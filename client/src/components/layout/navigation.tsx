@@ -17,6 +17,7 @@ export default function Navigation() {
   const navItems = [
     { path: "/", label: "Dashboard" },
     { path: "/estimates", label: "Estimates" },
+    { path: "/work-orders", label: "Work Orders" },
     { path: "/parts", label: "Parts Catalog" },
     { path: "/customers", label: "Customers" },
     { path: "/field-tech", label: "Field Tech" },

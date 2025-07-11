@@ -29,7 +29,7 @@ export const estimates = pgTable("estimates", {
   customerPhone: text("customer_phone"),
   projectName: text("project_name").notNull(),
   projectAddress: text("project_address"),
-  status: text("status").notNull().default("pending"), // pending, approved, rejected
+  status: text("status").notNull().default("pending"), // pending, approved, rejected, converted_to_work_order
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
@@ -38,6 +38,8 @@ export const estimates = pgTable("estimates", {
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
   markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).notNull(),
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
+  approvedAt: timestamp("approved_at"),
+  rejectedAt: timestamp("rejected_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -138,12 +140,97 @@ export const quickbooksSync = pgTable("quickbooks_sync", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+// Work Orders - created from approved estimates
+export const workOrders = pgTable("work_orders", {
+  id: serial("id").primaryKey(),
+  workOrderNumber: text("work_order_number").notNull().unique(),
+  estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  customerName: text("customer_name").notNull(),
+  customerEmail: text("customer_email").notNull(),
+  customerPhone: text("customer_phone"),
+  projectName: text("project_name").notNull(),
+  projectAddress: text("project_address"),
+  status: text("status").notNull().default("pending"), // pending, in_progress, completed, cancelled
+  scheduledDate: timestamp("scheduled_date"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  assignedTechnicianId: integer("assigned_technician_id"),
+  assignedTechnicianName: text("assigned_technician_name"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Work Order Items - copied from estimate items
+export const workOrderItems = pgTable("work_order_items", {
+  id: serial("id").primaryKey(),
+  workOrderId: integer("work_order_id").references(() => workOrders.id).notNull(),
+  zoneId: integer("zone_id").references(() => estimateZones.id),
+  partId: integer("part_id").references(() => parts.id).notNull(),
+  partName: text("part_name").notNull(),
+  partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
+  quantity: integer("quantity").notNull(),
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  actualQuantityUsed: integer("actual_quantity_used"),
+  actualLaborHours: decimal("actual_labor_hours", { precision: 5, scale: 2 }),
+  notes: text("notes"),
+});
+
+// Invoices - created from completed work orders
+export const invoices = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  workOrderId: integer("work_order_id").references(() => workOrders.id).notNull(),
+  estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  customerName: text("customer_name").notNull(),
+  customerEmail: text("customer_email").notNull(),
+  customerPhone: text("customer_phone"),
+  projectName: text("project_name").notNull(),
+  projectAddress: text("project_address"),
+  status: text("status").notNull().default("draft"), // draft, sent, paid, overdue, cancelled
+  partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
+  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
+  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
+  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).notNull(),
+  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
+  dueDate: timestamp("due_date"),
+  sentAt: timestamp("sent_at"),
+  paidAt: timestamp("paid_at"),
+  quickbooksInvoiceId: text("quickbooks_invoice_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Invoice Items - copied from work order items with actual quantities
+export const invoiceItems = pgTable("invoice_items", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").references(() => invoices.id).notNull(),
+  workOrderItemId: integer("work_order_item_id").references(() => workOrderItems.id),
+  partId: integer("part_id").references(() => parts.id).notNull(),
+  partName: text("part_name").notNull(),
+  partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
+  quantity: integer("quantity").notNull(),
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  description: text("description"),
+});
+
 export const insertPropertyZoneSchema = createInsertSchema(propertyZones).omit({ id: true });
 export const insertZoneSchema = createInsertSchema(zones).omit({ id: true });
 export const insertFieldWorkSessionSchema = createInsertSchema(fieldWorkSessions).omit({ id: true });
 export const insertFieldWorkItemSchema = createInsertSchema(fieldWorkItems).omit({ id: true });
 export const insertQuickbooksIntegrationSchema = createInsertSchema(quickbooksIntegration).omit({ id: true });
 export const insertQuickbooksSyncSchema = createInsertSchema(quickbooksSync).omit({ id: true });
+export const insertWorkOrderSchema = createInsertSchema(workOrders).omit({ id: true, workOrderNumber: true, createdAt: true, updatedAt: true });
+export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit({ id: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
+export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 
 export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
@@ -156,6 +243,10 @@ export type FieldWorkSession = typeof fieldWorkSessions.$inferSelect;
 export type FieldWorkItem = typeof fieldWorkItems.$inferSelect;
 export type QuickbooksIntegration = typeof quickbooksIntegration.$inferSelect;
 export type QuickbooksSync = typeof quickbooksSync.$inferSelect;
+export type WorkOrder = typeof workOrders.$inferSelect;
+export type WorkOrderItem = typeof workOrderItems.$inferSelect;
+export type Invoice = typeof invoices.$inferSelect;
+export type InvoiceItem = typeof invoiceItems.$inferSelect;
 
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type InsertPart = z.infer<typeof insertPartSchema>;
@@ -168,6 +259,10 @@ export type InsertFieldWorkSession = z.infer<typeof insertFieldWorkSessionSchema
 export type InsertFieldWorkItem = z.infer<typeof insertFieldWorkItemSchema>;
 export type InsertQuickbooksIntegration = z.infer<typeof insertQuickbooksIntegrationSchema>;
 export type InsertQuickbooksSync = z.infer<typeof insertQuickbooksSyncSchema>;
+export type InsertWorkOrder = z.infer<typeof insertWorkOrderSchema>;
+export type InsertWorkOrderItem = z.infer<typeof insertWorkOrderItemSchema>;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
 
 export type EstimateWithZones = Estimate & {
   zones: (EstimateZone & { items: EstimateItem[] })[];
@@ -183,4 +278,12 @@ export type PropertyZoneWithZones = PropertyZone & {
 
 export type FieldWorkSessionWithItems = FieldWorkSession & {
   items: FieldWorkItem[];
+};
+
+export type WorkOrderWithItems = WorkOrder & {
+  items: WorkOrderItem[];
+};
+
+export type InvoiceWithItems = Invoice & {
+  items: InvoiceItem[];
 };

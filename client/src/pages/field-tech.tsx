@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Clock, MapPin, Plus, Trash2, Tool, Download } from "lucide-react";
+import { Clock, MapPin, Plus, Trash2, Wrench, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
@@ -213,7 +213,7 @@ export default function FieldTech() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Field Tech Area</h1>
         <Badge variant="outline" className="text-sm">
-          <Tool className="w-4 h-4 mr-2" />
+          <Wrench className="w-4 h-4 mr-2" />
           Field Operations
         </Badge>
       </div>
