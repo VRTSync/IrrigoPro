@@ -19,6 +19,7 @@ export default function Navigation() {
     { path: "/estimates", label: "Estimates" },
     { path: "/parts", label: "Parts Catalog" },
     { path: "/customers", label: "Customers" },
+    { path: "/field-tech", label: "Field Tech" },
   ];
 
   return (

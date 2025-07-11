@@ -37,14 +37,23 @@ interface EstimateItem {
   totalLaborHours: number;
 }
 
+interface EstimateZone {
+  id: string;
+  zoneName: string;
+  workDescription: string;
+  clockInTime: string;
+  items: EstimateItem[];
+}
+
 interface EstimateModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
-  const [items, setItems] = useState<EstimateItem[]>([]);
+  const [zones, setZones] = useState<EstimateZone[]>([]);
   const [showPartsModal, setShowPartsModal] = useState(false);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -63,7 +72,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   });
 
   const createEstimateMutation = useMutation({
-    mutationFn: async (data: { estimate: any; items: any[] }) => {
+    mutationFn: async (data: { estimate: any; zones: any[] }) => {
       const response = await apiRequest("POST", "/api/estimates", data);
       return response.json();
     },
@@ -76,7 +85,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       });
       onOpenChange(false);
       form.reset();
-      setItems([]);
+      setZones([]);
     },
     onError: (error) => {
       toast({
@@ -87,15 +96,48 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     },
   });
 
+  const addZone = () => {
+    const newZone: EstimateZone = {
+      id: Date.now().toString(),
+      zoneName: `Zone ${zones.length + 1}`,
+      workDescription: "",
+      clockInTime: "",
+      items: [],
+    };
+    setZones([...zones, newZone]);
+  };
+
+  const updateZone = (zoneId: string, updates: Partial<EstimateZone>) => {
+    setZones(zones.map(zone => 
+      zone.id === zoneId ? { ...zone, ...updates } : zone
+    ));
+  };
+
+  const removeZone = (zoneId: string) => {
+    setZones(zones.filter(zone => zone.id !== zoneId));
+  };
+
   const addPart = (part: Part, quantity: number = 1) => {
-    const existingIndex = items.findIndex(item => item.part.id === part.id);
+    if (!selectedZoneId) {
+      toast({
+        title: "Error",
+        description: "Please select a zone first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const zone = zones.find(z => z.id === selectedZoneId);
+    if (!zone) return;
+
+    const existingIndex = zone.items.findIndex(item => item.part.id === part.id);
     
     if (existingIndex >= 0) {
-      const updatedItems = [...items];
+      const updatedItems = [...zone.items];
       updatedItems[existingIndex].quantity += quantity;
       updatedItems[existingIndex].totalPrice = parseFloat(part.price) * updatedItems[existingIndex].quantity;
       updatedItems[existingIndex].totalLaborHours = parseFloat(part.laborHours) * updatedItems[existingIndex].quantity;
-      setItems(updatedItems);
+      updateZone(selectedZoneId, { items: updatedItems });
     } else {
       const newItem: EstimateItem = {
         part,
@@ -103,12 +145,15 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
         totalPrice: parseFloat(part.price) * quantity,
         totalLaborHours: parseFloat(part.laborHours) * quantity,
       };
-      setItems([...items, newItem]);
+      updateZone(selectedZoneId, { items: [...zone.items, newItem] });
     }
   };
 
-  const updateQuantity = (partId: number, quantity: number) => {
-    const updatedItems = items.map(item => {
+  const updateQuantity = (zoneId: string, partId: number, quantity: number) => {
+    const zone = zones.find(z => z.id === zoneId);
+    if (!zone) return;
+
+    const updatedItems = zone.items.map(item => {
       if (item.part.id === partId) {
         return {
           ...item,
@@ -120,16 +165,21 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       return item;
     }).filter(item => item.quantity > 0);
     
-    setItems(updatedItems);
+    updateZone(zoneId, { items: updatedItems });
   };
 
-  const removePart = (partId: number) => {
-    setItems(items.filter(item => item.part.id !== partId));
+  const removePart = (zoneId: string, partId: number) => {
+    const zone = zones.find(z => z.id === zoneId);
+    if (!zone) return;
+    
+    const updatedItems = zone.items.filter(item => item.part.id !== partId);
+    updateZone(zoneId, { items: updatedItems });
   };
 
   const calculateTotals = () => {
-    const partsSubtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-    const totalLaborHours = items.reduce((sum, item) => sum + item.totalLaborHours, 0);
+    const allItems = zones.flatMap(zone => zone.items);
+    const partsSubtotal = allItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    const totalLaborHours = allItems.reduce((sum, item) => sum + item.totalLaborHours, 0);
     const laborRate = form.getValues("laborRate") || 75;
     const markupPercent = form.getValues("markupPercent") || 20;
     const taxPercent = form.getValues("taxPercent") || 8.25;
@@ -152,10 +202,10 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   };
 
   const onSubmit = async (data: EstimateFormValues) => {
-    if (items.length === 0) {
+    if (zones.length === 0) {
       toast({
         title: "Error",
-        description: "Please add at least one part to the estimate",
+        description: "Please add at least one zone to the estimate",
         variant: "destructive",
       });
       return;
@@ -180,16 +230,21 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       taxPercent: data.taxPercent.toFixed(2),
     };
 
-    const estimateItems = items.map(item => ({
-      partId: item.part.id,
-      partName: item.part.name,
-      partPrice: item.part.price,
-      quantity: item.quantity,
-      laborHours: item.totalLaborHours.toFixed(2),
-      totalPrice: item.totalPrice.toFixed(2),
+    const estimateZones = zones.map(zone => ({
+      zoneName: zone.zoneName,
+      workDescription: zone.workDescription,
+      clockInTime: zone.clockInTime,
+      items: zone.items.map(item => ({
+        partId: item.part.id,
+        partName: item.part.name,
+        partPrice: item.part.price,
+        quantity: item.quantity,
+        laborHours: item.totalLaborHours.toFixed(2),
+        totalPrice: item.totalPrice.toFixed(2),
+      }))
     }));
 
-    createEstimateMutation.mutate({ estimate, items: estimateItems });
+    createEstimateMutation.mutate({ estimate, zones: estimateZones });
   };
 
   const formatCurrency = (amount: number) => {
@@ -284,70 +339,123 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 )}
               />
 
-              {/* Parts Section */}
+              {/* Zones Section */}
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Parts & Materials</h3>
+                  <h3 className="text-lg font-medium text-gray-900">Work Zones</h3>
                   <Button
                     type="button"
-                    onClick={() => setShowPartsModal(true)}
+                    onClick={addZone}
                     className="bg-primary text-white hover:bg-blue-700"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Add Part
+                    Add Zone
                   </Button>
                 </div>
 
-                {items.length > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-2">Part Name</th>
-                            <th className="text-left py-2">Unit Price</th>
-                            <th className="text-left py-2">Quantity</th>
-                            <th className="text-left py-2">Labor Hours</th>
-                            <th className="text-left py-2">Total</th>
-                            <th className="text-left py-2">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {items.map((item) => (
-                            <tr key={item.part.id} className="border-b border-gray-200">
-                              <td className="py-2">{item.part.name}</td>
-                              <td className="py-2">{formatCurrency(parseFloat(item.part.price))}</td>
-                              <td className="py-2">
+                {zones.length > 0 ? (
+                  <div className="space-y-4">
+                    {zones.map((zone) => (
+                      <Card key={zone.id} className="bg-gray-50">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 space-y-2">
+                              <Input
+                                placeholder="Zone name"
+                                value={zone.zoneName}
+                                onChange={(e) => updateZone(zone.id, { zoneName: e.target.value })}
+                                className="font-medium"
+                              />
+                              <div className="grid grid-cols-2 gap-2">
                                 <Input
-                                  type="number"
-                                  min="1"
-                                  value={item.quantity}
-                                  onChange={(e) => updateQuantity(item.part.id, parseInt(e.target.value) || 0)}
-                                  className="w-16 text-center"
+                                  placeholder="Clock in time"
+                                  value={zone.clockInTime}
+                                  onChange={(e) => updateZone(zone.id, { clockInTime: e.target.value })}
                                 />
-                              </td>
-                              <td className="py-2">{item.totalLaborHours.toFixed(2)}</td>
-                              <td className="py-2 font-medium">{formatCurrency(item.totalPrice)}</td>
-                              <td className="py-2">
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="outline"
                                   size="sm"
-                                  onClick={() => removePart(item.part.id)}
-                                  className="text-red-600 hover:text-red-700"
+                                  onClick={() => {
+                                    setSelectedZoneId(zone.id);
+                                    setShowPartsModal(true);
+                                  }}
+                                  className="text-blue-600 hover:text-blue-700"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Plus className="w-4 h-4 mr-1" />
+                                  Add Parts
                                 </Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                              </div>
+                              <Textarea
+                                placeholder="Work description"
+                                value={zone.workDescription}
+                                onChange={(e) => updateZone(zone.id, { workDescription: e.target.value })}
+                                className="min-h-16"
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeZone(zone.id)}
+                              className="text-red-600 hover:text-red-700 ml-2"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </CardHeader>
+                        {zone.items.length > 0 && (
+                          <CardContent className="pt-0">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b border-gray-200">
+                                    <th className="text-left py-2">Part</th>
+                                    <th className="text-left py-2">Qty</th>
+                                    <th className="text-left py-2">Labor</th>
+                                    <th className="text-left py-2">Total</th>
+                                    <th className="text-left py-2"></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {zone.items.map((item) => (
+                                    <tr key={item.part.id} className="border-b border-gray-200">
+                                      <td className="py-2">{item.part.name}</td>
+                                      <td className="py-2">
+                                        <Input
+                                          type="number"
+                                          min="1"
+                                          value={item.quantity}
+                                          onChange={(e) => updateQuantity(zone.id, item.part.id, parseInt(e.target.value) || 0)}
+                                          className="w-16 text-center"
+                                        />
+                                      </td>
+                                      <td className="py-2">{item.totalLaborHours.toFixed(2)}h</td>
+                                      <td className="py-2 font-medium">{formatCurrency(item.totalPrice)}</td>
+                                      <td className="py-2">
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => removePart(zone.id, item.part.id)}
+                                          className="text-red-600 hover:text-red-700"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </CardContent>
+                        )}
+                      </Card>
+                    ))}
                   </div>
                 ) : (
                   <div className="bg-gray-50 rounded-lg p-8 text-center">
-                    <p className="text-gray-500">No parts added yet. Click "Add Part" to get started.</p>
+                    <p className="text-gray-500">No zones added yet. Click "Add Zone" to get started.</p>
                   </div>
                 )}
               </div>
@@ -399,7 +507,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Estimate Summary */}
               <EstimateSummary
-                items={items}
+                items={zones.flatMap(zone => zone.items)}
                 laborRate={form.watch("laborRate")}
                 markupPercent={form.watch("markupPercent")}
                 taxPercent={form.watch("taxPercent")}

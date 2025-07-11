@@ -2,16 +2,20 @@ import {
   customers, 
   parts, 
   estimates, 
+  estimateZones,
   estimateItems,
   type Customer, 
   type Part, 
   type Estimate, 
+  type EstimateZone,
   type EstimateItem,
   type InsertCustomer, 
   type InsertPart, 
   type InsertEstimate, 
+  type InsertEstimateZone,
   type InsertEstimateItem,
-  type EstimateWithItems 
+  type EstimateWithItems,
+  type EstimateWithZones 
 } from "@shared/schema";
 
 export interface IStorage {
@@ -29,11 +33,12 @@ export interface IStorage {
   createPart(part: InsertPart): Promise<Part>;
   updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined>;
   deletePart(id: number): Promise<boolean>;
+  syncPartsFromGoogleDocs(docUrl: string): Promise<void>;
 
   // Estimates
   getEstimates(): Promise<Estimate[]>;
-  getEstimate(id: number): Promise<EstimateWithItems | undefined>;
-  createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
+  getEstimate(id: number): Promise<EstimateWithZones | undefined>;
+  createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
   deleteEstimate(id: number): Promise<boolean>;
 
@@ -55,10 +60,12 @@ export class MemStorage implements IStorage {
   private customers: Map<number, Customer> = new Map();
   private parts: Map<number, Part> = new Map();
   private estimates: Map<number, Estimate> = new Map();
+  private estimateZones: Map<number, EstimateZone[]> = new Map();
   private estimateItems: Map<number, EstimateItem[]> = new Map();
   private currentCustomerId = 1;
   private currentPartId = 1;
   private currentEstimateId = 1;
+  private currentEstimateZoneId = 1;
   private currentEstimateItemId = 1;
 
   constructor() {
@@ -189,23 +196,46 @@ export class MemStorage implements IStorage {
     });
     this.currentEstimateId = 5;
 
-    // Seed estimate items
+    // Seed estimate zones
+    const sampleEstimateZones = [
+      [
+        { id: 1, estimateId: 1, zoneName: "Front Yard", workDescription: "Install sprinkler system for front lawn and flower beds", clockInTime: "8:00 AM", sortOrder: 1 },
+        { id: 2, estimateId: 1, zoneName: "Back Yard", workDescription: "Install rotor system for large back lawn area", clockInTime: "10:00 AM", sortOrder: 2 },
+      ],
+      [
+        { id: 3, estimateId: 2, zoneName: "Parking Area", workDescription: "Install commercial sprinkler system for landscaping", clockInTime: "7:00 AM", sortOrder: 1 },
+        { id: 4, estimateId: 2, zoneName: "Building Perimeter", workDescription: "Install drip irrigation for foundation plantings", clockInTime: "11:00 AM", sortOrder: 2 },
+      ],
+      [
+        { id: 5, estimateId: 3, zoneName: "Greenhouse Area", workDescription: "Install drip irrigation system for greenhouse plants", clockInTime: "9:00 AM", sortOrder: 1 },
+      ],
+      [
+        { id: 6, estimateId: 4, zoneName: "Side Yard", workDescription: "Upgrade existing sprinkler heads", clockInTime: "8:30 AM", sortOrder: 1 },
+      ],
+    ];
+
+    sampleEstimateZones.forEach((zones, index) => {
+      this.estimateZones.set(index + 1, zones);
+    });
+    this.currentEstimateZoneId = 7;
+
+    // Seed estimate items (now with zone assignments)
     const sampleEstimateItems = [
       [
-        { id: 1, estimateId: 1, partId: 1, partName: "Rain Bird 5004 Sprinkler", partPrice: "18.50", quantity: 12, laborHours: "0.50", totalPrice: "222.00" },
-        { id: 2, estimateId: 1, partId: 2, partName: "Hunter PGP-ADJ Rotor", partPrice: "42.75", quantity: 6, laborHours: "0.75", totalPrice: "256.50" },
+        { id: 1, estimateId: 1, zoneId: 1, partId: 1, partName: "Rain Bird 5004 Sprinkler", partPrice: "18.50", quantity: 8, laborHours: "4.00", totalPrice: "148.00" },
+        { id: 2, estimateId: 1, zoneId: 2, partId: 2, partName: "Hunter PGP-ADJ Rotor", partPrice: "42.75", quantity: 6, laborHours: "4.50", totalPrice: "256.50" },
       ],
       [
-        { id: 3, estimateId: 2, partId: 1, partName: "Rain Bird 5004 Sprinkler", partPrice: "18.50", quantity: 24, laborHours: "0.50", totalPrice: "444.00" },
-        { id: 4, estimateId: 2, partId: 4, partName: "Rain Bird ESP-ME Controller", partPrice: "189.00", quantity: 2, laborHours: "2.00", totalPrice: "378.00" },
+        { id: 3, estimateId: 2, zoneId: 3, partId: 1, partName: "Rain Bird 5004 Sprinkler", partPrice: "18.50", quantity: 20, laborHours: "10.00", totalPrice: "370.00" },
+        { id: 4, estimateId: 2, zoneId: 4, partId: 4, partName: "Rain Bird ESP-ME Controller", partPrice: "189.00", quantity: 2, laborHours: "4.00", totalPrice: "378.00" },
       ],
       [
-        { id: 5, estimateId: 3, partId: 8, partName: "1/2\" Poly Tubing (100ft)", partPrice: "24.99", quantity: 10, laborHours: "0.75", totalPrice: "249.90" },
-        { id: 6, estimateId: 3, partId: 7, partName: "Irritrol 2400 Valve", partPrice: "32.50", quantity: 8, laborHours: "0.60", totalPrice: "260.00" },
+        { id: 5, estimateId: 3, zoneId: 5, partId: 8, partName: "1/2\" Poly Tubing (100ft)", partPrice: "24.99", quantity: 10, laborHours: "7.50", totalPrice: "249.90" },
+        { id: 6, estimateId: 3, zoneId: 5, partId: 7, partName: "Irritrol 2400 Valve", partPrice: "32.50", quantity: 8, laborHours: "4.80", totalPrice: "260.00" },
       ],
       [
-        { id: 7, estimateId: 4, partId: 1, partName: "Rain Bird 5004 Sprinkler", partPrice: "18.50", quantity: 8, laborHours: "0.50", totalPrice: "148.00" },
-        { id: 8, estimateId: 4, partId: 5, partName: "Hunter Pro-Spray Body", partPrice: "8.75", quantity: 6, laborHours: "0.30", totalPrice: "52.50" },
+        { id: 7, estimateId: 4, zoneId: 6, partId: 1, partName: "Rain Bird 5004 Sprinkler", partPrice: "18.50", quantity: 8, laborHours: "4.00", totalPrice: "148.00" },
+        { id: 8, estimateId: 4, zoneId: 6, partId: 5, partName: "Hunter Pro-Spray Body", partPrice: "8.75", quantity: 6, laborHours: "1.80", totalPrice: "52.50" },
       ],
     ];
 
@@ -226,7 +256,10 @@ export class MemStorage implements IStorage {
   async createCustomer(customer: InsertCustomer): Promise<Customer> {
     const newCustomer: Customer = {
       id: this.currentCustomerId++,
-      ...customer,
+      name: customer.name,
+      email: customer.email,
+      phone: customer.phone || null,
+      address: customer.address || null,
     };
     this.customers.set(newCustomer.id, newCustomer);
     return newCustomer;
@@ -266,7 +299,12 @@ export class MemStorage implements IStorage {
   async createPart(part: InsertPart): Promise<Part> {
     const newPart: Part = {
       id: this.currentPartId++,
-      ...part,
+      name: part.name,
+      description: part.description || null,
+      price: part.price,
+      laborHours: part.laborHours,
+      sku: part.sku,
+      category: part.category || null,
     };
     this.parts.set(newPart.id, newPart);
     return newPart;
@@ -285,21 +323,39 @@ export class MemStorage implements IStorage {
     return this.parts.delete(id);
   }
 
+  async syncPartsFromGoogleDocs(docUrl: string): Promise<void> {
+    // This would integrate with Google Docs API to sync parts
+    // For now, we'll simulate the functionality
+    console.log(`Syncing parts from Google Docs: ${docUrl}`);
+    // In a real implementation, this would:
+    // 1. Authenticate with Google Docs API
+    // 2. Read the document content
+    // 3. Parse the parts data
+    // 4. Update the parts catalog
+  }
+
   async getEstimates(): Promise<Estimate[]> {
     return Array.from(this.estimates.values()).sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
 
-  async getEstimate(id: number): Promise<EstimateWithItems | undefined> {
+  async getEstimate(id: number): Promise<EstimateWithZones | undefined> {
     const estimate = this.estimates.get(id);
     if (!estimate) return undefined;
     
+    const zones = this.estimateZones.get(id) || [];
     const items = this.estimateItems.get(id) || [];
-    return { ...estimate, items };
+    
+    const zonesWithItems = zones.map(zone => ({
+      ...zone,
+      items: items.filter(item => item.zoneId === zone.id)
+    }));
+    
+    return { ...estimate, zones: zonesWithItems };
   }
 
-  async createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
+  async createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones> {
     const estimateNumber = `EST-${new Date().getFullYear()}-${String(this.currentEstimateId).padStart(3, '0')}`;
     const now = new Date();
     
@@ -308,19 +364,60 @@ export class MemStorage implements IStorage {
       estimateNumber,
       createdAt: now,
       updatedAt: now,
-      ...estimate,
+      customerId: estimate.customerId || null,
+      customerName: estimate.customerName,
+      customerEmail: estimate.customerEmail,
+      customerPhone: estimate.customerPhone || null,
+      projectName: estimate.projectName,
+      projectAddress: estimate.projectAddress || null,
+      status: estimate.status || "pending",
+      partsSubtotal: estimate.partsSubtotal,
+      laborSubtotal: estimate.laborSubtotal,
+      markupAmount: estimate.markupAmount,
+      taxAmount: estimate.taxAmount,
+      totalAmount: estimate.totalAmount,
+      laborRate: estimate.laborRate,
+      markupPercent: estimate.markupPercent,
+      taxPercent: estimate.taxPercent,
     };
     
-    const newItems: EstimateItem[] = items.map(item => ({
-      id: this.currentEstimateItemId++,
-      ...item,
+    const newZones: EstimateZone[] = zones.map((zone, index) => ({
+      id: this.currentEstimateZoneId++,
       estimateId: newEstimate.id,
+      zoneName: zone.zoneName,
+      workDescription: zone.workDescription || null,
+      clockInTime: zone.clockInTime || null,
+      sortOrder: zone.sortOrder || index + 1,
     }));
     
-    this.estimates.set(newEstimate.id, newEstimate);
-    this.estimateItems.set(newEstimate.id, newItems);
+    const allNewItems: EstimateItem[] = [];
+    zones.forEach((zone, zoneIndex) => {
+      const zoneId = newZones[zoneIndex].id;
+      zone.items.forEach(item => {
+        allNewItems.push({
+          id: this.currentEstimateItemId++,
+          estimateId: newEstimate.id,
+          zoneId: zoneId,
+          partId: item.partId,
+          partName: item.partName,
+          partPrice: item.partPrice,
+          quantity: item.quantity,
+          laborHours: item.laborHours,
+          totalPrice: item.totalPrice,
+        });
+      });
+    });
     
-    return { ...newEstimate, items: newItems };
+    this.estimates.set(newEstimate.id, newEstimate);
+    this.estimateZones.set(newEstimate.id, newZones);
+    this.estimateItems.set(newEstimate.id, allNewItems);
+    
+    const zonesWithItems = newZones.map(zone => ({
+      ...zone,
+      items: allNewItems.filter(item => item.zoneId === zone.id)
+    }));
+    
+    return { ...newEstimate, zones: zonesWithItems };
   }
 
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {

@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { Plus, FileText, Mail, Download, Eye } from "lucide-react";
 import { useState } from "react";
 import type { Estimate } from "@shared/schema";
@@ -61,8 +63,16 @@ export default function Estimates() {
         </div>
       </div>
 
-      {/* Estimates List */}
-      <Card className="bg-white shadow-sm border border-gray-200">
+      <Tabs defaultValue="estimates" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="estimates">Estimates</TabsTrigger>
+          <TabsTrigger value="quickbooks">QuickBooks</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="estimates">
+
+        {/* Estimates List */}
+        <Card className="bg-white shadow-sm border border-gray-200">
         <CardHeader className="px-6 py-4 border-b border-gray-200">
           <CardTitle className="text-lg font-semibold text-gray-900">All Estimates</CardTitle>
         </CardHeader>
@@ -175,7 +185,13 @@ export default function Estimates() {
             </table>
           </div>
         </CardContent>
-      </Card>
+        </Card>
+        </TabsContent>
+
+        <TabsContent value="quickbooks">
+          <QuickBooksIntegration estimates={estimates || []} />
+        </TabsContent>
+      </Tabs>
 
       {/* Estimate Modal */}
       <EstimateModal

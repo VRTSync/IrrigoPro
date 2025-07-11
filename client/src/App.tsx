@@ -8,6 +8,7 @@ import Dashboard from "@/pages/dashboard";
 import Estimates from "@/pages/estimates";
 import PartsCatalog from "@/pages/parts-catalog";
 import Customers from "@/pages/customers";
+import FieldTech from "@/pages/field-tech";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/estimates" component={Estimates} />
       <Route path="/parts" component={PartsCatalog} />
       <Route path="/customers" component={Customers} />
+      <Route path="/field-tech" component={FieldTech} />
       <Route component={NotFound} />
     </Switch>
   );

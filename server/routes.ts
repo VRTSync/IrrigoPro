@@ -1,12 +1,14 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertCustomerSchema, insertPartSchema, insertEstimateSchema, insertEstimateItemSchema } from "@shared/schema";
+import { insertCustomerSchema, insertPartSchema, insertEstimateSchema, insertEstimateZoneSchema, insertEstimateItemSchema } from "@shared/schema";
 import { z } from "zod";
 
-const createEstimateWithItemsSchema = z.object({
+const createEstimateWithZonesSchema = z.object({
   estimate: insertEstimateSchema,
-  items: z.array(insertEstimateItemSchema),
+  zones: z.array(insertEstimateZoneSchema.extend({
+    items: z.array(insertEstimateItemSchema)
+  }))
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -165,6 +167,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Google Docs sync
+  app.post("/api/parts/sync-google-docs", async (req, res) => {
+    try {
+      const { docUrl } = req.body;
+      if (!docUrl) {
+        return res.status(400).json({ message: "Google Docs URL is required" });
+      }
+      await storage.syncPartsFromGoogleDocs(docUrl);
+      res.json({ message: "Parts synced from Google Docs successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to sync parts from Google Docs" });
+    }
+  });
+
   // Estimate routes
   app.get("/api/estimates", async (req, res) => {
     try {
@@ -190,8 +206,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/estimates", async (req, res) => {
     try {
-      const { estimate, items } = createEstimateWithItemsSchema.parse(req.body);
-      const newEstimate = await storage.createEstimate(estimate, items);
+      const { estimate, zones } = createEstimateWithZonesSchema.parse(req.body);
+      const newEstimate = await storage.createEstimate(estimate, zones);
       res.status(201).json(newEstimate);
     } catch (error) {
       if (error instanceof z.ZodError) {
