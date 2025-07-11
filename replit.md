@@ -75,12 +75,14 @@ The system uses comprehensive database tables:
 - **Integrations**: Google Sheets and QuickBooks customer sync
 
 ### Frontend Pages
-- **Dashboard**: Business overview with key metrics and recent activity
-- **Estimates**: Zone-based estimate creation and management
-- **Parts Catalog**: Comprehensive parts inventory management
-- **Customers**: Customer management with integration capabilities
-- **Field Tech**: Technician interface without pricing access
-- **Work Orders**: Complete work order lifecycle management
+- **Login**: Role-based authentication (Admin/Field Tech)
+- **Dashboard**: Business overview with key metrics and recent activity (Admin only)
+- **Estimates**: Zone-based estimate creation and management (Admin only)
+- **Parts Catalog**: Comprehensive parts inventory management (Admin only)
+- **Customers**: Customer management with integration capabilities (Admin only)
+- **Field Tech**: Technician interface without pricing access (Admin only)
+- **Work Orders**: Complete work order lifecycle management (Admin only)
+- **Field Portal**: Dedicated field technician interface with work session management
 
 ### UI Components
 - Comprehensive component library based on shadcn/ui
@@ -88,6 +90,17 @@ The system uses comprehensive database tables:
 - Data tables with search and filtering
 - Modal dialogs for estimate creation
 - Toast notifications for user feedback
+- Role-based authentication system
+- Separate interfaces for admin and field technicians
+
+### Authentication & Authorization
+- **Role-based Access Control**: Admin and Field Tech roles with different permissions
+- **Admin Interface**: Full system access with navigation, pricing, and management features
+- **Field Tech Portal**: Dedicated interface for work session management without pricing access
+- **Demo Credentials**: 
+  - Admin: admin / admin123
+  - Field Tech: tech / tech123
+- **Session Management**: localStorage-based authentication with automatic redirects
 
 ## Data Flow
 
