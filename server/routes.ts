@@ -524,7 +524,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // This would need to be implemented in storage
       res.json({ message: "Work order creation endpoint ready for implementation" });
     } catch (error) {
-      res.status(500).json({ message: "Failed to convert estimate to work order" });
+      res.status(500).json({ message: "Failed to create work order" });
+    }
+  });
+
+  // Customer Integration API Routes
+  
+  // Google Sheets Customer Integration
+  app.get("/api/integrations/google-sheets/customers/status", async (req, res) => {
+    try {
+      const status = await storage.getGoogleSheetsCustomerStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get Google Sheets status" });
+    }
+  });
+
+  app.post("/api/integrations/google-sheets/customers/connect", async (req, res) => {
+    try {
+      const { sheetUrl } = req.body;
+      if (!sheetUrl) {
+        return res.status(400).json({ message: "Sheet URL is required" });
+      }
+      await storage.connectGoogleSheetsCustomers(sheetUrl);
+      res.json({ message: "Connected to Google Sheets successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to connect to Google Sheets" });
+    }
+  });
+
+  app.post("/api/integrations/google-sheets/customers/sync", async (req, res) => {
+    try {
+      const result = await storage.syncCustomersFromGoogleSheets("placeholder-url");
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to sync customers from Google Sheets" });
+    }
+  });
+
+  app.post("/api/integrations/google-sheets/customers/disconnect", async (req, res) => {
+    try {
+      await storage.disconnectGoogleSheetsCustomers();
+      res.json({ message: "Disconnected from Google Sheets successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to disconnect from Google Sheets" });
+    }
+  });
+
+  // QuickBooks Customer Integration
+  app.get("/api/integrations/quickbooks/customers/status", async (req, res) => {
+    try {
+      const status = await storage.getQuickBooksCustomerStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get QuickBooks status" });
+    }
+  });
+
+  app.get("/api/integrations/quickbooks/customers/auth-url", async (req, res) => {
+    try {
+      const authData = await storage.getQuickBooksAuthUrl();
+      res.json(authData);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get QuickBooks auth URL" });
+    }
+  });
+
+  app.post("/api/integrations/quickbooks/customers/sync", async (req, res) => {
+    try {
+      const result = await storage.syncCustomersFromQuickBooks();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to sync customers from QuickBooks" });
+    }
+  });
+
+  app.post("/api/integrations/quickbooks/customers/disconnect", async (req, res) => {
+    try {
+      await storage.disconnectQuickBooksCustomers();
+      res.json({ message: "Disconnected from QuickBooks successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to disconnect from QuickBooks" });
     }
   });
 

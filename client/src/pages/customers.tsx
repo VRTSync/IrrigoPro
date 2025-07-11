@@ -3,9 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings } from "lucide-react";
 import { useState } from "react";
 import type { Customer } from "@shared/schema";
+import { CustomerIntegration } from "@/components/integrations/customer-integration";
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -36,43 +38,53 @@ export default function Customers() {
             </Button>
           </div>
         </div>
-
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder="Search customers..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
-        </div>
       </div>
 
-      {/* Customers List */}
-      <Card className="bg-white shadow-sm border border-gray-200">
-        <CardHeader className="px-6 py-4 border-b border-gray-200">
-          <CardTitle className="text-lg font-semibold text-gray-900">All Customers</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contact
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Address
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
+      <Tabs defaultValue="customers" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="customers">Customer List</TabsTrigger>
+          <TabsTrigger value="integrations">
+            <Settings className="w-4 h-4 mr-2" />
+            Integrations
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="customers" className="space-y-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search customers..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          {/* Customers List */}
+          <Card className="bg-white shadow-sm border border-gray-200">
+            <CardHeader className="px-6 py-4 border-b border-gray-200">
+              <CardTitle className="text-lg font-semibold text-gray-900">All Customers</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Customer
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Contact
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Address
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
@@ -146,22 +158,28 @@ export default function Customers() {
         </CardContent>
       </Card>
 
-      {/* Empty State */}
-      {!isLoading && filteredCustomers?.length === 0 && (
-        <Card className="bg-white shadow-sm border border-gray-200">
-          <CardContent className="p-12 text-center">
-            <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No customers found</h3>
-            <p className="text-gray-600 mb-4">
-              {searchQuery ? "No customers match your search criteria." : "Get started by adding your first customer."}
-            </p>
-            <Button className="bg-primary text-white hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Add New Customer
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+          {/* Empty State */}
+          {!isLoading && filteredCustomers?.length === 0 && (
+            <Card className="bg-white shadow-sm border border-gray-200">
+              <CardContent className="p-12 text-center">
+                <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No customers found</h3>
+                <p className="text-gray-600 mb-4">
+                  {searchQuery ? "No customers match your search criteria." : "Get started by adding your first customer."}
+                </p>
+                <Button className="bg-primary text-white hover:bg-blue-700">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add New Customer
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="integrations">
+          <CustomerIntegration />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

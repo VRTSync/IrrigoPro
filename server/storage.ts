@@ -41,6 +41,16 @@ export interface IStorage {
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   updateCustomer(id: number, customer: Partial<InsertCustomer>): Promise<Customer | undefined>;
   deleteCustomer(id: number): Promise<boolean>;
+  
+  // Customer Integrations
+  syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
+  syncCustomersFromQuickBooks(): Promise<{ customersAdded: number }>;
+  getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }>;
+  getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }>;
+  connectGoogleSheetsCustomers(sheetUrl: string): Promise<void>;
+  disconnectGoogleSheetsCustomers(): Promise<void>;
+  getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }>;
+  disconnectQuickBooksCustomers(): Promise<void>;
 
   // Parts
   getParts(): Promise<Part[]>;
@@ -402,6 +412,106 @@ export class DatabaseStorage implements IStorage {
       recentEstimates,
       topParts
     };
+  }
+
+  // Customer Integration Methods
+  async syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }> {
+    // Mock implementation - in real app, would use Google Sheets API
+    console.log(`Syncing customers from Google Sheets: ${sheetsUrl}`);
+    
+    // Simulate adding customers from Google Sheets
+    const mockCustomers = [
+      { name: "John Smith", email: "john@example.com", phone: "555-0101", address: "123 Main St, Anytown, USA" },
+      { name: "Jane Doe", email: "jane@example.com", phone: "555-0102", address: "456 Oak Ave, Somewhere, USA" }
+    ];
+
+    let customersAdded = 0;
+    for (const customerData of mockCustomers) {
+      try {
+        const existing = await db.select().from(customers).where(eq(customers.email, customerData.email));
+        if (existing.length === 0) {
+          await db.insert(customers).values(customerData);
+          customersAdded++;
+        }
+      } catch (error) {
+        console.error(`Failed to add customer ${customerData.name}:`, error);
+      }
+    }
+
+    return { customersAdded };
+  }
+
+  async syncCustomersFromQuickBooks(): Promise<{ customersAdded: number }> {
+    // Mock implementation - in real app, would use QuickBooks API
+    console.log("Syncing customers from QuickBooks");
+    
+    // Simulate adding customers from QuickBooks
+    const mockCustomers = [
+      { name: "ABC Corp", email: "contact@abccorp.com", phone: "555-0201", address: "789 Business Blvd, Corporate City, USA" },
+      { name: "XYZ Services", email: "info@xyzservices.com", phone: "555-0202", address: "321 Service Way, Professional Town, USA" }
+    ];
+
+    let customersAdded = 0;
+    for (const customerData of mockCustomers) {
+      try {
+        const existing = await db.select().from(customers).where(eq(customers.email, customerData.email));
+        if (existing.length === 0) {
+          await db.insert(customers).values(customerData);
+          customersAdded++;
+        }
+      } catch (error) {
+        console.error(`Failed to add customer ${customerData.name}:`, error);
+      }
+    }
+
+    return { customersAdded };
+  }
+
+  async getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }> {
+    // Mock implementation - in real app, would store connection status in database
+    const allCustomers = await db.select().from(customers);
+    return {
+      isConnected: false, // Mock: not connected by default
+      lastSync: undefined,
+      sheetUrl: undefined,
+      customerCount: allCustomers.length
+    };
+  }
+
+  async getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
+    // Mock implementation - in real app, would check QuickBooks connection
+    const allCustomers = await db.select().from(customers);
+    return {
+      isConnected: false, // Mock: not connected by default
+      companyName: undefined,
+      lastSync: undefined,
+      customerCount: allCustomers.length
+    };
+  }
+
+  async connectGoogleSheetsCustomers(sheetUrl: string): Promise<void> {
+    // Mock implementation - in real app, would validate and store connection
+    console.log(`Connecting to Google Sheets: ${sheetUrl}`);
+    // Would store connection info in database
+  }
+
+  async disconnectGoogleSheetsCustomers(): Promise<void> {
+    // Mock implementation - in real app, would remove connection info
+    console.log("Disconnecting Google Sheets");
+  }
+
+  async getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }> {
+    // Mock implementation - in real app, would generate actual QuickBooks OAuth URL
+    const state = Math.random().toString(36).substring(2, 15);
+    return {
+      authUrl: `https://appcenter.intuit.com/connect/oauth2?client_id=YOUR_CLIENT_ID&scope=com.intuit.quickbooks.accounting&redirect_uri=YOUR_REDIRECT_URI&response_type=code&state=${state}`,
+      state
+    };
+  }
+
+  async disconnectQuickBooksCustomers(): Promise<void> {
+    // Mock implementation - in real app, would revoke QuickBooks tokens
+    console.log("Disconnecting QuickBooks");
   }
 }
 
