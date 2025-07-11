@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a full-stack irrigation business management system built with React, Express.js, and PostgreSQL. The application provides comprehensive tools for managing customers, parts catalog, and estimates for irrigation projects. It features a modern UI built with shadcn/ui components and Tailwind CSS, with a robust backend API for data management.
+This is a comprehensive full-stack irrigation business management system built with React, Express.js, and PostgreSQL. The application provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. It features zone-based estimates, customer integrations, and a modern UI built with shadcn/ui components and Tailwind CSS.
 
 ## User Preferences
 
@@ -35,24 +35,52 @@ Preferred communication style: Simple, everyday language.
 
 ## Key Components
 
+### Complete Business Workflow
+The system supports a full irrigation business workflow:
+1. **Estimate Creation**: Zone-based estimates with parts and labor
+2. **Customer Approval**: Estimate approval/rejection workflow
+3. **Work Order Generation**: Convert approved estimates to work orders
+4. **Field Work Management**: Track technician work and part usage
+5. **Invoice Creation**: Generate invoices from completed work orders
+6. **QuickBooks Integration**: Sync invoices and customer data
+
 ### Database Schema
-The system uses four main database tables:
-- **customers**: Customer information (name, email, phone, address)
+The system uses comprehensive database tables:
+- **customers**: Customer information with contact details
 - **parts**: Irrigation parts catalog with pricing and labor hours
-- **estimates**: Project estimates with customer details and totals
-- **estimateItems**: Line items linking estimates to parts with quantities
+- **estimates**: Project estimates with zone-based structure
+- **estimateZones**: Individual zones within estimates
+- **estimateItems**: Parts and quantities for each zone
+- **propertyZones**: Property locations with multiple zones
+- **zones**: Individual work zones with clock-in points
+- **fieldWorkSessions**: Technician work sessions
+- **fieldWorkItems**: Parts used during field work
+- **workOrders**: Generated from approved estimates
+- **workOrderItems**: Items included in work orders
+- **invoices**: Generated from completed work orders
+- **invoiceItems**: Line items for invoices
+- **quickbooksIntegration**: QuickBooks connection settings
+- **quickbooksSync**: Sync status tracking
 
 ### API Endpoints
-- **Dashboard**: `/api/dashboard/stats` - Analytics and overview data
-- **Customers**: CRUD operations for customer management
-- **Parts**: CRUD operations for parts catalog management
-- **Estimates**: CRUD operations for project estimates with line items
+- **Dashboard**: Analytics and overview data
+- **Customers**: CRUD operations with Google Sheets/QuickBooks integration
+- **Parts**: CRUD operations with Google Docs sync capability
+- **Estimates**: Zone-based estimate management with approval workflow
+- **Property Zones**: Property and zone management with Google Sheets sync
+- **Field Work**: Technician work session tracking
+- **Work Orders**: Work order lifecycle management
+- **Invoices**: Invoice generation and management
+- **QuickBooks Integration**: Customer and invoice sync
+- **Integrations**: Google Sheets and QuickBooks customer sync
 
 ### Frontend Pages
-- **Dashboard**: Overview with statistics and recent activity
-- **Estimates**: Create and manage project estimates
-- **Parts Catalog**: Manage irrigation parts inventory
-- **Customers**: Customer relationship management
+- **Dashboard**: Business overview with key metrics and recent activity
+- **Estimates**: Zone-based estimate creation and management
+- **Parts Catalog**: Comprehensive parts inventory management
+- **Customers**: Customer management with integration capabilities
+- **Field Tech**: Technician interface without pricing access
+- **Work Orders**: Complete work order lifecycle management
 
 ### UI Components
 - Comprehensive component library based on shadcn/ui
