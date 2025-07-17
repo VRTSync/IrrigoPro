@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { User, Lock, LogIn } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 
 interface LoginCredentials {
   username: string;
@@ -67,6 +68,13 @@ export default function Login() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
+          <div className="flex justify-center mb-4">
+            <img 
+              src={companyLogo} 
+              alt="Company Logo" 
+              className="h-16 w-auto"
+            />
+          </div>
           <CardTitle className="text-2xl font-bold">Irrigation Management System</CardTitle>
           <p className="text-gray-600">Please sign in to continue</p>
         </CardHeader>

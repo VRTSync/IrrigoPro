@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { Clock, MapPin, Plus, Trash2, Wrench, LogOut, Play, Square, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 
 interface User {
   id: string;
@@ -168,6 +169,11 @@ export default function FieldPortal() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
+              <img 
+                src={companyLogo} 
+                alt="Company Logo" 
+                className="h-8 w-auto mr-4"
+              />
               <Badge variant="outline" className="mr-4">
                 <Wrench className="w-4 h-4 mr-2" />
                 Field Tech Portal

@@ -3,6 +3,7 @@ import { Bell, Droplets, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useIsMobile } from "@/hooks/use-mobile";
+import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 
 export default function Navigation() {
   const [location] = useLocation();
@@ -31,8 +32,11 @@ export default function Navigation() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <div className="flex-shrink-0 flex items-center">
-                <Droplets className="h-8 w-8 text-primary mr-3" />
-                <span className="text-xl font-bold text-gray-900">IrrigationPro</span>
+                <img 
+                  src={companyLogo} 
+                  alt="Company Logo" 
+                  className="h-10 w-auto mr-3"
+                />
               </div>
             </div>
             
@@ -71,7 +75,18 @@ export default function Navigation() {
                   alt="User avatar" 
                   className="h-8 w-8 rounded-full"
                 />
-                <span className="text-sm font-medium text-gray-700">John Contractor</span>
+                <span className="text-sm font-medium text-gray-700">Admin User</span>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    localStorage.removeItem("user");
+                    window.location.href = "/login";
+                  }}
+                  className="ml-2 text-gray-500 hover:text-gray-700"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           </div>
