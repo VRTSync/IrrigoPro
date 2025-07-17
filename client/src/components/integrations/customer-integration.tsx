@@ -11,6 +11,7 @@ import { Sheet, Users, Download, Upload, RefreshCw, ExternalLink } from "lucide-
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CustomerCsvUpload } from "@/components/customer-csv-upload";
 
 interface GoogleSheetsSync {
   isConnected: boolean;
@@ -173,11 +174,16 @@ export function CustomerIntegration() {
         </Badge>
       </div>
 
-      <Tabs defaultValue="google-sheets" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+      <Tabs defaultValue="csv-upload" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="csv-upload">CSV Upload</TabsTrigger>
           <TabsTrigger value="google-sheets">Google Sheets</TabsTrigger>
           <TabsTrigger value="quickbooks">QuickBooks Online</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="csv-upload" className="space-y-4">
+          <CustomerCsvUpload />
+        </TabsContent>
 
         <TabsContent value="google-sheets" className="space-y-4">
           <Card>

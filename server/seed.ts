@@ -5,12 +5,60 @@ export async function seedDatabase() {
   console.log("Starting database seeding...");
 
   try {
-    // Seed customers
+    // Seed customers with contract-based billing rates
     const sampleCustomers = [
-      { name: "Johnson Family", email: "johnson@example.com", phone: "(555) 123-4567", address: "123 Oak Street, Springfield, IL 62701" },
-      { name: "Office Complex Management", email: "manager@officecomplex.com", phone: "(555) 234-5678", address: "456 Business Ave, Springfield, IL 62702" },
-      { name: "Garden Center LLC", email: "info@gardencenter.com", phone: "(555) 345-6789", address: "789 Garden Way, Springfield, IL 62703" },
-      { name: "Smith Residence", email: "smith@example.com", phone: "(555) 456-7890", address: "321 Maple Drive, Springfield, IL 62704" },
+      { 
+        name: "Johnson Family", 
+        email: "johnson@example.com", 
+        phone: "(555) 123-4567", 
+        address: "123 Oak Street, Springfield, IL 62701",
+        contractType: "residential",
+        laborRate: "42.00",
+        markupPercent: "18.00",
+        taxPercent: "8.25",
+        discountPercent: "0.00",
+        paymentTerms: "net_30",
+        notes: "Preferred residential customer with seasonal maintenance contract"
+      },
+      { 
+        name: "Office Complex Management", 
+        email: "manager@officecomplex.com", 
+        phone: "(555) 234-5678", 
+        address: "456 Business Ave, Springfield, IL 62702",
+        contractType: "commercial",
+        laborRate: "55.00",
+        markupPercent: "25.00",
+        taxPercent: "8.25",
+        discountPercent: "5.00",
+        paymentTerms: "net_15",
+        notes: "Commercial contract with bulk pricing discount"
+      },
+      { 
+        name: "Garden Center LLC", 
+        email: "info@gardencenter.com", 
+        phone: "(555) 345-6789", 
+        address: "789 Garden Way, Springfield, IL 62703",
+        contractType: "premium",
+        laborRate: "50.00",
+        markupPercent: "22.00",
+        taxPercent: "8.25",
+        discountPercent: "10.00",
+        paymentTerms: "net_30",
+        notes: "Premium service contract with priority scheduling"
+      },
+      { 
+        name: "Smith Residence", 
+        email: "smith@example.com", 
+        phone: "(555) 456-7890", 
+        address: "321 Maple Drive, Springfield, IL 62704",
+        contractType: "standard",
+        laborRate: "45.00",
+        markupPercent: "20.00",
+        taxPercent: "8.25",
+        discountPercent: "0.00",
+        paymentTerms: "net_30",
+        notes: "Standard residential customer"
+      },
     ];
 
     const insertedCustomers = await db.insert(customers).values(sampleCustomers).returning();

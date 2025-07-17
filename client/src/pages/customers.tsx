@@ -8,6 +8,7 @@ import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings } from "lucide
 import { useState } from "react";
 import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
+import { CustomerForm } from "@/components/customer-form";
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -32,10 +33,14 @@ export default function Customers() {
             <p className="text-gray-600 mt-1">Manage your customer database</p>
           </div>
           <div className="mt-4 sm:mt-0">
-            <Button className="bg-primary text-white hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Add New Customer
-            </Button>
+            <CustomerForm
+              trigger={
+                <Button className="bg-primary text-white hover:bg-blue-700">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add New Customer
+                </Button>
+              }
+            />
           </div>
         </div>
       </div>
@@ -78,6 +83,12 @@ export default function Customers() {
                         Contact
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Contract Type
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Billing Rates
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Address
                       </th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -99,6 +110,15 @@ export default function Customers() {
                         <div className="space-y-1">
                           <Skeleton className="h-4 w-40" />
                           <Skeleton className="h-4 w-24" />
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <Skeleton className="h-4 w-20" />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="space-y-1">
+                          <Skeleton className="h-4 w-24" />
+                          <Skeleton className="h-4 w-20" />
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -137,13 +157,31 @@ export default function Customers() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          {customer.contractType || 'Standard'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900 space-y-1">
+                          <div>Labor: ${customer.laborRate || '45.00'}/hr</div>
+                          <div className="text-xs text-gray-500">
+                            Markup: {customer.markupPercent || '20.00'}% | Tax: {customer.taxPercent || '8.25'}%
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{customer.address}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center space-x-2 justify-end">
-                          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                            <Edit className="w-4 h-4" />
-                          </Button>
+                          <CustomerForm
+                            customer={customer}
+                            trigger={
+                              <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                            }
+                          />
                           <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600">
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -167,10 +205,14 @@ export default function Customers() {
                 <p className="text-gray-600 mb-4">
                   {searchQuery ? "No customers match your search criteria." : "Get started by adding your first customer."}
                 </p>
-                <Button className="bg-primary text-white hover:bg-blue-700">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New Customer
-                </Button>
+                <CustomerForm
+                  trigger={
+                    <Button className="bg-primary text-white hover:bg-blue-700">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Customer
+                    </Button>
+                  }
+                />
               </CardContent>
             </Card>
           )}

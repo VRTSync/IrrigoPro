@@ -98,6 +98,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/customers/import-csv", async (req, res) => {
+    try {
+      const file = req.files?.file;
+      if (!file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const csvData = file.data.toString();
+      const lines = csvData.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        return res.status(400).json({ message: "CSV file must contain at least a header and one data row" });
+      }
+
+      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      const rows = lines.slice(1);
+
+      let imported = 0;
+      let duplicates = 0;
+      const errors: string[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        try {
+          const values = rows[i].split(',').map(v => v.trim().replace(/"/g, ''));
+          const customerData: any = {};
+
+          // Map CSV columns to customer fields
+          headers.forEach((header, index) => {
+            if (values[index]) {
+              switch (header.toLowerCase()) {
+                case 'name':
+                  customerData.name = values[index];
+                  break;
+                case 'email':
+                  customerData.email = values[index];
+                  break;
+                case 'phone':
+                  customerData.phone = values[index];
+                  break;
+                case 'address':
+                  customerData.address = values[index];
+                  break;
+                case 'contracttype':
+                  customerData.contractType = values[index];
+                  break;
+                case 'laborrate':
+                  customerData.laborRate = values[index];
+                  break;
+                case 'markuppercent':
+                  customerData.markupPercent = values[index];
+                  break;
+                case 'taxpercent':
+                  customerData.taxPercent = values[index];
+                  break;
+                case 'discountpercent':
+                  customerData.discountPercent = values[index];
+                  break;
+                case 'paymentterms':
+                  customerData.paymentTerms = values[index];
+                  break;
+                case 'notes':
+                  customerData.notes = values[index];
+                  break;
+              }
+            }
+          });
+
+          // Validate required fields
+          if (!customerData.name || !customerData.email) {
+            errors.push(`Row ${i + 2}: Missing required fields (name, email)`);
+            continue;
+          }
+
+          // Check for duplicate email
+          const existingCustomer = await storage.getCustomers();
+          const duplicate = existingCustomer.find(c => c.email === customerData.email);
+          if (duplicate) {
+            duplicates++;
+            continue;
+          }
+
+          // Validate and create customer
+          const validatedData = insertCustomerSchema.parse(customerData);
+          await storage.createCustomer(validatedData);
+          imported++;
+
+        } catch (error) {
+          errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : 'Invalid data'}`);
+        }
+      }
+
+      res.json({
+        success: errors.length === 0,
+        imported,
+        duplicates,
+        errors
+      });
+
+    } catch (error) {
+      res.status(500).json({ message: "Failed to import CSV" });
+    }
+  });
+
   // Parts routes
   app.get("/api/parts", async (req, res) => {
     try {

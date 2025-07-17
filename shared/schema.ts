@@ -8,6 +8,17 @@ export const customers = pgTable("customers", {
   email: text("email").notNull(),
   phone: text("phone"),
   address: text("address"),
+  // Contract-based billing rates
+  contractType: text("contract_type").default("standard"), // standard, premium, commercial, residential
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("45.00"),
+  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).default("20.00"),
+  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("8.25"),
+  discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }).default("0.00"),
+  // Contract details
+  contractStartDate: timestamp("contract_start_date"),
+  contractEndDate: timestamp("contract_end_date"),
+  paymentTerms: text("payment_terms").default("net_30"), // net_30, net_15, due_on_receipt
+  notes: text("notes"),
 });
 
 export const parts = pgTable("parts", {
