@@ -4,343 +4,380 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { WorkOrderForm } from "@/components/work-orders/work-order-form";
+import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { 
-  CheckCircle, 
-  Clock, 
-  FileText, 
-  User, 
+  Plus, 
+  Search, 
   Calendar, 
-  MapPin, 
-  Phone, 
-  Mail,
-  ArrowRight,
-  DollarSign,
-  ExternalLink
+  Clock, 
+  CheckCircle, 
+  AlertCircle, 
+  User,
+  MapPin,
+  FileText,
+  Eye
 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
-import { format } from "date-fns";
-
-interface WorkflowStep {
-  id: string;
-  title: string;
-  description: string;
-  status: "completed" | "current" | "pending";
-  icon: React.ReactNode;
-}
-
-const workflowSteps: WorkflowStep[] = [
-  {
-    id: "estimate",
-    title: "Estimate Created",
-    description: "Initial estimate prepared and sent to customer",
-    status: "completed",
-    icon: <FileText className="w-5 h-5" />
-  },
-  {
-    id: "approval",
-    title: "Customer Approval",
-    description: "Customer reviews and approves the estimate",
-    status: "completed",
-    icon: <CheckCircle className="w-5 h-5" />
-  },
-  {
-    id: "work-order",
-    title: "Work Order",
-    description: "Approved estimate converted to work order",
-    status: "current",
-    icon: <User className="w-5 h-5" />
-  },
-  {
-    id: "completion",
-    title: "Work Completed",
-    description: "Field work completed and documented",
-    status: "pending",
-    icon: <CheckCircle className="w-5 h-5" />
-  },
-  {
-    id: "invoice",
-    title: "Invoice Generated",
-    description: "Invoice created from completed work order",
-    status: "pending",
-    icon: <DollarSign className="w-5 h-5" />
-  },
-  {
-    id: "quickbooks",
-    title: "QuickBooks Sync",
-    description: "Invoice synchronized with QuickBooks Online",
-    status: "pending",
-    icon: <ExternalLink className="w-5 h-5" />
-  }
-];
+import type { WorkOrder } from "@shared/schema";
 
 export default function WorkOrders() {
-  const [selectedTab, setSelectedTab] = useState("workflow");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
-  // Fetch estimates for workflow demonstration
-  const { data: estimates = [], isLoading: loadingEstimates } = useQuery({
-    queryKey: ["/api/estimates"],
-    enabled: true,
-  });
-
-  // Fetch work orders (placeholder for now)
-  const { data: workOrders = [], isLoading: loadingWorkOrders } = useQuery({
+  const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
     queryKey: ["/api/work-orders"],
-    enabled: true,
   });
 
-  // Fetch invoices (placeholder for now)  
-  const { data: invoices = [], isLoading: loadingInvoices } = useQuery({
-    queryKey: ["/api/invoices"],
-    enabled: true,
-  });
+  const filteredWorkOrders = workOrders?.filter(workOrder =>
+    workOrder.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    workOrder.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    workOrder.workOrderNumber.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  // Approve estimate mutation
-  const approveEstimateMutation = useMutation({
-    mutationFn: async (estimateId: number) => {
-      const response = await apiRequest("POST", `/api/estimates/${estimateId}/approve`, {});
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
-      toast({
-        title: "Estimate Approved",
-        description: "The estimate has been approved and is ready for work order creation."
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to approve estimate. Please try again.",
-        variant: "destructive"
-      });
-    }
-  });
-
-  // Convert to work order mutation
-  const convertToWorkOrderMutation = useMutation({
-    mutationFn: async (estimateId: number) => {
-      const response = await apiRequest("POST", `/api/estimates/${estimateId}/convert-to-work-order`, {
-        assignedTechnicianName: "John Smith",
-        scheduledDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Tomorrow
-        notes: "Standard installation procedure"
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
-      toast({
-        title: "Work Order Created",
-        description: "The estimate has been converted to a work order."
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to create work order. Please try again.",
-        variant: "destructive"
-      });
-    }
-  });
-
-  const getStatusColor = (status: string) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case "pending": return "bg-yellow-100 text-yellow-800";
-      case "approved": return "bg-green-100 text-green-800";
-      case "rejected": return "bg-red-100 text-red-800";
-      case "in_progress": return "bg-blue-100 text-blue-800";
-      case "completed": return "bg-green-100 text-green-800";
-      default: return "bg-gray-100 text-gray-800";
+      case 'pending':
+        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Pending</Badge>;
+      case 'in_progress':
+        return <Badge variant="default" className="bg-blue-100 text-blue-800">In Progress</Badge>;
+      case 'completed':
+        return <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>;
+      case 'cancelled':
+        return <Badge variant="destructive">Cancelled</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
     }
   };
 
-  const getStepStatus = (step: WorkflowStep) => {
-    switch (step.status) {
-      case "completed":
-        return "bg-green-500 text-white";
-      case "current":
-        return "bg-blue-500 text-white";
-      case "pending":
-        return "bg-gray-200 text-gray-500";
+  const getPriorityBadge = (priority: string) => {
+    switch (priority) {
+      case 'urgent':
+        return <Badge variant="destructive">Urgent</Badge>;
+      case 'high':
+        return <Badge variant="default" className="bg-orange-100 text-orange-800">High</Badge>;
+      case 'medium':
+        return <Badge variant="secondary">Medium</Badge>;
+      case 'low':
+        return <Badge variant="outline">Low</Badge>;
       default:
-        return "bg-gray-200 text-gray-500";
+        return <Badge variant="outline">{priority}</Badge>;
     }
   };
+
+  const getWorkTypeBadge = (workType: string) => {
+    switch (workType) {
+      case 'estimate_based':
+        return <Badge variant="default" className="bg-blue-100 text-blue-800">From Estimate</Badge>;
+      case 'direct_billing':
+        return <Badge variant="default" className="bg-green-100 text-green-800">Direct Billing</Badge>;
+      case 'maintenance':
+        return <Badge variant="default" className="bg-purple-100 text-purple-800">Maintenance</Badge>;
+      default:
+        return <Badge variant="outline">{workType}</Badge>;
+    }
+  };
+
+  const formatDate = (date: string | Date | null) => {
+    if (!date) return "Not scheduled";
+    return new Date(date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Group work orders by customer/property
+  const groupedWorkOrders = filteredWorkOrders?.reduce((acc, workOrder) => {
+    const key = `${workOrder.customerName} - ${workOrder.projectAddress || 'No Address'}`;
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(workOrder);
+    return acc;
+  }, {} as Record<string, WorkOrder[]>);
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Work Orders & Workflow</h1>
-        <Badge variant="outline" className="text-sm">
-          Complete Business Process
-        </Badge>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Header */}
+      <div className="mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Work Orders</h1>
+            <p className="text-gray-600 mt-1">Manage and track field work assignments</p>
+          </div>
+          <div className="mt-4 sm:mt-0">
+            <Button 
+              onClick={() => setShowWorkOrderForm(true)} 
+              className="bg-primary text-white hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Work Order
+            </Button>
+          </div>
+        </div>
       </div>
 
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="workflow">Workflow Overview</TabsTrigger>
-          <TabsTrigger value="estimates">Estimates</TabsTrigger>
-          <TabsTrigger value="work-orders">Work Orders</TabsTrigger>
-          <TabsTrigger value="invoices">Invoices</TabsTrigger>
+      <Tabs defaultValue="grouped" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="grouped">By Property</TabsTrigger>
+          <TabsTrigger value="list">All Work Orders</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="workflow" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ArrowRight className="w-5 h-5" />
-                Complete Business Workflow
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <p className="text-muted-foreground mb-6">
-                  This workflow demonstrates the complete business process from estimate creation to QuickBooks synchronization:
-                </p>
-                
-                <div className="grid gap-4">
-                  {workflowSteps.map((step, index) => (
-                    <div key={step.id} className="flex items-start gap-4 p-4 rounded-lg border">
-                      <div className={`p-2 rounded-full ${getStepStatus(step)}`}>
-                        {step.icon}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-semibold">{step.title}</h3>
-                          <Badge variant="outline" className="text-xs">
-                            Step {index + 1}
-                          </Badge>
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search work orders..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+
+        <TabsContent value="grouped" className="space-y-4">
+          {isLoading ? (
+            <div className="space-y-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Card key={i} className="bg-white shadow-sm border border-gray-200">
+                  <CardHeader>
+                    <Skeleton className="h-6 w-64" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {Array.from({ length: 2 }).map((_, j) => (
+                        <div key={j} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="space-y-2">
+                            <Skeleton className="h-4 w-48" />
+                            <Skeleton className="h-3 w-32" />
+                          </div>
+                          <Skeleton className="h-8 w-20" />
                         </div>
-                        <p className="text-sm text-muted-foreground">{step.description}</p>
-                      </div>
-                      <div className="flex items-center">
-                        {step.status === "completed" && (
-                          <CheckCircle className="w-5 h-5 text-green-500" />
-                        )}
-                        {step.status === "current" && (
-                          <Clock className="w-5 h-5 text-blue-500" />
-                        )}
-                        {step.status === "pending" && (
-                          <div className="w-5 h-5 rounded-full border-2 border-gray-300" />
-                        )}
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-
-                <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                  <h4 className="font-semibold text-blue-900 mb-2">Key Features:</h4>
-                  <ul className="text-sm text-blue-800 space-y-1">
-                    <li>• Zone-based estimates with detailed work descriptions</li>
-                    <li>• Field tech interface without pricing access</li>
-                    <li>• Automatic work order generation from approved estimates</li>
-                    <li>• Invoice creation based on actual work completed</li>
-                    <li>• QuickBooks Online integration for accounting sync</li>
-                    <li>• Google Sheets integration for property and parts data</li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="estimates" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Estimates Ready for Approval</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingEstimates ? (
-                <div className="text-center py-8">Loading estimates...</div>
-              ) : estimates.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  No estimates found. Create an estimate to start the workflow.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {estimates.map((estimate: any) => (
-                    <div key={estimate.id} className="border rounded-lg p-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="font-semibold">{estimate.projectName}</h3>
-                          <p className="text-sm text-muted-foreground">{estimate.customerName}</p>
-                          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-4 h-4" />
-                              {estimate.projectAddress}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <DollarSign className="w-4 h-4" />
-                              ${estimate.totalAmount}
-                            </span>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {Object.entries(groupedWorkOrders || {}).map(([propertyKey, orders]) => (
+                <Card key={propertyKey} className="bg-white shadow-sm border border-gray-200">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center">
+                      <MapPin className="w-5 h-5 mr-2 text-gray-500" />
+                      {propertyKey}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {orders.map((workOrder) => (
+                        <div 
+                          key={workOrder.id}
+                          className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center space-x-3">
+                              <span className="font-medium text-gray-900">
+                                {workOrder.workOrderNumber}
+                              </span>
+                              <span className="text-gray-600">
+                                {workOrder.projectName}
+                              </span>
+                              {getWorkTypeBadge(workOrder.workType)}
+                            </div>
+                            <div className="flex items-center space-x-4 text-sm text-gray-500">
+                              <div className="flex items-center">
+                                <Calendar className="w-4 h-4 mr-1" />
+                                {formatDate(workOrder.scheduledDate)}
+                              </div>
+                              {workOrder.assignedTechnicianName && (
+                                <div className="flex items-center">
+                                  <User className="w-4 h-4 mr-1" />
+                                  {workOrder.assignedTechnicianName}
+                                </div>
+                              )}
+                              <div className="flex items-center space-x-2">
+                                {getStatusBadge(workOrder.status)}
+                                {getPriorityBadge(workOrder.priority)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedWorkOrder(workOrder)}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <Badge className={getStatusColor(estimate.status)}>
-                            {estimate.status}
-                          </Badge>
-                          {estimate.status === "pending" && (
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                onClick={() => approveEstimateMutation.mutate(estimate.id)}
-                                disabled={approveEstimateMutation.isPending}
-                              >
-                                Approve
-                              </Button>
-                            </div>
-                          )}
-                          {estimate.status === "approved" && (
-                            <Button
-                              size="sm"
-                              onClick={() => convertToWorkOrderMutation.mutate(estimate.id)}
-                              disabled={convertToWorkOrderMutation.isPending}
-                            >
-                              Create Work Order
-                            </Button>
-                          )}
-                        </div>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
-        <TabsContent value="work-orders" className="space-y-6">
-          <Card>
+        <TabsContent value="list" className="space-y-4">
+          <Card className="bg-white shadow-sm border border-gray-200">
             <CardHeader>
-              <CardTitle>Active Work Orders</CardTitle>
+              <CardTitle>All Work Orders</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                Work orders will appear here once estimates are approved and converted.
-                <br />
-                Complete the workflow by approving an estimate first.
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="invoices" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Generated Invoices</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                Invoices will be generated automatically when work orders are completed.
-                <br />
-                They can then be synchronized with QuickBooks Online.
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Work Order
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Customer/Property
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Type & Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Scheduled
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Technician
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {isLoading ? (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <tr key={i}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Skeleton className="h-4 w-32" />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Skeleton className="h-4 w-48" />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Skeleton className="h-4 w-24" />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Skeleton className="h-4 w-32" />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Skeleton className="h-4 w-24" />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <Skeleton className="h-8 w-16" />
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      filteredWorkOrders?.map((workOrder) => (
+                        <tr key={workOrder.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="bg-blue-50 p-2 rounded-lg mr-3">
+                                <FileText className="w-4 h-4 text-blue-600" />
+                              </div>
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">
+                                  {workOrder.workOrderNumber}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {workOrder.projectName}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{workOrder.customerName}</div>
+                            <div className="text-sm text-gray-500">{workOrder.projectAddress}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              {getWorkTypeBadge(workOrder.workType)}
+                              {getStatusBadge(workOrder.status)}
+                              {getPriorityBadge(workOrder.priority)}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {formatDate(workOrder.scheduledDate)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {workOrder.assignedTechnicianName || "Unassigned"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedWorkOrder(workOrder)}
+                              className="text-gray-600 hover:text-gray-900"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Empty State */}
+      {!isLoading && filteredWorkOrders?.length === 0 && (
+        <Card className="bg-white shadow-sm border border-gray-200">
+          <CardContent className="p-12 text-center">
+            <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No work orders found</h3>
+            <p className="text-gray-600 mb-4">
+              {searchQuery ? "No work orders match your search criteria." : "Get started by creating your first work order."}
+            </p>
+            <Button 
+              onClick={() => setShowWorkOrderForm(true)}
+              className="bg-primary text-white hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Work Order
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Work Order Form Modal */}
+      {showWorkOrderForm && (
+        <WorkOrderForm
+          onClose={() => setShowWorkOrderForm(false)}
+          onSuccess={() => {
+            setShowWorkOrderForm(false);
+            queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+          }}
+        />
+      )}
+
+      {/* Work Order Details Modal */}
+      {selectedWorkOrder && (
+        <WorkOrderDetails
+          workOrder={selectedWorkOrder}
+          onClose={() => setSelectedWorkOrder(null)}
+          onUpdate={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+          }}
+        />
+      )}
     </div>
   );
 }

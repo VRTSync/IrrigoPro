@@ -8,6 +8,8 @@ import {
   zones,
   fieldWorkSessions,
   fieldWorkItems,
+  workOrders,
+  workOrderItems,
   type Customer, 
   type Part, 
   type Estimate, 
@@ -17,6 +19,8 @@ import {
   type Zone,
   type FieldWorkSession,
   type FieldWorkItem,
+  type WorkOrder,
+  type WorkOrderItem,
   type InsertCustomer, 
   type InsertPart, 
   type InsertEstimate, 
@@ -26,6 +30,8 @@ import {
   type InsertZone,
   type InsertFieldWorkSession,
   type InsertFieldWorkItem,
+  type InsertWorkOrder,
+  type InsertWorkOrderItem,
   type EstimateWithItems,
   type EstimateWithZones,
   type PropertyZoneWithZones,
@@ -108,6 +114,23 @@ export interface IStorage {
   addFieldWorkItem(item: InsertFieldWorkItem): Promise<FieldWorkItem>;
   updateFieldWorkItem(id: number, item: Partial<InsertFieldWorkItem>): Promise<FieldWorkItem | undefined>;
   deleteFieldWorkItem(id: number): Promise<boolean>;
+
+  // Work Orders
+  getWorkOrders(): Promise<WorkOrder[]>;
+  getWorkOrder(id: number): Promise<WorkOrder | undefined>;
+  createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder>;
+  updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
+  deleteWorkOrder(id: number): Promise<boolean>;
+  
+  // Work Order Items
+  getWorkOrderItems(workOrderId: number): Promise<WorkOrderItem[]>;
+  addWorkOrderItem(item: InsertWorkOrderItem): Promise<WorkOrderItem>;
+  updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined>;
+  deleteWorkOrderItem(id: number): Promise<boolean>;
+  
+  // Billing Sheets
+  saveBillingSheet(workOrderId: number, billingData: any): Promise<void>;
+  getBillingSheet(workOrderId: number): Promise<any>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -512,6 +535,82 @@ export class DatabaseStorage implements IStorage {
   async disconnectQuickBooksCustomers(): Promise<void> {
     // Mock implementation - in real app, would revoke QuickBooks tokens
     console.log("Disconnecting QuickBooks");
+  }
+
+  // Work Orders
+  async getWorkOrders(): Promise<WorkOrder[]> {
+    return await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+  }
+
+  async getWorkOrder(id: number): Promise<WorkOrder | undefined> {
+    const [workOrder] = await db.select().from(workOrders).where(eq(workOrders.id, id));
+    return workOrder || undefined;
+  }
+
+  async createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder> {
+    // Generate work order number
+    const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    const [newWorkOrder] = await db.insert(workOrders).values({
+      ...workOrder,
+      workOrderNumber,
+    }).returning();
+    
+    return newWorkOrder;
+  }
+
+  async updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined> {
+    const [updatedWorkOrder] = await db.update(workOrders).set(workOrder).where(eq(workOrders.id, id)).returning();
+    return updatedWorkOrder || undefined;
+  }
+
+  async deleteWorkOrder(id: number): Promise<boolean> {
+    const result = await db.delete(workOrders).where(eq(workOrders.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  // Work Order Items
+  async getWorkOrderItems(workOrderId: number): Promise<WorkOrderItem[]> {
+    return await db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, workOrderId));
+  }
+
+  async addWorkOrderItem(item: InsertWorkOrderItem): Promise<WorkOrderItem> {
+    const [newItem] = await db.insert(workOrderItems).values(item).returning();
+    return newItem;
+  }
+
+  async updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined> {
+    const [updatedItem] = await db.update(workOrderItems).set(item).where(eq(workOrderItems.id, id)).returning();
+    return updatedItem || undefined;
+  }
+
+  async deleteWorkOrderItem(id: number): Promise<boolean> {
+    const result = await db.delete(workOrderItems).where(eq(workOrderItems.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  // Billing Sheets
+  async saveBillingSheet(workOrderId: number, billingData: any): Promise<void> {
+    // For now, we'll store billing data as notes in the work order
+    // In a production app, you might want a separate billing_sheets table
+    await db.update(workOrders).set({
+      notes: JSON.stringify(billingData),
+      status: 'completed',
+      completedAt: new Date(),
+    }).where(eq(workOrders.id, workOrderId));
+  }
+
+  async getBillingSheet(workOrderId: number): Promise<any> {
+    const workOrder = await this.getWorkOrder(workOrderId);
+    if (!workOrder?.notes) {
+      return null;
+    }
+    
+    try {
+      return JSON.parse(workOrder.notes);
+    } catch {
+      return null;
+    }
   }
 }
 

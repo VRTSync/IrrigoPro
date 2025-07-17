@@ -151,23 +151,27 @@ export const quickbooksSync = pgTable("quickbooks_sync", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-// Work Orders - created from approved estimates
+// Work Orders - created from approved estimates OR direct work orders
 export const workOrders = pgTable("work_orders", {
   id: serial("id").primaryKey(),
   workOrderNumber: text("work_order_number").notNull().unique(),
-  estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
+  estimateId: integer("estimate_id").references(() => estimates.id), // Optional - null for direct work orders
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone"),
   projectName: text("project_name").notNull(),
   projectAddress: text("project_address"),
+  workType: text("work_type").notNull().default("estimate_based"), // estimate_based, direct_billing, maintenance
   status: text("status").notNull().default("pending"), // pending, in_progress, completed, cancelled
+  priority: text("priority").notNull().default("medium"), // low, medium, high, urgent
   scheduledDate: timestamp("scheduled_date"),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   assignedTechnicianId: integer("assigned_technician_id"),
   assignedTechnicianName: text("assigned_technician_name"),
+  description: text("description"), // For direct work orders without estimates
+  specialInstructions: text("special_instructions"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

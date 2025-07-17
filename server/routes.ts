@@ -10,7 +10,9 @@ import {
   insertPropertyZoneSchema,
   insertZoneSchema,
   insertFieldWorkSessionSchema,
-  insertFieldWorkItemSchema
+  insertFieldWorkItemSchema,
+  insertWorkOrderSchema,
+  insertWorkOrderItemSchema
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -779,6 +781,125 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "PDF generated successfully", downloadUrl: `/api/estimates/${id}/pdf/download` });
     } catch (error) {
       res.status(500).json({ message: "Failed to generate PDF" });
+    }
+  });
+
+  // Work Order routes
+  app.get("/api/work-orders", async (req, res) => {
+    try {
+      const workOrders = await storage.getWorkOrders();
+      res.json(workOrders);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch work orders" });
+    }
+  });
+
+  app.get("/api/work-orders/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const workOrder = await storage.getWorkOrder(id);
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      res.json(workOrder);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch work order" });
+    }
+  });
+
+  app.post("/api/work-orders", async (req, res) => {
+    try {
+      const workOrderData = insertWorkOrderSchema.parse(req.body);
+      const workOrder = await storage.createWorkOrder(workOrderData);
+      res.status(201).json(workOrder);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create work order" });
+    }
+  });
+
+  app.patch("/api/work-orders/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const workOrderData = insertWorkOrderSchema.partial().parse(req.body);
+      const workOrder = await storage.updateWorkOrder(id, workOrderData);
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      res.json(workOrder);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update work order" });
+    }
+  });
+
+  app.delete("/api/work-orders/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const success = await storage.deleteWorkOrder(id);
+      if (!success) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      res.json({ message: "Work order deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete work order" });
+    }
+  });
+
+  // Work Order Items routes
+  app.get("/api/work-orders/:id/items", async (req, res) => {
+    try {
+      const workOrderId = parseInt(req.params.id);
+      const items = await storage.getWorkOrderItems(workOrderId);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch work order items" });
+    }
+  });
+
+  app.post("/api/work-orders/:id/items", async (req, res) => {
+    try {
+      const workOrderId = parseInt(req.params.id);
+      const itemData = insertWorkOrderItemSchema.parse({
+        ...req.body,
+        workOrderId
+      });
+      const item = await storage.addWorkOrderItem(itemData);
+      res.status(201).json(item);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid work order item data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to add work order item" });
+    }
+  });
+
+  // Billing Sheet routes
+  app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {
+    try {
+      const workOrderId = parseInt(req.params.id);
+      const billingData = req.body;
+      await storage.saveBillingSheet(workOrderId, billingData);
+      res.json({ message: "Billing sheet saved successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save billing sheet" });
+    }
+  });
+
+  app.get("/api/work-orders/:id/billing-sheet", async (req, res) => {
+    try {
+      const workOrderId = parseInt(req.params.id);
+      const billingSheet = await storage.getBillingSheet(workOrderId);
+      if (!billingSheet) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+      res.json(billingSheet);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch billing sheet" });
     }
   });
 
