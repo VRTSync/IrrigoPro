@@ -18,7 +18,7 @@ import NotFound from "@/pages/not-found";
 interface User {
   id: string;
   name: string;
-  role: "admin" | "field_tech";
+  role: "admin" | "irrigation_manager" | "field_tech";
   isActive: boolean;
 }
 
@@ -74,6 +74,20 @@ function Router() {
     );
   }
 
+  // Irrigation manager gets work orders and limited access
+  if (user.role === "irrigation_manager") {
+    return (
+      <Switch>
+        <Route path="/" component={WorkOrders} />
+        <Route path="/work-orders" component={WorkOrders} />
+        <Route path="/customers" component={Customers} />
+        <Route path="/field-portal" component={FieldPortal} />
+        <Route path="/login" component={Login} />
+        <Route component={NotFound} />
+      </Switch>
+    );
+  }
+
   // Admin gets full access to the system
   return (
     <Switch>
@@ -110,8 +124,8 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <div className="min-h-screen bg-gray-50">
-          {/* Only show navigation for admin users */}
-          {user?.role === "admin" && <Navigation />}
+          {/* Show navigation for admin and irrigation_manager users */}
+          {(user?.role === "admin" || user?.role === "irrigation_manager") && <Navigation />}
           <Router />
         </div>
         <Toaster />

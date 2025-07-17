@@ -2,6 +2,19 @@ import { pgTable, text, serial, integer, boolean, decimal, timestamp } from "dri
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Users table for authentication
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  name: text("name").notNull(),
+  email: text("email"),
+  role: text("role").notNull().default("field_tech"), // admin, irrigation_manager, field_tech
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -76,16 +89,7 @@ export const estimateItems = pgTable("estimate_items", {
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
 });
 
-export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
-export const insertPartSchema = createInsertSchema(parts).omit({ id: true });
-export const insertEstimateSchema = createInsertSchema(estimates).omit({ 
-  id: true, 
-  estimateNumber: true,
-  createdAt: true, 
-  updatedAt: true 
-});
-export const insertEstimateZoneSchema = createInsertSchema(estimateZones).omit({ id: true });
-export const insertEstimateItemSchema = createInsertSchema(estimateItems).omit({ id: true });
+
 
 // Property zones for field tech operations
 export const propertyZones = pgTable("property_zones", {
@@ -236,6 +240,12 @@ export const invoiceItems = pgTable("invoice_items", {
   description: text("description"),
 });
 
+export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
+export const insertPartSchema = createInsertSchema(parts).omit({ id: true });
+export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true });
+export const insertEstimateZoneSchema = createInsertSchema(estimateZones).omit({ id: true });
+export const insertEstimateItemSchema = createInsertSchema(estimateItems).omit({ id: true });
 export const insertPropertyZoneSchema = createInsertSchema(propertyZones).omit({ id: true });
 export const insertZoneSchema = createInsertSchema(zones).omit({ id: true });
 export const insertFieldWorkSessionSchema = createInsertSchema(fieldWorkSessions).omit({ id: true });
@@ -247,6 +257,7 @@ export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 
+export type User = typeof users.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
 export type Estimate = typeof estimates.$inferSelect;
@@ -263,6 +274,7 @@ export type WorkOrderItem = typeof workOrderItems.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 
+export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type InsertPart = z.infer<typeof insertPartSchema>;
 export type InsertEstimate = z.infer<typeof insertEstimateSchema>;

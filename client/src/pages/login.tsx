@@ -5,19 +5,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { User, Lock, LogIn } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 
 interface LoginCredentials {
   username: string;
   password: string;
-  role: "admin" | "field_tech";
 }
 
 export default function Login() {
   const [credentials, setCredentials] = useState<LoginCredentials>({
     username: "",
     password: "",
-    role: "admin",
   });
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -27,31 +26,18 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      // Mock authentication - in real app, would validate against backend
-      if (credentials.role === "field_tech") {
-        if (credentials.username === "tech" && credentials.password === "tech123") {
-          localStorage.setItem("user", JSON.stringify({
-            id: "tech1",
-            name: "John Field Tech",
-            role: "field_tech",
-            isActive: true,
-          }));
-          window.location.href = "/field-portal";
-        } else {
-          throw new Error("Invalid field tech credentials");
-        }
+      const user = await apiRequest("/api/auth/login", "POST", credentials);
+      
+      // Store user in localStorage
+      localStorage.setItem("user", JSON.stringify(user));
+      
+      // Redirect based on role
+      if (user.role === "field_tech") {
+        window.location.href = "/field-portal";
+      } else if (user.role === "irrigation_manager") {
+        window.location.href = "/work-orders";
       } else {
-        if (credentials.username === "admin" && credentials.password === "admin123") {
-          localStorage.setItem("user", JSON.stringify({
-            id: "admin1",
-            name: "Admin User",
-            role: "admin",
-            isActive: true,
-          }));
-          window.location.href = "/";
-        } else {
-          throw new Error("Invalid admin credentials");
-        }
+        window.location.href = "/";
       }
     } catch (error: any) {
       toast({
@@ -81,35 +67,11 @@ export default function Login() {
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="role">Role</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={credentials.role === "admin" ? "default" : "outline"}
-                  className="justify-start"
-                  onClick={() => setCredentials({ ...credentials, role: "admin" })}
-                >
-                  <User className="w-4 h-4 mr-2" />
-                  Admin
-                </Button>
-                <Button
-                  type="button"
-                  variant={credentials.role === "field_tech" ? "default" : "outline"}
-                  className="justify-start"
-                  onClick={() => setCredentials({ ...credentials, role: "field_tech" })}
-                >
-                  <User className="w-4 h-4 mr-2" />
-                  Field Tech
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
               <Label htmlFor="username">Username</Label>
               <Input
                 id="username"
                 type="text"
-                placeholder={credentials.role === "field_tech" ? "Field tech username" : "Admin username"}
+                placeholder="Enter your username"
                 value={credentials.username}
                 onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
                 required
@@ -142,6 +104,7 @@ export default function Login() {
             <div className="text-sm text-blue-800">
               <div className="font-medium mb-2">Demo Credentials:</div>
               <div><strong>Admin:</strong> admin / admin123</div>
+              <div><strong>Manager:</strong> manager / manager123</div>
               <div><strong>Field Tech:</strong> tech / tech123</div>
             </div>
           </div>

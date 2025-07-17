@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
+  insertUserSchema,
   insertCustomerSchema, 
   insertPartSchema, 
   insertEstimateSchema, 
@@ -24,6 +25,35 @@ const createEstimateWithZonesSchema = z.object({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Authentication routes
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      const user = await storage.getUserByUsername(username);
+      
+      if (!user || user.password !== password || !user.isActive) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      
+      // Return user without password
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  app.get("/api/users", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      // Remove passwords from response
+      const usersWithoutPasswords = users.map(({ password, ...user }) => user);
+      res.json(usersWithoutPasswords);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
   // Dashboard stats
   app.get("/api/dashboard/stats", async (req, res) => {
     try {
@@ -784,10 +814,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Work Order routes
+  // Work Order routes - Enhanced
   app.get("/api/work-orders", async (req, res) => {
     try {
-      const workOrders = await storage.getWorkOrders();
+      const { technician, customer, status } = req.query;
+      
+      let workOrders;
+      if (technician) {
+        workOrders = await storage.getWorkOrdersByTechnician(parseInt(technician as string));
+      } else if (customer) {
+        workOrders = await storage.getWorkOrdersByCustomer(parseInt(customer as string));
+      } else if (status) {
+        workOrders = await storage.getWorkOrdersByStatus(status as string);
+      } else {
+        workOrders = await storage.getWorkOrders();
+      }
+      
       res.json(workOrders);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch work orders" });
@@ -875,6 +917,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid work order item data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to add work order item" });
+    }
+  });
+
+  // Work Order Assignment
+  app.post("/api/work-orders/:id/assign", async (req, res) => {
+    try {
+      const workOrderId = parseInt(req.params.id);
+      const { technicianId, technicianName } = req.body;
+      
+      const success = await storage.assignWorkOrder(workOrderId, technicianId, technicianName);
+      if (!success) {
+        return res.status(404).json({ message: "Work order not found or assignment failed" });
+      }
+      
+      res.json({ message: "Work order assigned successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign work order" });
     }
   });
 

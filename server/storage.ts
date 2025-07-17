@@ -1,4 +1,5 @@
 import { 
+  users,
   customers, 
   parts, 
   estimates, 
@@ -10,6 +11,7 @@ import {
   fieldWorkItems,
   workOrders,
   workOrderItems,
+  type User,
   type Customer, 
   type Part, 
   type Estimate, 
@@ -21,6 +23,7 @@ import {
   type FieldWorkItem,
   type WorkOrder,
   type WorkOrderItem,
+  type InsertUser,
   type InsertCustomer, 
   type InsertPart, 
   type InsertEstimate, 
@@ -41,6 +44,14 @@ import { db } from "./db";
 import { eq, like, desc } from "drizzle-orm";
 
 export interface IStorage {
+  // Users
+  getUsers(): Promise<User[]>;
+  getUser(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
+  deleteUser(id: number): Promise<boolean>;
+  
   // Customers
   getCustomers(): Promise<Customer[]>;
   getCustomer(id: number): Promise<Customer | undefined>;
@@ -115,12 +126,16 @@ export interface IStorage {
   updateFieldWorkItem(id: number, item: Partial<InsertFieldWorkItem>): Promise<FieldWorkItem | undefined>;
   deleteFieldWorkItem(id: number): Promise<boolean>;
 
-  // Work Orders
+  // Work Orders - Enhanced
   getWorkOrders(): Promise<WorkOrder[]>;
+  getWorkOrdersByTechnician(technicianId: number): Promise<WorkOrder[]>;
+  getWorkOrdersByCustomer(customerId: number): Promise<WorkOrder[]>;
+  getWorkOrdersByStatus(status: string): Promise<WorkOrder[]>;
   getWorkOrder(id: number): Promise<WorkOrder | undefined>;
   createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
+  assignWorkOrder(workOrderId: number, technicianId: number, technicianName: string): Promise<boolean>;
   
   // Work Order Items
   getWorkOrderItems(workOrderId: number): Promise<WorkOrderItem[]>;
@@ -136,6 +151,76 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   constructor() {
     // Database initialization - schema is managed by Drizzle
+    this.initializeUsers();
+  }
+
+  // Initialize default users
+  private async initializeUsers() {
+    try {
+      // Check if users already exist
+      const existingUsers = await db.select().from(users);
+      if (existingUsers.length === 0) {
+        // Create default users
+        await db.insert(users).values([
+          {
+            username: "admin",
+            password: "admin123", // In production, this should be hashed
+            name: "Admin User",
+            email: "admin@irrigation.com",
+            role: "admin",
+            isActive: true,
+          },
+          {
+            username: "manager",
+            password: "manager123",
+            name: "Irrigation Manager",
+            email: "manager@irrigation.com",
+            role: "irrigation_manager",
+            isActive: true,
+          },
+          {
+            username: "tech",
+            password: "tech123",
+            name: "Field Technician",
+            email: "tech@irrigation.com",
+            role: "field_tech",
+            isActive: true,
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error("Error initializing users:", error);
+    }
+  }
+
+  // Users
+  async getUsers(): Promise<User[]> {
+    return await db.select().from(users);
+  }
+
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [newUser] = await db.insert(users).values(user).returning();
+    return newUser;
+  }
+
+  async updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined> {
+    const [updatedUser] = await db.update(users).set(user).where(eq(users.id, id)).returning();
+    return updatedUser || undefined;
+  }
+
+  async deleteUser(id: number): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id));
+    return (result.rowCount || 0) > 0;
   }
 
   // Customers
@@ -537,9 +622,48 @@ export class DatabaseStorage implements IStorage {
     console.log("Disconnecting QuickBooks");
   }
 
-  // Work Orders
+  // Work Orders - Enhanced
   async getWorkOrders(): Promise<WorkOrder[]> {
-    return await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+    try {
+      return await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+    } catch (error) {
+      console.error("Error fetching work orders:", error);
+      // Return empty array instead of error for now
+      return [];
+    }
+  }
+
+  async getWorkOrdersByTechnician(technicianId: number): Promise<WorkOrder[]> {
+    try {
+      return await db.select().from(workOrders)
+        .where(eq(workOrders.assignedTechnicianId, technicianId))
+        .orderBy(desc(workOrders.createdAt));
+    } catch (error) {
+      console.error("Error fetching work orders by technician:", error);
+      return [];
+    }
+  }
+
+  async getWorkOrdersByCustomer(customerId: number): Promise<WorkOrder[]> {
+    try {
+      return await db.select().from(workOrders)
+        .where(eq(workOrders.customerId, customerId))
+        .orderBy(desc(workOrders.createdAt));
+    } catch (error) {
+      console.error("Error fetching work orders by customer:", error);
+      return [];
+    }
+  }
+
+  async getWorkOrdersByStatus(status: string): Promise<WorkOrder[]> {
+    try {
+      return await db.select().from(workOrders)
+        .where(eq(workOrders.status, status))
+        .orderBy(desc(workOrders.createdAt));
+    } catch (error) {
+      console.error("Error fetching work orders by status:", error);
+      return [];
+    }
   }
 
   async getWorkOrder(id: number): Promise<WorkOrder | undefined> {
@@ -567,6 +691,24 @@ export class DatabaseStorage implements IStorage {
   async deleteWorkOrder(id: number): Promise<boolean> {
     const result = await db.delete(workOrders).where(eq(workOrders.id, id));
     return (result.rowCount || 0) > 0;
+  }
+
+  async assignWorkOrder(workOrderId: number, technicianId: number, technicianName: string): Promise<boolean> {
+    try {
+      const [updatedWorkOrder] = await db.update(workOrders)
+        .set({
+          assignedTechnicianId: technicianId,
+          assignedTechnicianName: technicianName,
+          status: 'assigned',
+        })
+        .where(eq(workOrders.id, workOrderId))
+        .returning();
+      
+      return !!updatedWorkOrder;
+    } catch (error) {
+      console.error("Error assigning work order:", error);
+      return false;
+    }
   }
 
   // Work Order Items

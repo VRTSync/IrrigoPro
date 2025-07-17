@@ -1,10 +1,50 @@
 import { db } from "./db";
-import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones } from "@shared/schema";
+import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users } from "@shared/schema";
 
 export async function seedDatabase() {
   console.log("Starting database seeding...");
 
   try {
+    // Seed users first
+    const sampleUsers = [
+      {
+        id: '1',
+        username: 'admin',
+        password: 'admin123',
+        name: 'Admin User',
+        email: 'admin@company.com',
+        role: 'admin' as const,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: '2',
+        username: 'manager',
+        password: 'manager123',
+        name: 'Manager User',
+        email: 'manager@company.com',
+        role: 'irrigation_manager' as const,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        id: '3',
+        username: 'tech',
+        password: 'tech123',
+        name: 'John Tech',
+        email: 'tech@company.com',
+        role: 'field_tech' as const,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+
+    const insertedUsers = await db.insert(users).values(sampleUsers).returning();
+    console.log(`Inserted ${insertedUsers.length} users`);
+
     // Seed customers with contract-based billing rates
     const sampleCustomers = [
       { 

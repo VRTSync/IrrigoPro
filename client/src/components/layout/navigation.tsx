@@ -15,13 +15,17 @@ export default function Navigation() {
     return false;
   };
 
+  // Get current user role from localStorage
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const userRole = user.role;
+
   const navItems = [
-    { path: "/", label: "Dashboard" },
-    { path: "/estimates", label: "Estimates" },
+    ...(userRole === "admin" ? [{ path: "/", label: "Dashboard" }] : []),
+    ...(userRole === "admin" ? [{ path: "/estimates", label: "Estimates" }] : []),
     { path: "/work-orders", label: "Work Orders" },
-    { path: "/parts", label: "Parts Catalog" },
+    ...(userRole === "admin" ? [{ path: "/parts", label: "Parts Catalog" }] : []),
     { path: "/customers", label: "Customers" },
-    { path: "/field-tech", label: "Field Tech" },
+    ...(userRole === "admin" ? [{ path: "/field-tech", label: "Field Tech" }] : []),
   ];
 
   return (
