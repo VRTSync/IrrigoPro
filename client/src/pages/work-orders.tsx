@@ -32,11 +32,11 @@ export default function WorkOrders() {
     queryKey: ["/api/work-orders"],
   });
 
-  const filteredWorkOrders = workOrders?.filter(workOrder =>
+  const filteredWorkOrders = workOrders?.filter ? workOrders.filter(workOrder =>
     workOrder.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     workOrder.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     workOrder.workOrderNumber.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ) : [];
 
   const getStatusBadge = (status: string) => {
     switch (status) {

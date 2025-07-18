@@ -743,21 +743,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Work order routes (placeholder endpoints)
-  app.get("/api/work-orders", async (req, res) => {
-    try {
-      // This would need to be implemented in storage
-      res.json({ message: "Work orders endpoint ready for implementation", workOrders: [] });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch work orders" });
-    }
-  });
-
+  // Work order completion route
   app.post("/api/work-orders/:id/complete", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      // This would need to be implemented in storage
-      res.json({ message: "Work order completion endpoint ready for implementation" });
+      const workOrder = await storage.updateWorkOrder(id, { 
+        status: "completed", 
+        completedAt: new Date() 
+      });
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      res.json(workOrder);
     } catch (error) {
       res.status(500).json({ message: "Failed to complete work order" });
     }

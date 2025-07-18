@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users } from "@shared/schema";
+import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users, workOrders } from "@shared/schema";
 
 export async function seedDatabase() {
   console.log("Starting database seeding...");
@@ -211,6 +211,82 @@ export async function seedDatabase() {
 
     const insertedEstimateItems = await db.insert(estimateItems).values(sampleEstimateItems).returning();
     console.log(`Inserted ${insertedEstimateItems.length} estimate items`);
+
+    // Seed work orders
+    const sampleWorkOrders = [
+      {
+        workOrderNumber: "WO-2024-001",
+        customerId: insertedCustomers[0].id,
+        customerName: insertedCustomers[0].name,
+        customerEmail: insertedCustomers[0].email,
+        customerPhone: insertedCustomers[0].phone,
+        projectName: "Sprinkler System Installation",
+        projectAddress: insertedCustomers[0].address,
+        status: "pending",
+        priority: "medium",
+        workType: "estimate_based",
+        estimateId: insertedEstimates[0].id,
+        assignedTechnicianId: null,
+        assignedTechnicianName: null,
+        scheduledDate: new Date("2024-07-20"),
+        notes: "Install new sprinkler system based on approved estimate",
+        partsSubtotal: "450.00",
+        laborSubtotal: "562.50",
+        totalAmount: "1315.16",
+        completedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        workOrderNumber: "WO-2024-002",
+        customerId: insertedCustomers[1].id,
+        customerName: insertedCustomers[1].name,
+        customerEmail: insertedCustomers[1].email,
+        customerPhone: insertedCustomers[1].phone,
+        projectName: "Commercial Irrigation Repair",
+        projectAddress: insertedCustomers[1].address,
+        status: "in_progress",
+        priority: "high",
+        workType: "direct_billing",
+        estimateId: null,
+        assignedTechnicianId: 3,
+        assignedTechnicianName: "Field Technician",
+        scheduledDate: new Date("2024-07-18"),
+        notes: "Emergency repair of main irrigation line",
+        partsSubtotal: "125.00",
+        laborSubtotal: "200.00",
+        totalAmount: "325.00",
+        completedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      },
+      {
+        workOrderNumber: "WO-2024-003",
+        customerId: insertedCustomers[2].id,
+        customerName: insertedCustomers[2].name,
+        customerEmail: insertedCustomers[2].email,
+        customerPhone: insertedCustomers[2].phone,
+        projectName: "Seasonal Maintenance",
+        projectAddress: insertedCustomers[2].address,
+        status: "completed",
+        priority: "low",
+        workType: "direct_billing",
+        estimateId: null,
+        assignedTechnicianId: 3,
+        assignedTechnicianName: "Field Technician",
+        scheduledDate: new Date("2024-07-15"),
+        notes: "Complete seasonal maintenance and system check",
+        partsSubtotal: "75.00",
+        laborSubtotal: "150.00",
+        totalAmount: "225.00",
+        completedAt: new Date("2024-07-16"),
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+
+    const insertedWorkOrders = await db.insert(workOrders).values(sampleWorkOrders).returning();
+    console.log(`Inserted ${insertedWorkOrders.length} work orders`);
 
     console.log("Database seeding completed successfully!");
   } catch (error) {
