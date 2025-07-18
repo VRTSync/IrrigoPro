@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +20,12 @@ import {
   Pause,
   AlertCircle,
   Edit,
-  Receipt
+  Receipt,
+  Building,
+  Hash,
+  Target,
+  Timer,
+  MessageSquare
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -75,13 +80,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Pending</Badge>;
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Pending</Badge>;
       case 'in_progress':
-        return <Badge variant="default" className="bg-blue-100 text-blue-800">In Progress</Badge>;
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">In Progress</Badge>;
       case 'completed':
-        return <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>;
+        return <Badge className="bg-green-100 text-green-800 border-green-200">Completed</Badge>;
       case 'cancelled':
-        return <Badge variant="destructive">Cancelled</Badge>;
+        return <Badge className="bg-red-100 text-red-800 border-red-200">Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -90,13 +95,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
   const getPriorityBadge = (priority: string) => {
     switch (priority) {
       case 'urgent':
-        return <Badge variant="destructive">Urgent</Badge>;
+        return <Badge className="bg-red-100 text-red-800 border-red-200">Urgent</Badge>;
       case 'high':
-        return <Badge variant="default" className="bg-orange-100 text-orange-800">High</Badge>;
+        return <Badge className="bg-orange-100 text-orange-800 border-orange-200">High</Badge>;
       case 'medium':
-        return <Badge variant="secondary">Medium</Badge>;
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Medium</Badge>;
       case 'low':
-        return <Badge variant="outline">Low</Badge>;
+        return <Badge className="bg-green-100 text-green-800 border-green-200">Low</Badge>;
       default:
         return <Badge variant="outline">{priority}</Badge>;
     }
@@ -105,11 +110,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
   const getWorkTypeBadge = (workType: string) => {
     switch (workType) {
       case 'estimate_based':
-        return <Badge variant="default" className="bg-blue-100 text-blue-800">From Estimate</Badge>;
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">From Estimate</Badge>;
       case 'direct_billing':
-        return <Badge variant="default" className="bg-green-100 text-green-800">Direct Billing</Badge>;
+        return <Badge className="bg-green-100 text-green-800 border-green-200">Direct Billing</Badge>;
       case 'maintenance':
-        return <Badge variant="default" className="bg-purple-100 text-purple-800">Maintenance</Badge>;
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Maintenance</Badge>;
       default:
         return <Badge variant="outline">{workType}</Badge>;
     }
@@ -175,128 +180,132 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
     return buttons;
   };
 
-  if (showBillingSheet) {
-    return (
-      <Dialog open={true} onOpenChange={onClose}>
-        <DialogContent className="max-w-6xl max-h-[95vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Billing Sheet - {workOrder.workOrderNumber}</DialogTitle>
-          </DialogHeader>
-          <BillingSheet
-            workOrder={workOrder}
-            onSave={() => {
-              setShowBillingSheet(false);
-              onUpdate();
-            }}
-          />
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <div className="flex items-center">
-              <FileText className="w-5 h-5 mr-2" />
-              {workOrder.workOrderNumber}
+          <DialogTitle className="flex items-center gap-3">
+            <div className="bg-blue-50 p-2 rounded-lg">
+              <FileText className="w-5 h-5 text-blue-600" />
             </div>
-            <div className="flex items-center space-x-2">
-              {getStatusBadge(workOrder.status)}
-              {getPriorityBadge(workOrder.priority)}
-              {getWorkTypeBadge(workOrder.workType)}
+            <div>
+              <span className="text-xl font-semibold">{workOrder.workOrderNumber}</span>
+              <p className="text-sm text-gray-600 font-normal mt-1">{workOrder.projectName}</p>
             </div>
           </DialogTitle>
+          <DialogDescription>
+            View and manage work order details, progress, and billing information
+          </DialogDescription>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="progress">Progress</TabsTrigger>
             <TabsTrigger value="billing">Billing</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-6">
-            {/* Status & Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Status & Actions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div>
-                      <div className="text-sm text-gray-500">Current Status</div>
-                      <div className="font-medium">{getStatusBadge(workOrder.status)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Priority</div>
-                      <div className="font-medium">{getPriorityBadge(workOrder.priority)}</div>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    {getStatusActions()}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          <TabsContent value="overview" className="space-y-6 mt-6">
+            {/* Header Status Bar */}
+            <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+              <div className="flex items-center gap-3">
+                {getStatusBadge(workOrder.status)}
+                {getPriorityBadge(workOrder.priority)}
+                {getWorkTypeBadge(workOrder.workType)}
+              </div>
+              <div className="flex gap-2">
+                {getStatusActions()}
+              </div>
+            </div>
 
-            {/* Customer & Project Info */}
+            {/* Main Content Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Customer Information */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center">
-                    <User className="w-5 h-5 mr-2" />
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <User className="w-5 h-5 text-blue-600" />
                     Customer Information
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <div className="text-sm text-gray-500">Name</div>
-                    <div className="font-medium">{workOrder.customerName}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-500">Email</div>
-                    <div className="font-medium flex items-center">
-                      <Mail className="w-4 h-4 mr-2" />
-                      {workOrder.customerEmail}
-                    </div>
-                  </div>
-                  {workOrder.customerPhone && (
-                    <div>
-                      <div className="text-sm text-gray-500">Phone</div>
-                      <div className="font-medium flex items-center">
-                        <Phone className="w-4 h-4 mr-2" />
-                        {workOrder.customerPhone}
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3">
+                    <div className="flex items-center gap-3">
+                      <Building className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="font-medium text-gray-900">{workOrder.customerName}</p>
+                        <p className="text-sm text-gray-600">Customer</p>
                       </div>
                     </div>
-                  )}
+                    
+                    <div className="flex items-center gap-3">
+                      <Mail className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="text-gray-900">{workOrder.customerEmail}</p>
+                        <p className="text-sm text-gray-600">Email</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <Phone className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="text-gray-900">{workOrder.customerPhone}</p>
+                        <p className="text-sm text-gray-600">Phone</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <MapPin className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="text-gray-900">{workOrder.projectAddress}</p>
+                        <p className="text-sm text-gray-600">Project Address</p>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
+              {/* Work Order Details */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center">
-                    <MapPin className="w-5 h-5 mr-2" />
-                    Project Information
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Hash className="w-5 h-5 text-blue-600" />
+                    Work Order Details
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <div className="text-sm text-gray-500">Project Name</div>
-                    <div className="font-medium">{workOrder.projectName}</div>
-                  </div>
-                  {workOrder.projectAddress && (
-                    <div>
-                      <div className="text-sm text-gray-500">Address</div>
-                      <div className="font-medium">{workOrder.projectAddress}</div>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3">
+                    <div className="flex items-center gap-3">
+                      <FileText className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="font-medium text-gray-900">{workOrder.workOrderNumber}</p>
+                        <p className="text-sm text-gray-600">Work Order Number</p>
+                      </div>
                     </div>
-                  )}
-                  <div>
-                    <div className="text-sm text-gray-500">Work Type</div>
-                    <div className="font-medium">{getWorkTypeBadge(workOrder.workType)}</div>
+                    
+                    <div className="flex items-center gap-3">
+                      <Target className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="text-gray-900">{workOrder.projectName}</p>
+                        <p className="text-sm text-gray-600">Project Name</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <Calendar className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="text-gray-900">{formatDate(workOrder.scheduledDate)}</p>
+                        <p className="text-sm text-gray-600">Scheduled Date</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <User className="w-4 h-4 text-gray-500" />
+                      <div>
+                        <p className="text-gray-900">{workOrder.assignedTechnicianName || "Unassigned"}</p>
+                        <p className="text-sm text-gray-600">Assigned Technician</p>
+                      </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -304,114 +313,110 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
 
             {/* Timeline */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center">
-                  <Clock className="w-5 h-5 mr-2" />
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Timer className="w-5 h-5 text-blue-600" />
                   Timeline
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <div className="text-sm text-gray-500">Created</div>
-                    <div className="font-medium">{formatDate(workOrder.createdAt)}</div>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <div>
+                      <p className="font-medium text-gray-900">Work Order Created</p>
+                      <p className="text-sm text-gray-600">{formatDate(workOrder.createdAt)}</p>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-sm text-gray-500">Scheduled</div>
-                    <div className="font-medium">{formatDate(workOrder.scheduledDate)}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-500">Started</div>
-                    <div className="font-medium">{formatDate(workOrder.startedAt)}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-500">Completed</div>
-                    <div className="font-medium">{formatDate(workOrder.completedAt)}</div>
-                  </div>
+                  
+                  {workOrder.startedAt && (
+                    <div className="flex items-center gap-4">
+                      <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                      <div>
+                        <p className="font-medium text-gray-900">Work Started</p>
+                        <p className="text-sm text-gray-600">{formatDate(workOrder.startedAt)}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {workOrder.completedAt && (
+                    <div className="flex items-center gap-4">
+                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                      <div>
+                        <p className="font-medium text-gray-900">Work Completed</p>
+                        <p className="text-sm text-gray-600">{formatDate(workOrder.completedAt)}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
 
-          <TabsContent value="details" className="space-y-6">
-            {/* Work Description */}
-            {workOrder.description && (
+            {/* Notes and Instructions */}
+            {(workOrder.description || workOrder.specialInstructions || workOrder.notes) && (
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Work Description</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-blue-600" />
+                    Notes & Instructions
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-gray-700 whitespace-pre-wrap">{workOrder.description}</p>
+                <CardContent className="space-y-4">
+                  {workOrder.description && (
+                    <div>
+                      <h4 className="font-medium text-gray-900 mb-2">Description</h4>
+                      <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{workOrder.description}</p>
+                    </div>
+                  )}
+                  
+                  {workOrder.specialInstructions && (
+                    <div>
+                      <h4 className="font-medium text-gray-900 mb-2">Special Instructions</h4>
+                      <p className="text-gray-700 bg-yellow-50 p-3 rounded-lg border border-yellow-200">{workOrder.specialInstructions}</p>
+                    </div>
+                  )}
+                  
+                  {workOrder.notes && (
+                    <div>
+                      <h4 className="font-medium text-gray-900 mb-2">Notes</h4>
+                      <p className="text-gray-700 bg-blue-50 p-3 rounded-lg border border-blue-200">{workOrder.notes}</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
 
-            {/* Assignment */}
+          <TabsContent value="progress" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg flex items-center">
-                  <User className="w-5 h-5 mr-2" />
-                  Assignment
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-blue-600" />
+                  Work Progress
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div>
-                  <div className="text-sm text-gray-500">Assigned Technician</div>
-                  <div className="font-medium">
-                    {workOrder.assignedTechnicianName || "Not assigned"}
-                  </div>
-                </div>
+                <p className="text-gray-600">Progress tracking features will be implemented here.</p>
               </CardContent>
             </Card>
-
-            {/* Special Instructions */}
-            {workOrder.specialInstructions && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Special Instructions</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-700 whitespace-pre-wrap">{workOrder.specialInstructions}</p>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Notes */}
-            {workOrder.notes && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Notes</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-gray-700 whitespace-pre-wrap">{workOrder.notes}</p>
-                </CardContent>
-              </Card>
-            )}
           </TabsContent>
 
-          <TabsContent value="billing" className="space-y-6">
+          <TabsContent value="billing" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg flex items-center">
-                  <Receipt className="w-5 h-5 mr-2" />
+                <CardTitle className="flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-blue-600" />
                   Billing Information
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-8">
-                  <Receipt className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    Create Billing Sheet
-                  </h3>
-                  <p className="text-gray-600 mb-4">
-                    Document materials used, labor hours, and work performed for this work order.
-                  </p>
-                  <Button 
+                <div className="flex gap-4">
+                  <Button
                     onClick={() => setShowBillingSheet(true)}
-                    className="bg-primary text-white hover:bg-blue-700"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
                   >
                     <Receipt className="w-4 h-4 mr-2" />
-                    Create Billing Sheet
+                    Generate Billing Sheet
                   </Button>
                 </div>
               </CardContent>
@@ -419,11 +424,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
           </TabsContent>
         </Tabs>
 
-        <div className="flex justify-end space-x-4 pt-4">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+        {/* Billing Sheet Modal */}
+        {showBillingSheet && (
+          <BillingSheet
+            workOrder={workOrder}
+            onClose={() => setShowBillingSheet(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
