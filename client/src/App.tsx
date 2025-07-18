@@ -32,11 +32,14 @@ function Router() {
     if (savedUser) {
       try {
         const userData = JSON.parse(savedUser);
+        console.log("Found saved user:", userData);
         setUser(userData);
       } catch (error) {
         console.error("Error parsing user data:", error);
         localStorage.removeItem("user");
       }
+    } else {
+      console.log("No saved user found");
     }
     setIsLoading(false);
   }, []);

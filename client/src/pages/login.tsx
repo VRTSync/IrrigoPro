@@ -26,10 +26,19 @@ export default function Login() {
     setIsLoading(true);
 
     try {
+      console.log("Attempting login with credentials:", credentials);
       const user = await apiRequest("/api/auth/login", "POST", credentials);
+      console.log("Login successful, user:", user);
       
       // Store user in localStorage
       localStorage.setItem("user", JSON.stringify(user));
+      
+      // Show success toast
+      toast({
+        title: "Login Successful",
+        description: `Welcome back, ${user.name}!`,
+        variant: "default",
+      });
       
       // Redirect based on role
       if (user.role === "field_tech") {
@@ -40,6 +49,7 @@ export default function Login() {
         window.location.href = "/";
       }
     } catch (error: any) {
+      console.error("Login error:", error);
       toast({
         title: "Login Failed",
         description: error.message || "Invalid credentials",
@@ -106,6 +116,32 @@ export default function Login() {
               <div><strong>Admin:</strong> admin / admin123</div>
               <div><strong>Manager:</strong> manager / manager123</div>
               <div><strong>Field Tech:</strong> tech / tech123</div>
+            </div>
+            <div className="mt-4 space-y-2">
+              <div className="text-xs font-medium text-blue-800">Quick Login:</div>
+              <div className="space-x-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => setCredentials({ username: "admin", password: "admin123" })}
+                >
+                  Admin
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => setCredentials({ username: "manager", password: "manager123" })}
+                >
+                  Manager
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => setCredentials({ username: "tech", password: "tech123" })}
+                >
+                  Field Tech
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>

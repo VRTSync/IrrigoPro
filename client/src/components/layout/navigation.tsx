@@ -79,7 +79,7 @@ export default function Navigation() {
                   alt="User avatar" 
                   className="h-8 w-8 rounded-full"
                 />
-                <span className="text-sm font-medium text-gray-700">Admin User</span>
+                <span className="text-sm font-medium text-gray-700">{user.name}</span>
                 <Button 
                   variant="ghost" 
                   size="sm"
