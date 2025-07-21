@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { Plus, FileText, Mail, Download, Eye } from "lucide-react";
 import { useState } from "react";
@@ -12,6 +13,8 @@ import type { Estimate } from "@shared/schema";
 
 export default function Estimates() {
   const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   const { data: estimates, isLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
@@ -141,11 +144,26 @@ export default function Estimates() {
                     <tr key={estimate.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className="bg-blue-50 p-2 rounded-lg mr-3">
+                          <div 
+                            className="bg-blue-50 p-2 rounded-lg mr-3 cursor-pointer hover:bg-blue-100 transition-colors"
+                            onClick={() => {
+                              setSelectedEstimateId(estimate.id);
+                              setShowDetailModal(true);
+                            }}
+                          >
                             <FileText className="w-4 h-4 text-blue-600" />
                           </div>
                           <div>
                             <div className="text-sm font-medium text-gray-900">{estimate.estimateNumber}</div>
+                            <button
+                              onClick={() => {
+                                setSelectedEstimateId(estimate.id);
+                                setShowDetailModal(true);
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              View
+                            </button>
                           </div>
                         </div>
                       </td>
@@ -169,9 +187,6 @@ export default function Estimates() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center space-x-2 justify-end">
-                          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                            <Eye className="w-4 h-4" />
-                          </Button>
                           {estimate.status !== 'converted_to_work_order' && (
                             <>
                               <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
@@ -206,6 +221,13 @@ export default function Estimates() {
       <EstimateModal
         open={showEstimateModal}
         onOpenChange={setShowEstimateModal}
+      />
+
+      {/* Estimate Detail Modal */}
+      <EstimateDetailModal
+        open={showDetailModal}
+        onOpenChange={setShowDetailModal}
+        estimateId={selectedEstimateId}
       />
     </div>
   );
