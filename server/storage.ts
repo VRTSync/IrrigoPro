@@ -303,7 +303,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones> {
-    const [newEstimate] = await db.insert(estimates).values(estimate).returning();
+    // Generate a unique estimate number if not provided
+    const estimateNumber = `EST-${Date.now()}`;
+    const estimateWithNumber = { ...estimate, estimateNumber };
+    const [newEstimate] = await db.insert(estimates).values([estimateWithNumber]).returning();
     
     const createdZones = [];
     for (const zone of zones) {

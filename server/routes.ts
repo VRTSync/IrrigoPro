@@ -1,6 +1,7 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import type { UploadedFile } from "express-fileupload";
 import { 
   insertUserSchema,
   insertCustomerSchema, 
@@ -132,19 +133,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/customers/import-csv", async (req, res) => {
     try {
-      const file = req.files?.file;
+      const file = (req as any).files?.file;
       if (!file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
 
       const csvData = file.data.toString();
-      const lines = csvData.split('\n').filter(line => line.trim());
+      const lines = csvData.split('\n').filter((line: string) => line.trim());
       
       if (lines.length < 2) {
         return res.status(400).json({ message: "CSV file must contain at least a header and one data row" });
       }
 
-      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      const headers = lines[0].split(',').map((h: string) => h.trim().replace(/"/g, ''));
       const rows = lines.slice(1);
 
       let imported = 0;
@@ -153,11 +154,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       for (let i = 0; i < rows.length; i++) {
         try {
-          const values = rows[i].split(',').map(v => v.trim().replace(/"/g, ''));
+          const values = rows[i].split(',').map((v: string) => v.trim().replace(/"/g, ''));
           const customerData: any = {};
 
           // Map CSV columns to customer fields
-          headers.forEach((header, index) => {
+          headers.forEach((header: string, index: number) => {
             if (values[index]) {
               switch (header.toLowerCase()) {
                 case 'name':
@@ -382,12 +383,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
 
           // Use flexible field mapping
-          const name = rowData[nameField] || rowData.name || '';
-          const price = rowData[priceField] || rowData.price || '';
-          const sku = rowData[skuField] || rowData.sku || `AUTO-${Date.now()}-${i}`;
-          const description = rowData[descField] || rowData.description || '';
-          const category = rowData[categoryField] || rowData.category || 'General';
-          const laborHours = rowData[laborField] || rowData.laborhours || '0.5';
+          const name = (nameField ? rowData[nameField] : rowData.name) || '';
+          const price = (priceField ? rowData[priceField] : rowData.price) || '';
+          const sku = (skuField ? rowData[skuField] : rowData.sku) || `AUTO-${Date.now()}-${i}`;
+          const description = (descField ? rowData[descField] : rowData.description) || '';
+          const category = (categoryField ? rowData[categoryField] : rowData.category) || 'General';
+          const laborHours = (laborField ? rowData[laborField] : rowData.laborhours) || '0.5';
 
           // Validate required fields
           if (!name || !price) {
