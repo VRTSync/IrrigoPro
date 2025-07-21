@@ -174,7 +174,7 @@ export class DatabaseStorage implements IStorage {
           {
             username: "manager",
             password: "manager123",
-            name: "Irrigation Manager",
+            name: "Brian Krisher",
             email: "manager@irrigation.com",
             role: "irrigation_manager",
             isActive: true,
@@ -182,7 +182,7 @@ export class DatabaseStorage implements IStorage {
           {
             username: "tech",
             password: "tech123",
-            name: "Field Technician",
+            name: "JoJo Durrill",
             email: "tech@irrigation.com",
             role: "field_tech",
             isActive: true,

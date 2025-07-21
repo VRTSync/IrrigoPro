@@ -34,12 +34,33 @@ export default function WorkOrders() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const queryClient = useQueryClient();
 
-  // Get current user from localStorage
+  // Get current user from localStorage and refresh user data
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
+    const refreshUserData = async () => {
+      const savedUser = localStorage.getItem("user");
+      if (savedUser) {
+        try {
+          const currentUserData = JSON.parse(savedUser);
+          setCurrentUser(currentUserData);
+          
+          // Refresh user data from API to get updated name
+          const response = await fetch(`/api/users`);
+          if (response.ok) {
+            const users = await response.json();
+            const updatedUser = users.find((u: any) => u.id === currentUserData.id);
+            if (updatedUser && updatedUser.name !== currentUserData.name) {
+              // Update localStorage with new name
+              localStorage.setItem("user", JSON.stringify(updatedUser));
+              setCurrentUser(updatedUser);
+            }
+          }
+        } catch (error) {
+          console.error("Error refreshing user data:", error);
+        }
+      }
+    };
+    
+    refreshUserData();
   }, []);
 
   const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
