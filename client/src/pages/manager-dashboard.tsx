@@ -143,9 +143,10 @@ export default function ManagerDashboard() {
                             estimate.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
                             estimate.status === 'approved' ? 'bg-green-100 text-green-800' :
                             estimate.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                            estimate.status === 'converted_to_work_order' ? 'bg-green-100 text-green-800' :
                             'bg-gray-100 text-gray-800'
                           }>
-                            {estimate.status}
+                            {estimate.status === 'converted_to_work_order' ? 'Converted to Work Order' : estimate.status}
                           </Badge>
                         </div>
                       ))}
