@@ -372,9 +372,9 @@ export default function WorkOrders() {
                       </div>
                     </div>
 
-                    {/* Work Order Completion - Above Technician Assignment */}
+                    {/* Work Order Start Button - Top Right of Card */}
                     {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && workOrder.assignedTechnicianName && (
-                      <div className="absolute bottom-24 right-6 z-20">
+                      <div className="absolute top-6 right-6 z-20">
                         <Button
                           size="sm"
                           onClick={(e) => {
