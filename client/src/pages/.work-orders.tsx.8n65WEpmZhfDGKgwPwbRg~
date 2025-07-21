@@ -116,10 +116,20 @@ export default function WorkOrders() {
                   <div className="flex items-center space-x-4 flex-1">
                     <Skeleton className="h-12 w-12 rounded-lg" />
                     <div className="flex-1">
-                      <Skeleton className="h-6 w-32 mb-2" />
-                      <Skeleton className="h-4 w-40 mb-2" />
-                      <Skeleton className="h-4 w-48 mb-3" />
-                      <Skeleton className="h-4 w-32 mb-3" />
+                      <div className="flex items-center justify-between mb-2">
+                        <Skeleton className="h-6 w-32" />
+                        <div className="flex space-x-6">
+                          <div className="text-right">
+                            <Skeleton className="h-4 w-24 mb-1" />
+                            <Skeleton className="h-3 w-16" />
+                          </div>
+                          <div className="text-right">
+                            <Skeleton className="h-4 w-20 mb-1" />
+                            <Skeleton className="h-3 w-18" />
+                          </div>
+                        </div>
+                      </div>
+                      <Skeleton className="h-4 w-48 mb-2" />
                       <div className="flex space-x-6">
                         <Skeleton className="h-4 w-24" />
                         <Skeleton className="h-4 w-40" />
@@ -300,24 +310,26 @@ export default function WorkOrders() {
                           {getPriorityIcon(workOrder.priority)}
                         </div>
                         
-                        {/* Customer - Right under work order number */}
-                        <div className="flex items-center space-x-2 mb-2">
-                          <User className="w-4 h-4 text-blue-600" />
-                          <p className="font-medium text-gray-900">{workOrder.customerName}</p>
-                        </div>
-                        
                         <p className="text-gray-700 font-medium mb-3">
                           {workOrder.projectName}
                         </p>
                         
-                        {/* Technician assignment */}
-                        <div className="mb-3">
+                        {/* Customer and Technician - Prominent but clean */}
+                        <div className="grid grid-cols-2 gap-4 mb-3">
+                          <div className="flex items-center space-x-2">
+                            <User className="w-4 h-4 text-blue-600" />
+                            <div>
+                              <p className="font-medium text-gray-900">{workOrder.customerName}</p>
+                              <p className="text-xs text-gray-500">Customer</p>
+                            </div>
+                          </div>
+                          
                           {workOrder.assignedTechnicianName ? (
                             <div className="flex items-center space-x-2">
                               <Wrench className="w-4 h-4 text-orange-600" />
                               <div>
                                 <p className="font-medium text-gray-900">{workOrder.assignedTechnicianName}</p>
-                                <p className="text-xs text-gray-500">Assigned Technician</p>
+                                <p className="text-xs text-gray-500">Technician</p>
                               </div>
                             </div>
                           ) : (
@@ -325,7 +337,7 @@ export default function WorkOrders() {
                               <Wrench className="w-4 h-4 text-gray-400" />
                               <div>
                                 <p className="text-gray-500">Unassigned</p>
-                                <p className="text-xs text-gray-400">No technician assigned</p>
+                                <p className="text-xs text-gray-400">Technician</p>
                               </div>
                             </div>
                           )}
