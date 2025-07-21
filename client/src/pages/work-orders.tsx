@@ -374,27 +374,20 @@ export default function WorkOrders() {
 
                     {/* Work Order Completion - Above Technician Assignment */}
                     {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && workOrder.assignedTechnicianName && (
-                      <div className="absolute bottom-20 right-6 z-10">
+                      <div className="absolute bottom-24 right-6 z-20">
                         <Button
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedWorkOrderForCompletion(workOrder);
                           }}
-                          className="bg-green-600 hover:bg-green-700 text-white shadow-lg border-2 border-green-800"
+                          className="bg-green-600 hover:bg-green-700 text-white shadow-lg"
                         >
                           <CheckCircle className="w-4 h-4 mr-2" />
                           Start
                         </Button>
                       </div>
                     )}
-                    
-                    {/* Debug: Show button for all work orders temporarily */}
-                    <div className="absolute top-20 right-6 z-20 bg-red-100 p-2 text-xs">
-                      Status: {workOrder.status}<br/>
-                      Assigned: {workOrder.assignedTechnicianName ? 'Yes' : 'No'}<br/>
-                      Show Button: {((workOrder.status === 'in_progress' || workOrder.status === 'assigned') && workOrder.assignedTechnicianName) ? 'Yes' : 'No'}
-                    </div>
                   </div>
 
                   {/* Bottom Right - Technician Assignment */}
