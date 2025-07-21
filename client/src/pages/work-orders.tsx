@@ -416,7 +416,7 @@ export default function WorkOrders() {
                           <div>
                             <p className="font-medium text-gray-900 text-sm">Completed by</p>
                             <p className="text-xs text-green-700 font-medium">
-                              {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'ME' : (workOrder.assignedTechnicianName || 'Unknown Technician')}
+                              {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : (workOrder.assignedTechnicianName || 'Unknown Technician')}
                             </p>
                           </div>
                         </div>
@@ -430,7 +430,7 @@ export default function WorkOrders() {
                             </div>
                             <div>
                               <p className="font-medium text-gray-900 text-sm">
-                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'ME' : workOrder.assignedTechnicianName}
+                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : workOrder.assignedTechnicianName}
                               </p>
                               <p className="text-xs text-gray-600">In Progress</p>
                             </div>
@@ -457,7 +457,7 @@ export default function WorkOrders() {
                             </div>
                             <div>
                               <p className="font-medium text-gray-900 text-sm">
-                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'ME' : workOrder.assignedTechnicianName}
+                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : workOrder.assignedTechnicianName}
                               </p>
                               <p className="text-xs text-gray-600">Field Technician</p>
                             </div>
