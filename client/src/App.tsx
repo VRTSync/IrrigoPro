@@ -14,6 +14,7 @@ import WorkOrders from "@/pages/work-orders";
 import Login from "@/pages/login";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
+import ManagerDashboard from "@/pages/manager-dashboard";
 
 interface User {
   id: string;
@@ -77,14 +78,12 @@ function Router() {
     );
   }
 
-  // Irrigation manager gets work orders and limited access
+  // Irrigation manager gets simplified dashboard
   if (user.role === "irrigation_manager") {
     return (
       <Switch>
-        <Route path="/" component={WorkOrders} />
-        <Route path="/work-orders" component={WorkOrders} />
-        <Route path="/customers" component={Customers} />
-        <Route path="/field-portal" component={FieldPortal} />
+        <Route path="/" component={ManagerDashboard} />
+        <Route path="/manager" component={ManagerDashboard} />
         <Route path="/login" component={Login} />
         <Route component={NotFound} />
       </Switch>
