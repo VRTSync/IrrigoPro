@@ -595,6 +595,10 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
           <BillingSheet
             workOrder={workOrder}
             onClose={() => setShowBillingSheet(false)}
+            onInvoiceCreated={() => {
+              setShowBillingSheet(false);
+              onUpdate();
+            }}
           />
         )}
       </DialogContent>

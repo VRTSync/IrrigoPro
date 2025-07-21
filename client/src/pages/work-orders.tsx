@@ -351,7 +351,10 @@ export default function WorkOrders() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setSelectedWorkOrder(workOrder)}
+                        onClick={() => {
+                          console.log('Setting selected work order:', workOrder);
+                          setSelectedWorkOrder(workOrder);
+                        }}
                         className="opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <ArrowRight className="w-4 h-4" />
@@ -379,8 +382,12 @@ export default function WorkOrders() {
         {selectedWorkOrder && (
           <WorkOrderDetails 
             workOrder={selectedWorkOrder}
-            onClose={() => setSelectedWorkOrder(null)}
+            onClose={() => {
+              console.log('Closing work order details');
+              setSelectedWorkOrder(null);
+            }}
             onUpdate={() => {
+              console.log('Updating work orders');
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
           />
