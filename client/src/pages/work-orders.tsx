@@ -338,8 +338,8 @@ export default function WorkOrders() {
                     </div>
 
                     {/* Right side - Work Information */}
-                    <div className="flex flex-col items-end space-y-3 min-w-0 ml-4">
-                      <div className="flex items-center space-x-2 flex-wrap justify-end">
+                    <div className="flex flex-col justify-between min-w-0 ml-4 h-full">
+                      <div className="flex items-center space-x-2 flex-wrap justify-end mb-3">
                         {getStatusBadge(workOrder.status)}
                         {workOrder.estimateId && (
                           <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
@@ -354,8 +354,8 @@ export default function WorkOrders() {
                         )}
                       </div>
 
-                      {/* Technician assignment */}
-                      <div className="flex items-center space-x-3">
+                      {/* Technician assignment - aligned to bottom */}
+                      <div className="flex items-end justify-end space-x-3">
                         {workOrder.assignedTechnicianName ? (
                           <div className="flex items-center space-x-2 text-right">
                             <div>
@@ -365,12 +365,15 @@ export default function WorkOrders() {
                             <Wrench className="w-4 h-4 text-orange-600 flex-shrink-0" />
                           </div>
                         ) : (
-                          <div className="flex items-center space-x-2 opacity-50 text-right">
+                          <div className="flex items-center space-x-2 text-right">
                             <div>
-                              <p className="text-gray-500 text-sm">Unassigned</p>
-                              <p className="text-xs text-gray-400">No technician</p>
+                              <p className="text-red-600 font-medium text-sm">Needs Assignment</p>
+                              <p className="text-xs text-red-500">No technician assigned</p>
                             </div>
-                            <Wrench className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                            <div className="relative">
+                              <Wrench className="w-4 h-4 text-red-400 flex-shrink-0" />
+                              <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                            </div>
                           </div>
                         )}
                         
