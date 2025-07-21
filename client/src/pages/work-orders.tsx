@@ -430,7 +430,9 @@ export default function WorkOrders() {
                               <p className="font-medium text-gray-900 text-sm">
                                 {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : workOrder.assignedTechnicianName}
                               </p>
-                              <p className="text-xs text-gray-600">In Progress</p>
+                              <p className="text-xs text-gray-600">
+                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'Irrigation Manager' : 'Field Technician'} - In Progress
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -457,7 +459,9 @@ export default function WorkOrders() {
                               <p className="font-medium text-gray-900 text-sm">
                                 {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : workOrder.assignedTechnicianName}
                               </p>
-                              <p className="text-xs text-gray-600">Field Technician</p>
+                              <p className="text-xs text-gray-600">
+                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'Irrigation Manager' : 'Field Technician'}
+                              </p>
                             </div>
                           </div>
                         </div>
