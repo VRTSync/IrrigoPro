@@ -64,6 +64,8 @@ export const estimates = pgTable("estimates", {
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
+  photos: text("photos").array().default("{}"), // JSON array of photo URLs
+  attachments: text("attachments").array().default("{}"), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -177,9 +179,16 @@ export const workOrders = pgTable("work_orders", {
   description: text("description"), // For direct work orders without estimates
   specialInstructions: text("special_instructions"),
   notes: text("notes"),
+  // Completion fields
+  workSummary: text("work_summary"), // Summary of work completed
+  customerNotes: text("customer_notes"), // Notes to share with customer
+  totalHours: decimal("total_hours", { precision: 5, scale: 2 }), // Hours worked
+  totalPartsCost: decimal("total_parts_cost", { precision: 10, scale: 2 }), // Cost of parts used
   // Financial fields
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
   totalItems: integer("total_items").default(0),
+  photos: text("photos").array().default("{}"), // JSON array of photo URLs
+  attachments: text("attachments").array().default("{}"), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

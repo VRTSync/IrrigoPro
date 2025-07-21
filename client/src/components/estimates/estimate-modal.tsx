@@ -11,9 +11,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { CustomerSelector } from "@/components/ui/customer-selector";
-import { Plus, Trash2, Search, User, FileText } from "lucide-react";
+import { Plus, Trash2, Search, User, FileText, Image, Paperclip } from "lucide-react";
 import { PartsSearchModal } from "./parts-search-modal";
 import { EstimateSummary } from "./estimate-summary";
+import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Part, Customer } from "@shared/schema";
@@ -57,6 +58,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [photos, setPhotos] = useState<UploadedFile[]>([]);
+  const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -102,6 +105,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       form.reset();
       setZones([]);
       setSelectedCustomer(null);
+      setPhotos([]);
+      setAttachments([]);
     },
     onError: (error) => {
       toast({
@@ -254,6 +259,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       laborRate: data.laborRate.toFixed(2),
       markupPercent: data.markupPercent.toFixed(2),
       taxPercent: data.taxPercent.toFixed(2),
+      photos: photos.map(photo => photo.url),
+      attachments: attachments.map(attachment => attachment.url),
     };
 
     const estimateZones = zones.map(zone => ({
@@ -558,7 +565,48 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 </CardContent>
               </Card>
 
-              {/* Step 5: Estimate Summary */}
+              {/* Step 5: Photos and Attachments */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Image className="w-5 h-5 text-blue-600" />
+                    Photos & Attachments
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                      <Image className="w-4 h-4" />
+                      Site Photos
+                    </h4>
+                    <FileUpload
+                      type="photo"
+                      label="Photos"
+                      accept="image/*"
+                      multiple={true}
+                      files={photos}
+                      onFilesChange={setPhotos}
+                    />
+                  </div>
+                  
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                      <Paperclip className="w-4 h-4" />
+                      Landscape Plans & Documents
+                    </h4>
+                    <FileUpload
+                      type="attachment"
+                      label="Attachments"
+                      accept="*/*"
+                      multiple={true}
+                      files={attachments}
+                      onFilesChange={setAttachments}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Step 6: Estimate Summary */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Estimate Summary</CardTitle>

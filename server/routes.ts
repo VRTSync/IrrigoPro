@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import type { UploadedFile } from "express-fileupload";
@@ -887,6 +887,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Work order completion route
+  app.post("/api/work-orders/complete", async (req, res) => {
+    try {
+      const {
+        workOrderId,
+        workSummary,
+        customerNotes,
+        completedAt,
+        totalHours,
+        usedParts,
+        photos,
+        totalPartsCost
+      } = req.body;
+
+      // Update work order with completion details
+      const workOrder = await storage.updateWorkOrder(workOrderId, {
+        status: 'completed',
+        completedAt: new Date(completedAt),
+        workSummary,
+        customerNotes,
+        totalHours: parseFloat(totalHours),
+        photos: photos || [],
+        totalPartsCost: parseFloat(totalPartsCost || '0')
+      });
+
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+
+      // Save used parts information
+      for (const part of usedParts || []) {
+        await storage.createWorkOrderItem({
+          workOrderId,
+          partId: part.partId,
+          quantity: part.quantity,
+          unitPrice: (parseFloat(part.totalCost) / part.quantity).toFixed(2),
+          totalPrice: part.totalCost
+        });
+      }
+
+      res.json({ message: "Work order completed successfully", workOrder });
+    } catch (error) {
+      console.error("Error completing work order:", error);
+      res.status(500).json({ message: "Failed to complete work order" });
+    }
+  });
+
   app.post("/api/work-orders/:id/complete", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -1101,6 +1147,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch billing sheet" });
     }
   });
+
+  // File upload routes for photos and attachments
+  app.post("/api/upload/photo", async (req, res) => {
+    try {
+      if (!req.files || !req.files.photo) {
+        return res.status(400).json({ message: "No photo file provided" });
+      }
+
+      const photo = Array.isArray(req.files.photo) ? req.files.photo[0] : req.files.photo;
+      
+      // Validate file type (images only)
+      if (!photo.mimetype.startsWith('image/')) {
+        return res.status(400).json({ message: "Only image files are allowed for photos" });
+      }
+
+      const fileName = `photo_${Date.now()}_${photo.name.replace(/\s+/g, '_')}`;
+      const uploadPath = `./uploads/${fileName}`;
+
+      await photo.mv(uploadPath);
+      res.json({ url: `/uploads/${fileName}`, fileName, originalName: photo.name });
+    } catch (error) {
+      console.error("Photo upload error:", error);
+      res.status(500).json({ message: "Failed to upload photo" });
+    }
+  });
+
+  app.post("/api/upload/attachment", async (req, res) => {
+    try {
+      if (!req.files || !req.files.attachment) {
+        return res.status(400).json({ message: "No attachment file provided" });
+      }
+
+      const attachment = Array.isArray(req.files.attachment) ? req.files.attachment[0] : req.files.attachment;
+      const fileName = `attachment_${Date.now()}_${attachment.name.replace(/\s+/g, '_')}`;
+      const uploadPath = `./uploads/${fileName}`;
+
+      await attachment.mv(uploadPath);
+      res.json({ url: `/uploads/${fileName}`, fileName, originalName: attachment.name });
+    } catch (error) {
+      console.error("Attachment upload error:", error);
+      res.status(500).json({ message: "Failed to upload attachment" });
+    }
+  });
+
+  // Serve uploaded files
+  app.use('/uploads', express.static('./uploads'));
 
   const httpServer = createServer(app);
   return httpServer;

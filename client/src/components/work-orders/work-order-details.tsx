@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { BillingSheet } from "./billing-sheet";
+import { WorkOrderCompletion } from "./work-order-completion";
 import { 
   FileText, 
   Calendar, 
@@ -42,6 +43,7 @@ interface WorkOrderDetailsProps {
 export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showBillingSheet, setShowBillingSheet] = useState(false);
+  const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   const { toast } = useToast();
@@ -209,12 +211,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
       buttons.push(
         <Button
           key="complete"
-          onClick={() => updateWorkOrderStatus.mutate('completed')}
-          disabled={updateWorkOrderStatus.isPending}
+          onClick={() => setShowCompletionForm(true)}
           className="bg-green-600 hover:bg-green-700 text-white"
         >
           <CheckCircle className="w-4 h-4 mr-2" />
-          Complete
+          Complete Work Order
         </Button>
       );
     }
@@ -238,7 +239,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
   };
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
+    <>
+      <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
@@ -597,5 +599,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Work Order Completion Modal */}
+    {showCompletionForm && (
+      <WorkOrderCompletion
+        workOrder={workOrder}
+        open={showCompletionForm}
+        onClose={() => setShowCompletionForm(false)}
+        onComplete={onUpdate}
+      />
+    )}
+    </>
   );
 }
