@@ -60,7 +60,6 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
   });
 
   const watchedEstimateId = form.watch("estimateId");
-  const watchedWorkType = form.watch("workType");
 
   // Auto-fill estimate info when estimate is selected
   const selectedEstimate = estimates?.find(e => e.id === watchedEstimateId);
@@ -179,65 +178,45 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 2: Work Order Type and Source */}
+            {/* Step 2: Source Estimate (Optional) */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Target className="w-5 h-5 text-blue-600" />
-                  Step 2: Work Order Details
+                  Step 2: Source Estimate (Optional)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
-                    name="workType"
+                    name="estimateId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Work Order Type</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormLabel>Link to Approved Estimate</FormLabel>
+                        <Select onValueChange={(value) => {
+                          const estimateId = value ? parseInt(value) : null;
+                          field.onChange(estimateId);
+                          // Auto-set work type based on whether estimate is selected
+                          form.setValue("workType", estimateId ? "estimate_based" : "direct_billing");
+                        }}>
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Select work order type" />
+                              <SelectValue placeholder="Select estimate (leave blank for direct work order)" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="direct_billing">Direct Billing</SelectItem>
-                            <SelectItem value="estimate_based">From Estimate</SelectItem>
-                            <SelectItem value="maintenance">Maintenance</SelectItem>
+                            {estimates?.filter(est => est.status === 'approved').map((estimate) => (
+                              <SelectItem key={estimate.id} value={estimate.id.toString()}>
+                                {estimate.estimateNumber} - {estimate.projectName}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-
-                  {watchedWorkType === "estimate_based" && (
-                    <FormField
-                      control={form.control}
-                      name="estimateId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Source Estimate</FormLabel>
-                          <Select onValueChange={(value) => field.onChange(value ? parseInt(value) : null)}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select estimate" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {estimates?.filter(est => est.status === 'approved').map((estimate) => (
-                                <SelectItem key={estimate.id} value={estimate.id.toString()}>
-                                  {estimate.estimateNumber} - {estimate.projectName}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
 
                   <FormField
                     control={form.control}
@@ -263,6 +242,13 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
                     )}
                   />
                 </div>
+
+                {watchedEstimateId && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                    <p><strong>Linked to Estimate:</strong> {selectedEstimate?.estimateNumber} - {selectedEstimate?.projectName}</p>
+                    <p className="text-xs text-blue-600 mt-1">Customer and project details will be auto-filled from the estimate</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

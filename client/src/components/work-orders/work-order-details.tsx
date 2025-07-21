@@ -166,18 +166,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
     return <Badge className={config.bg}>{label}</Badge>;
   };
 
-  const getWorkTypeBadge = (workType: string) => {
-    switch (workType) {
-      case 'estimate_based':
-        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">From Estimate</Badge>;
-      case 'direct_billing':
-        return <Badge className="bg-green-100 text-green-800 border-green-200">Direct Billing</Badge>;
-      case 'maintenance':
-        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Maintenance</Badge>;
-      default:
-        return <Badge variant="outline">{workType}</Badge>;
-    }
-  };
+
 
   const formatDate = (date: string | Date | null) => {
     if (!date) return "Not set";
@@ -309,7 +298,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
                     </div>
                   )}
                 </div>
-                {getWorkTypeBadge(workOrder.workType)}
+                {workOrder.estimateId && (
+                  <Badge className="bg-green-100 text-green-800 border-green-200">
+                    From EST-{workOrder.estimateId}
+                  </Badge>
+                )}
               </div>
               <div className="flex gap-2">
                 {getStatusActions()}

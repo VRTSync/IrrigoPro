@@ -19,7 +19,8 @@ import {
   FileText,
   Eye,
   Filter,
-  ArrowRight
+  ArrowRight,
+  Wrench
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
 
@@ -108,17 +109,28 @@ export default function WorkOrders() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="space-y-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i} className="p-6">
-                <Skeleton className="h-6 w-32 mb-4" />
-                <Skeleton className="h-4 w-full mb-2" />
-                <Skeleton className="h-4 w-3/4 mb-4" />
-                <div className="flex gap-2 mb-4">
-                  <Skeleton className="h-6 w-16" />
-                  <Skeleton className="h-6 w-20" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4 flex-1">
+                    <Skeleton className="h-12 w-12 rounded-lg" />
+                    <div className="flex-1">
+                      <Skeleton className="h-6 w-32 mb-2" />
+                      <Skeleton className="h-4 w-48 mb-2" />
+                      <div className="flex space-x-4">
+                        <Skeleton className="h-4 w-24" />
+                        <Skeleton className="h-4 w-24" />
+                        <Skeleton className="h-4 w-20" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Skeleton className="h-6 w-16" />
+                    <Skeleton className="h-6 w-20" />
+                    <Skeleton className="h-8 w-8" />
+                  </div>
                 </div>
-                <Skeleton className="h-4 w-24" />
               </Card>
             ))}
           </div>
@@ -266,81 +278,68 @@ export default function WorkOrders() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {filteredWorkOrders?.map((workOrder) => (
+          <div className="space-y-4">
+            {filteredWorkOrders
+              ?.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) // Sort oldest to newest
+              ?.map((workOrder) => (
               <Card key={workOrder.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-blue-50 p-2 rounded-lg">
-                        <FileText className="w-5 h-5 text-blue-600" />
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    {/* Left side - Main work order info */}
+                    <div className="flex items-center space-x-4 flex-1">
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <FileText className="w-6 h-6 text-blue-600" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900 text-lg">
-                          {workOrder.workOrderNumber}
-                        </h3>
-                        <p className="text-sm text-gray-600 mt-1">
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-3 mb-2">
+                          <h3 className="font-semibold text-gray-900 text-lg">
+                            {workOrder.workOrderNumber}
+                          </h3>
+                          {getPriorityIcon(workOrder.priority)}
+                        </div>
+                        
+                        <p className="text-gray-700 font-medium mb-1">
                           {workOrder.projectName}
                         </p>
-                      </div>
-                    </div>
-                    {getPriorityIcon(workOrder.priority)}
-                  </div>
-                </CardHeader>
+                        
+                        <div className="flex items-center space-x-4 text-sm text-gray-600">
+                          <div className="flex items-center space-x-1">
+                            <User className="w-4 h-4" />
+                            <span className="truncate max-w-32">{workOrder.customerName}</span>
+                          </div>
+                          
+                          {workOrder.assignedTechnicianName && (
+                            <div className="flex items-center space-x-1">
+                              <Wrench className="w-4 h-4" />
+                              <span className="truncate max-w-32">{workOrder.assignedTechnicianName}</span>
+                            </div>
+                          )}
+                          
+                          <div className="flex items-center space-x-1">
+                            <Calendar className="w-4 h-4" />
+                            <span>{formatDate(workOrder.scheduledDate)}</span>
+                          </div>
 
-                <CardContent className="pt-0">
-                  <div className="space-y-4">
-                    {/* Customer Info */}
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gray-50 p-2 rounded-lg">
-                        <User className="w-4 h-4 text-gray-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {workOrder.customerName}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">
-                          {workOrder.customerEmail}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Address */}
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gray-50 p-2 rounded-lg">
-                        <MapPin className="w-4 h-4 text-gray-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900 truncate">
-                          {workOrder.projectAddress}
-                        </p>
+                          {workOrder.projectAddress && (
+                            <div className="flex items-center space-x-1">
+                              <MapPin className="w-4 h-4" />
+                              <span className="truncate max-w-48">{workOrder.projectAddress}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Schedule */}
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gray-50 p-2 rounded-lg">
-                        <Calendar className="w-4 h-4 text-gray-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900">
-                          {formatDate(workOrder.scheduledDate)}
-                        </p>
-                        {workOrder.assignedTechnicianName && (
-                          <p className="text-xs text-gray-500">
-                            Assigned to {workOrder.assignedTechnicianName}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Status and Work Type */}
-                    <div className="flex items-center justify-between pt-2">
+                    {/* Right side - Status, badges, and actions */}
+                    <div className="flex items-center space-x-4">
                       <div className="flex items-center space-x-2">
                         {getStatusBadge(workOrder.status)}
-                        <Badge variant="outline" className="text-xs">
-                          {workOrder.workType === 'estimate_based' ? 'From Estimate' : 'Direct'}
-                        </Badge>
+                        {workOrder.estimateId && (
+                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                            From EST-{workOrder.estimateId}
+                          </Badge>
+                        )}
                         {workOrder.priority === 'urgent' && (
                           <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
                         )}
@@ -348,6 +347,7 @@ export default function WorkOrders() {
                           <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
                         )}
                       </div>
+                      
                       <Button
                         variant="ghost"
                         size="sm"
