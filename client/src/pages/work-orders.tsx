@@ -44,6 +44,8 @@ export default function WorkOrders() {
 
   const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
     queryKey: ["/api/work-orders"],
+    staleTime: 0, // Force fresh data
+    refetchOnMount: true,
   });
 
   const filteredWorkOrders = workOrders?.filter ? workOrders.filter(workOrder => {
