@@ -16,6 +16,7 @@ import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import ManagerDashboard from "@/pages/manager-dashboard";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
+import { UserSelector } from "@/components/user-selector";
 
 interface User {
   id: string;
@@ -29,21 +30,47 @@ function Router() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for saved user in localStorage
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      try {
-        const userData = JSON.parse(savedUser);
-        console.log("Found saved user:", userData);
-        setUser(userData);
-      } catch (error) {
-        console.error("Error parsing user data:", error);
-        localStorage.removeItem("user");
+    // Check for saved user in localStorage and force refresh
+    const refreshUserSession = async () => {
+      const savedUser = localStorage.getItem("user");
+      if (savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          console.log("Found saved user:", userData);
+          
+          // Force refresh user data from API
+          try {
+            const response = await fetch('/api/users');
+            if (response.ok) {
+              const users = await response.json();
+              const updatedUser = users.find((u: any) => u.username === userData.username);
+              if (updatedUser) {
+                localStorage.setItem("user", JSON.stringify(updatedUser));
+                setUser(updatedUser);
+                console.log("Updated user session:", updatedUser);
+              } else {
+                // If user not found with current username, clear session
+                localStorage.removeItem("user");
+                setUser(null);
+              }
+            } else {
+              setUser(userData);
+            }
+          } catch (apiError) {
+            console.error("Error fetching updated user:", apiError);
+            setUser(userData);
+          }
+        } catch (error) {
+          console.error("Error parsing user data:", error);
+          localStorage.removeItem("user");
+        }
+      } else {
+        console.log("No saved user found");
       }
-    } else {
-      console.log("No saved user found");
-    }
-    setIsLoading(false);
+      setIsLoading(false);
+    };
+    
+    refreshUserSession();
   }, []);
 
   if (isLoading) {
@@ -57,13 +84,14 @@ function Router() {
     );
   }
 
-  // If no user is logged in, show login page
+  // If no user is logged in, show user selector instead of login
   if (!user) {
     return (
       <Switch>
         <Route path="/login" component={Login} />
-        <Route path="/" component={Login} />
-        <Route component={Login} />
+        <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+        <Route path="/" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+        <Route component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
       </Switch>
     );
   }

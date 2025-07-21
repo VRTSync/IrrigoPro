@@ -41,18 +41,21 @@ export default function WorkOrders() {
       if (savedUser) {
         try {
           const currentUserData = JSON.parse(savedUser);
-          setCurrentUser(currentUserData);
           
-          // Refresh user data from API to get updated name
+          // Force refresh user data from API to get updated user info
           const response = await fetch(`/api/users`);
           if (response.ok) {
             const users = await response.json();
-            const updatedUser = users.find((u: any) => u.id === currentUserData.id);
-            if (updatedUser && updatedUser.name !== currentUserData.name) {
-              // Update localStorage with new name
+            const updatedUser = users.find((u: any) => u.username === currentUserData.username);
+            if (updatedUser) {
+              // Always update localStorage with fresh data
               localStorage.setItem("user", JSON.stringify(updatedUser));
               setCurrentUser(updatedUser);
+            } else {
+              setCurrentUser(currentUserData);
             }
+          } else {
+            setCurrentUser(currentUserData);
           }
         } catch (error) {
           console.error("Error refreshing user data:", error);

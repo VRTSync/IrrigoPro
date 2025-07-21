@@ -65,6 +65,11 @@ export default function Navigation() {
             )}
 
             <div className="flex items-center space-x-4">
+              <Link href="/user-selector">
+                <Button variant="outline" size="sm" className="text-gray-600 hover:text-gray-800">
+                  Switch User
+                </Button>
+              </Link>
               <Button variant="ghost" size="sm" className="text-gray-500 hover:text-gray-700 relative">
                 <Bell className="h-5 w-5" />
                 <Badge 
