@@ -146,7 +146,7 @@ export default function ManagerDashboard() {
                             estimate.status === 'converted_to_work_order' ? 'bg-green-100 text-green-800' :
                             'bg-gray-100 text-gray-800'
                           }>
-                            {estimate.status === 'converted_to_work_order' ? 'Converted to Work Order' : estimate.status}
+                            {estimate.status === 'converted_to_work_order' ? 'Converted' : estimate.status}
                           </Badge>
                         </div>
                       ))}
