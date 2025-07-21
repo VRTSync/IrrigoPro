@@ -154,10 +154,10 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                   
                   <div className="flex items-center gap-4">
                     <div className="text-right">
-                      <p className="text-2xl font-bold text-gray-900">
-                        {formatCurrency(parseFloat(workOrder.totalAmount))}
+                      <p className="text-lg font-semibold text-gray-900">
+                        {workOrder.status === 'completed' ? 'Completed' : workOrder.priority.toUpperCase()}
                       </p>
-                      <p className="text-sm text-gray-500">Total Amount</p>
+                      <p className="text-sm text-gray-500">Priority</p>
                     </div>
                     
                     <div className="flex flex-col gap-2">

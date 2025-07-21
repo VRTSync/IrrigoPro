@@ -177,6 +177,9 @@ export const workOrders = pgTable("work_orders", {
   description: text("description"), // For direct work orders without estimates
   specialInstructions: text("special_instructions"),
   notes: text("notes"),
+  // Financial fields
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
+  totalItems: integer("total_items").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
