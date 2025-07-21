@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 import type { Estimate } from "@shared/schema";
 
 interface EstimatesManagerProps {
@@ -13,7 +14,7 @@ interface EstimatesManagerProps {
 }
 
 export function EstimatesManager({ onBack }: EstimatesManagerProps) {
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showEstimateModal, setShowEstimateModal] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -64,38 +65,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
     }).format(amount);
   };
 
-  if (showCreateForm) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-6">
-        <div className="mb-6">
-          <Button variant="outline" onClick={() => setShowCreateForm(false)}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Estimates
-          </Button>
-        </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>Create New Estimate</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600">Estimate creation form would go here...</p>
-            <Button 
-              className="mt-4" 
-              onClick={() => {
-                setShowCreateForm(false);
-                toast({
-                  title: "Demo",
-                  description: "Estimate creation form would be implemented here",
-                });
-              }}
-            >
-              Save Estimate
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -108,7 +78,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
           </Button>
           <h1 className="text-3xl font-bold text-gray-900">Estimates</h1>
         </div>
-        <Button onClick={() => setShowCreateForm(true)} className="bg-blue-600 hover:bg-blue-700">
+        <Button onClick={() => setShowEstimateModal(true)} className="bg-blue-600 hover:bg-blue-700">
           <Plus className="w-4 h-4 mr-2" />
           New Estimate
         </Button>
@@ -185,6 +155,12 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
           ))
         )}
       </div>
+
+      {/* Enhanced Estimate Modal */}
+      <EnhancedEstimateModal
+        open={showEstimateModal}
+        onOpenChange={setShowEstimateModal}
+      />
     </div>
   );
 }
