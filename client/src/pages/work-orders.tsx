@@ -293,41 +293,26 @@ export default function WorkOrders() {
                       </div>
                       
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-3">
-                            <h3 className="font-semibold text-gray-900 text-lg">
-                              {workOrder.workOrderNumber}
-                            </h3>
-                            {getPriorityIcon(workOrder.priority)}
-                            
-                            {/* Status and estimate badges */}
-                            <div className="flex items-center space-x-2">
-                              {getStatusBadge(workOrder.status)}
-                              {workOrder.estimateId && (
-                                <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                  From EST-{workOrder.estimateId}
-                                </Badge>
-                              )}
-                              {workOrder.priority === 'urgent' && (
-                                <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
-                              )}
-                              {workOrder.priority === 'high' && (
-                                <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
-                              )}
-                            </div>
-                          </div>
+                        <div className="flex items-center space-x-3 mb-2">
+                          <h3 className="font-semibold text-gray-900 text-lg">
+                            {workOrder.workOrderNumber}
+                          </h3>
+                          {getPriorityIcon(workOrder.priority)}
                           
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              console.log('Setting selected work order:', workOrder);
-                              setSelectedWorkOrder(workOrder);
-                            }}
-                            className="text-xs flex-shrink-0"
-                          >
-                            View Work Order
-                          </Button>
+                          {/* Essential badges only */}
+                          <div className="flex items-center space-x-2">
+                            {workOrder.estimateId && (
+                              <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                From EST-{workOrder.estimateId}
+                              </Badge>
+                            )}
+                            {workOrder.priority === 'urgent' && (
+                              <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
+                            )}
+                            {workOrder.priority === 'high' && (
+                              <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
+                            )}
+                          </div>
                         </div>
                         
                         {/* Customer - Right under work order number */}
@@ -340,29 +325,43 @@ export default function WorkOrders() {
                           {workOrder.projectName}
                         </p>
                         
-                        <div className="space-y-1">
-                          <div className="flex items-center space-x-1 text-sm text-gray-600">
-                            <Calendar className="w-4 h-4 flex-shrink-0" />
-                            <span>{formatDate(workOrder.scheduledDate)}</span>
-                          </div>
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-1 flex-1">
+                            <div className="flex items-center space-x-1 text-sm text-gray-600">
+                              <Calendar className="w-4 h-4 flex-shrink-0" />
+                              <span>{formatDate(workOrder.scheduledDate)}</span>
+                            </div>
 
-                          {workOrder.projectAddress && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
-                                const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-                                  ? `https://maps.apple.com/?q=${encodedAddress}` // iOS Maps
-                                  : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
-                                window.open(mapsUrl, '_blank');
-                              }}
-                              className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-                              title="Click for directions"
-                            >
-                              <MapPin className="w-4 h-4 flex-shrink-0" />
-                              <span className="truncate">{workOrder.projectAddress}</span>
-                            </button>
-                          )}
+                            {workOrder.projectAddress && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
+                                  const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+                                    ? `https://maps.apple.com/?q=${encodedAddress}` // iOS Maps
+                                    : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
+                                  window.open(mapsUrl, '_blank');
+                                }}
+                                className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                                title="Click for directions"
+                              >
+                                <MapPin className="w-4 h-4 flex-shrink-0" />
+                                <span className="truncate">{workOrder.projectAddress}</span>
+                              </button>
+                            )}
+                          </div>
+                          
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              console.log('Setting selected work order:', workOrder);
+                              setSelectedWorkOrder(workOrder);
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex-shrink-0"
+                          >
+                            View Details
+                          </Button>
                         </div>
                       </div>
                     </div>
