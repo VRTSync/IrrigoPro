@@ -355,39 +355,41 @@ export default function WorkOrders() {
                   </div>
 
                   {/* Bottom Right - Technician Assignment */}
-                  <div className="absolute bottom-6 right-6 flex items-center space-x-3">
-                    {workOrder.assignedTechnicianName ? (
-                      <div className="flex items-center space-x-2 text-right">
-                        <div>
-                          <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
-                          <p className="text-xs text-gray-500">Assigned Technician</p>
+                  <div className="absolute bottom-6 right-6 flex items-center justify-end space-x-3">
+                    <div className="flex items-center space-x-3">
+                      {workOrder.assignedTechnicianName ? (
+                        <div className="flex items-center space-x-2 text-right">
+                          <div>
+                            <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                            <p className="text-xs text-gray-500">Assigned Technician</p>
+                          </div>
+                          <Wrench className="w-4 h-4 text-orange-600 flex-shrink-0" />
                         </div>
-                        <Wrench className="w-4 h-4 text-orange-600 flex-shrink-0" />
-                      </div>
-                    ) : (
-                      <div className="flex items-center space-x-2 text-right">
-                        <div>
-                          <p className="text-red-600 font-medium text-sm">Needs Assignment</p>
-                          <p className="text-xs text-red-500">No technician assigned</p>
+                      ) : (
+                        <div className="flex items-center space-x-2 text-right">
+                          <div>
+                            <p className="text-red-600 font-medium text-sm">Needs Assignment</p>
+                            <p className="text-xs text-red-500">No technician assigned</p>
+                          </div>
+                          <div className="relative">
+                            <Wrench className="w-4 h-4 text-red-400 flex-shrink-0" />
+                            <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                          </div>
                         </div>
-                        <div className="relative">
-                          <Wrench className="w-4 h-4 text-red-400 flex-shrink-0" />
-                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        console.log('Setting selected work order:', workOrder);
-                        setSelectedWorkOrder(workOrder);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                    >
-                      <ArrowRight className="w-4 h-4" />
-                    </Button>
+                      )}
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          console.log('Setting selected work order:', workOrder);
+                          setSelectedWorkOrder(workOrder);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
