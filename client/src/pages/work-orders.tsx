@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
+import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
 import { 
   Plus, 
   Search, 
@@ -27,6 +28,7 @@ import type { WorkOrder } from "@shared/schema";
 export default function WorkOrders() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [selectedWorkOrderForCompletion, setSelectedWorkOrderForCompletion] = useState<WorkOrder | null>(null);
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const queryClient = useQueryClient();
@@ -310,20 +312,27 @@ export default function WorkOrders() {
                           </h3>
                           {getPriorityIcon(workOrder.priority)}
                           
-                          {/* Essential badges only */}
-                          <div className="flex items-center space-x-2">
-                            {workOrder.estimateId && (
-                              <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                From EST-{workOrder.estimateId}
-                              </Badge>
-                            )}
-                            {workOrder.priority === 'urgent' && (
-                              <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
-                            )}
-                            {workOrder.priority === 'high' && (
-                              <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
-                            )}
-                          </div>
+                          {/* Priority Badge next to work order number */}
+                          <Badge 
+                            variant="outline" 
+                            className={`text-xs font-medium ${
+                              workOrder.priority === 'urgent' 
+                                ? 'border-red-300 text-red-700 bg-red-50' 
+                                : workOrder.priority === 'high'
+                                ? 'border-orange-300 text-orange-700 bg-orange-50'
+                                : workOrder.priority === 'medium'
+                                ? 'border-yellow-300 text-yellow-700 bg-yellow-50'
+                                : 'border-gray-300 text-gray-700 bg-gray-50'
+                            }`}
+                          >
+                            {workOrder.priority?.charAt(0).toUpperCase() + workOrder.priority?.slice(1) || 'Normal'} Priority
+                          </Badge>
+
+                          {workOrder.estimateId && (
+                            <Badge variant="outline" className="text-xs border-blue-200 text-blue-700 bg-blue-50">
+                              From Estimate
+                            </Badge>
+                          )}
                         </div>
                         
                         {/* Customer - Right under work order number */}
@@ -363,7 +372,22 @@ export default function WorkOrders() {
                       </div>
                     </div>
 
-
+                    {/* Work Order Completion - Above Technician Assignment */}
+                    {workOrder.status === 'in_progress' && (
+                      <div className="absolute bottom-20 right-6">
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedWorkOrderForCompletion(workOrder);
+                          }}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Complete Work Order
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Bottom Right - Technician Assignment */}
@@ -381,6 +405,31 @@ export default function WorkOrders() {
                             </p>
                           </div>
                         </div>
+                      </div>
+                    ) : workOrder.status === 'in_progress' ? (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 min-w-[200px]">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                              <Wrench className="w-4 h-4 text-blue-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                              <p className="text-xs text-gray-600">In Progress</p>
+                            </div>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('Reassign technician for work order:', workOrder.id);
+                          }}
+                          className="w-full text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Reassign
+                        </Button>
                       </div>
                     ) : workOrder.assignedTechnicianName ? (
                       <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 min-w-[200px]">
@@ -462,6 +511,23 @@ export default function WorkOrders() {
             }}
             onUpdate={() => {
               console.log('Updating work orders');
+              queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
+            }}
+          />
+        )}
+
+        {/* Work Order Completion Dialog */}
+        {selectedWorkOrderForCompletion && (
+          <WorkOrderCompletion 
+            workOrder={selectedWorkOrderForCompletion}
+            open={!!selectedWorkOrderForCompletion}
+            onClose={() => {
+              console.log('Closing work order completion');
+              setSelectedWorkOrderForCompletion(null);
+            }}
+            onComplete={() => {
+              console.log('Work order completed');
+              setSelectedWorkOrderForCompletion(null);
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
           />

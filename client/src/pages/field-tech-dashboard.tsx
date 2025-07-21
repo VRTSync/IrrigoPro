@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Play, Pause, Clock, Package, CheckCircle, User, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
 import type { WorkOrder, FieldWorkSession } from "@shared/schema";
 
 export default function FieldTechDashboard() {
