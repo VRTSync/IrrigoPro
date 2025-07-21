@@ -369,42 +369,59 @@ export default function WorkOrders() {
                   </div>
 
                   {/* Bottom Right - Technician Assignment */}
-                  <div className="absolute bottom-6 right-6 flex flex-col items-end space-y-2">
-                    <div className="flex items-center space-x-2">
-                      {workOrder.assignedTechnicianName ? (
-                        <>
-                          <Wrench className="w-5 h-5 text-orange-600 flex-shrink-0" />
-                          <div className="text-right">
-                            <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
-                            <p className="text-xs text-gray-500">Assigned Technician</p>
+                  <div className="absolute bottom-6 right-6">
+                    {workOrder.assignedTechnicianName ? (
+                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 min-w-[200px]">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                              <Wrench className="w-4 h-4 text-orange-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                              <p className="text-xs text-gray-600">Field Technician</p>
+                            </div>
                           </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="relative">
-                            <Wrench className="w-5 h-5 text-red-400 flex-shrink-0" />
-                            <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('Reassign technician for work order:', workOrder.id);
+                          }}
+                          className="w-full text-xs bg-white hover:bg-gray-50 border-orange-200 text-orange-700 hover:text-orange-800"
+                        >
+                          Reassign
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 min-w-[200px]">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center relative">
+                              <Wrench className="w-4 h-4 text-red-600" />
+                              <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></div>
+                            </div>
+                            <div>
+                              <p className="font-medium text-red-700 text-sm">Needs Assignment</p>
+                              <p className="text-xs text-red-600">No technician assigned</p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-red-600 font-medium text-sm">Needs Assignment</p>
-                            <p className="text-xs text-red-500">No technician assigned</p>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // TODO: Open technician assignment modal
-                        console.log('Assign technician to work order:', workOrder.id);
-                      }}
-                      className="text-xs text-blue-600 hover:text-blue-800"
-                    >
-                      {workOrder.assignedTechnicianName ? 'Reassign' : 'Assign Technician'}
-                    </Button>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log('Assign technician to work order:', workOrder.id);
+                          }}
+                          className="w-full text-xs bg-white hover:bg-gray-50 border-red-200 text-red-700 hover:text-red-800"
+                        >
+                          Assign Technician
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
