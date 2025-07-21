@@ -7,12 +7,19 @@ import { FileText, Wrench, Package, Clock, CheckCircle } from "lucide-react";
 import { EstimatesManager } from "@/components/manager/estimates-manager";
 import { WorkOrdersManager } from "@/components/manager/work-orders-manager";
 import { PartsListManager } from "@/components/manager/parts-list-manager";
+import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
+import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import type { Estimate, WorkOrder } from "@shared/schema";
 
 type ManagerView = 'menu' | 'estimates' | 'work-orders' | 'parts';
 
 export default function ManagerDashboard() {
   const [currentView, setCurrentView] = useState<ManagerView>('menu');
+  const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [estimateModalOpen, setEstimateModalOpen] = useState(false);
+  const [workOrderModalOpen, setWorkOrderModalOpen] = useState(false);
 
   // Get dashboard stats from API
   const { data: stats } = useQuery({
@@ -134,7 +141,14 @@ export default function ManagerDashboard() {
                   ) : (
                     <div className="space-y-3">
                       {recentEstimates.map((estimate) => (
-                        <div key={estimate.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div 
+                          key={estimate.id} 
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+                          onClick={() => {
+                            setSelectedEstimateId(estimate.id);
+                            setEstimateModalOpen(true);
+                          }}
+                        >
                           <div>
                             <p className="font-medium">{estimate.estimateNumber}</p>
                             <p className="text-sm text-gray-600">{estimate.customerName}</p>
@@ -179,7 +193,14 @@ export default function ManagerDashboard() {
                   ) : (
                     <div className="space-y-3">
                       {recentWorkOrders.map((workOrder) => (
-                        <div key={workOrder.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div 
+                          key={workOrder.id} 
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+                          onClick={() => {
+                            setSelectedWorkOrder(workOrder);
+                            setWorkOrderModalOpen(true);
+                          }}
+                        >
                           <div>
                             <p className="font-medium">{workOrder.workOrderNumber}</p>
                             <p className="text-sm text-gray-600">{workOrder.customerName}</p>
@@ -208,6 +229,29 @@ export default function ManagerDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {renderContent()}
+      
+      {/* Estimate Detail Modal */}
+      <EstimateDetailModal
+        open={estimateModalOpen}
+        onOpenChange={setEstimateModalOpen}
+        estimateId={selectedEstimateId}
+      />
+      
+      {/* Work Order Detail Modal */}
+      {selectedWorkOrder && (
+        <Dialog open={workOrderModalOpen} onOpenChange={setWorkOrderModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <WorkOrderDetails
+              workOrder={selectedWorkOrder}
+              onClose={() => setWorkOrderModalOpen(false)}
+              onUpdate={() => {
+                // Refresh data after update
+                // The query will automatically refetch
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
