@@ -26,6 +26,8 @@ const estimateFormSchema = z.object({
   customerPhone: z.string().optional(),
   projectName: z.string().min(1, "Project name is required"),
   projectAddress: z.string().optional(),
+  estimateDate: z.string().default(() => new Date().toISOString().split('T')[0]),
+  createdBy: z.string().default("Irrigation Manager"),
   laborRate: z.coerce.number().min(0, "Labor rate must be positive"),
   markupPercent: z.coerce.number().min(0, "Markup percentage must be positive"),
   taxPercent: z.coerce.number().min(0, "Tax percentage must be positive"),
@@ -42,7 +44,9 @@ interface EstimateItem {
 
 interface EstimateZone {
   id: string;
-  zoneName: string;
+  controllerId: string; // A, B, C, D, etc.
+  zoneNumber: string;
+  zoneName: string; // Full zone name like "Controller B Zone 21"
   workDescription: string;
   clockInTime: string;
   items: EstimateItem[];
@@ -72,11 +76,23 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       customerPhone: "",
       projectName: "",
       projectAddress: "",
+      estimateDate: new Date().toISOString().split('T')[0],
+      createdBy: "Irrigation Manager",
       laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
     },
   });
+
+  // Helper function to generate controller options based on customer's total controllers
+  const getControllerOptions = (totalControllers: number) => {
+    const options = [];
+    for (let i = 0; i < totalControllers; i++) {
+      const letter = String.fromCharCode(65 + i); // A, B, C, D, etc.
+      options.push({ value: letter, label: `Controller ${letter}` });
+    }
+    return options;
+  };
 
   const handleCustomerSelect = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -88,6 +104,19 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
     form.setValue("markupPercent", parseFloat(customer.markupPercent || "20"));
     form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
+  };
+
+  const addZone = (controllerId: string, zoneNumber: string, workDescription: string) => {
+    const newZone: EstimateZone = {
+      id: Date.now().toString(),
+      controllerId,
+      zoneNumber,
+      zoneName: `Controller ${controllerId} Zone ${zoneNumber}`,
+      workDescription,
+      clockInTime: "",
+      items: [],
+    };
+    setZones([...zones, newZone]);
   };
 
   const createEstimateMutation = useMutation({
@@ -117,10 +146,12 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     },
   });
 
-  const addZone = () => {
+  const addZoneSimple = () => {
     const newZone: EstimateZone = {
       id: Date.now().toString(),
-      zoneName: `Zone ${zones.length + 1}`,
+      controllerId: "A",
+      zoneNumber: "1",
+      zoneName: `Controller A Zone 1`,
       workDescription: "",
       clockInTime: "",
       items: [],

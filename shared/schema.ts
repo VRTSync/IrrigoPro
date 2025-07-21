@@ -21,6 +21,8 @@ export const customers = pgTable("customers", {
   email: text("email").notNull(),
   phone: text("phone"),
   address: text("address"),
+  // Irrigation system details
+  totalControllers: integer("total_controllers").default(1), // Number of controllers (1-10)
   // Contract-based billing rates
   contractType: text("contract_type").default("standard"), // standard, premium, commercial, residential
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("45.00"),
@@ -53,6 +55,8 @@ export const estimates = pgTable("estimates", {
   customerPhone: text("customer_phone"),
   projectName: text("project_name").notNull(),
   projectAddress: text("project_address"),
+  createdBy: text("created_by").notNull().default("Irrigation Manager"), // Who created the estimate
+  estimateDate: timestamp("estimate_date").defaultNow().notNull(), // Date of estimate creation
   status: text("status").notNull().default("pending"), // pending, approved, rejected, converted_to_work_order
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -73,8 +77,10 @@ export const estimates = pgTable("estimates", {
 export const estimateZones = pgTable("estimate_zones", {
   id: serial("id").primaryKey(),
   estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
-  zoneName: text("zone_name").notNull(),
-  workDescription: text("work_description"),
+  controllerId: text("controller_id").notNull(), // Controller A, B, C, D, etc.
+  zoneNumber: text("zone_number").notNull(), // Zone number within controller
+  zoneName: text("zone_name").notNull(), // Full zone name like "Controller B Zone 21"
+  workDescription: text("work_description").notNull(), // Description of work to be done
   clockInTime: text("clock_in_time"),
   sortOrder: integer("sort_order").default(0),
 });
