@@ -649,7 +649,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
       res.json(fieldTechParts);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch parts for field tech" });
+      console.error("Error in /api/parts/field-tech:", error);
+      res.status(500).json({ message: "Failed to fetch parts" });
     }
   });
 

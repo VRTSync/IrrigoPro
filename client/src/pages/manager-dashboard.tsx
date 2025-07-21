@@ -97,7 +97,7 @@ export default function ManagerDashboard() {
                   <CardTitle className="text-xl">Parts List</CardTitle>
                 </CardHeader>
                 <CardContent className="text-center">
-                  <p className="text-gray-600 mb-4">View parts inventory without pricing information</p>
+                  <p className="text-gray-600 mb-4">View parts list and add new parts</p>
                   <Button className="w-full bg-purple-600 hover:bg-purple-700">
                     View Parts
                   </Button>
