@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
@@ -25,11 +26,12 @@ import {
   Hash,
   Target,
   Timer,
-  MessageSquare
+  MessageSquare,
+  Users
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder } from "@shared/schema";
+import type { WorkOrder, User as UserType } from "@shared/schema";
 
 interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
@@ -40,8 +42,43 @@ interface WorkOrderDetailsProps {
 export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showBillingSheet, setShowBillingSheet] = useState(false);
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Get field technicians for reassignment
+  const { data: fieldTechs } = useQuery<UserType[]>({
+    queryKey: ["/api/users"],
+    select: (users) => users?.filter(user => user.role === 'field_tech') || [],
+  });
+
+  const reassignWorkOrder = useMutation({
+    mutationFn: async (technicianId: string) => {
+      const selectedTech = fieldTechs?.find(tech => tech.id.toString() === technicianId);
+      if (!selectedTech) throw new Error("Technician not found");
+      
+      return apiRequest(`/api/work-orders/${workOrder.id}/assign`, "POST", {
+        technicianId: selectedTech.id,
+        technicianName: selectedTech.name,
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Work Order Reassigned",
+        description: "Work order has been successfully reassigned to field technician",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      setSelectedTechnicianId("");
+      onUpdate();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reassign work order",
+        variant: "destructive",
+      });
+    },
+  });
 
   const updateWorkOrderStatus = useMutation({
     mutationFn: async (status: string) => {
@@ -55,10 +92,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
         updateData.completedAt = new Date().toISOString();
       }
       
-      return apiRequest(`/api/work-orders/${workOrder.id}`, {
-        method: 'PATCH',
-        body: updateData,
-      });
+      return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", updateData);
     },
     onSuccess: (data, status) => {
       toast({
@@ -301,10 +335,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
                     
                     <div className="flex items-center gap-3">
                       <User className="w-4 h-4 text-gray-500" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-gray-900">{workOrder.assignedTechnicianName || "Unassigned"}</p>
                         <p className="text-sm text-gray-600">Assigned Technician</p>
                       </div>
+                      {workOrder.assignedTechnicianName && workOrder.assignedTechnicianName !== "Manager" && (
+                        <Badge variant="outline" className="ml-2">Field Tech</Badge>
+                      )}
+                      {workOrder.assignedTechnicianName === "Manager" && (
+                        <Badge className="ml-2 bg-blue-100 text-blue-800">Manager</Badge>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -351,6 +391,51 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
                 </div>
               </CardContent>
             </Card>
+
+            {/* Reassignment Section - Only show for managers when work order is assigned to them */}
+            {workOrder.assignedTechnicianName === "Manager" && fieldTechs && fieldTechs.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Users className="w-5 h-5 text-blue-600" />
+                    Assign to Field Technician
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    This work order is currently assigned to you as the manager. Select a field technician to hand it off for field work.
+                  </p>
+                  <div className="flex gap-3">
+                    <Select 
+                      value={selectedTechnicianId} 
+                      onValueChange={setSelectedTechnicianId}
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Choose field technician..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {fieldTechs.map((tech) => (
+                          <SelectItem key={tech.id} value={tech.id.toString()}>
+                            {tech.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button 
+                      onClick={() => {
+                        if (selectedTechnicianId) {
+                          reassignWorkOrder.mutate(selectedTechnicianId);
+                        }
+                      }}
+                      disabled={!selectedTechnicianId || reassignWorkOrder.isPending}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      {reassignWorkOrder.isPending ? "Assigning..." : "Assign"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Notes and Instructions */}
             {(workOrder.description || workOrder.specialInstructions || workOrder.notes) && (

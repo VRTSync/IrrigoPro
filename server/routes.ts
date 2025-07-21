@@ -26,6 +26,18 @@ const createEstimateWithZonesSchema = z.object({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // User routes
+  app.get("/api/users", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      // Remove passwords for security
+      const usersWithoutPasswords = users.map(({ password, ...user }) => user);
+      res.json(usersWithoutPasswords);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
   // Authentication routes
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -754,7 +766,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Only approved estimates can be converted to work orders" });
       }
       
-      // Create work order from estimate
+      // Find the manager user to auto-assign work orders initially
+      const managerUser = await storage.getUserByRole('irrigation_manager');
+      
+      // Create work order from estimate - initially assign to manager
       const workOrderData = {
         estimateId: estimate.id,
         customerId: estimate.customerId,
@@ -763,8 +778,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerPhone: estimate.customerPhone,
         projectName: estimate.projectName,
         projectAddress: estimate.projectAddress,
-        status: "pending" as const,
-        assignedTechnicianName: req.body.assignedTechnicianName || null,
+        status: "assigned" as const,
+        assignedTechnicianId: managerUser?.id || null,
+        assignedTechnicianName: managerUser?.name || "Manager",
         scheduledDate: req.body.scheduledDate ? new Date(req.body.scheduledDate) : null,
         notes: req.body.notes || null,
         totalAmount: estimate.totalAmount,
