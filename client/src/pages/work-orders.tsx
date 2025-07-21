@@ -293,11 +293,41 @@ export default function WorkOrders() {
                       </div>
                       
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="font-semibold text-gray-900 text-lg">
-                            {workOrder.workOrderNumber}
-                          </h3>
-                          {getPriorityIcon(workOrder.priority)}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-3">
+                            <h3 className="font-semibold text-gray-900 text-lg">
+                              {workOrder.workOrderNumber}
+                            </h3>
+                            {getPriorityIcon(workOrder.priority)}
+                            
+                            {/* Status and estimate badges */}
+                            <div className="flex items-center space-x-2">
+                              {getStatusBadge(workOrder.status)}
+                              {workOrder.estimateId && (
+                                <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                  From EST-{workOrder.estimateId}
+                                </Badge>
+                              )}
+                              {workOrder.priority === 'urgent' && (
+                                <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
+                              )}
+                              {workOrder.priority === 'high' && (
+                                <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              console.log('Setting selected work order:', workOrder);
+                              setSelectedWorkOrder(workOrder);
+                            }}
+                            className="text-xs flex-shrink-0"
+                          >
+                            View Work Order
+                          </Button>
                         </div>
                         
                         {/* Customer - Right under work order number */}
@@ -320,7 +350,7 @@ export default function WorkOrders() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const encodedAddress = encodeURIComponent(workOrder.projectAddress);
+                                const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
                                 const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
                                   ? `https://maps.apple.com/?q=${encodedAddress}` // iOS Maps
                                   : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
@@ -337,35 +367,7 @@ export default function WorkOrders() {
                       </div>
                     </div>
 
-                    {/* Top Right - Badges and View Button */}
-                    <div className="absolute top-6 right-6 flex items-start space-x-3">
-                      <div className="flex items-start justify-end space-x-2 flex-wrap">
-                        {getStatusBadge(workOrder.status)}
-                        {workOrder.estimateId && (
-                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                            From EST-{workOrder.estimateId}
-                          </Badge>
-                        )}
-                        {workOrder.priority === 'urgent' && (
-                          <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
-                        )}
-                        {workOrder.priority === 'high' && (
-                          <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
-                        )}
-                      </div>
-                      
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          console.log('Setting selected work order:', workOrder);
-                          setSelectedWorkOrder(workOrder);
-                        }}
-                        className="text-xs flex-shrink-0"
-                      >
-                        View Work Order
-                      </Button>
-                    </div>
+
                   </div>
 
                   {/* Bottom Right - Technician Assignment */}
