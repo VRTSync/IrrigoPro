@@ -4,7 +4,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench } from "lucide-react";
@@ -20,12 +19,12 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId }: Estimate
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
 
-  const { data: estimate, isLoading } = useQuery({
+  const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
     enabled: !!estimateId && open,
   });
 
-  const { data: estimateZones } = useQuery({
+  const { data: estimateZones } = useQuery<any[]>({
     queryKey: ["/api/estimates", estimateId, "zones"],
     enabled: !!estimateId && open,
   });

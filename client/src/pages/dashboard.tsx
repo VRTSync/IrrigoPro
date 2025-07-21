@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
-import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp } from "lucide-react";
+import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
 
@@ -151,19 +151,21 @@ export default function Dashboard() {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Parts in Catalog</p>
+                  <p className="text-sm font-medium text-gray-600">Active Work Orders</p>
                   {isLoading ? (
                     <Skeleton className="h-8 w-16 mt-2" />
                   ) : (
-                    <p className="text-2xl font-bold text-gray-900">{stats?.partsCount || 0}</p>
+                    <p className="text-2xl font-bold text-gray-900">{stats?.workOrderStats?.inProgress || 0}</p>
                   )}
                 </div>
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <Package className="w-5 h-5 text-gray-600" />
+                <div className="bg-orange-50 p-3 rounded-lg">
+                  <Wrench className="w-5 h-5 text-orange-600" />
                 </div>
               </div>
               <div className="mt-4 flex items-center text-sm">
-                <span className="text-gray-600">No change</span>
+                <span className="text-gray-600">
+                  {stats?.workOrderStats?.pending || 0} pending, {stats?.workOrderStats?.completed || 0} completed
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -218,7 +220,6 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</p>
                         {getStatusBadge(estimate.status)}
                       </div>
                     </div>

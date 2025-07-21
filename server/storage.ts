@@ -97,6 +97,13 @@ export interface IStorage {
     partsCount: number;
     recentEstimates: Estimate[];
     topParts: (Part & { usageCount: number })[];
+    workOrderStats: {
+      pending: number;
+      inProgress: number;
+      completed: number;
+      total: number;
+    };
+    recentWorkOrders: WorkOrder[];
   }>;
 
   // Property Zones
@@ -481,10 +488,18 @@ export class DatabaseStorage implements IStorage {
     partsCount: number;
     recentEstimates: Estimate[];
     topParts: (Part & { usageCount: number })[];
+    workOrderStats: {
+      pending: number;
+      inProgress: number;
+      completed: number;
+      total: number;
+    };
+    recentWorkOrders: WorkOrder[];
   }> {
     const allEstimates = await db.select().from(estimates);
     const allParts = await db.select().from(parts);
     const allEstimateItems = await db.select().from(estimateItems);
+    const allWorkOrders = await db.select().from(workOrders);
 
     const pendingEstimates = allEstimates.filter(e => e.status === "pending").length;
     
@@ -505,6 +520,18 @@ export class DatabaseStorage implements IStorage {
     const recentEstimates = allEstimates
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
+
+    const recentWorkOrders = allWorkOrders
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 5);
+
+    // Work order stats
+    const workOrderStats = {
+      pending: allWorkOrders.filter(wo => wo.status === "pending").length,
+      inProgress: allWorkOrders.filter(wo => wo.status === "in_progress").length,
+      completed: allWorkOrders.filter(wo => wo.status === "completed").length,
+      total: allWorkOrders.length
+    };
 
     // Calculate top parts usage
     const partUsage = new Map<number, number>();
@@ -527,7 +554,9 @@ export class DatabaseStorage implements IStorage {
       totalRevenue,
       partsCount,
       recentEstimates,
-      topParts
+      topParts,
+      workOrderStats,
+      recentWorkOrders
     };
   }
 
