@@ -288,22 +288,20 @@ export default function WorkOrders() {
                   <div className="flex items-start justify-between">
                     {/* Left side - Job Information */}
                     <div className="flex items-start space-x-4 flex-1 pr-4">
-                      <div className="flex flex-col items-center space-y-2 flex-shrink-0">
-                        <div className="bg-blue-50 p-3 rounded-lg">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          console.log('Setting selected work order:', workOrder);
+                          setSelectedWorkOrder(workOrder);
+                        }}
+                        className="flex flex-col items-center space-y-1 flex-shrink-0 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
+                        title="View work order details"
+                      >
+                        <div className="bg-blue-50 p-3 rounded-lg group-hover:bg-blue-100 transition-colors">
                           <FileText className="w-6 h-6 text-blue-600" />
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            console.log('Setting selected work order:', workOrder);
-                            setSelectedWorkOrder(workOrder);
-                          }}
-                          className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1"
-                        >
-                          View
-                        </Button>
-                      </div>
+                        <span className="text-xs text-gray-600 group-hover:text-blue-600 transition-colors">View</span>
+                      </button>
                       
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-3 mb-2">
