@@ -256,6 +256,12 @@ export function CustomerSelector({
                             <Badge variant="outline" className="text-xs">
                               ${customer.laborRate || "45.00"}/hr
                             </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {customer.markupPercent || "20"}% markup
+                            </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {customer.taxPercent || "8.25"}% tax
+                            </Badge>
                           </div>
                         </div>
                       </div>
