@@ -373,7 +373,7 @@ export default function WorkOrders() {
                     </div>
 
                     {/* Work Order Completion - Above Technician Assignment */}
-                    {workOrder.status === 'in_progress' && (
+                    {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && workOrder.assignedTechnicianName && (
                       <div className="absolute bottom-20 right-6">
                         <Button
                           size="sm"
@@ -381,10 +381,10 @@ export default function WorkOrders() {
                             e.stopPropagation();
                             setSelectedWorkOrderForCompletion(workOrder);
                           }}
-                          className="bg-green-600 hover:bg-green-700 text-white"
+                          className="bg-green-600 hover:bg-green-700 text-white shadow-md"
                         >
                           <CheckCircle className="w-4 h-4 mr-2" />
-                          Complete Work Order
+                          Begin Completion
                         </Button>
                       </div>
                     )}
