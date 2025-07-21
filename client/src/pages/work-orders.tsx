@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,16 @@ export default function WorkOrders() {
   const [selectedWorkOrderForCompletion, setSelectedWorkOrderForCompletion] = useState<WorkOrder | null>(null);
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const queryClient = useQueryClient();
+
+  // Get current user from localStorage
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+  }, []);
 
   const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
     queryKey: ["/api/work-orders"],
@@ -373,7 +382,11 @@ export default function WorkOrders() {
                     </div>
 
                     {/* Work Order Start Button - Top Right of Card */}
-                    {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && workOrder.assignedTechnicianName && (
+                    {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && 
+                     workOrder.assignedTechnicianName && 
+                     currentUser && 
+                     (currentUser.role === 'irrigation_manager' || 
+                      (currentUser.role === 'field_tech' && workOrder.assignedTechnicianId === currentUser.id)) && (
                       <div className="absolute top-6 right-6 z-20">
                         <Button
                           size="sm"
