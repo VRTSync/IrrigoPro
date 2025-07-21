@@ -146,7 +146,8 @@ export default function ManagerDashboard() {
                             estimate.status === 'converted_to_work_order' ? 'bg-green-100 text-green-800' :
                             'bg-gray-100 text-gray-800'
                           }>
-                            {estimate.status === 'converted_to_work_order' ? 'Converted' : estimate.status}
+                            {estimate.status === 'converted_to_work_order' ? 'Converted' : 
+                             estimate.status.charAt(0).toUpperCase() + estimate.status.slice(1)}
                           </Badge>
                         </div>
                       ))}
@@ -189,7 +190,8 @@ export default function ManagerDashboard() {
                             workOrder.status === 'assigned' ? 'bg-orange-100 text-orange-800' :
                             'bg-yellow-100 text-yellow-800'
                           }>
-                            {workOrder.status.replace('_', ' ')}
+                            {workOrder.status.replace('_', ' ').split(' ').map(word => 
+                              word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
                           </Badge>
                         </div>
                       ))}
