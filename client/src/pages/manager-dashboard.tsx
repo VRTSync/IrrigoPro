@@ -118,7 +118,7 @@ export default function ManagerDashboard() {
                     <Button 
                       variant="outline" 
                       size="sm"
-                      onClick={() => setCurrentView('estimates')}
+                      onClick={() => window.location.href = '/estimates'}
                     >
                       View List
                     </Button>
@@ -156,7 +156,7 @@ export default function ManagerDashboard() {
                     <Button 
                       variant="outline" 
                       size="sm"
-                      onClick={() => setCurrentView('work-orders')}
+                      onClick={() => window.location.href = '/work-orders'}
                     >
                       View List
                     </Button>
