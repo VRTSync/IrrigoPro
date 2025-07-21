@@ -110,9 +110,18 @@ export default function ManagerDashboard() {
               {/* Recent Estimates */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-blue-600" />
-                    Recent Estimates
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-blue-600" />
+                      Recent Estimates
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setCurrentView('estimates')}
+                    >
+                      View List
+                    </Button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -139,9 +148,18 @@ export default function ManagerDashboard() {
               {/* Recent Work Orders */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    Recent Work Orders
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      Recent Work Orders
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setCurrentView('work-orders')}
+                    >
+                      View List
+                    </Button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
