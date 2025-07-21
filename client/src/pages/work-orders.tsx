@@ -383,12 +383,10 @@ export default function WorkOrders() {
                       </div>
                     </div>
 
-                    {/* Work Order Start Button - Top Right of Card */}
+                    {/* Work Order Start Button - Top Right of Card - Only for ME */}
                     {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && 
-                     workOrder.assignedTechnicianName && 
                      currentUser && 
-                     (currentUser.role === 'irrigation_manager' || 
-                      (currentUser.role === 'field_tech' && workOrder.assignedTechnicianId === currentUser.id)) && (
+                     workOrder.assignedTechnicianId === currentUser.id && (
                       <div className="absolute top-6 right-6 z-20">
                         <Button
                           size="sm"
