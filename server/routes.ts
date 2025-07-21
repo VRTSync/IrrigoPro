@@ -312,6 +312,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/parts/import/google-sheets", async (req, res) => {
+    try {
+      const { sheetsUrl } = req.body;
+      if (!sheetsUrl) {
+        return res.status(400).json({ message: "Google Sheets URL is required" });
+      }
+
+      // Convert Google Sheets URL to CSV export URL
+      const sheetId = sheetsUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+      if (!sheetId) {
+        return res.status(400).json({ message: "Invalid Google Sheets URL format" });
+      }
+
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
+      
+      // Fetch CSV data
+      const response = await fetch(csvUrl);
+      if (!response.ok) {
+        return res.status(400).json({ 
+          message: "Failed to access Google Sheets. Make sure the sheet is publicly viewable (Anyone with the link can view)" 
+        });
+      }
+
+      const csvData = await response.text();
+      const lines = csvData.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        return res.status(400).json({ message: "Sheet appears to be empty or missing data" });
+      }
+
+      // Parse CSV headers
+      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+      
+      // Create header mapping - more flexible approach
+      const headerMap: Record<string, string> = {};
+      headers.forEach((header, index) => {
+        headerMap[header] = headers[index];
+      });
+
+      // Find the actual header names in the sheet
+      const nameField = headers.find(h => h.includes('name') || h.includes('product') || h.includes('item'));
+      const priceField = headers.find(h => h.includes('price') || h.includes('cost') || h.includes('amount'));
+      const skuField = headers.find(h => h.includes('sku') || h.includes('code') || h.includes('part'));
+      const laborField = headers.find(h => h.includes('labor') || h.includes('hour') || h.includes('time'));
+      const descField = headers.find(h => h.includes('desc') || h.includes('detail'));
+      const categoryField = headers.find(h => h.includes('category') || h.includes('type') || h.includes('group'));
+
+      console.log('Available headers:', headers);
+      console.log('Mapped fields:', { nameField, priceField, skuField, laborField });
+
+      if (!nameField || !priceField) {
+        return res.status(400).json({ 
+          message: `Could not find required columns in sheet. Available headers: ${headers.join(', ')}. Need at least: name/product and price/cost` 
+        });
+      }
+
+      // Parse and import parts
+      let partsAdded = 0;
+      const errors = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        try {
+          const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+          const rowData: any = {};
+          
+          headers.forEach((header, index) => {
+            rowData[header] = values[index] || '';
+          });
+
+          // Use flexible field mapping
+          const name = rowData[nameField] || rowData.name || '';
+          const price = rowData[priceField] || rowData.price || '';
+          const sku = rowData[skuField] || rowData.sku || `AUTO-${Date.now()}-${i}`;
+          const description = rowData[descField] || rowData.description || '';
+          const category = rowData[categoryField] || rowData.category || 'General';
+          const laborHours = rowData[laborField] || rowData.laborhours || '0.5';
+
+          // Validate required fields
+          if (!name || !price) {
+            errors.push(`Row ${i + 1}: Missing required fields (name: "${name}", price: "${price}")`);
+            continue;
+          }
+
+          // Create part object
+          const partData = {
+            name: name.trim(),
+            description: description.trim(),
+            price: price.toString(),
+            laborHours: laborHours.toString(),
+            sku: sku.trim(),
+            category: category.trim(),
+          };
+
+          await storage.createPart(partData);
+          partsAdded++;
+        } catch (error) {
+          errors.push(`Row ${i + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      res.json({ 
+        partsAdded, 
+        errors: errors.length > 0 ? errors : undefined,
+        message: `Successfully imported ${partsAdded} parts` + (errors.length > 0 ? ` with ${errors.length} errors` : '')
+      });
+    } catch (error) {
+      console.error("Error importing from Google Sheets:", error);
+      res.status(500).json({ message: "Failed to import parts from Google Sheets" });
+    }
+  });
+
   // Google Docs sync
   app.post("/api/parts/sync-google-docs", async (req, res) => {
     try {

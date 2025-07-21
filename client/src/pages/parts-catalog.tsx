@@ -3,9 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Package, Search, Edit, Trash2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings } from "lucide-react";
 import { useState } from "react";
 import type { Part } from "@shared/schema";
+import { PartsIntegration } from "@/components/integrations/parts-integration";
 
 export default function PartsCatalog() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -36,28 +38,38 @@ export default function PartsCatalog() {
             <h1 className="text-3xl font-bold text-gray-900">Parts Catalog</h1>
             <p className="text-gray-600 mt-1">Manage your irrigation parts and pricing</p>
           </div>
-          <div className="mt-4 sm:mt-0">
+          <div className="mt-4 sm:mt-0 flex gap-2">
             <Button className="bg-primary text-white hover:bg-blue-700">
               <Plus className="w-4 h-4 mr-2" />
               Add New Part
             </Button>
           </div>
         </div>
-
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder="Search parts catalog..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
-        </div>
       </div>
 
-      {/* Parts Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <Tabs defaultValue="catalog" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="catalog">Parts Catalog</TabsTrigger>
+          <TabsTrigger value="integrations">
+            <Settings className="w-4 h-4 mr-2" />
+            Integrations
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="catalog" className="space-y-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search parts catalog..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          {/* Parts Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isLoading ? (
           Array.from({ length: 9 }).map((_, i) => (
             <Card key={i} className="bg-white shadow-sm border border-gray-200">
@@ -110,24 +122,30 @@ export default function PartsCatalog() {
             </Card>
           ))
         )}
-      </div>
+          </div>
 
-      {/* Empty State */}
-      {!isLoading && filteredParts?.length === 0 && (
-        <Card className="bg-white shadow-sm border border-gray-200">
-          <CardContent className="p-12 text-center">
-            <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No parts found</h3>
-            <p className="text-gray-600 mb-4">
-              {searchQuery ? "No parts match your search criteria." : "Get started by adding your first part to the catalog."}
-            </p>
-            <Button className="bg-primary text-white hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Add New Part
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+          {/* Empty State */}
+          {!isLoading && filteredParts?.length === 0 && (
+            <Card className="bg-white shadow-sm border border-gray-200">
+              <CardContent className="p-12 text-center">
+                <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No parts found</h3>
+                <p className="text-gray-600 mb-4">
+                  {searchQuery ? "No parts match your search criteria." : "Get started by adding your first part to the catalog."}
+                </p>
+                <Button className="bg-primary text-white hover:bg-blue-700">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add New Part
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="integrations">
+          <PartsIntegration />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
