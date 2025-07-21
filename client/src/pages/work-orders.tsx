@@ -337,25 +337,39 @@ export default function WorkOrders() {
                       </div>
                     </div>
 
-                    {/* Top Right - Badges */}
-                    <div className="absolute top-6 right-6 flex items-start justify-end space-x-2 flex-wrap">
-                      {getStatusBadge(workOrder.status)}
-                      {workOrder.estimateId && (
-                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                          From EST-{workOrder.estimateId}
-                        </Badge>
-                      )}
-                      {workOrder.priority === 'urgent' && (
-                        <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
-                      )}
-                      {workOrder.priority === 'high' && (
-                        <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
-                      )}
+                    {/* Top Right - Badges and View Button */}
+                    <div className="absolute top-6 right-6 flex items-start space-x-3">
+                      <div className="flex items-start justify-end space-x-2 flex-wrap">
+                        {getStatusBadge(workOrder.status)}
+                        {workOrder.estimateId && (
+                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                            From EST-{workOrder.estimateId}
+                          </Badge>
+                        )}
+                        {workOrder.priority === 'urgent' && (
+                          <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
+                        )}
+                        {workOrder.priority === 'high' && (
+                          <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
+                        )}
+                      </div>
+                      
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          console.log('Setting selected work order:', workOrder);
+                          setSelectedWorkOrder(workOrder);
+                        }}
+                        className="text-xs flex-shrink-0"
+                      >
+                        View Work Order
+                      </Button>
                     </div>
                   </div>
 
                   {/* Bottom Right - Technician Assignment */}
-                  <div className="absolute bottom-6 right-6 flex items-center space-x-3">
+                  <div className="absolute bottom-6 right-6 flex flex-col items-end space-y-2">
                     <div className="flex items-center space-x-2">
                       {workOrder.assignedTechnicianName ? (
                         <>
@@ -382,13 +396,14 @@ export default function WorkOrders() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        console.log('Setting selected work order:', workOrder);
-                        setSelectedWorkOrder(workOrder);
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // TODO: Open technician assignment modal
+                        console.log('Assign technician to work order:', workOrder.id);
                       }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      className="text-xs text-blue-600 hover:text-blue-800"
                     >
-                      <ArrowRight className="w-4 h-4" />
+                      {workOrder.assignedTechnicianName ? 'Reassign' : 'Assign Technician'}
                     </Button>
                   </div>
                 </CardContent>
