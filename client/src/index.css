@@ -71,4 +71,8 @@
   .status-rejected {
     @apply bg-red-50 text-red-700 border-red-200;
   }
+  
+  .status-converted {
+    @apply bg-purple-50 text-purple-700 border-purple-200;
+  }
 }

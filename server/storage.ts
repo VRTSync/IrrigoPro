@@ -674,14 +674,32 @@ export class DatabaseStorage implements IStorage {
     return workOrder || undefined;
   }
 
-  async createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder> {
+  async createWorkOrder(workOrder: InsertWorkOrder, estimateZones?: (EstimateZone & { items: EstimateItem[] })[]): Promise<WorkOrder> {
     // Generate work order number
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
-    const [newWorkOrder] = await db.insert(workOrders).values({
+    const [newWorkOrder] = await db.insert(workOrders).values([{
       ...workOrder,
       workOrderNumber,
-    }).returning();
+    }]).returning();
+
+    // Copy estimate items to work order items if provided
+    if (estimateZones && estimateZones.length > 0) {
+      for (const zone of estimateZones) {
+        for (const item of zone.items) {
+          await db.insert(workOrderItems).values([{
+            workOrderId: newWorkOrder.id,
+            zoneId: zone.id,
+            partId: item.partId,
+            partName: item.partName,
+            partPrice: item.partPrice,
+            quantity: item.quantity,
+            laborHours: item.laborHours,
+            totalPrice: item.totalPrice,
+          }]);
+        }
+      }
+    }
     
     return newWorkOrder;
   }

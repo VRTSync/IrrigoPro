@@ -32,6 +32,8 @@ export default function Estimates() {
         return <Badge className="status-approved">Approved</Badge>;
       case 'rejected':
         return <Badge className="status-rejected">Rejected</Badge>;
+      case 'converted_to_work_order':
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Converted to Work Order</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -170,12 +172,19 @@ export default function Estimates() {
                           <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
                             <Eye className="w-4 h-4" />
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                            <Mail className="w-4 h-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                            <Download className="w-4 h-4" />
-                          </Button>
+                          {estimate.status !== 'converted_to_work_order' && (
+                            <>
+                              <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                                <Mail className="w-4 h-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                                <Download className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                          {estimate.status === 'converted_to_work_order' && (
+                            <span className="text-sm text-gray-500 italic">Cannot edit - Converted</span>
+                          )}
                         </div>
                       </td>
                     </tr>

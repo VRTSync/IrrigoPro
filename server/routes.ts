@@ -765,12 +765,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "pending" as const,
         assignedTechnicianName: req.body.assignedTechnicianName || null,
         scheduledDate: req.body.scheduledDate ? new Date(req.body.scheduledDate) : null,
-        notes: req.body.notes || null
+        notes: req.body.notes || null,
+        totalAmount: estimate.totalAmount,
+        totalItems: estimate.zones?.reduce((total, zone) => total + (zone.items?.length || 0), 0) || 0
       };
       
-      // This would need to be implemented in storage
-      res.json({ message: "Work order creation endpoint ready for implementation" });
+      // Create the work order and update estimate status
+      const workOrder = await storage.createWorkOrder(workOrderData, estimate.zones || []);
+      
+      // Update estimate status to converted
+      await storage.updateEstimate(id, { status: "converted_to_work_order" });
+      
+      res.json({ 
+        message: "Work order created successfully", 
+        workOrder,
+        estimateId: id
+      });
     } catch (error) {
+      console.error("Error converting estimate to work order:", error);
       res.status(500).json({ message: "Failed to create work order" });
     }
   });

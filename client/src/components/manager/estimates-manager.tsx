@@ -50,6 +50,8 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
         return 'bg-green-100 text-green-800';
       case 'rejected':
         return 'bg-red-100 text-red-800';
+      case 'converted_to_work_order':
+        return 'bg-purple-100 text-purple-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -171,6 +173,9 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                           <ArrowRight className="w-4 h-4 mr-2" />
                           Convert to Work Order
                         </Button>
+                      )}
+                      {estimate.status === 'converted_to_work_order' && (
+                        <span className="text-sm text-gray-500 italic">Converted to Work Order</span>
                       )}
                     </div>
                   </div>
