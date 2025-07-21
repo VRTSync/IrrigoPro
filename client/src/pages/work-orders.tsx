@@ -284,10 +284,10 @@ export default function WorkOrders() {
               ?.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) // Sort oldest to newest
               ?.map((workOrder) => (
               <Card key={workOrder.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group">
-                <CardContent className="p-6">
+                <CardContent className="p-6 relative">
                   <div className="flex items-start justify-between">
                     {/* Left side - Job Information */}
-                    <div className="flex items-start space-x-4 flex-1">
+                    <div className="flex items-start space-x-4 flex-1 pr-4">
                       <div className="bg-blue-50 p-3 rounded-lg flex-shrink-0">
                         <FileText className="w-6 h-6 text-blue-600" />
                       </div>
@@ -337,59 +337,57 @@ export default function WorkOrders() {
                       </div>
                     </div>
 
-                    {/* Right side - Work Information */}
-                    <div className="flex flex-col justify-between min-w-0 ml-4 h-full">
-                      <div className="flex items-center space-x-2 flex-wrap justify-end mb-3">
-                        {getStatusBadge(workOrder.status)}
-                        {workOrder.estimateId && (
-                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                            From EST-{workOrder.estimateId}
-                          </Badge>
-                        )}
-                        {workOrder.priority === 'urgent' && (
-                          <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
-                        )}
-                        {workOrder.priority === 'high' && (
-                          <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
-                        )}
-                      </div>
-
-                      {/* Technician assignment - aligned to bottom */}
-                      <div className="flex items-end justify-end space-x-3">
-                        {workOrder.assignedTechnicianName ? (
-                          <div className="flex items-center space-x-2 text-right">
-                            <div>
-                              <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
-                              <p className="text-xs text-gray-500">Assigned Technician</p>
-                            </div>
-                            <Wrench className="w-4 h-4 text-orange-600 flex-shrink-0" />
-                          </div>
-                        ) : (
-                          <div className="flex items-center space-x-2 text-right">
-                            <div>
-                              <p className="text-red-600 font-medium text-sm">Needs Assignment</p>
-                              <p className="text-xs text-red-500">No technician assigned</p>
-                            </div>
-                            <div className="relative">
-                              <Wrench className="w-4 h-4 text-red-400 flex-shrink-0" />
-                              <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            console.log('Setting selected work order:', workOrder);
-                            setSelectedWorkOrder(workOrder);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                        >
-                          <ArrowRight className="w-4 h-4" />
-                        </Button>
-                      </div>
+                    {/* Top Right - Badges */}
+                    <div className="flex items-start justify-end space-x-2 flex-wrap">
+                      {getStatusBadge(workOrder.status)}
+                      {workOrder.estimateId && (
+                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                          From EST-{workOrder.estimateId}
+                        </Badge>
+                      )}
+                      {workOrder.priority === 'urgent' && (
+                        <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
+                      )}
+                      {workOrder.priority === 'high' && (
+                        <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
+                      )}
                     </div>
+                  </div>
+
+                  {/* Bottom Right - Technician Assignment */}
+                  <div className="absolute bottom-6 right-6 flex items-center space-x-3">
+                    {workOrder.assignedTechnicianName ? (
+                      <div className="flex items-center space-x-2 text-right">
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                          <p className="text-xs text-gray-500">Assigned Technician</p>
+                        </div>
+                        <Wrench className="w-4 h-4 text-orange-600 flex-shrink-0" />
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2 text-right">
+                        <div>
+                          <p className="text-red-600 font-medium text-sm">Needs Assignment</p>
+                          <p className="text-xs text-red-500">No technician assigned</p>
+                        </div>
+                        <div className="relative">
+                          <Wrench className="w-4 h-4 text-red-400 flex-shrink-0" />
+                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        console.log('Setting selected work order:', workOrder);
+                        setSelectedWorkOrder(workOrder);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
