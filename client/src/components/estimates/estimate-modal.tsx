@@ -3,21 +3,23 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Trash2, Search } from "lucide-react";
+import { CustomerSelector } from "@/components/ui/customer-selector";
+import { Plus, Trash2, Search, User, FileText } from "lucide-react";
 import { PartsSearchModal } from "./parts-search-modal";
 import { EstimateSummary } from "./estimate-summary";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { Part } from "@shared/schema";
+import type { Part, Customer } from "@shared/schema";
 
 const estimateFormSchema = z.object({
+  customerId: z.number().min(1, "Customer is required"),
   customerName: z.string().min(1, "Customer name is required"),
   customerEmail: z.string().email("Valid email is required"),
   customerPhone: z.string().optional(),
@@ -54,27 +56,40 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   const [zones, setZones] = useState<EstimateZone[]>([]);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const form = useForm<EstimateFormValues>({
     resolver: zodResolver(estimateFormSchema),
     defaultValues: {
+      customerId: 0,
       customerName: "",
       customerEmail: "",
       customerPhone: "",
       projectName: "",
       projectAddress: "",
-      laborRate: 75,
+      laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
     },
   });
 
+  const handleCustomerSelect = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    form.setValue("customerId", customer.id);
+    form.setValue("customerName", customer.name);
+    form.setValue("customerEmail", customer.email);
+    form.setValue("customerPhone", customer.phone || "");
+    // Use customer's contract rates
+    form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
+    form.setValue("markupPercent", parseFloat(customer.markupPercent || "20"));
+    form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
+  };
+
   const createEstimateMutation = useMutation({
     mutationFn: async (data: { estimate: any; zones: any[] }) => {
-      const response = await apiRequest("POST", "/api/estimates", data);
-      return response.json();
+      return await apiRequest("/api/estimates", "POST", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
@@ -86,6 +101,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       onOpenChange(false);
       form.reset();
       setZones([]);
+      setSelectedCustomer(null);
     },
     onError: (error) => {
       toast({
@@ -202,6 +218,15 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   };
 
   const onSubmit = async (data: EstimateFormValues) => {
+    if (!selectedCustomer) {
+      toast({
+        title: "Customer Required",
+        description: "Please select a customer before creating the estimate.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (zones.length === 0) {
       toast({
         title: "Error",
@@ -214,6 +239,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     const totals = calculateTotals();
     
     const estimate = {
+      customerId: data.customerId,
       customerName: data.customerName,
       customerEmail: data.customerEmail,
       customerPhone: data.customerPhone || "",
@@ -259,88 +285,158 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create New Estimate</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-blue-600" />
+              Create New Estimate
+            </DialogTitle>
+            <DialogDescription>
+              Create a new estimate by selecting a customer and adding work zones
+            </DialogDescription>
           </DialogHeader>
 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              {/* Customer Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="customerName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Customer Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter customer name" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+              {/* Step 1: Customer Selection */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <User className="w-5 h-5 text-blue-600" />
+                    Step 1: Select Customer
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CustomerSelector
+                    selectedCustomer={selectedCustomer}
+                    onSelectCustomer={handleCustomerSelect}
+                    placeholder="Search and select a customer for this estimate..."
+                  />
+                </CardContent>
+              </Card>
+
+              {/* Step 2: Project Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Project Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="projectName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Project Name *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Sprinkler System Installation" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="projectAddress"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Project Address</FormLabel>
+                          <FormControl>
+                            <Input placeholder="123 Oak Street, Springfield, IL" {...field} value={field.value || ""} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Step 3: Contract Terms */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Contract Terms</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="laborRate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Labor Rate ($/hour)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="number" 
+                              step="0.01" 
+                              min="0" 
+                              {...field} 
+                              readOnly={!!selectedCustomer}
+                              className={selectedCustomer ? "bg-gray-50" : ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="markupPercent"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Markup (%)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="number" 
+                              step="0.01" 
+                              min="0" 
+                              {...field} 
+                              readOnly={!!selectedCustomer}
+                              className={selectedCustomer ? "bg-gray-50" : ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="taxPercent"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tax Rate (%)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="number" 
+                              step="0.01" 
+                              min="0" 
+                              {...field} 
+                              readOnly={!!selectedCustomer}
+                              className={selectedCustomer ? "bg-gray-50" : ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  {selectedCustomer && (
+                    <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-md">
+                      <p>These rates are automatically set based on the customer's contract terms.</p>
+                    </div>
                   )}
-                />
+                </CardContent>
+              </Card>
 
-                <FormField
-                  control={form.control}
-                  name="projectName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Project Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter project name" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="customerEmail"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email Address</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="customer@example.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="customerPhone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone Number</FormLabel>
-                      <FormControl>
-                        <Input type="tel" placeholder="(555) 123-4567" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="projectAddress"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Project Address</FormLabel>
-                    <FormControl>
-                      <Textarea placeholder="Enter full project address" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Zones Section */}
-              <div>
+              {/* Step 4: Work Zones */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Work Zones</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {/* Zones Section */}
+                  <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-gray-900">Work Zones</h3>
                   <Button
@@ -458,60 +554,24 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                     <p className="text-gray-500">No zones added yet. Click "Add Zone" to get started.</p>
                   </div>
                 )}
-              </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              {/* Labor Configuration */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <FormField
-                  control={form.control}
-                  name="laborRate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Labor Rate ($/hour)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" min="0" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="markupPercent"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Markup (%)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" min="0" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="taxPercent"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tax Rate (%)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" min="0" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              {/* Estimate Summary */}
-              <EstimateSummary
-                items={zones.flatMap(zone => zone.items)}
-                laborRate={form.watch("laborRate")}
-                markupPercent={form.watch("markupPercent")}
-                taxPercent={form.watch("taxPercent")}
-              />
+              {/* Step 5: Estimate Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Estimate Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <EstimateSummary
+                    items={zones.flatMap(zone => zone.items)}
+                    laborRate={form.watch("laborRate")}
+                    markupPercent={form.watch("markupPercent")}
+                    taxPercent={form.watch("taxPercent")}
+                  />
+                </CardContent>
+              </Card>
 
               {/* Action Buttons */}
               <Separator />

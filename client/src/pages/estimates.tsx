@@ -189,7 +189,7 @@ export default function Estimates() {
         </TabsContent>
 
         <TabsContent value="quickbooks">
-          <QuickBooksIntegration estimates={estimates || []} />
+          <QuickBooksIntegration />
         </TabsContent>
       </Tabs>
 
