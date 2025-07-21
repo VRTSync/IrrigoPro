@@ -288,8 +288,21 @@ export default function WorkOrders() {
                   <div className="flex items-start justify-between">
                     {/* Left side - Job Information */}
                     <div className="flex items-start space-x-4 flex-1 pr-4">
-                      <div className="bg-blue-50 p-3 rounded-lg flex-shrink-0">
-                        <FileText className="w-6 h-6 text-blue-600" />
+                      <div className="flex flex-col items-center space-y-2 flex-shrink-0">
+                        <div className="bg-blue-50 p-3 rounded-lg">
+                          <FileText className="w-6 h-6 text-blue-600" />
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            console.log('Setting selected work order:', workOrder);
+                            setSelectedWorkOrder(workOrder);
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1"
+                        >
+                          View
+                        </Button>
                       </div>
                       
                       <div className="flex-1 min-w-0">
@@ -325,43 +338,29 @@ export default function WorkOrders() {
                           {workOrder.projectName}
                         </p>
                         
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-1 flex-1">
-                            <div className="flex items-center space-x-1 text-sm text-gray-600">
-                              <Calendar className="w-4 h-4 flex-shrink-0" />
-                              <span>{formatDate(workOrder.scheduledDate)}</span>
-                            </div>
-
-                            {workOrder.projectAddress && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
-                                  const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-                                    ? `https://maps.apple.com/?q=${encodedAddress}` // iOS Maps
-                                    : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
-                                  window.open(mapsUrl, '_blank');
-                                }}
-                                className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-                                title="Click for directions"
-                              >
-                                <MapPin className="w-4 h-4 flex-shrink-0" />
-                                <span className="truncate">{workOrder.projectAddress}</span>
-                              </button>
-                            )}
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1 text-sm text-gray-600">
+                            <Calendar className="w-4 h-4 flex-shrink-0" />
+                            <span>{formatDate(workOrder.scheduledDate)}</span>
                           </div>
-                          
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              console.log('Setting selected work order:', workOrder);
-                              setSelectedWorkOrder(workOrder);
-                            }}
-                            className="text-xs text-blue-600 hover:text-blue-800 flex-shrink-0"
-                          >
-                            View Details
-                          </Button>
+
+                          {workOrder.projectAddress && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
+                                const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+                                  ? `https://maps.apple.com/?q=${encodedAddress}` // iOS Maps
+                                  : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
+                                window.open(mapsUrl, '_blank');
+                              }}
+                              className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                              title="Click for directions"
+                            >
+                              <MapPin className="w-4 h-4 flex-shrink-0" />
+                              <span className="truncate">{workOrder.projectAddress}</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
