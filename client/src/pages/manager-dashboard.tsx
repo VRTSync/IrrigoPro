@@ -47,7 +47,7 @@ export default function ManagerDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               {/* Estimates */}
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setCurrentView('estimates')}>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer flex flex-col" onClick={() => setCurrentView('estimates')}>
                 <CardHeader className="text-center relative">
                   <div className="bg-blue-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
                     <FileText className="w-8 h-8 text-blue-600" />
@@ -59,16 +59,16 @@ export default function ManagerDashboard() {
                   )}
                   <CardTitle className="text-xl">Estimates</CardTitle>
                 </CardHeader>
-                <CardContent className="text-center">
-                  <p className="text-gray-600 mb-4">View estimate list, create new estimates, and convert to work orders</p>
-                  <Button className="w-full bg-blue-600 hover:bg-blue-700">
+                <CardContent className="text-center flex-1 flex flex-col">
+                  <p className="text-gray-600 mb-4 flex-1">View estimate list, create new estimates, and convert to work orders</p>
+                  <Button className="w-full bg-blue-600 hover:bg-blue-700 mt-auto">
                     Manage Estimates
                   </Button>
                 </CardContent>
               </Card>
 
               {/* Work Orders */}
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setCurrentView('work-orders')}>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer flex flex-col" onClick={() => setCurrentView('work-orders')}>
                 <CardHeader className="text-center relative">
                   <div className="bg-green-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
                     <Wrench className="w-8 h-8 text-green-600" />
@@ -80,25 +80,25 @@ export default function ManagerDashboard() {
                   )}
                   <CardTitle className="text-xl">Work Orders</CardTitle>
                 </CardHeader>
-                <CardContent className="text-center">
-                  <p className="text-gray-600 mb-4">View work order list, create new orders, and assign to technicians</p>
-                  <Button className="w-full bg-green-600 hover:bg-green-700">
+                <CardContent className="text-center flex-1 flex flex-col">
+                  <p className="text-gray-600 mb-4 flex-1">View work order list, create new orders, and assign to technicians</p>
+                  <Button className="w-full bg-green-600 hover:bg-green-700 mt-auto">
                     Manage Work Orders
                   </Button>
                 </CardContent>
               </Card>
 
               {/* Parts List */}
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setCurrentView('parts')}>
+              <Card className="hover:shadow-lg transition-shadow cursor-pointer flex flex-col" onClick={() => setCurrentView('parts')}>
                 <CardHeader className="text-center">
                   <div className="bg-purple-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
                     <Package className="w-8 h-8 text-purple-600" />
                   </div>
                   <CardTitle className="text-xl">Parts List</CardTitle>
                 </CardHeader>
-                <CardContent className="text-center">
-                  <p className="text-gray-600 mb-4">View parts list and add new parts</p>
-                  <Button className="w-full bg-purple-600 hover:bg-purple-700">
+                <CardContent className="text-center flex-1 flex flex-col">
+                  <p className="text-gray-600 mb-4 flex-1">View Parts List and Add New Parts</p>
+                  <Button className="w-full bg-purple-600 hover:bg-purple-700 mt-auto">
                     View Parts
                   </Button>
                 </CardContent>
