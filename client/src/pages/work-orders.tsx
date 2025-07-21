@@ -285,10 +285,10 @@ export default function WorkOrders() {
               ?.map((workOrder) => (
               <Card key={workOrder.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group">
                 <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    {/* Left side - Main work order info */}
-                    <div className="flex items-center space-x-4 flex-1">
-                      <div className="bg-blue-50 p-3 rounded-lg">
+                  <div className="flex items-start justify-between">
+                    {/* Left side - Job Information */}
+                    <div className="flex items-start space-x-4 flex-1">
+                      <div className="bg-blue-50 p-3 rounded-lg flex-shrink-0">
                         <FileText className="w-6 h-6 text-blue-600" />
                       </div>
                       
@@ -302,7 +302,7 @@ export default function WorkOrders() {
                         
                         {/* Customer - Right under work order number */}
                         <div className="flex items-center space-x-2 mb-2">
-                          <User className="w-4 h-4 text-blue-600" />
+                          <User className="w-4 h-4 text-blue-600 flex-shrink-0" />
                           <p className="font-medium text-gray-900">{workOrder.customerName}</p>
                         </div>
                         
@@ -310,30 +310,9 @@ export default function WorkOrders() {
                           {workOrder.projectName}
                         </p>
                         
-                        {/* Technician assignment */}
-                        <div className="mb-3">
-                          {workOrder.assignedTechnicianName ? (
-                            <div className="flex items-center space-x-2">
-                              <Wrench className="w-4 h-4 text-orange-600" />
-                              <div>
-                                <p className="font-medium text-gray-900">{workOrder.assignedTechnicianName}</p>
-                                <p className="text-xs text-gray-500">Assigned Technician</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center space-x-2 opacity-50">
-                              <Wrench className="w-4 h-4 text-gray-400" />
-                              <div>
-                                <p className="text-gray-500">Unassigned</p>
-                                <p className="text-xs text-gray-400">No technician assigned</p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-center space-x-6 text-sm text-gray-600">
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="w-4 h-4" />
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1 text-sm text-gray-600">
+                            <Calendar className="w-4 h-4 flex-shrink-0" />
                             <span>{formatDate(workOrder.scheduledDate)}</span>
                           </div>
 
@@ -347,20 +326,20 @@ export default function WorkOrders() {
                                   : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
                                 window.open(mapsUrl, '_blank');
                               }}
-                              className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                              className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
                               title="Click for directions"
                             >
-                              <MapPin className="w-4 h-4" />
-                              <span className="truncate max-w-64">{workOrder.projectAddress}</span>
+                              <MapPin className="w-4 h-4 flex-shrink-0" />
+                              <span className="truncate">{workOrder.projectAddress}</span>
                             </button>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Right side - Status, badges, and actions */}
-                    <div className="flex items-center space-x-4">
-                      <div className="flex items-center space-x-2">
+                    {/* Right side - Work Information */}
+                    <div className="flex flex-col items-end space-y-3 min-w-0 ml-4">
+                      <div className="flex items-center space-x-2 flex-wrap justify-end">
                         {getStatusBadge(workOrder.status)}
                         {workOrder.estimateId && (
                           <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
@@ -374,18 +353,39 @@ export default function WorkOrders() {
                           <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
                         )}
                       </div>
-                      
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          console.log('Setting selected work order:', workOrder);
-                          setSelectedWorkOrder(workOrder);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                      </Button>
+
+                      {/* Technician assignment */}
+                      <div className="flex items-center space-x-3">
+                        {workOrder.assignedTechnicianName ? (
+                          <div className="flex items-center space-x-2 text-right">
+                            <div>
+                              <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                              <p className="text-xs text-gray-500">Assigned Technician</p>
+                            </div>
+                            <Wrench className="w-4 h-4 text-orange-600 flex-shrink-0" />
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-2 opacity-50 text-right">
+                            <div>
+                              <p className="text-gray-500 text-sm">Unassigned</p>
+                              <p className="text-xs text-gray-400">No technician</p>
+                            </div>
+                            <Wrench className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </div>
+                        )}
+                        
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            console.log('Setting selected work order:', workOrder);
+                            setSelectedWorkOrder(workOrder);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
