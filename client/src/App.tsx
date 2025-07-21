@@ -112,7 +112,7 @@ function Router() {
   if (user.role === "irrigation_manager") {
     return (
       <Switch>
-        <Route path="/" component={Dashboard} />
+        <Route path="/" component={ManagerDashboard} />
         <Route path="/manager" component={ManagerDashboard} />
         <Route path="/estimates" component={Estimates} />
         <Route path="/parts" component={PartsCatalog} />

@@ -14,7 +14,11 @@ type ManagerView = 'menu' | 'estimates' | 'work-orders' | 'parts';
 export default function ManagerDashboard() {
   const [currentView, setCurrentView] = useState<ManagerView>('menu');
 
-  // Get data for dashboard stats
+  // Get dashboard stats from API
+  const { data: stats } = useQuery({
+    queryKey: ["/api/dashboard/stats"],
+  });
+
   const { data: estimates } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
   });
@@ -23,11 +27,11 @@ export default function ManagerDashboard() {
     queryKey: ["/api/work-orders"],
   });
 
-  // Calculate stats
-  const pendingEstimates = estimates?.filter(e => e.status === 'pending').length || 0;
-  const activeWorkOrders = workOrders?.filter(w => w.status === 'in_progress').length || 0;
-  const recentEstimates = estimates?.slice(-3) || [];
-  const recentWorkOrders = workOrders?.slice(-3) || [];
+  // Calculate stats from API data
+  const pendingEstimates = stats?.pendingEstimates || 0;
+  const activeWorkOrders = stats?.workOrderStats?.inProgress || 0;
+  const recentEstimates = stats?.recentEstimates?.slice(0, 3) || [];
+  const recentWorkOrders = stats?.recentWorkOrders?.slice(0, 3) || [];
 
   const renderContent = () => {
     switch (currentView) {
@@ -135,8 +139,13 @@ export default function ManagerDashboard() {
                             <p className="font-medium">#{estimate.id} - {estimate.customerName}</p>
                             <p className="text-sm text-gray-600">{estimate.status}</p>
                           </div>
-                          <Badge className={estimate.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}>
-                            {estimate.totalAmount ? `$${estimate.totalAmount}` : 'TBD'}
+                          <Badge className={
+                            estimate.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                            estimate.status === 'approved' ? 'bg-green-100 text-green-800' :
+                            estimate.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                            'bg-gray-100 text-gray-800'
+                          }>
+                            {estimate.status}
                           </Badge>
                         </div>
                       ))}
@@ -176,9 +185,10 @@ export default function ManagerDashboard() {
                           <Badge className={
                             workOrder.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                             workOrder.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                            workOrder.status === 'assigned' ? 'bg-orange-100 text-orange-800' :
                             'bg-yellow-100 text-yellow-800'
                           }>
-                            {workOrder.totalAmount ? `$${workOrder.totalAmount}` : workOrder.priority}
+                            {workOrder.status.replace('_', ' ')}
                           </Badge>
                         </div>
                       ))}
