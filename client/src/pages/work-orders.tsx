@@ -338,7 +338,7 @@ export default function WorkOrders() {
                     </div>
 
                     {/* Top Right - Badges */}
-                    <div className="flex items-start justify-end space-x-2 flex-wrap">
+                    <div className="absolute top-6 right-6 flex items-start justify-end space-x-2 flex-wrap">
                       {getStatusBadge(workOrder.status)}
                       {workOrder.estimateId && (
                         <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
