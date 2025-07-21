@@ -341,6 +341,12 @@ export default function WorkOrders() {
                         <Badge variant="outline" className="text-xs">
                           {workOrder.workType === 'estimate_based' ? 'From Estimate' : 'Direct'}
                         </Badge>
+                        {workOrder.priority === 'urgent' && (
+                          <Badge className="text-xs bg-red-100 text-red-800 border-red-200">Emergency</Badge>
+                        )}
+                        {workOrder.priority === 'high' && (
+                          <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">High</Badge>
+                        )}
                       </div>
                       <Button
                         variant="ghost"

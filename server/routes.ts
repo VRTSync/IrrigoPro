@@ -778,7 +778,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerPhone: estimate.customerPhone,
         projectName: estimate.projectName,
         projectAddress: estimate.projectAddress,
+        workType: "estimate_based" as const,
         status: "assigned" as const,
+        priority: "medium" as const, // Standard priority for estimate-based work orders
         assignedTechnicianId: managerUser?.id || null,
         assignedTechnicianName: managerUser?.name || "Manager",
         scheduledDate: req.body.scheduledDate ? new Date(req.body.scheduledDate) : null,

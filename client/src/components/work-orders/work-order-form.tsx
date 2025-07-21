@@ -49,7 +49,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
       projectAddress: "",
       workType: "direct_billing",
       status: "pending",
-      priority: "medium",
+      priority: "medium", // Default to standard for direct work orders
       scheduledDate: "",
       assignedTechnicianId: null,
       assignedTechnicianName: "",
@@ -238,6 +238,30 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
                       )}
                     />
                   )}
+
+                  <FormField
+                    control={form.control}
+                    name="priority"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Priority Level</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select priority" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="low">Low Priority</SelectItem>
+                            <SelectItem value="medium">Standard</SelectItem>
+                            <SelectItem value="high">High Priority</SelectItem>
+                            <SelectItem value="urgent">Emergency</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
               </CardContent>
             </Card>

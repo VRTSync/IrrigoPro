@@ -43,6 +43,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
   const [activeTab, setActiveTab] = useState("overview");
   const [showBillingSheet, setShowBillingSheet] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
+  const [isEditingPriority, setIsEditingPriority] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -50,6 +51,28 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
   const { data: fieldTechs } = useQuery<UserType[]>({
     queryKey: ["/api/users"],
     select: (users) => users?.filter(user => user.role === 'field_tech') || [],
+  });
+
+  const updatePriority = useMutation({
+    mutationFn: async (priority: string) => {
+      return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { priority });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Priority Updated",
+        description: "Work order priority has been updated successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      setIsEditingPriority(false);
+      onUpdate();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update priority",
+        variant: "destructive",
+      });
+    },
   });
 
   const reassignWorkOrder = useMutation({
@@ -126,19 +149,19 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
     }
   };
 
-  const getPriorityBadge = (priority: string) => {
-    switch (priority) {
-      case 'urgent':
-        return <Badge className="bg-red-100 text-red-800 border-red-200">Urgent</Badge>;
-      case 'high':
-        return <Badge className="bg-orange-100 text-orange-800 border-orange-200">High</Badge>;
-      case 'medium':
-        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Medium</Badge>;
-      case 'low':
-        return <Badge className="bg-green-100 text-green-800 border-green-200">Low</Badge>;
-      default:
-        return <Badge variant="outline">{priority}</Badge>;
-    }
+  const getPriorityBadge = (priority: string, showLabel: boolean = false) => {
+    const priorityMap = {
+      'urgent': { bg: 'bg-red-100 text-red-800 border-red-200', label: 'Emergency' },
+      'high': { bg: 'bg-orange-100 text-orange-800 border-orange-200', label: 'High Priority' },
+      'medium': { bg: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Standard' },
+      'low': { bg: 'bg-green-100 text-green-800 border-green-200', label: 'Low Priority' }
+    };
+    
+    const config = priorityMap[priority as keyof typeof priorityMap];
+    if (!config) return <Badge variant="outline">{priority}</Badge>;
+    
+    const label = showLabel ? config.label : priority.charAt(0).toUpperCase() + priority.slice(1);
+    return <Badge className={config.bg}>{label}</Badge>;
   };
 
   const getWorkTypeBadge = (workType: string) => {
@@ -244,7 +267,46 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
             <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
               <div className="flex items-center gap-3">
                 {getStatusBadge(workOrder.status)}
-                {getPriorityBadge(workOrder.priority)}
+                <div className="flex items-center gap-2">
+                  {!isEditingPriority ? (
+                    <>
+                      {getPriorityBadge(workOrder.priority, true)}
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setIsEditingPriority(true)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        <Edit className="w-3 h-3" />
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Select 
+                        value={workOrder.priority} 
+                        onValueChange={(priority) => updatePriority.mutate(priority)}
+                      >
+                        <SelectTrigger className="h-6 w-32 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low Priority</SelectItem>
+                          <SelectItem value="medium">Standard</SelectItem>
+                          <SelectItem value="high">High Priority</SelectItem>
+                          <SelectItem value="urgent">Emergency</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setIsEditingPriority(false)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  )}
+                </div>
                 {getWorkTypeBadge(workOrder.workType)}
               </div>
               <div className="flex gap-2">
@@ -322,6 +384,23 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
                       <div>
                         <p className="text-gray-900">{workOrder.projectName}</p>
                         <p className="text-sm text-gray-600">Project Name</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="w-4 h-4 text-gray-500" />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          {getPriorityBadge(workOrder.priority, true)}
+                          {workOrder.workType === 'estimate_based' && (
+                            <span className="text-xs text-gray-500">(from estimate)</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-600">
+                          {workOrder.priority === 'urgent' ? 'Emergency Priority' : 
+                           workOrder.priority === 'high' ? 'High Priority' :
+                           workOrder.priority === 'low' ? 'Low Priority' : 'Standard Priority'}
+                        </p>
                       </div>
                     </div>
                     
