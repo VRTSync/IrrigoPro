@@ -137,7 +137,6 @@ export default function ManagerDashboard() {
                         <div key={estimate.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
                             <p className="font-medium">#{estimate.id} - {estimate.customerName}</p>
-                            <p className="text-sm text-gray-600">{estimate.status}</p>
                           </div>
                           <Badge className={
                             estimate.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
@@ -181,7 +180,6 @@ export default function ManagerDashboard() {
                         <div key={workOrder.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div>
                             <p className="font-medium">#{workOrder.id} - {workOrder.customerName}</p>
-                            <p className="text-sm text-gray-600">{workOrder.status.replace('_', ' ')}</p>
                           </div>
                           <Badge className={
                             workOrder.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
