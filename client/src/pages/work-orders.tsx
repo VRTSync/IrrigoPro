@@ -416,7 +416,7 @@ export default function WorkOrders() {
                           <div>
                             <p className="font-medium text-gray-900 text-sm">Completed by</p>
                             <p className="text-xs text-green-700 font-medium">
-                              {workOrder.assignedTechnicianName || 'Unknown Technician'}
+                              {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'ME' : (workOrder.assignedTechnicianName || 'Unknown Technician')}
                             </p>
                           </div>
                         </div>
@@ -429,7 +429,9 @@ export default function WorkOrders() {
                               <Wrench className="w-4 h-4 text-blue-600" />
                             </div>
                             <div>
-                              <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                              <p className="font-medium text-gray-900 text-sm">
+                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'ME' : workOrder.assignedTechnicianName}
+                              </p>
                               <p className="text-xs text-gray-600">In Progress</p>
                             </div>
                           </div>
@@ -454,7 +456,9 @@ export default function WorkOrders() {
                               <Wrench className="w-4 h-4 text-orange-600" />
                             </div>
                             <div>
-                              <p className="font-medium text-gray-900 text-sm">{workOrder.assignedTechnicianName}</p>
+                              <p className="font-medium text-gray-900 text-sm">
+                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'ME' : workOrder.assignedTechnicianName}
+                              </p>
                               <p className="text-xs text-gray-600">Field Technician</p>
                             </div>
                           </div>
