@@ -15,6 +15,7 @@ import Login from "@/pages/login";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import ManagerDashboard from "@/pages/manager-dashboard";
+import FieldTechDashboard from "@/pages/field-tech-dashboard";
 
 interface User {
   id: string;
@@ -67,13 +68,14 @@ function Router() {
     );
   }
 
-  // Field tech gets their own portal
+  // Field tech gets simplified dashboard
   if (user.role === "field_tech") {
     return (
       <Switch>
-        <Route path="/field-portal" component={FieldPortal} />
-        <Route path="/" component={FieldPortal} />
-        <Route component={FieldPortal} />
+        <Route path="/" component={FieldTechDashboard} />
+        <Route path="/field-tech" component={FieldTechDashboard} />
+        <Route path="/login" component={Login} />
+        <Route component={NotFound} />
       </Switch>
     );
   }

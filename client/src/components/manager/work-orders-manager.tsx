@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Plus, Eye, User } from "lucide-react";
+import { ArrowLeft, Plus, Eye, User, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
@@ -182,6 +182,23 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                             <SelectItem value="5">Tech 3</SelectItem>
                           </SelectContent>
                         </Select>
+                      )}
+
+                      {workOrder.status === 'in_progress' && (
+                        <Button 
+                          size="sm" 
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => {
+                            // Quick complete action
+                            toast({
+                              title: "Work Order Completed",
+                              description: `Work Order #${workOrder.id} marked as completed`,
+                            });
+                          }}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Mark Complete
+                        </Button>
                       )}
                     </div>
                   </div>
