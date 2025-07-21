@@ -80,15 +80,22 @@ function Router() {
     );
   }
 
-  // Irrigation manager gets simplified dashboard
+  // Irrigation manager gets access to specific pages
   if (user.role === "irrigation_manager") {
     return (
-      <Switch>
-        <Route path="/" component={ManagerDashboard} />
-        <Route path="/manager" component={ManagerDashboard} />
-        <Route path="/login" component={Login} />
-        <Route component={NotFound} />
-      </Switch>
+      <div>
+        <Navigation />
+        <Switch>
+          <Route path="/" component={ManagerDashboard} />
+          <Route path="/manager" component={ManagerDashboard} />
+          <Route path="/estimates" component={Estimates} />
+          <Route path="/parts" component={PartsCatalog} />
+          <Route path="/work-orders" component={WorkOrders} />
+          <Route path="/customers" component={Customers} />
+          <Route path="/login" component={Login} />
+          <Route component={NotFound} />
+        </Switch>
+      </div>
     );
   }
 
