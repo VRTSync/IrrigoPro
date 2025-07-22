@@ -88,59 +88,91 @@ function Router() {
   // If no user is logged in, show user selector instead of login
   if (!user) {
     return (
-      <Switch>
-        <Route path="/login" component={Login} />
-        <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-        <Route path="/" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-        <Route component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-      </Switch>
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <Switch>
+            <Route path="/login" component={Login} />
+            <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+            <Route path="/" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+            <Route component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+          </Switch>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
     );
   }
 
   // Field tech gets simplified dashboard
   if (user.role === "field_tech") {
     return (
-      <Switch>
-        <Route path="/" component={FieldTechDashboard} />
-        <Route path="/field-tech" component={FieldTechDashboard} />
-        <Route path="/login" component={Login} />
-        <Route component={NotFound} />
-      </Switch>
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <div className="min-h-screen bg-gray-50">
+            <Navigation />
+            <Switch>
+              <Route path="/" component={FieldTechDashboard} />
+              <Route path="/field-tech" component={FieldTechDashboard} />
+              <Route path="/billing-sheets" component={BillingSheets} />
+              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+              <Route path="/login" component={Login} />
+              <Route component={NotFound} />
+            </Switch>
+          </div>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
     );
   }
 
   // Irrigation manager gets access to specific pages
   if (user.role === "irrigation_manager") {
     return (
-      <Switch>
-        <Route path="/" component={ManagerDashboard} />
-        <Route path="/manager" component={ManagerDashboard} />
-        <Route path="/estimates" component={Estimates} />
-        <Route path="/parts" component={PartsCatalog} />
-        <Route path="/work-orders" component={WorkOrders} />
-        <Route path="/customers" component={Customers} />
-        <Route path="/billing-sheets" component={BillingSheets} />
-        <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-        <Route path="/login" component={Login} />
-        <Route component={NotFound} />
-      </Switch>
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <div className="min-h-screen bg-gray-50">
+            <Navigation />
+            <Switch>
+              <Route path="/" component={ManagerDashboard} />
+              <Route path="/manager" component={ManagerDashboard} />
+              <Route path="/estimates" component={Estimates} />
+              <Route path="/parts" component={PartsCatalog} />
+              <Route path="/work-orders" component={WorkOrders} />
+              <Route path="/customers" component={Customers} />
+              <Route path="/billing-sheets" component={BillingSheets} />
+              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+              <Route path="/login" component={Login} />
+              <Route component={NotFound} />
+            </Switch>
+          </div>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
     );
   }
 
-  // Admin gets full access to the system
+  // Admin gets full access to the system with unified dashboard
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/estimates" component={Estimates} />
-      <Route path="/parts" component={PartsCatalog} />
-      <Route path="/customers" component={Customers} />
-      <Route path="/field-tech" component={FieldTech} />
-      <Route path="/work-orders" component={WorkOrders} />
-      <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-      <Route path="/login" component={Login} />
-      <Route path="/field-portal" component={FieldPortal} />
-      <Route component={NotFound} />
-    </Switch>
+    <TooltipProvider>
+      <QueryClientProvider client={queryClient}>
+        <div className="min-h-screen bg-gray-50">
+          <Navigation />
+          <Switch>
+            <Route path="/" component={ManagerDashboard} />
+            <Route path="/estimates" component={Estimates} />
+            <Route path="/parts" component={PartsCatalog} />
+            <Route path="/customers" component={Customers} />
+            <Route path="/field-tech" component={FieldTech} />
+            <Route path="/work-orders" component={WorkOrders} />
+            <Route path="/billing-sheets" component={BillingSheets} />
+            <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+            <Route path="/login" component={Login} />
+            <Route path="/field-portal" component={FieldPortal} />
+            <Route component={NotFound} />
+          </Switch>
+        </div>
+        <Toaster />
+      </QueryClientProvider>
+    </TooltipProvider>
   );
 }
 
