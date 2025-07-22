@@ -48,7 +48,7 @@ import {
   type BillingSheetWithItems
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, like, desc } from "drizzle-orm";
+import { eq, like, desc, and, gte, lte } from "drizzle-orm";
 
 export interface IStorage {
   // Users
