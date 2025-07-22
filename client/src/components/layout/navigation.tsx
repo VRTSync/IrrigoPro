@@ -48,21 +48,23 @@ export default function Navigation() {
             </div>
             
             {!isMobile && (
-              <div className="hidden md:flex items-center space-x-8">
-                {navItems.map((item) => (
-                  <Link key={item.path} href={item.path}>
-                    <Button
-                      variant="ghost"
-                      className={`font-medium ${
-                        isActive(item.path)
-                          ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
-                          : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {item.label}
-                    </Button>
-                  </Link>
-                ))}
+              <div className="hidden md:flex items-center justify-center flex-1">
+                <div className="flex items-center space-x-8">
+                  {navItems.map((item) => (
+                    <Link key={item.path} href={item.path}>
+                      <Button
+                        variant="ghost"
+                        className={`font-medium ${
+                          isActive(item.path)
+                            ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
+                            : "text-gray-500 hover:text-gray-700"
+                        }`}
+                      >
+                        {item.label}
+                      </Button>
+                    </Link>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -108,7 +110,7 @@ export default function Navigation() {
       {/* Mobile Navigation */}
       {isMobile && (
         <div className="md:hidden bg-white border-b border-gray-200">
-          <div className="px-4 py-2 flex space-x-4 overflow-x-auto">
+          <div className="px-4 py-2 flex justify-center space-x-4 overflow-x-auto">
             {navItems.map((item) => (
               <Link key={item.path} href={item.path}>
                 <Button
