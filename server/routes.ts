@@ -19,9 +19,27 @@ import {
 import { z } from "zod";
 
 const createEstimateWithZonesSchema = z.object({
-  estimate: insertEstimateSchema,
-  zones: z.array(insertEstimateZoneSchema.extend({
-    items: z.array(insertEstimateItemSchema)
+  estimate: insertEstimateSchema.extend({
+    // Allow date as string (will be converted)
+    estimateDate: z.union([z.date(), z.string()]).optional(),
+    // Allow numbers for decimal fields (will be converted to strings)
+    partsSubtotal: z.union([z.string(), z.number()]).optional(),
+    laborSubtotal: z.union([z.string(), z.number()]).optional(), 
+    markupAmount: z.union([z.string(), z.number()]).optional(),
+    taxAmount: z.union([z.string(), z.number()]).optional(),
+    totalAmount: z.union([z.string(), z.number()]).optional(),
+    laborRate: z.union([z.string(), z.number()]),
+    markupPercent: z.union([z.string(), z.number()]),
+    taxPercent: z.union([z.string(), z.number()])
+  }),
+  zones: z.array(insertEstimateZoneSchema.omit({ estimateId: true }).extend({
+    items: z.array(insertEstimateItemSchema.omit({ estimateId: true, partId: true }).extend({
+      partId: z.number().optional(),
+      partName: z.string().optional(),
+      partPrice: z.union([z.string(), z.number()]).optional(),
+      laborHours: z.union([z.string(), z.number()]).optional(),
+      totalPrice: z.union([z.string(), z.number()])
+    }))
   }))
 });
 
@@ -507,7 +525,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/estimates", async (req, res) => {
     try {
       console.log("Received estimate data:", JSON.stringify(req.body, null, 2));
-      const { estimate, zones } = createEstimateWithZonesSchema.parse(req.body);
+      const parsed = createEstimateWithZonesSchema.parse(req.body);
+      
+      // Convert and normalize data
+      const estimate = {
+        ...parsed.estimate,
+        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
+        partsSubtotal: String(parsed.estimate.partsSubtotal || 0),
+        laborSubtotal: String(parsed.estimate.laborSubtotal || 0),
+        markupAmount: String(parsed.estimate.markupAmount || 0),
+        taxAmount: String(parsed.estimate.taxAmount || 0),
+        totalAmount: String(parsed.estimate.totalAmount || 0),
+        laborRate: String(parsed.estimate.laborRate),
+        markupPercent: String(parsed.estimate.markupPercent),
+        taxPercent: String(parsed.estimate.taxPercent)
+      };
+      
+      // Process zones and items
+      const zones = parsed.zones.map(zone => ({
+        ...zone,
+        items: zone.items.map(item => ({
+          ...item,
+          partName: item.partName || '',
+          partPrice: String(item.partPrice || 0),
+          laborHours: String(item.laborHours || 0),
+          totalPrice: String(item.totalPrice || 0)
+        }))
+      }));
+      
       const newEstimate = await storage.createEstimate(estimate, zones);
       res.status(201).json(newEstimate);
     } catch (error) {
