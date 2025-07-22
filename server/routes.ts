@@ -143,6 +143,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer-related data endpoints
+  app.get("/api/customers/:id/estimates", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const estimates = await storage.getEstimatesByCustomer(customerId);
+      res.json(estimates);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch customer estimates" });
+    }
+  });
+
+  app.get("/api/customers/:id/work-orders", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const workOrders = await storage.getWorkOrdersByCustomer(customerId);
+      res.json(workOrders);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch customer work orders" });
+    }
+  });
+
+  app.get("/api/customers/:id/billing-sheets", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const billingSheets = await storage.getBillingSheetsByCustomer(customerId);
+      res.json(billingSheets);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch customer billing sheets" });
+    }
+  });
+
   app.post("/api/customers/import-csv", async (req, res) => {
     try {
       const file = (req as any).files?.file;

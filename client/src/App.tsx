@@ -119,6 +119,7 @@ function Router() {
         <Route path="/parts" component={PartsCatalog} />
         <Route path="/work-orders" component={WorkOrders} />
         <Route path="/customers" component={Customers} />
+        <Route path="/billing-sheets" component={BillingSheets} />
         <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
         <Route path="/login" component={Login} />
         <Route component={NotFound} />

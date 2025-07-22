@@ -4,14 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings } from "lucide-react";
+import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
 import { useState } from "react";
 import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
 import { CustomerForm } from "@/components/customer-form";
+import { CustomerProfile } from "@/components/customers/customer-profile";
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
   const { data: customers, isLoading } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
@@ -22,6 +24,16 @@ export default function Customers() {
     customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
     customer.phone?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Show customer profile if selected
+  if (selectedCustomer) {
+    return (
+      <CustomerProfile 
+        customer={selectedCustomer} 
+        onBack={() => setSelectedCustomer(null)} 
+      />
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -174,6 +186,14 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center space-x-2 justify-end">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-blue-600 hover:text-blue-900"
+                            onClick={() => setSelectedCustomer(customer)}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
                           <CustomerForm
                             customer={customer}
                             trigger={

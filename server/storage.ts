@@ -67,6 +67,10 @@ export interface IStorage {
   updateCustomer(id: number, customer: Partial<InsertCustomer>): Promise<Customer | undefined>;
   deleteCustomer(id: number): Promise<boolean>;
   
+  // Customer-related data
+  getEstimatesByCustomer(customerId: number): Promise<Estimate[]>;
+  getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]>;
+  
   // Customer Integrations
   syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
   syncCustomersFromQuickBooks(): Promise<{ customersAdded: number }>;
@@ -881,6 +885,23 @@ export class DatabaseStorage implements IStorage {
   async deleteBillingSheetItem(itemId: number): Promise<boolean> {
     const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.id, itemId));
     return (result.rowCount || 0) > 0;
+  }
+
+  // Customer-related data methods
+  async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {
+    return await db.select().from(estimates).where(eq(estimates.customerId, customerId)).orderBy(desc(estimates.createdAt));
+  }
+
+  async getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]> {
+    const sheets = await db.select().from(billingSheets).where(eq(billingSheets.customerId, customerId)).orderBy(desc(billingSheets.createdAt));
+    
+    // Get items for each billing sheet
+    const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
+      const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
+      return { ...sheet, items };
+    }));
+    
+    return sheetsWithItems;
   }
 }
 
