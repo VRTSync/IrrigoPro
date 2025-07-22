@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,8 +7,11 @@ import { Package, FileText, Plus } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
 import { Link } from "wouter";
+import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 
 export default function FieldTechDashboard() {
+  const [showBillingModal, setShowBillingModal] = useState(false);
+  
   // Get current user from localStorage
   const getCurrentUser = () => {
     const savedUser = localStorage.getItem("user");
@@ -88,7 +92,15 @@ export default function FieldTechDashboard() {
                     <p className="text-gray-600 text-xs sm:text-sm">Create standalone billing</p>
                   </div>
                 </div>
-                <Button size="sm" className="bg-green-600 hover:bg-green-700 flex-shrink-0">
+                <Button 
+                  size="sm" 
+                  className="bg-green-600 hover:bg-green-700 flex-shrink-0"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowBillingModal(true);
+                  }}
+                >
                   <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
                   <span className="hidden sm:inline">New</span>
                 </Button>
@@ -118,7 +130,11 @@ export default function FieldTechDashboard() {
           </Card>
         </div>
 
-
+        {/* Standalone Billing Sheet Modal */}
+        <StandaloneBillingSheet
+          open={showBillingModal}
+          onOpenChange={setShowBillingModal}
+        />
       </div>
     </div>
   );
