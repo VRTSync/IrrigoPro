@@ -336,213 +336,78 @@ export default function WorkOrders() {
             {filteredWorkOrders
               ?.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) // Sort oldest to newest
               ?.map((workOrder) => (
-              <Card key={workOrder.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group">
-                <CardContent className="p-6 relative">
-                  <div className="flex items-start justify-between">
-                    {/* Left side - Job Information */}
-                    <div className="flex items-start space-x-4 flex-1 pr-4">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          console.log('Setting selected work order:', workOrder);
-                          setSelectedWorkOrder(workOrder);
-                        }}
-                        className="flex flex-col items-center space-y-1 flex-shrink-0 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
-                        title="View work order details"
-                      >
-                        <div className="bg-blue-50 p-3 rounded-lg group-hover:bg-blue-100 transition-colors">
-                          <FileText className="w-6 h-6 text-blue-600" />
-                        </div>
-                        <span className="text-xs text-gray-600 group-hover:text-blue-600 transition-colors">View</span>
-                      </button>
-                      
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="font-semibold text-gray-900 text-lg">
-                            {workOrder.workOrderNumber}
-                          </h3>
-                          {getPriorityIcon(workOrder.priority)}
-                          
-                          {/* Priority Badge next to work order number */}
-                          <Badge 
-                            variant="outline" 
-                            className={`text-xs font-medium ${
-                              workOrder.priority === 'urgent' 
-                                ? 'border-red-300 text-red-700 bg-red-50' 
-                                : workOrder.priority === 'high'
-                                ? 'border-orange-300 text-orange-700 bg-orange-50'
-                                : workOrder.priority === 'medium'
-                                ? 'border-yellow-300 text-yellow-700 bg-yellow-50'
-                                : 'border-gray-300 text-gray-700 bg-gray-50'
-                            }`}
-                          >
-                            {workOrder.priority?.charAt(0).toUpperCase() + workOrder.priority?.slice(1) || 'Normal'} Priority
-                          </Badge>
-
-                          {workOrder.estimateId && (
-                            <Badge variant="outline" className="text-xs border-blue-200 text-blue-700 bg-blue-50">
-                              From Estimate
-                            </Badge>
-                          )}
-                        </div>
-                        
-                        {/* Customer - Right under work order number */}
-                        <div className="flex items-center space-x-2 mb-2">
-                          <User className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                          <p className="font-medium text-gray-900">{workOrder.customerName}</p>
-                        </div>
-                        
-                        <p className="text-gray-700 font-medium mb-3">
-                          {workOrder.projectName}
-                        </p>
-                        
-                        <div className="space-y-1">
-                          <div className="flex items-center space-x-1 text-sm text-gray-600">
-                            <Calendar className="w-4 h-4 flex-shrink-0" />
-                            <span>{formatDate(workOrder.scheduledDate)}</span>
-                          </div>
-
-                          {workOrder.projectAddress && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
-                                const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-                                  ? `https://maps.apple.com/?q=${encodedAddress}` // iOS Maps
-                                  : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`; // Google Maps
-                                window.open(mapsUrl, '_blank');
-                              }}
-                              className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-                              title="Click for directions"
-                            >
-                              <MapPin className="w-4 h-4 flex-shrink-0" />
-                              <span className="truncate">{workOrder.projectAddress}</span>
-                            </button>
-                          )}
-                        </div>
+              <Card key={workOrder.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-all duration-200">
+                <CardContent className="p-4">
+                  {/* Mobile-First Layout */}
+                  <div className="space-y-3">
+                    {/* Top Row: View Icon, Work Order #, Status Badge */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedWorkOrder(workOrder);
+                          }}
+                          className="flex-shrink-0 p-2 rounded-lg hover:bg-gray-50 transition-colors"
+                          title="View work order details"
+                        >
+                          <Eye className="w-5 h-5 text-blue-600" />
+                        </button>
+                        <h3 className="font-semibold text-gray-900 text-base">
+                          {workOrder.workOrderNumber}
+                        </h3>
                       </div>
+                      {getStatusBadge(workOrder.status)}
                     </div>
 
-                    {/* Work Order Start Button - Top Right of Card - Only for ME */}
-                    {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && 
-                     currentUser && 
-                     workOrder.assignedTechnicianId === currentUser.id && (
-                      <div className="absolute top-6 right-6 z-20">
-                        <Button
-                          size="sm"
+                    {/* Customer */}
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                      <span className="text-gray-900 font-medium truncate">{workOrder.customerName}</span>
+                    </div>
+
+                    {/* Date Assigned */}
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                      <span className="text-gray-700 text-sm">
+                        Assigned: {formatDate(workOrder.scheduledDate)}
+                      </span>
+                    </div>
+
+                    {/* Location */}
+                    {workOrder.projectAddress && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedWorkOrderForCompletion(workOrder);
+                            const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
+                            const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+                              ? `https://maps.apple.com/?q=${encodedAddress}`
+                              : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+                            window.open(mapsUrl, '_blank');
                           }}
-                          className="bg-green-600 hover:bg-green-700 text-white shadow-lg"
+                          className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm truncate flex-1 text-left"
                         >
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          Start
-                        </Button>
+                          {workOrder.projectAddress}
+                        </button>
                       </div>
                     )}
-                  </div>
 
-                  {/* Bottom Right - Technician Assignment */}
-                  <div className="absolute bottom-6 right-6">
-                    {workOrder.status === 'completed' ? (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 min-w-[200px]">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                            <Wrench className="w-4 h-4 text-green-600" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-900 text-sm">Completed by</p>
-                            <p className="text-xs text-green-700 font-medium">
-                              {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : (workOrder.assignedTechnicianName || 'Unknown Technician')}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : workOrder.status === 'in_progress' ? (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 min-w-[200px]">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                              <Wrench className="w-4 h-4 text-blue-600" />
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900 text-sm">
-                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : workOrder.assignedTechnicianName}
-                              </p>
-                              <p className="text-xs text-gray-600">
-                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'Irrigation Manager' : 'Field Technician'} - In Progress
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            console.log('Reassign technician for work order:', workOrder.id);
-                          }}
-                          className="w-full text-xs text-blue-600 hover:text-blue-800"
-                        >
-                          Reassign
-                        </Button>
-                      </div>
-                    ) : workOrder.assignedTechnicianName ? (
-                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 min-w-[200px]">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
-                              <Wrench className="w-4 h-4 text-orange-600" />
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900 text-sm">
-                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? `${currentUser.name} (ME)` : workOrder.assignedTechnicianName}
-                              </p>
-                              <p className="text-xs text-gray-600">
-                                {currentUser && workOrder.assignedTechnicianId === currentUser.id ? 'Irrigation Manager' : 'Field Technician'}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            console.log('Reassign technician for work order:', workOrder.id);
-                          }}
-                          className="w-full text-xs bg-white hover:bg-gray-50 border-orange-200 text-orange-700 hover:text-orange-800"
-                        >
-                          Reassign
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 min-w-[200px]">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center relative">
-                              <Wrench className="w-4 h-4 text-red-600" />
-                              <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></div>
-                            </div>
-                            <div>
-                              <p className="font-medium text-red-700 text-sm">Needs Assignment</p>
-                              <p className="text-xs text-red-600">No technician assigned</p>
-                            </div>
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            console.log('Assign technician to work order:', workOrder.id);
-                          }}
-                          className="w-full text-xs bg-white hover:bg-gray-50 border-red-200 text-red-700 hover:text-red-800"
-                        >
-                          Assign Technician
-                        </Button>
-                      </div>
+                    {/* Start Button - Full Width at Bottom (only for field techs and their assigned work) */}
+                    {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && 
+                     currentUser?.role === 'field_tech' && 
+                     workOrder.assignedTechnicianId === currentUser.id && (
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedWorkOrderForCompletion(workOrder);
+                        }}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white mt-4"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Start Work
+                      </Button>
                     )}
                   </div>
                 </CardContent>
