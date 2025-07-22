@@ -535,36 +535,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log("Received estimate data:", JSON.stringify(req.body, null, 2));
       const parsed = createEstimateWithZonesSchema.parse(req.body);
       
-      // Convert and normalize data
-      const estimate = {
-        ...parsed.estimate,
-        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
-        partsSubtotal: String(parsed.estimate.partsSubtotal || 0),
-        laborSubtotal: String(parsed.estimate.laborSubtotal || 0),
-        markupAmount: String(parsed.estimate.markupAmount || 0),
-        taxAmount: String(parsed.estimate.taxAmount || 0),
-        totalAmount: String(parsed.estimate.totalAmount || 0),
-        laborRate: String(parsed.estimate.laborRate),
-        markupPercent: String(parsed.estimate.markupPercent),
-        taxPercent: String(parsed.estimate.taxPercent)
-      };
-      
-      // Process zones and items
+      // Process zones and items first to calculate totals
       const zones = parsed.zones.map(zone => ({
         ...zone,
         items: zone.items.map(item => {
           // Handle nested part data structure from frontend
           const partData = (item as any).part;
+          const quantity = (item as any).quantity || 1;
+          const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
+          const laborHours = parseFloat(String(partData?.laborHours || item.laborHours || 0));
           return {
             partId: partData?.id || item.partId,
             partName: partData?.name || item.partName || '',
-            partPrice: String(partData?.price || item.partPrice || 0),
-            quantity: (item as any).quantity || 1,
-            laborHours: String((item as any).totalLaborHours || partData?.laborHours || item.laborHours || 0),
-            totalPrice: String((item as any).totalPrice || item.totalPrice || 0)
+            partPrice: String(partPrice),
+            quantity: quantity,
+            laborHours: String(laborHours),
+            totalPrice: String((partPrice * quantity).toFixed(2))
           };
         })
       }));
+
+      // Calculate totals from processed zones
+      let partsSubtotal = 0;
+      let totalLaborHours = 0;
+
+      zones.forEach(zone => {
+        zone.items.forEach(item => {
+          const itemTotal = parseFloat(item.totalPrice);
+          const itemLaborHours = parseFloat(item.laborHours) * item.quantity;
+          partsSubtotal += itemTotal;
+          totalLaborHours += itemLaborHours;
+        });
+      });
+
+      const laborRate = parseFloat(String(parsed.estimate.laborRate));
+      const markupPercent = parseFloat(String(parsed.estimate.markupPercent));
+      const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
+
+      const laborSubtotal = totalLaborHours * laborRate;
+      const markupAmount = (partsSubtotal + laborSubtotal) * (markupPercent / 100);
+      const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
+      const taxAmount = subtotalWithMarkup * (taxPercent / 100);
+      const totalAmount = subtotalWithMarkup + taxAmount;
+
+      // Convert and normalize data with calculated totals
+      const estimate = {
+        ...parsed.estimate,
+        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
+        partsSubtotal: String(partsSubtotal.toFixed(2)),
+        laborSubtotal: String(laborSubtotal.toFixed(2)),
+        markupAmount: String(markupAmount.toFixed(2)),
+        taxAmount: String(taxAmount.toFixed(2)),
+        totalAmount: String(totalAmount.toFixed(2)),
+        laborRate: String(parsed.estimate.laborRate),
+        markupPercent: String(parsed.estimate.markupPercent),
+        taxPercent: String(parsed.estimate.taxPercent)
+      };
       
       const newEstimate = await storage.createEstimate(estimate, zones);
       res.status(201).json(newEstimate);
@@ -596,36 +622,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log("Updating estimate data:", JSON.stringify(req.body, null, 2));
       const parsed = createEstimateWithZonesSchema.parse(req.body);
       
-      // Convert and normalize data
-      const estimate = {
-        ...parsed.estimate,
-        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
-        partsSubtotal: String(parsed.estimate.partsSubtotal || 0),
-        laborSubtotal: String(parsed.estimate.laborSubtotal || 0),
-        markupAmount: String(parsed.estimate.markupAmount || 0),
-        taxAmount: String(parsed.estimate.taxAmount || 0),
-        totalAmount: String(parsed.estimate.totalAmount || 0),
-        laborRate: String(parsed.estimate.laborRate),
-        markupPercent: String(parsed.estimate.markupPercent),
-        taxPercent: String(parsed.estimate.taxPercent)
-      };
-      
-      // Process zones and items
+      // Process zones and items first to calculate totals
       const zones = parsed.zones.map(zone => ({
         ...zone,
         items: zone.items.map(item => {
           // Handle nested part data structure from frontend
           const partData = (item as any).part;
+          const quantity = (item as any).quantity || 1;
+          const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
+          const laborHours = parseFloat(String(partData?.laborHours || item.laborHours || 0));
           return {
             partId: partData?.id || item.partId,
             partName: partData?.name || item.partName || '',
-            partPrice: String(partData?.price || item.partPrice || 0),
-            quantity: (item as any).quantity || 1,
-            laborHours: String((item as any).totalLaborHours || partData?.laborHours || item.laborHours || 0),
-            totalPrice: String((item as any).totalPrice || item.totalPrice || 0)
+            partPrice: String(partPrice),
+            quantity: quantity,
+            laborHours: String(laborHours),
+            totalPrice: String((partPrice * quantity).toFixed(2))
           };
         })
       }));
+
+      // Calculate totals from processed zones
+      let partsSubtotal = 0;
+      let totalLaborHours = 0;
+
+      zones.forEach(zone => {
+        zone.items.forEach(item => {
+          const itemTotal = parseFloat(item.totalPrice);
+          const itemLaborHours = parseFloat(item.laborHours) * item.quantity;
+          partsSubtotal += itemTotal;
+          totalLaborHours += itemLaborHours;
+        });
+      });
+
+      const laborRate = parseFloat(String(parsed.estimate.laborRate));
+      const markupPercent = parseFloat(String(parsed.estimate.markupPercent));
+      const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
+
+      const laborSubtotal = totalLaborHours * laborRate;
+      const markupAmount = (partsSubtotal + laborSubtotal) * (markupPercent / 100);
+      const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
+      const taxAmount = subtotalWithMarkup * (taxPercent / 100);
+      const totalAmount = subtotalWithMarkup + taxAmount;
+
+      // Convert and normalize data with calculated totals
+      const estimate = {
+        ...parsed.estimate,
+        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
+        partsSubtotal: String(partsSubtotal.toFixed(2)),
+        laborSubtotal: String(laborSubtotal.toFixed(2)),
+        markupAmount: String(markupAmount.toFixed(2)),
+        taxAmount: String(taxAmount.toFixed(2)),
+        totalAmount: String(totalAmount.toFixed(2)),
+        laborRate: String(parsed.estimate.laborRate),
+        markupPercent: String(parsed.estimate.markupPercent),
+        taxPercent: String(parsed.estimate.taxPercent)
+      };
       
       const updatedEstimate = await storage.updateEstimateWithZones(estimateId, estimate, zones);
       res.json(updatedEstimate);

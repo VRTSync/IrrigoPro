@@ -111,8 +111,6 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   // Helper function to generate controller options based on customer's total controllers
   const getControllerOptions = (totalControllers: number) => {
-    console.log("Creating controller options for", totalControllers, "controllers");
-    console.log("Selected customer:", selectedCustomer);
     const options = [];
     for (let i = 0; i < totalControllers; i++) {
       const letter = String.fromCharCode(65 + i); // A, B, C, D, etc.
