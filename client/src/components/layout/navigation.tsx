@@ -22,10 +22,12 @@ export default function Navigation() {
   const navItems = [
     ...(userRole === "admin" ? [{ path: "/", label: "Dashboard" }] : []),
     ...(userRole === "irrigation_manager" ? [{ path: "/", label: "Manager Dashboard" }] : []),
+    ...(userRole === "field_tech" ? [{ path: "/", label: "Dashboard" }] : []),
     ...(userRole === "admin" || userRole === "irrigation_manager" ? [{ path: "/estimates", label: "Estimates" }] : []),
     { path: "/work-orders", label: "Work Orders" },
+    { path: "/billing-sheets", label: "Billing Sheets" },
     ...(userRole === "admin" || userRole === "irrigation_manager" ? [{ path: "/parts", label: "Parts Catalog" }] : []),
-    { path: "/customers", label: "Customers" },
+    ...(userRole === "admin" || userRole === "irrigation_manager" ? [{ path: "/customers", label: "Customers" }] : []),
     ...(userRole === "admin" ? [{ path: "/field-tech", label: "Field Tech" }] : []),
   ];
 
