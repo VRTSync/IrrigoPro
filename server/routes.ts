@@ -33,12 +33,20 @@ const createEstimateWithZonesSchema = z.object({
     taxPercent: z.union([z.string(), z.number()])
   }),
   zones: z.array(insertEstimateZoneSchema.omit({ estimateId: true }).extend({
-    items: z.array(insertEstimateItemSchema.omit({ estimateId: true, partId: true }).extend({
+    items: z.array(z.object({
+      part: z.object({
+        id: z.number(),
+        name: z.string(),
+        price: z.union([z.string(), z.number()]),
+        laborHours: z.union([z.string(), z.number()]).optional()
+      }).optional(),
       partId: z.number().optional(),
       partName: z.string().optional(),
       partPrice: z.union([z.string(), z.number()]).optional(),
+      quantity: z.number(),
       laborHours: z.union([z.string(), z.number()]).optional(),
-      totalPrice: z.union([z.string(), z.number()])
+      totalPrice: z.union([z.string(), z.number()]),
+      totalLaborHours: z.number().optional()
     }))
   }))
 });
@@ -544,13 +552,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process zones and items
       const zones = parsed.zones.map(zone => ({
         ...zone,
-        items: zone.items.map(item => ({
-          ...item,
-          partName: item.partName || '',
-          partPrice: String(item.partPrice || 0),
-          laborHours: String(item.laborHours || 0),
-          totalPrice: String(item.totalPrice || 0)
-        }))
+        items: zone.items.map(item => {
+          // Handle nested part data structure from frontend
+          const partData = (item as any).part;
+          return {
+            partId: partData?.id || item.partId,
+            partName: partData?.name || item.partName || '',
+            partPrice: String(partData?.price || item.partPrice || 0),
+            quantity: (item as any).quantity || 1,
+            laborHours: String((item as any).totalLaborHours || partData?.laborHours || item.laborHours || 0),
+            totalPrice: String((item as any).totalPrice || item.totalPrice || 0)
+          };
+        })
       }));
       
       const newEstimate = await storage.createEstimate(estimate, zones);
