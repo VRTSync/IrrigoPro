@@ -48,6 +48,14 @@ The system supports a full irrigation business workflow:
 6. **QuickBooks Integration**: Sync invoices and customer data
 7. **Standalone Billing Sheets**: Capture billables for work done without work orders
 
+### Monthly Invoice Consolidation Architecture
+The system consolidates all customer work into single monthly QuickBooks invoices:
+- **invoices** table redesigned with monthly period tracking (invoiceMonth, invoiceYear, periodStart, periodEnd)
+- **invoiceItems** table tracks source type (work_order or billing_sheet) and source ID for detailed line item tracking
+- Automatic consolidation of completed work orders and approved billing sheets by customer and month
+- Professional QuickBooks format with detailed line items showing work dates, descriptions, technician names, and reference numbers
+- Proper business rule implementation: 20% markup on parts only, labor calculated at $45/hr, 8.25% tax on total
+
 ### Database Schema
 The system uses comprehensive database tables:
 - **customers**: Customer information with contact details
@@ -171,5 +179,7 @@ The system uses comprehensive database tables:
 - **Monthly Invoice Consolidation System**: Implemented monthly invoice generation that combines all work orders and billing sheets per customer into single QuickBooks invoices
 - **Billing Sheet Integration**: Added photo upload capability and redesigned modal for field technicians with pricing information hidden
 - **Unified Invoice Architecture**: Restructured invoice system to track both work order and billing sheet sources for comprehensive monthly billing
+- **Sample Data Created**: Generated 5 completed work orders and 5 approved billing sheets for December 2024 showing consolidated invoice totaling $4,112.24
+- **QuickBooks Integration Format**: Designed professional invoice layout with detailed line items, proper markup calculation (20% on parts only), and streamlined monthly billing
 
 The application follows modern full-stack development practices with type safety throughout, efficient state management, and a clean separation of concerns between frontend and backend code.
