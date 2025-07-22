@@ -17,7 +17,8 @@ import { PartsSearchModal } from "./parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { Part, Customer } from "@shared/schema";
+import type { Part, Customer, EstimateWithZones } from "@shared/schema";
+import { useEffect } from "react";
 
 const estimateFormSchema = z.object({
   customerId: z.number().min(1, "Customer is required"),
@@ -61,9 +62,10 @@ interface NewZoneFormData {
 interface EnhancedEstimateModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  estimateId?: number | null; // For editing existing estimates
 }
 
-export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateModalProps) {
+export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: EnhancedEstimateModalProps) {
   const [zones, setZones] = useState<EstimateZone[]>([]);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
@@ -77,6 +79,18 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
   });
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Fetch estimate data for editing
+  const { data: estimate, isLoading: isLoadingEstimate } = useQuery<EstimateWithZones>({
+    queryKey: ["/api/estimates", estimateId],
+    enabled: open && estimateId !== null,
+  });
+
+  // Fetch customers for selector
+  const { data: customers } = useQuery<Customer[]>({
+    queryKey: ["/api/customers"],
+    enabled: open,
+  });
 
   const form = useForm<EstimateFormValues>({
     resolver: zodResolver(estimateFormSchema),
@@ -97,6 +111,8 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
 
   // Helper function to generate controller options based on customer's total controllers
   const getControllerOptions = (totalControllers: number) => {
+    console.log("Creating controller options for", totalControllers, "controllers");
+    console.log("Selected customer:", selectedCustomer);
     const options = [];
     for (let i = 0; i < totalControllers; i++) {
       const letter = String.fromCharCode(65 + i); // A, B, C, D, etc.
@@ -104,6 +120,56 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
     }
     return options;
   };
+
+  // Load estimate data when editing
+  useEffect(() => {
+    if (estimate && customers) {
+      // Reset form with estimate data
+      form.reset({
+        customerId: estimate.customerId,
+        customerName: estimate.customerName,
+        customerEmail: estimate.customerEmail,
+        customerPhone: estimate.customerPhone || "",
+        projectName: estimate.projectName,
+        projectAddress: estimate.projectAddress || "",
+        estimateDate: new Date(estimate.estimateDate).toISOString().split('T')[0],
+        createdBy: estimate.createdBy,
+        laborRate: parseFloat(estimate.laborRate),
+        markupPercent: parseFloat(estimate.markupPercent),
+        taxPercent: parseFloat(estimate.taxPercent),
+      });
+
+      // Convert estimate zones to our zone format
+      const estimateZones: EstimateZone[] = estimate.zones.map((zone, index) => ({
+        id: `zone-${index}`,
+        controllerId: zone.controllerId,
+        zoneNumber: zone.zoneNumber,
+        zoneName: zone.zoneName,
+        workDescription: zone.workDescription,
+        clockInTime: zone.clockInTime || "",
+        items: zone.items.map(item => ({
+          part: {
+            id: item.partId,
+            name: item.partName,
+            description: "",
+            price: item.partPrice,
+            laborHours: item.laborHours,
+            sku: "",
+            category: ""
+          } as Part,
+          quantity: item.quantity,
+          totalPrice: parseFloat(item.totalPrice),
+          totalLaborHours: parseFloat(item.laborHours) * item.quantity
+        }))
+      }));
+
+      setZones(estimateZones);
+
+      // Set selected customer
+      const customer = customers.find(c => c.id === estimate.customerId);
+      setSelectedCustomer(customer || null);
+    }
+  }, [estimate, customers, form]);
 
   const handleCustomerSelect = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -222,14 +288,21 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
 
   const createEstimateMutation = useMutation({
     mutationFn: async (data: { estimate: any; zones: any[] }) => {
-      return await apiRequest("/api/estimates", "POST", data);
+      if (estimateId) {
+        // Update existing estimate
+        return await apiRequest(`/api/estimates/${estimateId}`, "PUT", data);
+      } else {
+        // Create new estimate
+        return await apiRequest("/api/estimates", "POST", data);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       toast({
         title: "Success",
-        description: "Estimate created successfully",
+        description: estimateId ? "Estimate updated successfully" : "Estimate created successfully",
       });
       onOpenChange(false);
       resetForm();
@@ -237,7 +310,7 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
     onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to create estimate",
+        description: estimateId ? "Failed to update estimate" : "Failed to create estimate",
         variant: "destructive",
       });
     },
@@ -322,9 +395,14 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create New Estimate</DialogTitle>
+          <DialogTitle>
+            {estimateId ? "Edit Estimate" : "Create New Estimate"}
+          </DialogTitle>
           <DialogDescription>
-            Create a comprehensive estimate with zone-based work descriptions and parts selection
+            {estimateId 
+              ? "Modify estimate details and adjust zones with required parts" 
+              : "Create a comprehensive estimate with zone-based work descriptions and parts selection"
+            }
           </DialogDescription>
         </DialogHeader>
 
@@ -466,7 +544,7 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
                         <SelectValue placeholder="Select Controller" />
                       </SelectTrigger>
                       <SelectContent>
-                        {getControllerOptions(selectedCustomer.totalControllers || 1).map(option => (
+                        {getControllerOptions(selectedCustomer?.totalControllers || 1).map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
@@ -663,7 +741,10 @@ export function EnhancedEstimateModal({ open, onOpenChange }: EnhancedEstimateMo
                 type="submit"
                 disabled={createEstimateMutation.isPending}
               >
-                {createEstimateMutation.isPending ? "Creating..." : "Create Estimate"}
+                {createEstimateMutation.isPending 
+                  ? (estimateId ? "Updating..." : "Creating...") 
+                  : (estimateId ? "Update Estimate" : "Create Estimate")
+                }
               </Button>
             </div>
           </form>
