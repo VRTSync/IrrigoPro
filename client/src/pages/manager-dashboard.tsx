@@ -27,13 +27,13 @@ export default function ManagerDashboard() {
   const recentWorkOrders = stats?.recentWorkOrders?.slice(0, 3) || [];
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Manager Dashboard</h1>
-          <p className="text-gray-600 mt-2">Choose an option to get started</p>
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Manager Dashboard</h1>
+          <p className="text-gray-600 mt-2 text-sm sm:text-base">Choose an option to get started</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
           {/* Estimates */}
           <Card className="hover:shadow-lg transition-shadow flex flex-col">
             <CardHeader className="text-center relative">

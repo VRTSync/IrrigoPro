@@ -13,8 +13,22 @@ export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Get current user from localStorage  
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+
+  const currentUser = getCurrentUser();
+
+  // For field techs, only show their own billing sheets
   const { data: billingSheets, isLoading } = useQuery<BillingSheet[]>({
-    queryKey: ["/api/billing-sheets"],
+    queryKey: currentUser?.role === 'field_tech' 
+      ? ["/api/billing-sheets", "technician", currentUser?.id]
+      : ["/api/billing-sheets"],
+    queryFn: () => currentUser?.role === 'field_tech' 
+      ? fetch(`/api/billing-sheets?technician=${currentUser.id}`).then(res => res.json())
+      : fetch('/api/billing-sheets').then(res => res.json()),
   });
 
   const formatCurrency = (amount: number | string) => {
@@ -56,16 +70,23 @@ export default function BillingSheets() {
   ) || [];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Billing Sheets</h1>
-          <p className="text-gray-600 mt-2">Manage billing for work performed without work orders</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            {currentUser?.role === 'field_tech' ? 'My Billing Sheets' : 'Billing Sheets'}
+          </h1>
+          <p className="text-gray-600 mt-1 sm:mt-2 text-sm sm:text-base">
+            {currentUser?.role === 'field_tech' 
+              ? 'Create billing for your standalone work'
+              : 'Manage billing for work performed without work orders'
+            }
+          </p>
         </div>
         <Button 
           onClick={() => setShowBillingModal(true)}
-          className="bg-blue-600 hover:bg-blue-700"
+          className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
         >
           <Plus className="w-4 h-4 mr-2" />
           New Billing Sheet
@@ -128,64 +149,64 @@ export default function BillingSheets() {
         <div className="space-y-4">
           {filteredBillingSheets.map((sheet) => (
             <Card key={sheet.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-3">
-                      <FileText className="w-5 h-5 text-blue-600" />
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{sheet.billingNumber}</h3>
-                        <p className="text-sm text-gray-600">{sheet.customerName}</p>
+                      <FileText className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
+                        <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-sm">
                       <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-gray-500" />
-                        <div>
-                          <p className="text-gray-900">{formatDate(sheet.workDate)}</p>
-                          <p className="text-gray-500">Work Date</p>
+                        <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
+                          <p className="text-gray-500 text-xs">Work Date</p>
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        <User className="w-4 h-4 text-gray-500" />
-                        <div>
-                          <p className="text-gray-900">{sheet.technicianName}</p>
-                          <p className="text-gray-500">Technician</p>
+                        <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-gray-900 truncate">{sheet.technicianName}</p>
+                          <p className="text-gray-500 text-xs">Technician</p>
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-gray-500" />
-                        <div>
-                          <p className="text-gray-900">{sheet.totalHours} hours</p>
-                          <p className="text-gray-500">Total Time</p>
+                        <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
+                          <p className="text-gray-500 text-xs">Total Time</p>
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-gray-500" />
-                        <div>
-                          <p className="text-gray-900 font-semibold">{formatCurrency(sheet.totalAmount)}</p>
-                          <p className="text-gray-500">Total Amount</p>
+                        <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
+                          <p className="text-gray-500 text-xs">Total Amount</p>
                         </div>
                       </div>
                     </div>
                     
-                    <div className="mt-3">
-                      <p className="text-sm text-gray-600">
-                        <strong>Work:</strong> {sheet.workDescription}
+                    <div className="mt-3 space-y-1">
+                      <p className="text-xs sm:text-sm text-gray-600">
+                        <strong>Work:</strong> <span className="break-words">{sheet.workDescription}</span>
                       </p>
                       {sheet.propertyAddress && (
-                        <p className="text-sm text-gray-600">
-                          <strong>Location:</strong> {sheet.propertyAddress}
+                        <p className="text-xs sm:text-sm text-gray-600">
+                          <strong>Location:</strong> <span className="break-words">{sheet.propertyAddress}</span>
                         </p>
                       )}
                     </div>
                   </div>
                   
-                  <div className="flex flex-col items-end gap-3">
+                  <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
                     {getStatusBadge(sheet.status)}
                     <div className="text-xs text-gray-500">
                       Created: {formatDate(sheet.createdAt)}

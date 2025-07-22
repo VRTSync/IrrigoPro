@@ -164,5 +164,9 @@ The system uses comprehensive database tables:
 - Updated both backend storage methods and frontend modal logic for consistent calculations
 - Added edit button to estimate detail modal for seamless view-to-edit transition
 - Unified estimate pricing display - totals now show correctly in list view, detail modal, and estimate summary
+- **Mobile Responsiveness Overhaul**: Fixed overlapping issues on phones across all views with proper responsive breakpoints
+- **Role-Based Data Filtering**: Field techs now only see work orders assigned to them and billing sheets they created
+- **Field Tech Dashboard Redesign**: Clean two-card layout matching manager dashboard style
+- **Enhanced Security**: Field techs cannot create new work orders, only view/manage assigned ones
 
 The application follows modern full-stack development practices with type safety throughout, efficient state management, and a clean separation of concerns between frontend and backend code.

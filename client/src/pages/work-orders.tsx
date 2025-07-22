@@ -66,10 +66,17 @@ export default function WorkOrders() {
     refreshUserData();
   }, []);
 
+  // For field techs, only show work orders assigned to them
   const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
-    queryKey: ["/api/work-orders"],
-    staleTime: 0, // Force fresh data
+    queryKey: currentUser?.role === 'field_tech' 
+      ? ["/api/work-orders", "technician", currentUser?.id]
+      : ["/api/work-orders"],
+    queryFn: () => currentUser?.role === 'field_tech' 
+      ? fetch(`/api/work-orders?technician=${currentUser.id}`).then(res => res.json())
+      : fetch('/api/work-orders').then(res => res.json()),
+    staleTime: 0,
     refetchOnMount: true,
+    enabled: !!currentUser,
   });
 
   const filteredWorkOrders = workOrders?.filter ? workOrders.filter(workOrder => {
@@ -178,21 +185,30 @@ export default function WorkOrders() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/30 p-6">
+    <div className="min-h-screen bg-gray-50/30 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Work Orders</h1>
-            <p className="text-gray-600 mt-1">Manage and track field work assignments</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+              {currentUser?.role === 'field_tech' ? 'My Work Orders' : 'Work Orders'}
+            </h1>
+            <p className="text-gray-600 mt-1 text-sm sm:text-base">
+              {currentUser?.role === 'field_tech' 
+                ? 'View and manage your assigned work'
+                : 'Manage and track field work assignments'
+              }
+            </p>
           </div>
-          <Button 
-            onClick={() => setShowWorkOrderForm(true)} 
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg shadow-sm"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Work Order
-          </Button>
+          {currentUser?.role !== 'field_tech' && (
+            <Button 
+              onClick={() => setShowWorkOrderForm(true)} 
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-2.5 rounded-lg shadow-sm w-full sm:w-auto"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Work Order
+            </Button>
+          )}
         </div>
 
         {/* Stats Cards */}
