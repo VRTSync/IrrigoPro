@@ -17,6 +17,7 @@ import { insertCustomerSchema } from "@shared/schema";
 import type { Customer } from "@shared/schema";
 
 const customerFormSchema = insertCustomerSchema.extend({
+  totalControllers: z.coerce.number().min(1, "Must have at least 1 controller").max(10, "Maximum 10 controllers").default(1),
   contractType: z.enum(["standard", "premium", "commercial", "residential"]).default("standard"),
   laborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("45.00"),
   markupPercent: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("20.00"),
@@ -47,6 +48,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: customer.email,
       phone: customer.phone || "",
       address: customer.address || "",
+      totalControllers: customer.totalControllers || 1,
       contractType: customer.contractType as any || "standard",
       laborRate: customer.laborRate || "45.00",
       markupPercent: customer.markupPercent || "20.00",
@@ -61,6 +63,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
+      totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
       markupPercent: "20.00",
@@ -78,13 +81,10 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       const endpoint = customer ? `/api/customers/${customer.id}` : "/api/customers";
       const method = customer ? "PUT" : "POST";
       
-      return apiRequest(endpoint, {
-        method,
-        body: {
-          ...data,
-          contractStartDate: data.contractStartDate ? new Date(data.contractStartDate).toISOString() : null,
-          contractEndDate: data.contractEndDate ? new Date(data.contractEndDate).toISOString() : null,
-        },
+      return apiRequest(endpoint, method, {
+        ...data,
+        contractStartDate: data.contractStartDate ? new Date(data.contractStartDate).toISOString() : null,
+        contractEndDate: data.contractEndDate ? new Date(data.contractEndDate).toISOString() : null,
       });
     },
     onSuccess: () => {
@@ -165,7 +165,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                       <FormItem>
                         <FormLabel>Phone Number</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter phone number" {...field} />
+                          <Input placeholder="Enter phone number" {...field} value={field.value || ""} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -178,7 +178,33 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                       <FormItem>
                         <FormLabel>Address</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter address" {...field} />
+                          <Input placeholder="Enter address" {...field} value={field.value || ""} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="totalControllers"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Number of Controllers</FormLabel>
+                        <FormControl>
+                          <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select number of controllers" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Array.from({ length: 10 }, (_, i) => (
+                                <SelectItem key={i + 1} value={(i + 1).toString()}>
+                                  {i + 1} Controller{i + 1 > 1 ? 's' : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </FormControl>
                         <FormMessage />
                       </FormItem>

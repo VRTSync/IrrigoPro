@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { CustomerSelector } from "@/components/ui/customer-selector";
@@ -104,6 +105,10 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
     form.setValue("markupPercent", parseFloat(customer.markupPercent || "20"));
     form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
+    
+    // Clear validation errors for auto-populated fields
+    form.clearErrors("customerName");
+    form.clearErrors("customerEmail");
   };
 
   const addZone = (controllerId: string, zoneNumber: string, workDescription: string) => {
@@ -479,7 +484,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <h3 className="text-lg font-medium text-gray-900">Work Zones</h3>
                   <Button
                     type="button"
-                    onClick={addZone}
+                    onClick={addZoneSimple}
                     className="bg-primary text-white hover:bg-blue-700"
                   >
                     <Plus className="w-4 h-4 mr-2" />
@@ -500,11 +505,26 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                                 onChange={(e) => updateZone(zone.id, { zoneName: e.target.value })}
                                 className="font-medium"
                               />
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-3 gap-2">
+                                <Select 
+                                  value={zone.controllerId} 
+                                  onValueChange={(value) => updateZone(zone.id, { controllerId: value })}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Controller" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {getControllerOptions(selectedCustomer?.totalControllers || 1).map((option) => (
+                                      <SelectItem key={option.value} value={option.value}>
+                                        {option.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                                 <Input
-                                  placeholder="Clock in time"
-                                  value={zone.clockInTime}
-                                  onChange={(e) => updateZone(zone.id, { clockInTime: e.target.value })}
+                                  placeholder="Zone #"
+                                  value={zone.zoneNumber}
+                                  onChange={(e) => updateZone(zone.id, { zoneNumber: e.target.value })}
                                 />
                                 <Button
                                   type="button"

@@ -43,7 +43,7 @@ export function EstimateSummary({ items, laborRate, markupPercent, taxPercent }:
         </div>
         <div className="flex justify-between">
           <span className="text-gray-600">
-            Labor ({totalLaborHours.toFixed(1)} hours @ {formatCurrency(laborRate || 0)}/hr):
+            Labor ({totalLaborHours.toFixed(1)} hours):
           </span>
           <span className="font-medium">{formatCurrency(laborSubtotal)}</span>
         </div>
@@ -52,11 +52,11 @@ export function EstimateSummary({ items, laborRate, markupPercent, taxPercent }:
           <span className="font-medium">{formatCurrency(subtotal)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-600">Markup ({markupPercent || 0}%):</span>
+          <span className="text-gray-600">Markup:</span>
           <span className="font-medium">{formatCurrency(markupAmount)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-600">Tax ({taxPercent || 0}%):</span>
+          <span className="text-gray-600">Tax:</span>
           <span className="font-medium">{formatCurrency(taxAmount)}</span>
         </div>
         <div className="border-t border-gray-200 pt-2">
