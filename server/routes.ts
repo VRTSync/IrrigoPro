@@ -588,20 +588,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/estimates/:id", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
-      const estimateData = insertEstimateSchema.partial().parse(req.body);
-      const estimate = await storage.updateEstimate(id, estimateData);
-      if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+      const estimateId = parseInt(req.params.id);
+      if (isNaN(estimateId)) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
       }
-      res.json(estimate);
+
+      console.log("Updating estimate data:", JSON.stringify(req.body, null, 2));
+      const parsed = createEstimateWithZonesSchema.parse(req.body);
+      
+      // Convert and normalize data
+      const estimate = {
+        ...parsed.estimate,
+        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
+        partsSubtotal: String(parsed.estimate.partsSubtotal || 0),
+        laborSubtotal: String(parsed.estimate.laborSubtotal || 0),
+        markupAmount: String(parsed.estimate.markupAmount || 0),
+        taxAmount: String(parsed.estimate.taxAmount || 0),
+        totalAmount: String(parsed.estimate.totalAmount || 0),
+        laborRate: String(parsed.estimate.laborRate),
+        markupPercent: String(parsed.estimate.markupPercent),
+        taxPercent: String(parsed.estimate.taxPercent)
+      };
+      
+      // Process zones and items
+      const zones = parsed.zones.map(zone => ({
+        ...zone,
+        items: zone.items.map(item => {
+          // Handle nested part data structure from frontend
+          const partData = (item as any).part;
+          return {
+            partId: partData?.id || item.partId,
+            partName: partData?.name || item.partName || '',
+            partPrice: String(partData?.price || item.partPrice || 0),
+            quantity: (item as any).quantity || 1,
+            laborHours: String((item as any).totalLaborHours || partData?.laborHours || item.laborHours || 0),
+            totalPrice: String((item as any).totalPrice || item.totalPrice || 0)
+          };
+        })
+      }));
+      
+      const updatedEstimate = await storage.updateEstimateWithZones(estimateId, estimate, zones);
+      res.json(updatedEstimate);
     } catch (error) {
+      console.error("Estimate update error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid estimate data", errors: error.errors });
+        console.error("Validation errors:", error.errors);
+        return res.status(400).json({ 
+          message: "Invalid estimate data", 
+          errors: error.errors,
+          details: error.errors.map(err => ({
+            path: err.path.join('.'),
+            message: err.message,
+            received: err.received
+          }))
+        });
       }
       res.status(500).json({ message: "Failed to update estimate" });
     }
   });
+
+
 
   app.delete("/api/estimates/:id", async (req, res) => {
     try {

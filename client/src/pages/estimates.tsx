@@ -6,8 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
+import { EditEstimateModal } from "@/components/estimates/edit-estimate-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
-import { Plus, FileText, Mail, Download, Eye } from "lucide-react";
+import { Plus, FileText, Mail, Download, Eye, Edit2 } from "lucide-react";
 import { useState } from "react";
 import type { Estimate } from "@shared/schema";
 
@@ -15,6 +16,8 @@ export default function Estimates() {
   const [showEstimateModal, setShowEstimateModal] = useState(false);
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
 
   const { data: estimates, isLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
@@ -189,6 +192,17 @@ export default function Estimates() {
                         <div className="flex items-center space-x-2 justify-end">
                           {estimate.status !== 'converted_to_work_order' && (
                             <>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-blue-600 hover:text-blue-800"
+                                onClick={() => {
+                                  setEditEstimateId(estimate.id);
+                                  setShowEditModal(true);
+                                }}
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </Button>
                               <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
                                 <Mail className="w-4 h-4" />
                               </Button>
@@ -228,6 +242,13 @@ export default function Estimates() {
         open={showDetailModal}
         onOpenChange={setShowDetailModal}
         estimateId={selectedEstimateId}
+      />
+
+      {/* Edit Estimate Modal */}
+      <EditEstimateModal
+        open={showEditModal}
+        onOpenChange={setShowEditModal}
+        estimateId={editEstimateId}
       />
     </div>
   );

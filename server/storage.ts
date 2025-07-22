@@ -95,6 +95,7 @@ export interface IStorage {
   getEstimate(id: number): Promise<EstimateWithZones | undefined>;
   createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
+  updateEstimateWithZones(id: number, estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones>;
   deleteEstimate(id: number): Promise<boolean>;
 
   // Estimate Items
@@ -366,6 +367,39 @@ export class DatabaseStorage implements IStorage {
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {
     const [updatedEstimate] = await db.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
     return updatedEstimate || undefined;
+  }
+
+  async updateEstimateWithZones(id: number, estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones> {
+    // Update the estimate
+    const [updatedEstimate] = await db.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
+    
+    // Delete existing zones and items for this estimate
+    await db.delete(estimateItems).where(eq(estimateItems.estimateId, id));
+    await db.delete(estimateZones).where(eq(estimateZones.estimateId, id));
+    
+    // Create new zones and items
+    const createdZones = [];
+    for (const zone of zones) {
+      const { items, ...zoneData } = zone;
+      const [createdZone] = await db.insert(estimateZones).values({
+        ...zoneData,
+        estimateId: id
+      }).returning();
+
+      const createdItems = [];
+      for (const item of items) {
+        const [createdItem] = await db.insert(estimateItems).values({
+          ...item,
+          estimateId: id,
+          zoneId: createdZone.id
+        }).returning();
+        createdItems.push(createdItem);
+      }
+
+      createdZones.push({ ...createdZone, items: createdItems });
+    }
+
+    return { ...updatedEstimate, zones: createdZones };
   }
 
   async deleteEstimate(id: number): Promise<boolean> {
