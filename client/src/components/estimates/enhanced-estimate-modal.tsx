@@ -157,7 +157,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
           } as Part,
           quantity: item.quantity,
           totalPrice: parseFloat(item.totalPrice),
-          totalLaborHours: parseFloat(item.laborHours) * item.quantity
+          totalLaborHours: parseFloat(item.laborHours) // Labor hours per part, not multiplied by quantity
         }))
       }));
 
@@ -239,7 +239,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       const updatedItems = [...zone.items];
       updatedItems[existingIndex].quantity += quantity;
       updatedItems[existingIndex].totalPrice = updatedItems[existingIndex].quantity * parseFloat(part.price);
-      updatedItems[existingIndex].totalLaborHours = updatedItems[existingIndex].quantity * parseFloat(part.laborHours);
+      updatedItems[existingIndex].totalLaborHours = parseFloat(part.laborHours); // Labor hours per part, not multiplied by quantity
       
       updateZone(selectedZoneId, { items: updatedItems });
     } else {
@@ -248,7 +248,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         part,
         quantity,
         totalPrice: quantity * parseFloat(part.price),
-        totalLaborHours: quantity * parseFloat(part.laborHours),
+        totalLaborHours: parseFloat(part.laborHours), // Labor hours per part, not multiplied by quantity
       };
       
       updateZone(selectedZoneId, { items: [...zone.items, newItem] });
@@ -275,7 +275,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
           ...item,
           quantity: newQuantity,
           totalPrice: newQuantity * parseFloat(item.part.price),
-          totalLaborHours: newQuantity * parseFloat(item.part.laborHours),
+          totalLaborHours: parseFloat(item.part.laborHours), // Labor hours per part, not multiplied by quantity
         };
       }
       return item;
