@@ -70,6 +70,14 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Get current user role and info
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+  const currentUser = getCurrentUser();
+  const isFieldTech = currentUser?.role === 'field_tech';
+
   const form = useForm<BillingSheetData>({
     resolver: zodResolver(billingSheetSchema),
     defaultValues: {
@@ -77,7 +85,7 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
       customerName: "",
       propertyAddress: "",
       workDate: new Date().toISOString().split('T')[0],
-      technicianName: "",
+      technicianName: isFieldTech ? currentUser?.name || "" : "",
       workDescription: "",
       totalHours: 0,
       laborRate: 45,
@@ -105,8 +113,8 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
       partName: part.name,
       partDescription: part.description || "",
       quantity,
-      unitPrice: parseFloat(part.price),
-      laborHours: parseFloat(part.laborHours),
+      unitPrice: isFieldTech ? 0 : parseFloat(part.price),
+      laborHours: isFieldTech ? 0 : parseFloat(part.laborHours),
       notes: "",
     };
     
@@ -197,7 +205,7 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Create Billing Sheet</DialogTitle>
           <DialogDescription>
@@ -248,7 +256,7 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="workDate"
@@ -270,37 +278,12 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                       <FormItem>
                         <FormLabel>Technician Name</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="Who performed the work" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="totalHours"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Total Hours</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="number" step="0.25" placeholder="Hours worked" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  
-                  <FormField
-                    control={form.control}
-                    name="laborRate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Labor Rate ($/hour)</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="number" step="0.01" />
+                          <Input 
+                            {...field} 
+                            placeholder="Who performed the work"
+                            disabled={isFieldTech}
+                            className={isFieldTech ? "bg-gray-50" : ""}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -321,6 +304,25 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                     </FormItem>
                   )}
                 />
+
+                {/* Hide labor rate for field techs */}
+                {!isFieldTech && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="laborRate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Labor Rate ($/hour)</FormLabel>
+                          <FormControl>
+                            <Input {...field} type="number" step="0.01" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -359,7 +361,7 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                     {fields.map((field, index) => (
                       <Card key={field.id} className="border-l-4 border-l-blue-500">
                         <CardContent className="pt-4">
-                          <div className="grid grid-cols-6 gap-4 items-end">
+                          <div className={`grid gap-4 items-end ${isFieldTech ? 'grid-cols-4' : 'grid-cols-6'}`}>
                             <div className="col-span-2">
                               <FormField
                                 control={form.control}
@@ -390,33 +392,38 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                               )}
                             />
                             
-                            <FormField
-                              control={form.control}
-                              name={`items.${index}.unitPrice`}
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Unit Price</FormLabel>
-                                  <FormControl>
-                                    <Input {...field} type="number" step="0.01" />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
+                            {/* Hide pricing for field techs */}
+                            {!isFieldTech && (
+                              <FormField
+                                control={form.control}
+                                name={`items.${index}.unitPrice`}
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Unit Price</FormLabel>
+                                    <FormControl>
+                                      <Input {...field} type="number" step="0.01" />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            )}
                             
-                            <FormField
-                              control={form.control}
-                              name={`items.${index}.laborHours`}
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Labor Hours</FormLabel>
-                                  <FormControl>
-                                    <Input {...field} type="number" step="0.25" />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
+                            {!isFieldTech && (
+                              <FormField
+                                control={form.control}
+                                name={`items.${index}.laborHours`}
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Labor Hours</FormLabel>
+                                    <FormControl>
+                                      <Input {...field} type="number" step="0.25" />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            )}
                             
                             <Button
                               type="button"
@@ -443,16 +450,44 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                             />
                           </div>
                           
-                          <div className="mt-2 text-right">
-                            <span className="text-sm text-gray-600">
-                              Total: ${(form.watch(`items.${index}.quantity`) * form.watch(`items.${index}.unitPrice`)).toFixed(2)}
-                            </span>
-                          </div>
+                          {/* Hide pricing totals for field techs */}
+                          {!isFieldTech && (
+                            <div className="mt-2 text-right">
+                              <span className="text-sm text-gray-600">
+                                Total: ${(form.watch(`items.${index}.quantity`) * form.watch(`items.${index}.unitPrice`)).toFixed(2)}
+                              </span>
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Labor Hours - Field techs enter this last */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Timer className="w-5 h-5" />
+                  Labor Hours
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <FormField
+                  control={form.control}
+                  name="totalHours"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Hours Worked</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="number" step="0.25" placeholder="Total hours worked on this job" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </CardContent>
             </Card>
 
@@ -476,40 +511,42 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
               </CardContent>
             </Card>
 
-            {/* Billing Summary */}
-            <Card className="bg-gray-50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calculator className="w-5 h-5" />
-                  Billing Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Parts Subtotal:</span>
-                  <span className="font-medium">${totals.partsSubtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">
-                    Labor ({form.watch("totalHours")} hours @ ${form.watch("laborRate")}/hr):
-                  </span>
-                  <span className="font-medium">${totals.laborSubtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Markup:</span>
-                  <span className="font-medium">${totals.markupAmount.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Tax:</span>
-                  <span className="font-medium">${totals.taxAmount.toFixed(2)}</span>
-                </div>
-                <Separator />
-                <div className="flex justify-between text-lg font-semibold">
-                  <span>Total:</span>
-                  <span>${totals.totalAmount.toFixed(2)}</span>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Billing Summary - Hidden from field techs */}
+            {!isFieldTech && (
+              <Card className="bg-gray-50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Calculator className="w-5 h-5" />
+                    Billing Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Parts Subtotal:</span>
+                    <span className="font-medium">${totals.partsSubtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">
+                      Labor ({form.watch("totalHours")} hours @ ${form.watch("laborRate")}/hr):
+                    </span>
+                    <span className="font-medium">${totals.laborSubtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Markup:</span>
+                    <span className="font-medium">${totals.markupAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Tax:</span>
+                    <span className="font-medium">${totals.taxAmount.toFixed(2)}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between text-lg font-semibold">
+                    <span>Total:</span>
+                    <span>${totals.totalAmount.toFixed(2)}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Action Buttons */}
             <div className="flex gap-3 justify-end">
