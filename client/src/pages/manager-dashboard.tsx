@@ -3,17 +3,17 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Wrench, Package, Clock, CheckCircle, Receipt } from "lucide-react";
+import { FileText, Wrench, Clock, CheckCircle, Receipt } from "lucide-react";
 import { EstimatesManager } from "@/components/manager/estimates-manager";
 import { WorkOrdersManager } from "@/components/manager/work-orders-manager";
-import { PartsListManager } from "@/components/manager/parts-list-manager";
+
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import BillingSheets from "@/pages/billing-sheets";
 import type { Estimate, WorkOrder } from "@shared/schema";
 
-type ManagerView = 'menu' | 'estimates' | 'work-orders' | 'parts' | 'billing-sheets';
+type ManagerView = 'menu' | 'estimates' | 'work-orders' | 'billing-sheets';
 
 export default function ManagerDashboard() {
   const [currentView, setCurrentView] = useState<ManagerView>('menu');
@@ -47,8 +47,7 @@ export default function ManagerDashboard() {
         return <EstimatesManager onBack={() => setCurrentView('menu')} />;
       case 'work-orders':
         return <WorkOrdersManager onBack={() => setCurrentView('menu')} />;
-      case 'parts':
-        return <PartsListManager onBack={() => setCurrentView('menu')} />;
+
       case 'billing-sheets':
         return <BillingSheets />;
       default:
@@ -59,7 +58,7 @@ export default function ManagerDashboard() {
               <p className="text-gray-600 mt-2">Choose an option to get started</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               {/* Estimates */}
               <Card className="hover:shadow-lg transition-shadow cursor-pointer flex flex-col" onClick={() => setCurrentView('estimates')}>
                 <CardHeader className="text-center relative">
@@ -98,22 +97,6 @@ export default function ManagerDashboard() {
                   <p className="text-gray-600 mb-4 flex-1">View work order list, create new orders, and assign to technicians</p>
                   <Button className="w-full bg-green-600 hover:bg-green-700 mt-auto">
                     Manage Work Orders
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* Parts List */}
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer flex flex-col" onClick={() => setCurrentView('parts')}>
-                <CardHeader className="text-center">
-                  <div className="bg-purple-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                    <Package className="w-8 h-8 text-purple-600" />
-                  </div>
-                  <CardTitle className="text-xl">Parts List</CardTitle>
-                </CardHeader>
-                <CardContent className="text-center flex-1 flex flex-col">
-                  <p className="text-gray-600 mb-4 flex-1">View Parts List and Add New Parts</p>
-                  <Button className="w-full bg-purple-600 hover:bg-purple-700 mt-auto">
-                    View Parts
                   </Button>
                 </CardContent>
               </Card>

@@ -7,6 +7,7 @@ This is a comprehensive full-stack irrigation business management system built w
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request 2025-07-22).
 
 ## System Architecture
 
