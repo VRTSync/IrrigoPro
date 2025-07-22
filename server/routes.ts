@@ -506,12 +506,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/estimates", async (req, res) => {
     try {
+      console.log("Received estimate data:", JSON.stringify(req.body, null, 2));
       const { estimate, zones } = createEstimateWithZonesSchema.parse(req.body);
       const newEstimate = await storage.createEstimate(estimate, zones);
       res.status(201).json(newEstimate);
     } catch (error) {
+      console.error("Estimate creation error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid estimate data", errors: error.errors });
+        console.error("Validation errors:", error.errors);
+        return res.status(400).json({ 
+          message: "Invalid estimate data", 
+          errors: error.errors,
+          details: error.errors.map(err => ({
+            path: err.path.join('.'),
+            message: err.message,
+            received: err.received
+          }))
+        });
       }
       res.status(500).json({ message: "Failed to create estimate" });
     }
