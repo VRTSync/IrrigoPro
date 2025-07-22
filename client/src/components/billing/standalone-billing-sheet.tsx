@@ -23,7 +23,8 @@ import {
   User,
   MapPin,
   Calendar,
-  Clock
+  Clock,
+  Camera
 } from "lucide-react";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
@@ -488,6 +489,31 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                     </FormItem>
                   )}
                 />
+              </CardContent>
+            </Card>
+
+            {/* Photo Upload */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Camera className="w-5 h-5" />
+                  Photos
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <FileUpload
+                    files={photos}
+                    onChange={setPhotos}
+                    accept="image/*"
+                    multiple
+                    maxFiles={5}
+                    className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors"
+                  />
+                  <p className="text-sm text-gray-500">
+                    Upload photos of the work performed (up to 5 images)
+                  </p>
+                </div>
               </CardContent>
             </Card>
 
