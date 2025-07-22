@@ -316,7 +316,46 @@ export class DatabaseStorage implements IStorage {
 
   // Estimates
   async getEstimates(): Promise<Estimate[]> {
-    return await db.select().from(estimates).orderBy(desc(estimates.createdAt));
+    const estimatesList = await db.select().from(estimates).orderBy(desc(estimates.createdAt));
+    
+    // Recalculate totals for each estimate to ensure accuracy
+    const estimatesWithCalculatedTotals = await Promise.all(
+      estimatesList.map(async (estimate) => {
+        const zones = await db.select().from(estimateZones).where(eq(estimateZones.estimateId, estimate.id));
+        const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimate.id));
+        
+        let partsSubtotal = 0;
+        let totalLaborHours = 0;
+        
+        items.forEach(item => {
+          const itemTotal = parseFloat(String(item.totalPrice));
+          const itemLaborHours = parseFloat(String(item.laborHours));
+          partsSubtotal += itemTotal;
+          totalLaborHours += itemLaborHours;
+        });
+        
+        const laborRate = parseFloat(String(estimate.laborRate));
+        const markupPercent = parseFloat(String(estimate.markupPercent));
+        const taxPercent = parseFloat(String(estimate.taxPercent));
+        
+        const laborSubtotal = totalLaborHours * laborRate;
+        const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
+        const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
+        const taxAmount = subtotalWithMarkup * (taxPercent / 100);
+        const totalAmount = subtotalWithMarkup + taxAmount;
+        
+        return {
+          ...estimate,
+          partsSubtotal: partsSubtotal.toFixed(2),
+          laborSubtotal: laborSubtotal.toFixed(2),
+          markupAmount: markupAmount.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          totalAmount: totalAmount.toFixed(2)
+        };
+      })
+    );
+    
+    return estimatesWithCalculatedTotals;
   }
 
   async getEstimate(id: number): Promise<EstimateWithZones | undefined> {
@@ -331,7 +370,37 @@ export class DatabaseStorage implements IStorage {
       items: estimateItemsList.filter(item => item.zoneId === zone.id)
     }));
 
-    return { ...estimate, zones };
+    // Recalculate totals to ensure accuracy
+    let partsSubtotal = 0;
+    let totalLaborHours = 0;
+    
+    estimateItemsList.forEach(item => {
+      const itemTotal = parseFloat(String(item.totalPrice));
+      const itemLaborHours = parseFloat(String(item.laborHours));
+      partsSubtotal += itemTotal;
+      totalLaborHours += itemLaborHours;
+    });
+    
+    const laborRate = parseFloat(String(estimate.laborRate));
+    const markupPercent = parseFloat(String(estimate.markupPercent));
+    const taxPercent = parseFloat(String(estimate.taxPercent));
+    
+    const laborSubtotal = totalLaborHours * laborRate;
+    const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
+    const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
+    const taxAmount = subtotalWithMarkup * (taxPercent / 100);
+    const totalAmount = subtotalWithMarkup + taxAmount;
+    
+    const estimateWithCalculatedTotals = {
+      ...estimate,
+      partsSubtotal: partsSubtotal.toFixed(2),
+      laborSubtotal: laborSubtotal.toFixed(2),
+      markupAmount: markupAmount.toFixed(2),
+      taxAmount: taxAmount.toFixed(2),
+      totalAmount: totalAmount.toFixed(2)
+    };
+
+    return { ...estimateWithCalculatedTotals, zones };
   }
 
   async createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones> {

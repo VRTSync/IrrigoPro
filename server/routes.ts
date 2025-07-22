@@ -562,7 +562,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       zones.forEach(zone => {
         zone.items.forEach(item => {
           const itemTotal = parseFloat(item.totalPrice);
-          const itemLaborHours = parseFloat(item.laborHours) * item.quantity;
+          const itemLaborHours = parseFloat(item.laborHours);
           partsSubtotal += itemTotal;
           totalLaborHours += itemLaborHours;
         });
@@ -649,7 +649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       zones.forEach(zone => {
         zone.items.forEach(item => {
           const itemTotal = parseFloat(item.totalPrice);
-          const itemLaborHours = parseFloat(item.laborHours) * item.quantity;
+          const itemLaborHours = parseFloat(item.laborHours);
           partsSubtotal += itemTotal;
           totalLaborHours += itemLaborHours;
         });
