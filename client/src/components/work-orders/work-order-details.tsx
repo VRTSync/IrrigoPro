@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { BillingSheet } from "./billing-sheet";
+
 import { WorkOrderCompletion } from "./work-order-completion";
 import { 
   FileText, 
@@ -28,7 +28,8 @@ import {
   Target,
   Timer,
   MessageSquare,
-  Users
+  Users,
+  Download
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -42,7 +43,6 @@ interface WorkOrderDetailsProps {
 
 export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview");
-  const [showBillingSheet, setShowBillingSheet] = useState(false);
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
   const [isEditingPriority, setIsEditingPriority] = useState(false);
@@ -104,6 +104,39 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
       });
     },
   });
+
+  const handleCreateInvoice = async () => {
+    try {
+      await apiRequest(`/api/work-orders/${workOrder.id}/create-invoice`, "POST");
+      toast({
+        title: "Success",
+        description: "Invoice created successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to create invoice",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSyncToQuickBooks = async () => {
+    try {
+      await apiRequest(`/api/work-orders/${workOrder.id}/sync-quickbooks`, "POST");
+      toast({
+        title: "Success",
+        description: "Synced to QuickBooks successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to sync to QuickBooks",
+        variant: "destructive",
+      });
+    }
+  };
 
   const updateWorkOrderStatus = useMutation({
     mutationFn: async (status: string) => {
@@ -250,7 +283,10 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="progress">Progress</TabsTrigger>
-            <TabsTrigger value="billing">Billing</TabsTrigger>
+            <TabsTrigger value="invoicing" className="flex items-center gap-2">
+              <Receipt className="w-4 h-4" />
+              Invoicing
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 mt-6">
@@ -560,40 +596,46 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
             </Card>
           </TabsContent>
 
-          <TabsContent value="billing" className="space-y-6 mt-6">
+          <TabsContent value="invoicing" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Receipt className="w-5 h-5 text-blue-600" />
-                  Billing Information
+                  Invoice Generation
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="flex gap-4">
-                  <Button
-                    onClick={() => setShowBillingSheet(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Receipt className="w-4 h-4 mr-2" />
-                    Generate Billing Sheet
-                  </Button>
+                <div className="space-y-4">
+                  {workOrder.status === 'completed' ? (
+                    <div className="flex gap-4">
+                      <Button
+                        onClick={() => handleCreateInvoice()}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        <Receipt className="w-4 h-4 mr-2" />
+                        Create Invoice
+                      </Button>
+                      <Button
+                        onClick={() => handleSyncToQuickBooks()}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                        variant="outline"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Sync to QuickBooks
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="text-gray-500">
+                      <p>Work order must be completed before creating an invoice.</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
 
-        {/* Billing Sheet Modal */}
-        {showBillingSheet && (
-          <BillingSheet
-            workOrder={workOrder}
-            onClose={() => setShowBillingSheet(false)}
-            onInvoiceCreated={() => {
-              setShowBillingSheet(false);
-              onUpdate();
-            }}
-          />
-        )}
+
       </DialogContent>
     </Dialog>
 

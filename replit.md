@@ -43,6 +43,7 @@ The system supports a full irrigation business workflow:
 4. **Field Work Management**: Track technician work and part usage
 5. **Invoice Creation**: Generate invoices from completed work orders
 6. **QuickBooks Integration**: Sync invoices and customer data
+7. **Standalone Billing Sheets**: Capture billables for work done without work orders
 
 ### Database Schema
 The system uses comprehensive database tables:
@@ -59,6 +60,8 @@ The system uses comprehensive database tables:
 - **workOrderItems**: Items included in work orders
 - **invoices**: Generated from completed work orders
 - **invoiceItems**: Line items for invoices
+- **billingSheets**: Standalone billing for work without work orders
+- **billingSheetItems**: Parts and labor items for standalone billing
 - **quickbooksIntegration**: QuickBooks connection settings
 - **quickbooksSync**: Sync status tracking
 
@@ -69,8 +72,9 @@ The system uses comprehensive database tables:
 - **Estimates**: Zone-based estimate management with approval workflow
 - **Property Zones**: Property and zone management with Google Sheets sync
 - **Field Work**: Technician work session tracking
-- **Work Orders**: Work order lifecycle management
-- **Invoices**: Invoice generation and management
+- **Work Orders**: Work order lifecycle management with invoice conversion
+- **Invoices**: Invoice generation and QuickBooks sync from completed work orders
+- **Billing Sheets**: Standalone billing system for work without work orders
 - **QuickBooks Integration**: Customer and invoice sync
 - **Integrations**: Google Sheets and QuickBooks customer sync
 
@@ -81,8 +85,9 @@ The system uses comprehensive database tables:
 - **Parts Catalog**: Comprehensive parts inventory management (Admin only)
 - **Customers**: Customer management with integration capabilities (Admin only)
 - **Field Tech**: Technician interface without pricing access (Admin only)
-- **Work Orders**: Complete work order lifecycle management (Admin only)
+- **Work Orders**: Complete work order lifecycle management with invoice conversion (Admin only)
 - **Field Portal**: Dedicated field technician interface with work session management
+- **Billing Sheets**: Standalone billing system for both managers and technicians
 
 ### UI Components
 - Comprehensive component library based on shadcn/ui

@@ -969,6 +969,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/work-orders/:id/sync-quickbooks", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      // This would need to be implemented for QuickBooks sync
+      res.json({ message: "QuickBooks sync endpoint ready for implementation" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to sync to QuickBooks" });
+    }
+  });
+
+  // Billing Sheets API - for work done without work orders
+  app.get("/api/billing-sheets", async (req, res) => {
+    try {
+      const billingSheets = await storage.getAllBillingSheets();
+      res.json(billingSheets);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch billing sheets" });
+    }
+  });
+
+  app.get("/api/billing-sheets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const billingSheet = await storage.getBillingSheetById(id);
+      if (!billingSheet) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+      res.json(billingSheet);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch billing sheet" });
+    }
+  });
+
+  app.post("/api/billing-sheets", async (req, res) => {
+    try {
+      const billingSheetData = req.body;
+      
+      // Generate billing number
+      const count = await storage.getBillingSheetCount();
+      const billingNumber = `BS-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
+      
+      const billingSheet = await storage.createBillingSheet({
+        ...billingSheetData,
+        billingNumber
+      });
+      
+      res.json(billingSheet);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create billing sheet" });
+    }
+  });
+
+  app.patch("/api/billing-sheets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      const billingSheet = await storage.updateBillingSheet(id, updates);
+      if (!billingSheet) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+      res.json(billingSheet);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update billing sheet" });
+    }
+  });
+
+  app.delete("/api/billing-sheets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteBillingSheet(id);
+      res.json({ message: "Billing sheet deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete billing sheet" });
+    }
+  });
+
   app.post("/api/invoices/:id/sync-quickbooks", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

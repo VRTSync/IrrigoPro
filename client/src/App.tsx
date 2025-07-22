@@ -16,6 +16,7 @@ import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import ManagerDashboard from "@/pages/manager-dashboard";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
+import BillingSheets from "@/pages/billing-sheets";
 import { UserSelector } from "@/components/user-selector";
 
 interface User {

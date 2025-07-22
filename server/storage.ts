@@ -11,6 +11,8 @@ import {
   fieldWorkItems,
   workOrders,
   workOrderItems,
+  billingSheets,
+  billingSheetItems,
   type User,
   type Customer, 
   type Part, 
@@ -23,6 +25,8 @@ import {
   type FieldWorkItem,
   type WorkOrder,
   type WorkOrderItem,
+  type BillingSheet,
+  type BillingSheetItem,
   type InsertUser,
   type InsertCustomer, 
   type InsertPart, 
@@ -35,10 +39,13 @@ import {
   type InsertFieldWorkItem,
   type InsertWorkOrder,
   type InsertWorkOrderItem,
+  type InsertBillingSheet,
+  type InsertBillingSheetItem,
   type EstimateWithItems,
   type EstimateWithZones,
   type PropertyZoneWithZones,
-  type FieldWorkSessionWithItems
+  type FieldWorkSessionWithItems,
+  type BillingSheetWithItems
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, like, desc } from "drizzle-orm";
@@ -151,9 +158,16 @@ export interface IStorage {
   updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined>;
   deleteWorkOrderItem(id: number): Promise<boolean>;
   
-  // Billing Sheets
-  saveBillingSheet(workOrderId: number, billingData: any): Promise<void>;
-  getBillingSheet(workOrderId: number): Promise<any>;
+  // Billing Sheets - for work done without work orders
+  getAllBillingSheets(): Promise<BillingSheetWithItems[]>;
+  getBillingSheetById(id: number): Promise<BillingSheetWithItems | undefined>;
+  getBillingSheetCount(): Promise<number>;
+  createBillingSheet(billingSheet: InsertBillingSheet): Promise<BillingSheet>;
+  updateBillingSheet(id: number, billingSheet: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined>;
+  deleteBillingSheet(id: number): Promise<boolean>;
+  addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem>;
+  updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined>;
+  deleteBillingSheetItem(itemId: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -787,28 +801,86 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
-  // Billing Sheets
-  async saveBillingSheet(workOrderId: number, billingData: any): Promise<void> {
-    // For now, we'll store billing data as notes in the work order
-    // In a production app, you might want a separate billing_sheets table
-    await db.update(workOrders).set({
-      notes: JSON.stringify(billingData),
-      status: 'completed',
-      completedAt: new Date(),
-    }).where(eq(workOrders.id, workOrderId));
+  // Standalone Billing Sheets - for work done without work orders
+  async getAllBillingSheets(): Promise<BillingSheetWithItems[]> {
+    const sheets = await db.select().from(billingSheets).orderBy(desc(billingSheets.createdAt));
+    
+    // Get items for each billing sheet
+    const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
+      const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
+      return { ...sheet, items };
+    }));
+    
+    return sheetsWithItems;
   }
 
-  async getBillingSheet(workOrderId: number): Promise<any> {
-    const workOrder = await this.getWorkOrder(workOrderId);
-    if (!workOrder?.notes) {
-      return null;
+  async getBillingSheetById(id: number): Promise<BillingSheetWithItems | undefined> {
+    const [sheet] = await db.select().from(billingSheets).where(eq(billingSheets.id, id));
+    if (!sheet) return undefined;
+    
+    const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
+    return { ...sheet, items };
+  }
+
+  async getBillingSheetCount(): Promise<number> {
+    const result = await db.select({ count: billingSheets.id }).from(billingSheets);
+    return result.length;
+  }
+
+  async createBillingSheet(billingSheetData: InsertBillingSheet): Promise<BillingSheet> {
+    const [newSheet] = await db.insert(billingSheets).values(billingSheetData).returning();
+    
+    // If items are provided, insert them
+    if ('items' in billingSheetData && Array.isArray(billingSheetData.items)) {
+      const items = billingSheetData.items as InsertBillingSheetItem[];
+      for (const item of items) {
+        await db.insert(billingSheetItems).values({
+          ...item,
+          billingSheetId: newSheet.id,
+          totalPrice: Number(item.quantity) * Number(item.unitPrice)
+        });
+      }
     }
     
-    try {
-      return JSON.parse(workOrder.notes);
-    } catch {
-      return null;
+    return newSheet;
+  }
+
+  async updateBillingSheet(id: number, billingSheetData: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined> {
+    const [updatedSheet] = await db.update(billingSheets).set(billingSheetData).where(eq(billingSheets.id, id)).returning();
+    return updatedSheet || undefined;
+  }
+
+  async deleteBillingSheet(id: number): Promise<boolean> {
+    // Delete items first
+    await db.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
+    
+    // Delete the billing sheet
+    const result = await db.delete(billingSheets).where(eq(billingSheets.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  async addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem> {
+    const [newItem] = await db.insert(billingSheetItems).values({
+      ...item,
+      billingSheetId,
+      totalPrice: Number(item.quantity) * Number(item.unitPrice)
+    }).returning();
+    return newItem;
+  }
+
+  async updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined> {
+    const updateData = { ...item };
+    if (item.quantity && item.unitPrice) {
+      updateData.totalPrice = Number(item.quantity) * Number(item.unitPrice);
     }
+    
+    const [updatedItem] = await db.update(billingSheetItems).set(updateData).where(eq(billingSheetItems.id, itemId)).returning();
+    return updatedItem || undefined;
+  }
+
+  async deleteBillingSheetItem(itemId: number): Promise<boolean> {
+    const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.id, itemId));
+    return (result.rowCount || 0) > 0;
   }
 }
 

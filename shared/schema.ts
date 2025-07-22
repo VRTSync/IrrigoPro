@@ -46,6 +46,45 @@ export const parts = pgTable("parts", {
   category: text("category"),
 });
 
+// Standalone billing sheets for work without work orders
+export const billingSheets = pgTable("billing_sheets", {
+  id: serial("id").primaryKey(),
+  billingNumber: text("billing_number").notNull().unique(),
+  customerId: integer("customer_id").references(() => customers.id),
+  customerName: text("customer_name").notNull(),
+  propertyAddress: text("property_address").notNull(),
+  workDate: timestamp("work_date").notNull(),
+  technicianName: text("technician_name").notNull(),
+  technicianId: integer("technician_id").references(() => users.id),
+  workDescription: text("work_description").notNull(),
+  status: text("status").notNull().default("draft"), // draft, submitted, approved, billed
+  totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
+  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
+  partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
+  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
+  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  photos: text("photos").array().default("{}"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Items used in standalone billing sheets
+export const billingSheetItems = pgTable("billing_sheet_items", {
+  id: serial("id").primaryKey(),
+  billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id),
+  partId: integer("part_id").references(() => parts.id),
+  partName: text("part_name").notNull(),
+  partDescription: text("part_description"),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  notes: text("notes"),
+});
+
 export const estimates = pgTable("estimates", {
   id: serial("id").primaryKey(),
   estimateNumber: text("estimate_number").notNull().unique(),
@@ -274,6 +313,8 @@ export const insertWorkOrderSchema = createInsertSchema(workOrders).omit({ id: t
 export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit({ id: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
+export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
+export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
 
 export type User = typeof users.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
@@ -291,6 +332,8 @@ export type WorkOrder = typeof workOrders.$inferSelect;
 export type WorkOrderItem = typeof workOrderItems.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
+export type BillingSheet = typeof billingSheets.$inferSelect;
+export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
@@ -308,6 +351,8 @@ export type InsertWorkOrder = z.infer<typeof insertWorkOrderSchema>;
 export type InsertWorkOrderItem = z.infer<typeof insertWorkOrderItemSchema>;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
+export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
+export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
 
 export type EstimateWithZones = Estimate & {
   zones: (EstimateZone & { items: EstimateItem[] })[];
@@ -331,4 +376,8 @@ export type WorkOrderWithItems = WorkOrder & {
 
 export type InvoiceWithItems = Invoice & {
   items: InvoiceItem[];
+};
+
+export type BillingSheetWithItems = BillingSheet & {
+  items: BillingSheetItem[];
 };
