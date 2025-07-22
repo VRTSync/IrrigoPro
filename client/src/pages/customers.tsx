@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings } from "lucide-react";
+import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
 import { useState } from "react";
 import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
@@ -130,15 +130,23 @@ export default function Customers() {
                   ))
                 ) : (
                   filteredCustomers?.map((customer) => (
-                    <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedCustomer(customer)}>
+                    <tr key={customer.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className="bg-blue-50 p-2 rounded-lg mr-3 hover:bg-blue-100 transition-colors">
+                          <div className="bg-blue-50 p-2 rounded-lg mr-3">
                             <Users className="w-4 h-4 text-blue-600" />
                           </div>
-                          <div>
+                          <div className="flex-1">
                             <div className="text-sm font-medium text-gray-900">{customer.name}</div>
                           </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-blue-600 hover:text-blue-900 ml-2"
+                            onClick={() => setSelectedCustomer(customer)}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
