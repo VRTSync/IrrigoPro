@@ -177,33 +177,7 @@ function Router() {
 }
 
 function App() {
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      try {
-        const userData = JSON.parse(savedUser);
-        setUser(userData);
-      } catch (error) {
-        console.error("Error parsing user data:", error);
-        localStorage.removeItem("user");
-      }
-    }
-  }, []);
-
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <div className="min-h-screen bg-gray-50">
-          {/* Show navigation for admin and irrigation_manager users */}
-          {(user?.role === "admin" || user?.role === "irrigation_manager") && <Navigation />}
-          <Router />
-        </div>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
-  );
+  return <Router />;
 }
 
 export default App;
