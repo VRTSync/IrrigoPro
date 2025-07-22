@@ -803,7 +803,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create work order from estimate - initially assign to manager
       const workOrderData = {
         estimateId: estimate.id,
-        customerId: estimate.customerId,
+        customerId: estimate.customerId || 0,
         customerName: estimate.customerName,
         customerEmail: estimate.customerEmail,
         customerPhone: estimate.customerPhone,
@@ -1035,6 +1035,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/billing-sheets", async (req, res) => {
     try {
+      console.log('Received billing sheet data:', req.body);
       const billingSheetData = req.body;
       
       // Generate billing number
@@ -1048,7 +1049,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json(billingSheet);
     } catch (error) {
-      res.status(500).json({ message: "Failed to create billing sheet" });
+      console.error('Error creating billing sheet:', error);
+      res.status(500).json({ message: "Failed to create billing sheet", error: error instanceof Error ? error.message : String(error) });
     }
   });
 

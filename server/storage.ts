@@ -166,7 +166,7 @@ export interface IStorage {
   getAllBillingSheets(): Promise<BillingSheetWithItems[]>;
   getBillingSheetById(id: number): Promise<BillingSheetWithItems | undefined>;
   getBillingSheetCount(): Promise<number>;
-  createBillingSheet(billingSheet: InsertBillingSheet): Promise<BillingSheet>;
+  createBillingSheet(billingSheet: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet>;
   updateBillingSheet(id: number, billingSheet: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined>;
   deleteBillingSheet(id: number): Promise<boolean>;
   addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem>;
@@ -831,12 +831,50 @@ export class DatabaseStorage implements IStorage {
     return result.length;
   }
 
-  async createBillingSheet(billingSheetData: InsertBillingSheet): Promise<BillingSheet> {
-    const [newSheet] = await db.insert(billingSheets).values(billingSheetData).returning();
+  async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet> {
+    // Extract items from the data
+    const { items, ...sheetData } = billingSheetData;
+    
+    // Calculate totals if they're missing
+    let laborSubtotal = Number(sheetData.laborSubtotal || 0);
+    let partsSubtotal = Number(sheetData.partsSubtotal || 0);
+    let markupAmount = Number(sheetData.markupAmount || 0);
+    let taxAmount = Number(sheetData.taxAmount || 0);
+    let totalAmount = Number(sheetData.totalAmount || 0);
+    
+    // If we have items, calculate the totals
+    if (items && Array.isArray(items)) {
+      partsSubtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
+      laborSubtotal = Number(sheetData.totalHours || 0) * Number(sheetData.laborRate || 0);
+      
+      // Calculate markup (typically on parts)
+      const markupPercent = 20; // Default 20% markup
+      markupAmount = partsSubtotal * (markupPercent / 100);
+      
+      // Calculate tax on subtotals + markup
+      const taxPercent = 8.25; // Default tax rate
+      taxAmount = (laborSubtotal + partsSubtotal + markupAmount) * (taxPercent / 100);
+      
+      // Total amount
+      totalAmount = laborSubtotal + partsSubtotal + markupAmount + taxAmount;
+    }
+
+    const finalSheetData = {
+      ...sheetData,
+      laborSubtotal: laborSubtotal.toString(),
+      partsSubtotal: partsSubtotal.toString(),
+      markupAmount: markupAmount.toString(),
+      taxAmount: taxAmount.toString(),
+      totalAmount: totalAmount.toString(),
+      workDate: new Date(sheetData.workDate as string)
+    };
+
+    console.log('Creating billing sheet with data:', finalSheetData);
+    
+    const [newSheet] = await db.insert(billingSheets).values(finalSheetData).returning();
     
     // If items are provided, insert them
-    if ('items' in billingSheetData && Array.isArray(billingSheetData.items)) {
-      const items = billingSheetData.items as InsertBillingSheetItem[];
+    if (items && Array.isArray(items)) {
       for (const item of items) {
         await db.insert(billingSheetItems).values({
           ...item,
