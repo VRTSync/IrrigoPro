@@ -6,16 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2 } from "lucide-react";
 import type { Estimate } from "@shared/schema";
 
 interface EstimateDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   estimateId: number | null;
+  onEdit?: (estimateId: number) => void;
 }
 
-export function EstimateDetailModal({ open, onOpenChange, estimateId }: EstimateDetailModalProps) {
+export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: EstimateDetailModalProps) {
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
 
@@ -268,6 +269,19 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId }: Estimate
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Close
               </Button>
+              {estimate.status !== 'converted_to_work_order' && onEdit && (
+                <Button 
+                  onClick={() => {
+                    onEdit(estimateId!);
+                    onOpenChange(false);
+                  }}
+                  variant="outline"
+                  className="border-blue-200 text-blue-600 hover:bg-blue-50"
+                >
+                  <Edit2 className="w-4 h-4 mr-2" />
+                  Edit Estimate
+                </Button>
+              )}
               {estimate.status === 'approved' && estimate.status !== 'converted_to_work_order' && (
                 <Button 
                   onClick={handleConvertToWorkOrder}

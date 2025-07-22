@@ -246,6 +246,11 @@ export default function Estimates() {
         open={showDetailModal}
         onOpenChange={setShowDetailModal}
         estimateId={selectedEstimateId}
+        onEdit={(estimateId) => {
+          setEditEstimateId(estimateId);
+          setShowDetailModal(false);
+          setShowEstimateModal(true);
+        }}
       />
     </div>
   );
