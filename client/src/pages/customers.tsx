@@ -98,7 +98,7 @@ export default function Customers() {
                         Contract Type
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Billing Rates
+                        Controllers
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Address
@@ -129,8 +129,7 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="space-y-1">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-4 w-20" />
+                          <Skeleton className="h-6 w-20 rounded-full" />
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -174,10 +173,9 @@ export default function Customers() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900 space-y-1">
-                          <div>Labor: ${customer.laborRate || '45.00'}/hr</div>
-                          <div className="text-xs text-gray-500">
-                            Markup: {customer.markupPercent || '20.00'}% | Tax: {customer.taxPercent || '8.25'}%
+                        <div className="text-sm text-gray-900">
+                          <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            {customer.totalControllers || 1} Controller{(customer.totalControllers || 1) !== 1 ? 's' : ''}
                           </div>
                         </div>
                       </td>
