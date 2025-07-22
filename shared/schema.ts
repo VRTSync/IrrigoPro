@@ -65,7 +65,7 @@ export const billingSheets = pgTable("billing_sheets", {
   markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
-  photos: text("photos").array().default("{}"),
+  photos: text("photos").array().default([]),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -107,8 +107,8 @@ export const estimates = pgTable("estimates", {
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
-  photos: text("photos").array().default("{}"), // JSON array of photo URLs
-  attachments: text("attachments").array().default("{}"), // JSON array of attachment URLs (landscape plans, etc.)
+  photos: text("photos").array().default([]), // JSON array of photo URLs
+  attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -232,8 +232,8 @@ export const workOrders = pgTable("work_orders", {
   // Financial fields
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
   totalItems: integer("total_items").default(0),
-  photos: text("photos").array().default("{}"), // JSON array of photo URLs
-  attachments: text("attachments").array().default("{}"), // JSON array of attachment URLs (landscape plans, etc.)
+  photos: text("photos").array().default([]), // JSON array of photo URLs
+  attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -255,26 +255,27 @@ export const workOrderItems = pgTable("work_order_items", {
 });
 
 // Invoices - created from completed work orders
+// Monthly consolidated invoices that include all work for a customer
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
   invoiceNumber: text("invoice_number").notNull().unique(),
-  workOrderId: integer("work_order_id").references(() => workOrders.id).notNull(),
-  estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone"),
-  projectName: text("project_name").notNull(),
-  projectAddress: text("project_address"),
+  // Monthly period this invoice covers
+  invoiceMonth: integer("invoice_month").notNull(), // 1-12
+  invoiceYear: integer("invoice_year").notNull(),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  // Invoice details
   status: text("status").notNull().default("draft"), // draft, sent, paid, overdue, cancelled
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
-  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
-  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).notNull(),
-  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
+  // Payment info
   dueDate: timestamp("due_date"),
   sentAt: timestamp("sent_at"),
   paidAt: timestamp("paid_at"),
@@ -283,18 +284,27 @@ export const invoices = pgTable("invoices", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Invoice Items - copied from work order items with actual quantities
+// Line items for monthly invoices - can come from work orders OR billing sheets
 export const invoiceItems = pgTable("invoice_items", {
   id: serial("id").primaryKey(),
-  invoiceId: integer("invoice_id").references(() => invoices.id).notNull(),
-  workOrderItemId: integer("work_order_item_id").references(() => workOrderItems.id),
-  partId: integer("part_id").references(() => parts.id).notNull(),
-  partName: text("part_name").notNull(),
-  partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
-  quantity: integer("quantity").notNull(),
-  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
-  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
-  description: text("description"),
+  invoiceId: integer("invoice_id").references(() => invoices.id),
+  // Source tracking - either from work order or billing sheet
+  sourceType: text("source_type").notNull(), // "work_order" or "billing_sheet"
+  sourceId: integer("source_id").notNull(), // ID of work order or billing sheet
+  workOrderId: integer("work_order_id").references(() => workOrders.id), // Nullable for billing sheet items
+  billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id), // Nullable for work order items
+  // Item details
+  workDate: timestamp("work_date").notNull(),
+  description: text("description").notNull(), // Work description or project name
+  partId: integer("part_id").references(() => parts.id),
+  partName: text("part_name"),
+  partDescription: text("part_description"),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).default("0"),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).default("0"),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).default("0"),
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).default("0"),
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("0"),
+  laborTotal: decimal("labor_total", { precision: 10, scale: 2 }).default("0"),
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });

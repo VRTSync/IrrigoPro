@@ -9,7 +9,7 @@ This is a comprehensive full-stack irrigation business management system built w
 Preferred communication style: Simple, everyday language.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request 2025-07-22).
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching (consolidated 2025-07-22).
-Business Rules: Markup calculations apply only to parts subtotal, not parts + labor combined. Labor hours are per-part, not multiplied by quantity.
+Business Rules: Markup calculations apply only to parts subtotal, not parts + labor combined. Labor hours are per-part, not multiplied by quantity. Monthly invoice consolidation combines all customer work into single QuickBooks invoices.
 
 ## System Architecture
 
@@ -168,5 +168,8 @@ The system uses comprehensive database tables:
 - **Role-Based Data Filtering**: Field techs now only see work orders assigned to them and billing sheets they created
 - **Field Tech Dashboard Redesign**: Clean two-card layout matching manager dashboard style
 - **Enhanced Security**: Field techs cannot create new work orders, only view/manage assigned ones
+- **Monthly Invoice Consolidation System**: Implemented monthly invoice generation that combines all work orders and billing sheets per customer into single QuickBooks invoices
+- **Billing Sheet Integration**: Added photo upload capability and redesigned modal for field technicians with pricing information hidden
+- **Unified Invoice Architecture**: Restructured invoice system to track both work order and billing sheet sources for comprehensive monthly billing
 
 The application follows modern full-stack development practices with type safety throughout, efficient state management, and a clean separation of concerns between frontend and backend code.

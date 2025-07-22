@@ -1057,6 +1057,208 @@ export class DatabaseStorage implements IStorage {
     
     return sheetsWithItems;
   }
+
+  // Monthly Invoice Consolidation Methods
+  async generateMonthlyInvoices(month: number, year: number): Promise<Invoice[]> {
+    // Get all completed work orders and approved billing sheets for the month
+    const periodStart = new Date(year, month - 1, 1);
+    const periodEnd = new Date(year, month, 0, 23, 59, 59);
+    
+    // Get completed work orders for the period
+    const completedWorkOrders = await db.select()
+      .from(workOrders)
+      .where(
+        and(
+          eq(workOrders.status, "completed"),
+          gte(workOrders.completedAt, periodStart),
+          lte(workOrders.completedAt, periodEnd)
+        )
+      );
+    
+    // Get approved billing sheets for the period
+    const approvedBillingSheets = await db.select()
+      .from(billingSheets)
+      .where(
+        and(
+          eq(billingSheets.status, "approved"),
+          gte(billingSheets.workDate, periodStart),
+          lte(billingSheets.workDate, periodEnd)
+        )
+      );
+    
+    // Group by customer
+    const customerWork = new Map<number, { workOrders: any[], billingSheets: any[] }>();
+    
+    // Group work orders by customer
+    completedWorkOrders.forEach(wo => {
+      if (!customerWork.has(wo.customerId)) {
+        customerWork.set(wo.customerId, { workOrders: [], billingSheets: [] });
+      }
+      customerWork.get(wo.customerId)!.workOrders.push(wo);
+    });
+    
+    // Group billing sheets by customer
+    approvedBillingSheets.forEach(bs => {
+      if (bs.customerId) {
+        if (!customerWork.has(bs.customerId)) {
+          customerWork.set(bs.customerId, { workOrders: [], billingSheets: [] });
+        }
+        customerWork.get(bs.customerId)!.billingSheets.push(bs);
+      }
+    });
+    
+    // Generate invoices for each customer
+    const invoices: Invoice[] = [];
+    for (const [customerId, work] of customerWork) {
+      const invoice = await this.createMonthlyInvoice(customerId, work, month, year, periodStart, periodEnd);
+      if (invoice) {
+        invoices.push(invoice);
+      }
+    }
+    
+    return invoices;
+  }
+
+  async createMonthlyInvoice(
+    customerId: number, 
+    work: { workOrders: any[], billingSheets: any[] },
+    month: number,
+    year: number,
+    periodStart: Date,
+    periodEnd: Date
+  ): Promise<Invoice | null> {
+    // Check if invoice already exists for this customer and period
+    const existingInvoice = await db.select()
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.customerId, customerId),
+          eq(invoices.invoiceMonth, month),
+          eq(invoices.invoiceYear, year)
+        )
+      );
+    
+    if (existingInvoice.length > 0) {
+      return existingInvoice[0];
+    }
+    
+    // Get customer details
+    const customer = await this.getCustomer(customerId);
+    if (!customer) return null;
+    
+    // Calculate totals from all work
+    let partsSubtotal = 0;
+    let laborSubtotal = 0;
+    
+    // Add work order totals
+    work.workOrders.forEach(wo => {
+      partsSubtotal += parseFloat(wo.totalPartsCost || "0");
+      laborSubtotal += parseFloat(wo.totalHours || "0") * parseFloat(customer.laborRate || "45");
+    });
+    
+    // Add billing sheet totals
+    work.billingSheets.forEach(bs => {
+      partsSubtotal += parseFloat(bs.partsSubtotal || "0");
+      laborSubtotal += parseFloat(bs.laborSubtotal || "0");
+    });
+    
+    // Calculate markup and tax
+    const markupPercent = parseFloat(customer.markupPercent || "20");
+    const taxPercent = parseFloat(customer.taxPercent || "8.25");
+    const markupAmount = partsSubtotal * (markupPercent / 100);
+    const taxAmount = (partsSubtotal + laborSubtotal + markupAmount) * (taxPercent / 100);
+    const totalAmount = partsSubtotal + laborSubtotal + markupAmount + taxAmount;
+    
+    // Generate invoice number
+    const invoiceCount = await this.getInvoiceCount();
+    const invoiceNumber = `INV-${year}-${String(month).padStart(2, '0')}-${String(invoiceCount + 1).padStart(3, '0')}`;
+    
+    // Create invoice
+    const [newInvoice] = await db.insert(invoices).values({
+      invoiceNumber,
+      customerId,
+      customerName: customer.name,
+      customerEmail: customer.email,
+      customerPhone: customer.phone,
+      invoiceMonth: month,
+      invoiceYear: year,
+      periodStart,
+      periodEnd,
+      partsSubtotal: partsSubtotal.toString(),
+      laborSubtotal: laborSubtotal.toString(),
+      markupAmount: markupAmount.toString(),
+      taxAmount: taxAmount.toString(),
+      totalAmount: totalAmount.toString(),
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+    }).returning();
+    
+    // Create invoice items from work orders
+    for (const wo of work.workOrders) {
+      const woItems = await db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, wo.id));
+      for (const item of woItems) {
+        await db.insert(invoiceItems).values({
+          invoiceId: newInvoice.id,
+          sourceType: "work_order",
+          sourceId: wo.id,
+          workOrderId: wo.id,
+          workDate: wo.completedAt || wo.startedAt,
+          description: wo.projectName || wo.description,
+          partId: item.partId,
+          partName: item.partName,
+          quantity: item.actualQuantityUsed?.toString() || item.quantity.toString(),
+          unitPrice: item.partPrice.toString(),
+          totalPrice: ((item.actualQuantityUsed || item.quantity) * parseFloat(item.partPrice)).toString(),
+          laborHours: item.actualLaborHours?.toString() || item.laborHours.toString(),
+          laborRate: customer.laborRate || "45",
+          laborTotal: ((parseFloat(item.actualLaborHours?.toString() || item.laborHours.toString())) * parseFloat(customer.laborRate || "45")).toString(),
+        });
+      }
+    }
+    
+    // Create invoice items from billing sheets
+    for (const bs of work.billingSheets) {
+      const bsItems = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, bs.id));
+      for (const item of bsItems) {
+        await db.insert(invoiceItems).values({
+          invoiceId: newInvoice.id,
+          sourceType: "billing_sheet",
+          sourceId: bs.id,
+          billingSheetId: bs.id,
+          workDate: bs.workDate,
+          description: bs.workDescription,
+          partId: item.partId,
+          partName: item.partName,
+          partDescription: item.partDescription,
+          quantity: item.quantity.toString(),
+          unitPrice: item.unitPrice.toString(),
+          totalPrice: item.totalPrice.toString(),
+          laborHours: item.laborHours.toString(),
+          laborRate: bs.laborRate.toString(),
+          laborTotal: (parseFloat(item.laborHours.toString()) * parseFloat(bs.laborRate.toString())).toString(),
+        });
+      }
+    }
+    
+    return newInvoice;
+  }
+
+  async getInvoiceCount(): Promise<number> {
+    const result = await db.select({ count: invoices.id }).from(invoices);
+    return result.length;
+  }
+
+  async getAllInvoices(): Promise<Invoice[]> {
+    return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  }
+
+  async getInvoiceById(id: number): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    return invoice || undefined;
+  }
+
+  async getInvoiceItems(invoiceId: number): Promise<InvoiceItem[]> {
+    return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  }
 }
 
 export const storage = new DatabaseStorage();
