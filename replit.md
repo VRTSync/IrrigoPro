@@ -9,6 +9,7 @@ This is a comprehensive full-stack irrigation business management system built w
 Preferred communication style: Simple, everyday language.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request 2025-07-22).
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching (consolidated 2025-07-22).
+Business Rules: Markup calculations apply only to parts subtotal, not parts + labor combined. Labor hours are per-part, not multiplied by quantity.
 
 ## System Architecture
 
@@ -155,5 +156,13 @@ The system uses comprehensive database tables:
 - Database connection via environment variables
 - Vite configuration for asset handling and aliases
 - TypeScript paths for clean imports
+
+## Recent Changes (2025-07-22)
+
+- Fixed critical pricing calculation bugs including "through the roof" labor calculations
+- Corrected markup calculation to only apply to parts subtotal (not parts + labor) per business rules
+- Updated both backend storage methods and frontend modal logic for consistent calculations
+- Added edit button to estimate detail modal for seamless view-to-edit transition
+- Unified estimate pricing display - totals now show correctly in list view, detail modal, and estimate summary
 
 The application follows modern full-stack development practices with type safety throughout, efficient state management, and a clean separation of concerns between frontend and backend code.
