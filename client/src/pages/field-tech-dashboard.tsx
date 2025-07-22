@@ -3,20 +3,31 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Play, Pause, Clock, Package, CheckCircle, User, MapPin } from "lucide-react";
+import { Play, Pause, Clock, Package, CheckCircle, User, MapPin, FileText, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
 import type { WorkOrder, FieldWorkSession } from "@shared/schema";
+import { Link } from "wouter";
 
 export default function FieldTechDashboard() {
   const [activeTimer, setActiveTimer] = useState<number | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get assigned work orders
+  // Get current user from localStorage
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+
+  const currentUser = getCurrentUser();
+
+  // Get assigned work orders for this technician
   const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
-    queryKey: ["/api/work-orders/assigned"],
+    queryKey: ["/api/work-orders", "technician", currentUser?.id],
+    queryFn: () => apiRequest(`/api/work-orders?technician=${currentUser?.id}`, "GET"),
+    enabled: !!currentUser?.id,
   });
 
   // Get active field work session
@@ -81,7 +92,47 @@ export default function FieldTechDashboard() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Field Tech Portal</h1>
-          <p className="text-gray-600 mt-2">Manage your assigned work orders</p>
+          <p className="text-gray-600 mt-2">Manage your assigned work orders and billing</p>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <Card className="hover:shadow-md transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="bg-blue-100 p-3 rounded-full">
+                  <Package className="w-6 h-6 text-blue-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900">Work Orders</h3>
+                  <p className="text-gray-600">View and manage assigned work</p>
+                </div>
+                <Badge variant="secondary">
+                  {workOrders?.length || 0} active
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Link href="/billing-sheets">
+            <Card className="hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="bg-green-100 p-3 rounded-full">
+                    <FileText className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-gray-900">Billing Sheets</h3>
+                    <p className="text-gray-600">Create billing for standalone work</p>
+                  </div>
+                  <Button size="sm" className="bg-green-600 hover:bg-green-700">
+                    <Plus className="w-4 h-4 mr-2" />
+                    New
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
 
         {/* Active Timer Card */}

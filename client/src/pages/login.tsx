@@ -42,7 +42,7 @@ export default function Login() {
       
       // Redirect based on role
       if (user.role === "field_tech") {
-        window.location.href = "/field-portal";
+        window.location.href = "/";
       } else if (user.role === "irrigation_manager") {
         window.location.href = "/work-orders";
       } else {

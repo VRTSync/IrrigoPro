@@ -20,8 +20,10 @@ import BillingSheets from "@/pages/billing-sheets";
 import { UserSelector } from "@/components/user-selector";
 
 interface User {
-  id: string;
+  id: number;
+  username: string;
   name: string;
+  email: string;
   role: "admin" | "irrigation_manager" | "field_tech";
   isActive: boolean;
 }
@@ -112,6 +114,8 @@ function Router() {
             <Switch>
               <Route path="/" component={FieldTechDashboard} />
               <Route path="/field-tech" component={FieldTechDashboard} />
+              <Route path="/field-portal" component={FieldPortal} />
+              <Route path="/work-orders" component={WorkOrders} />
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
               <Route path="/login" component={Login} />

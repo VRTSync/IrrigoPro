@@ -1180,7 +1180,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Billing Sheets API - for work done without work orders
   app.get("/api/billing-sheets", async (req, res) => {
     try {
-      const billingSheets = await storage.getAllBillingSheets();
+      const { technician } = req.query;
+      
+      let billingSheets;
+      if (technician) {
+        billingSheets = await storage.getBillingSheetsByTechnician(parseInt(technician as string));
+      } else {
+        billingSheets = await storage.getAllBillingSheets();
+      }
+      
       res.json(billingSheets);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch billing sheets" });

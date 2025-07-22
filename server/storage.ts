@@ -70,6 +70,7 @@ export interface IStorage {
   // Customer-related data
   getEstimatesByCustomer(customerId: number): Promise<Estimate[]>;
   getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]>;
+  getBillingSheetsByTechnician(technicianId: number): Promise<BillingSheetWithItems[]>;
   
   // Customer Integrations
   syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
@@ -1035,6 +1036,18 @@ export class DatabaseStorage implements IStorage {
 
   async getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]> {
     const sheets = await db.select().from(billingSheets).where(eq(billingSheets.customerId, customerId)).orderBy(desc(billingSheets.createdAt));
+    
+    // Get items for each billing sheet
+    const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
+      const items = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
+      return { ...sheet, items };
+    }));
+    
+    return sheetsWithItems;
+  }
+
+  async getBillingSheetsByTechnician(technicianId: number): Promise<BillingSheetWithItems[]> {
+    const sheets = await db.select().from(billingSheets).where(eq(billingSheets.technicianId, technicianId)).orderBy(desc(billingSheets.createdAt));
     
     // Get items for each billing sheet
     const sheetsWithItems = await Promise.all(sheets.map(async (sheet) => {
