@@ -369,7 +369,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
     const laborSubtotal = totalLaborHours * laborRate;
     
     const markupPercent = form.getValues("markupPercent") || 0;
-    const markupAmount = (partsSubtotal + laborSubtotal) * (markupPercent / 100);
+    const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
     
     const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
     const taxPercent = form.getValues("taxPercent") || 0;

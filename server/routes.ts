@@ -573,7 +573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
 
       const laborSubtotal = totalLaborHours * laborRate;
-      const markupAmount = (partsSubtotal + laborSubtotal) * (markupPercent / 100);
+      const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
       const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
       const taxAmount = subtotalWithMarkup * (taxPercent / 100);
       const totalAmount = subtotalWithMarkup + taxAmount;
@@ -660,7 +660,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
 
       const laborSubtotal = totalLaborHours * laborRate;
-      const markupAmount = (partsSubtotal + laborSubtotal) * (markupPercent / 100);
+      const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
       const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
       const taxAmount = subtotalWithMarkup * (taxPercent / 100);
       const totalAmount = subtotalWithMarkup + taxAmount;
