@@ -61,7 +61,7 @@ export default function Navigation() {
   return (
     <>
       {/* Desktop Navigation - Top */}
-      <nav className="hidden lg:block bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+      <nav className="hidden lg:block bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo Button */}
@@ -141,7 +141,7 @@ export default function Navigation() {
       {/* Mobile Navigation - Bottom */}
       <div className="lg:hidden">
         {/* Top Bar with Logo and Notifications */}
-        <div className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+        <div className="bg-white shadow-sm border-b border-gray-200">
           <div className="flex justify-between items-center h-16 px-4">
             {/* Logo */}
             <div className="flex items-center">
