@@ -1,17 +1,20 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { BillingSheet } from "@shared/schema";
 
 export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Get current user from localStorage  
   const getCurrentUser = () => {
@@ -68,6 +71,60 @@ export default function BillingSheets() {
     sheet.technicianName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
+
+  // Billing sheet approval mutation
+  const approveBillingSheet = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/billing-sheets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' })
+      });
+      if (!response.ok) throw new Error('Failed to approve billing sheet');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
+      toast({
+        title: "Success",
+        description: "Billing sheet approved successfully"
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error", 
+        description: "Failed to approve billing sheet",
+        variant: "destructive"
+      });
+    }
+  });
+
+  // Billing sheet rejection mutation
+  const rejectBillingSheet = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/billing-sheets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'draft' })
+      });
+      if (!response.ok) throw new Error('Failed to reject billing sheet');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
+      toast({
+        title: "Success",
+        description: "Billing sheet rejected and returned to draft"
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to reject billing sheet", 
+        variant: "destructive"
+      });
+    }
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
@@ -207,7 +264,33 @@ export default function BillingSheets() {
                   </div>
                   
                   <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
-                    {getStatusBadge(sheet.status)}
+                    <div className="flex flex-col sm:items-end gap-2">
+                      {getStatusBadge(sheet.status)}
+                      {/* Approval buttons for managers on submitted billing sheets */}
+                      {currentUser?.role !== 'field_tech' && sheet.status === 'submitted' && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => approveBillingSheet.mutate(sheet.id)}
+                            disabled={approveBillingSheet.isPending}
+                            className="bg-green-600 hover:bg-green-700 text-white px-3"
+                          >
+                            <Check className="w-3 h-3 mr-1" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => rejectBillingSheet.mutate(sheet.id)}
+                            disabled={rejectBillingSheet.isPending}
+                            className="border-red-300 text-red-600 hover:bg-red-50 px-3"
+                          >
+                            <X className="w-3 h-3 mr-1" />
+                            Reject
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                     <div className="text-xs text-gray-500">
                       Created: {formatDate(sheet.createdAt)}
                     </div>
