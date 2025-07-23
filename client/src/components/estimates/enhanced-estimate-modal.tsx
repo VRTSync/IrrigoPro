@@ -102,7 +102,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       projectName: "",
       projectAddress: "",
       estimateDate: new Date().toISOString().split('T')[0],
-      createdBy: "Irrigation Manager",
+      createdBy: JSON.parse(localStorage.getItem('user') || '{}').name || "Irrigation Manager",
       laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
@@ -175,10 +175,15 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
     form.setValue("customerName", customer.name);
     form.setValue("customerEmail", customer.email);
     form.setValue("customerPhone", customer.phone || "");
-    // Use customer's contract rates
+    // Use customer's contract rates - labor rate is pulled from customer profile
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
     form.setValue("markupPercent", parseFloat(customer.markupPercent || "20"));
     form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
+    
+    // Clear validation errors after autofill
+    setTimeout(() => {
+      form.clearErrors();
+    }, 100);
   };
 
   const addZone = () => {
@@ -463,7 +468,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="projectName"
@@ -493,7 +498,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="estimateDate"
@@ -533,7 +538,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Add New Zone Form */}
-                  <div className="grid grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
                     <Select
                       value={newZoneForm.controllerId}
                       onValueChange={(value) => setNewZoneForm(prev => ({ ...prev, controllerId: value }))}
