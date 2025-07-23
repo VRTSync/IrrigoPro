@@ -6,7 +6,7 @@ import { Link } from "wouter";
 export default function AdminDashboard() {
   // Simplified admin dashboard - user management moved to Users page (updated)
   return (
-    <div className="max-w-7xl mx-auto pt-8">
+    <div className="max-w-7xl mx-auto pt-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
