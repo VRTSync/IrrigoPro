@@ -40,9 +40,10 @@ interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
   onClose: () => void;
   onUpdate: () => void;
+  showAddDetailsButton?: boolean;
 }
 
-export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDetailsProps) {
+export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsButton = false }: WorkOrderDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
@@ -620,7 +621,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
         </Tabs>
 
         {/* Action Buttons - Bottom Section */}
-        {(workOrder.status === 'pending' || workOrder.status === 'assigned') && (
+        {showAddDetailsButton && (workOrder.status === 'pending' || workOrder.status === 'assigned') && (
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
               <Button

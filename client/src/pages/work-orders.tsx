@@ -30,6 +30,7 @@ import type { WorkOrder } from "@shared/schema";
 export default function WorkOrders() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [selectedWorkOrderForStart, setSelectedWorkOrderForStart] = useState<WorkOrder | null>(null);
   const [selectedWorkOrderForCompletion, setSelectedWorkOrderForCompletion] = useState<WorkOrder | null>(null);
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -464,7 +465,7 @@ export default function WorkOrders() {
                                   size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleStartWork(workOrder.id);
+                                    setSelectedWorkOrderForStart(workOrder);
                                   }}
                                   className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                                 >
@@ -492,18 +493,22 @@ export default function WorkOrders() {
                       ) : (
                         // Manager/Admin View - Status-based action buttons
                         <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedWorkOrder(workOrder);
-                            }}
-                            className="flex-1"
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            View
-                          </Button>
+                          {/* Show View button only for work orders NOT assigned to current user */}
+                          {!(workOrder.assignedTechnicianId === currentUser.id || 
+                            workOrder.assignedTechnicianName === currentUser.name) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedWorkOrder(workOrder);
+                              }}
+                              className="flex-1"
+                            >
+                              <Eye className="w-4 h-4 mr-1" />
+                              View
+                            </Button>
+                          )}
                           
                           {/* Start Work Order button - only for work orders assigned to current user or unassigned (managers only) */}
                           {(workOrder.status === 'pending' || workOrder.status === 'assigned') && 
@@ -514,7 +519,7 @@ export default function WorkOrders() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedWorkOrder(workOrder);
+                                setSelectedWorkOrderForStart(workOrder);
                               }}
                               className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                             >
@@ -598,7 +603,7 @@ export default function WorkOrders() {
           />
         )}
 
-        {/* Work Order Details Dialog */}
+        {/* Work Order Details Dialog - View Only */}
         {selectedWorkOrder && (
           <WorkOrderDetails 
             workOrder={selectedWorkOrder}
@@ -610,6 +615,23 @@ export default function WorkOrders() {
               console.log('Updating work orders');
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
+            showAddDetailsButton={false}
+          />
+        )}
+
+        {/* Work Order Details Dialog - Start Work Order */}
+        {selectedWorkOrderForStart && (
+          <WorkOrderDetails 
+            workOrder={selectedWorkOrderForStart}
+            onClose={() => {
+              console.log('Closing work order start details');
+              setSelectedWorkOrderForStart(null);
+            }}
+            onUpdate={() => {
+              console.log('Updating work orders');
+              queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
+            }}
+            showAddDetailsButton={true}
           />
         )}
 
