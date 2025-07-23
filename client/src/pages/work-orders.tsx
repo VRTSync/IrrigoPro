@@ -145,7 +145,7 @@ export default function WorkOrders() {
           </div>
           
           <div className="flex flex-wrap gap-3 mb-6">
-            {Array.from({ length: 4 }).map((_, i) => (
+            {Array.from({ length: 3 }).map((_, i) => (
               <Card key={i} className="flex-1 min-w-[120px]">
                 <CardContent className="p-3">
                   <div className="flex items-center space-x-2">
@@ -262,19 +262,7 @@ export default function WorkOrders() {
             </CardContent>
           </Card>
 
-          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow flex-1 min-w-[120px]">
-            <CardContent className="p-3">
-              <div className="flex items-center space-x-2">
-                <div className="bg-gray-100 p-1.5 rounded-full">
-                  <FileText className="w-3 h-3 text-gray-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-600">Total</p>
-                  <p className="text-lg font-bold text-gray-900">{workOrders?.length || 0}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+
         </div>
 
         {/* Filters */}
