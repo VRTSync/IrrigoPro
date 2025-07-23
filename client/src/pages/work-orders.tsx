@@ -144,11 +144,18 @@ export default function WorkOrders() {
             <Skeleton className="h-10 w-36" />
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="flex flex-wrap gap-3 mb-6">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i} className="p-6">
-                <Skeleton className="h-4 w-16 mb-2" />
-                <Skeleton className="h-8 w-8" />
+              <Card key={i} className="flex-1 min-w-[120px]">
+                <CardContent className="p-3">
+                  <div className="flex items-center space-x-2">
+                    <Skeleton className="h-6 w-6 rounded-full" />
+                    <div>
+                      <Skeleton className="h-3 w-12 mb-1" />
+                      <Skeleton className="h-5 w-6" />
+                    </div>
+                  </div>
+                </CardContent>
               </Card>
             ))}
           </div>
@@ -211,59 +218,59 @@ export default function WorkOrders() {
           )}
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Pending</p>
-                  <p className="text-2xl font-bold text-gray-900">{getStatusCount('pending')}</p>
+        {/* Stats Cards - Compact Single Row */}
+        <div className="flex flex-wrap gap-3 mb-6">
+          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow flex-1 min-w-[120px]">
+            <CardContent className="p-3">
+              <div className="flex items-center space-x-2">
+                <div className="bg-yellow-100 p-1.5 rounded-full">
+                  <Clock className="w-3 h-3 text-yellow-600" />
                 </div>
-                <div className="bg-yellow-100 p-3 rounded-full">
-                  <Clock className="w-5 h-5 text-yellow-600" />
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Pending</p>
+                  <p className="text-lg font-bold text-gray-900">{getStatusCount('pending')}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">In Progress</p>
-                  <p className="text-2xl font-bold text-gray-900">{getStatusCount('in_progress')}</p>
+          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow flex-1 min-w-[120px]">
+            <CardContent className="p-3">
+              <div className="flex items-center space-x-2">
+                <div className="bg-blue-100 p-1.5 rounded-full">
+                  <AlertCircle className="w-3 h-3 text-blue-600" />
                 </div>
-                <div className="bg-blue-100 p-3 rounded-full">
-                  <AlertCircle className="w-5 h-5 text-blue-600" />
+                <div>
+                  <p className="text-xs font-medium text-gray-600">In Progress</p>
+                  <p className="text-lg font-bold text-gray-900">{getStatusCount('in_progress')}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Completed</p>
-                  <p className="text-2xl font-bold text-gray-900">{getStatusCount('completed')}</p>
+          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow flex-1 min-w-[120px]">
+            <CardContent className="p-3">
+              <div className="flex items-center space-x-2">
+                <div className="bg-green-100 p-1.5 rounded-full">
+                  <CheckCircle className="w-3 h-3 text-green-600" />
                 </div>
-                <div className="bg-green-100 p-3 rounded-full">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Completed</p>
+                  <p className="text-lg font-bold text-gray-900">{getStatusCount('completed')}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Total</p>
-                  <p className="text-2xl font-bold text-gray-900">{workOrders?.length || 0}</p>
+          <Card className="bg-white border-0 shadow-sm hover:shadow-md transition-shadow flex-1 min-w-[120px]">
+            <CardContent className="p-3">
+              <div className="flex items-center space-x-2">
+                <div className="bg-gray-100 p-1.5 rounded-full">
+                  <FileText className="w-3 h-3 text-gray-600" />
                 </div>
-                <div className="bg-gray-100 p-3 rounded-full">
-                  <FileText className="w-5 h-5 text-gray-600" />
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Total</p>
+                  <p className="text-lg font-bold text-gray-900">{workOrders?.length || 0}</p>
                 </div>
               </div>
             </CardContent>
