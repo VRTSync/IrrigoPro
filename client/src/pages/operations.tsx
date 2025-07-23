@@ -166,12 +166,26 @@ export default function Operations() {
       </div>
 
       <Tabs defaultValue="all" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="all">All ({allItems.length})</TabsTrigger>
-          <TabsTrigger value="estimates">Estimates ({estimates.length})</TabsTrigger>
-          <TabsTrigger value="workorders">Work Orders ({workOrders.length})</TabsTrigger>
-          <TabsTrigger value="billingsheets">Billing Sheets ({billingSheets.length})</TabsTrigger>
-        </TabsList>
+        <div className="w-full overflow-x-auto">
+          <TabsList className="grid w-full grid-cols-4 min-w-[600px] h-auto">
+            <TabsTrigger value="all" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
+              <span className="hidden sm:inline">All ({allItems.length})</span>
+              <span className="sm:hidden">All<br />({allItems.length})</span>
+            </TabsTrigger>
+            <TabsTrigger value="estimates" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
+              <span className="hidden sm:inline">Estimates ({estimates.length})</span>
+              <span className="sm:hidden">Est<br />({estimates.length})</span>
+            </TabsTrigger>
+            <TabsTrigger value="workorders" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
+              <span className="hidden sm:inline">Work Orders ({workOrders.length})</span>
+              <span className="sm:hidden">WO<br />({workOrders.length})</span>
+            </TabsTrigger>
+            <TabsTrigger value="billingsheets" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
+              <span className="hidden sm:inline">Billing Sheets ({billingSheets.length})</span>
+              <span className="sm:hidden">Bill<br />({billingSheets.length})</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="all" className="space-y-4">
           {allItems.length === 0 ? (
