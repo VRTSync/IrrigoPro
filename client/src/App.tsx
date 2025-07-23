@@ -178,14 +178,14 @@ function Router() {
     );
   }
 
-  // Admin gets full access to the system with unified dashboard
+  // Admin gets access to admin-specific dashboard only
   return (
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>
         <div className="min-h-screen bg-gray-50">
           <Navigation />
           <Switch>
-            <Route path="/" component={ManagerDashboard} />
+            <Route path="/" component={AdminDashboard} />
             <Route path="/admin" component={AdminDashboard} />
             <Route path="/estimates" component={Estimates} />
             <Route path="/parts" component={PartsCatalog} />
