@@ -121,12 +121,16 @@ export default function Navigation() {
 
             {/* Centered Logo */}
             <div className="flex-1 flex justify-center">
-              <Link href="/">
+              <Link href="/" className="group relative p-2 rounded-lg hover:bg-gray-50 transition-all duration-200">
                 <img 
                   src={companyLogo} 
                   alt="Company Logo" 
-                  className="h-8 w-auto"
+                  className="h-8 w-auto group-hover:scale-105 transition-transform duration-200 cursor-pointer"
                 />
+                {/* Tooltip */}
+                <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none">
+                  Dashboard
+                </div>
               </Link>
             </div>
 
@@ -140,12 +144,16 @@ export default function Navigation() {
           <div className="hidden lg:flex w-full justify-between items-center">
             {/* Logo */}
             <div className="flex-shrink-0">
-              <Link href="/">
+              <Link href="/" className="group relative p-3 rounded-lg hover:bg-gray-50 transition-all duration-200">
                 <img 
                   src={companyLogo} 
                   alt="Company Logo" 
-                  className="h-10 w-auto"
+                  className="h-10 w-auto group-hover:scale-105 transition-transform duration-200 cursor-pointer"
                 />
+                {/* Tooltip */}
+                <div className="absolute -bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-3 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-50">
+                  ← Back to Dashboard
+                </div>
               </Link>
             </div>
             
