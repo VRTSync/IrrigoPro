@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, FileText, Wrench, ClipboardList, Calendar, DollarSign, User, MapPin } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -46,6 +45,7 @@ interface BillingSheet {
 
 export default function Operations() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'estimates' | 'workorders' | 'billingsheets'>('all');
 
   const { data: estimates = [], isLoading: estimatesLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
@@ -147,6 +147,21 @@ export default function Operations() {
     ...billingSheets.map(item => ({ ...item, type: 'billingsheet' as const }))
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  const getFilteredItems = () => {
+    switch (activeFilter) {
+      case 'estimates':
+        return estimates.map(item => ({ ...item, type: 'estimate' as const }));
+      case 'workorders':
+        return workOrders.map(item => ({ ...item, type: 'workorder' as const }));
+      case 'billingsheets':
+        return billingSheets.map(item => ({ ...item, type: 'billingsheet' as const }));
+      default:
+        return allItems;
+    }
+  };
+
+  const filteredItems = getFilteredItems();
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
@@ -165,282 +180,136 @@ export default function Operations() {
         </Dialog>
       </div>
 
-      <Tabs defaultValue="all" className="w-full">
-        <div className="w-full overflow-x-auto">
-          <TabsList className="grid w-full grid-cols-4 min-w-[600px] h-auto">
-            <TabsTrigger value="all" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
-              <span className="hidden sm:inline">All ({allItems.length})</span>
-              <span className="sm:hidden">All<br />({allItems.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="estimates" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
-              <span className="hidden sm:inline">Estimates ({estimates.length})</span>
-              <span className="sm:hidden">Est<br />({estimates.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="workorders" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
-              <span className="hidden sm:inline">Work Orders ({workOrders.length})</span>
-              <span className="sm:hidden">WO<br />({workOrders.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="billingsheets" className="text-xs sm:text-sm px-2 py-2 h-auto whitespace-nowrap">
-              <span className="hidden sm:inline">Billing Sheets ({billingSheets.length})</span>
-              <span className="sm:hidden">Bill<br />({billingSheets.length})</span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
+      {/* Filter Buttons */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <Button
+          variant={activeFilter === 'all' ? 'default' : 'outline'}
+          onClick={() => setActiveFilter('all')}
+          className="flex flex-col items-center justify-center h-16 space-y-1"
+        >
+          <span className="font-medium">All</span>
+          <span className="text-xs">({allItems.length})</span>
+        </Button>
+        <Button
+          variant={activeFilter === 'estimates' ? 'default' : 'outline'}
+          onClick={() => setActiveFilter('estimates')}
+          className="flex flex-col items-center justify-center h-16 space-y-1"
+        >
+          <FileText className="h-4 w-4" />
+          <span className="text-xs">Estimates ({estimates.length})</span>
+        </Button>
+        <Button
+          variant={activeFilter === 'workorders' ? 'default' : 'outline'}
+          onClick={() => setActiveFilter('workorders')}
+          className="flex flex-col items-center justify-center h-16 space-y-1"
+        >
+          <Wrench className="h-4 w-4" />
+          <span className="text-xs">Work Orders ({workOrders.length})</span>
+        </Button>
+        <Button
+          variant={activeFilter === 'billingsheets' ? 'default' : 'outline'}
+          onClick={() => setActiveFilter('billingsheets')}
+          className="flex flex-col items-center justify-center h-16 space-y-1"
+        >
+          <ClipboardList className="h-4 w-4" />
+          <span className="text-xs">Billing Sheets ({billingSheets.length})</span>
+        </Button>
+      </div>
 
-        <TabsContent value="all" className="space-y-4">
-          {allItems.length === 0 ? (
-            <Card className="p-8 text-center">
-              <div className="text-gray-500">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No work items found</p>
+      {/* Filtered Results */}
+      <div className="space-y-4">
+        {filteredItems.length === 0 ? (
+          <Card className="p-8 text-center">
+            <div className="text-gray-500">
+              {activeFilter === 'estimates' && <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />}
+              {activeFilter === 'workorders' && <Wrench className="h-12 w-12 mx-auto mb-4 opacity-50" />}
+              {activeFilter === 'billingsheets' && <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-50" />}
+              {activeFilter === 'all' && <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />}
+              <p>No {activeFilter === 'all' ? 'work items' : activeFilter.replace('sheets', ' sheets').replace('orders', ' orders')} found</p>
+              {activeFilter === 'all' && (
                 <p className="text-sm mt-2">Create your first estimate, work order, or billing sheet to get started.</p>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {allItems.map((item) => (
-                <Card key={`${item.type}-${item.id}`} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between space-y-4 lg:space-y-0">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          {item.type === 'estimate' && <FileText className="h-5 w-5 text-blue-600" />}
-                          {item.type === 'workorder' && <Wrench className="h-5 w-5 text-green-600" />}
-                          {item.type === 'billingsheet' && <ClipboardList className="h-5 w-5 text-purple-600" />}
-                          <h3 className="font-semibold text-lg">
-                            {item.type === 'estimate' && (item as any).estimateNumber}
-                            {item.type === 'workorder' && (item as any).workOrderNumber}
-                            {item.type === 'billingsheet' && (item as any).billingSheetNumber}
-                          </h3>
-                          <Badge className={getStatusColor(item.status)}>
-                            {item.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600">
-                          <div className="flex items-center space-x-2">
-                            <User className="h-4 w-4" />
-                            <span>{item.customerName}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Calendar className="h-4 w-4" />
-                            <span>{format(new Date(item.createdAt), "MMM d, yyyy")}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <DollarSign className="h-4 w-4" />
-                            <span>{formatCurrency(item.totalAmount)}</span>
-                          </div>
-                          {(item.type === 'estimate' || item.type === 'workorder') && (item as any).propertyAddress && (
-                            <div className="flex items-center space-x-2">
-                              <MapPin className="h-4 w-4" />
-                              <span className="truncate">{(item as any).propertyAddress}</span>
-                            </div>
-                          )}
-                          {item.type === 'workorder' && (item as any).assignedTechnicianName && (
-                            <div className="flex items-center space-x-2">
-                              <User className="h-4 w-4" />
-                              <span>Tech: {(item as any).assignedTechnicianName}</span>
-                            </div>
-                          )}
-                          {item.type === 'billingsheet' && (
-                            <div className="flex items-center space-x-2">
-                              <User className="h-4 w-4" />
-                              <span>Tech: {(item as any).technicianName}</span>
-                            </div>
-                          )}
-                        </div>
-                        
-                        <p className="text-gray-700 mt-2 font-medium">
-                          {item.type === 'estimate' && (item as any).projectName}
-                          {item.type === 'workorder' && (item as any).projectName}
-                          {item.type === 'billingsheet' && (item as any).description}
-                        </p>
-                      </div>
-                      
-                      <div className="flex space-x-2">
-                        <Link 
-                          href={
-                            item.type === 'estimate' ? '/estimates' :
-                            item.type === 'workorder' ? '/work-orders' :
-                            '/billing-sheets'
-                          }
-                        >
-                          <Button variant="outline" size="sm">
-                            View Details
-                          </Button>
-                        </Link>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+              )}
             </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="estimates" className="space-y-4">
-          {estimates.length === 0 ? (
-            <Card className="p-8 text-center">
-              <div className="text-gray-500">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No estimates found</p>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {estimates.map((estimate) => (
-                <Card key={estimate.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between space-y-4 lg:space-y-0">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <FileText className="h-5 w-5 text-blue-600" />
-                          <h3 className="font-semibold text-lg">{estimate.estimateNumber}</h3>
-                          <Badge className={getStatusColor(estimate.status)}>
-                            {estimate.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <p className="text-gray-700 font-medium mb-2">{estimate.projectName}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
-                          <div className="flex items-center space-x-2">
-                            <User className="h-4 w-4" />
-                            <span>{estimate.customerName}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Calendar className="h-4 w-4" />
-                            <span>{format(new Date(estimate.createdAt), "MMM d, yyyy")}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <DollarSign className="h-4 w-4" />
-                            <span>{formatCurrency(estimate.totalAmount)}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <Link href="/estimates">
-                        <Button variant="outline" size="sm">
-                          View Details
-                        </Button>
-                      </Link>
+          </Card>
+        ) : (
+          filteredItems.map((item) => (
+            <Card key={`${item.type}-${item.id}`} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between space-y-4 lg:space-y-0">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-3 mb-2">
+                      {item.type === 'estimate' && <FileText className="h-5 w-5 text-blue-600" />}
+                      {item.type === 'workorder' && <Wrench className="h-5 w-5 text-green-600" />}
+                      {item.type === 'billingsheet' && <ClipboardList className="h-5 w-5 text-purple-600" />}
+                      <h3 className="font-semibold text-lg">
+                        {item.type === 'estimate' && (item as any).estimateNumber}
+                        {item.type === 'workorder' && (item as any).workOrderNumber}
+                        {item.type === 'billingsheet' && (item as any).billingSheetNumber}
+                      </h3>
+                      <Badge className={getStatusColor(item.status)}>
+                        {item.status.replace('_', ' ')}
+                      </Badge>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="workorders" className="space-y-4">
-          {workOrders.length === 0 ? (
-            <Card className="p-8 text-center">
-              <div className="text-gray-500">
-                <Wrench className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No work orders found</p>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {workOrders.map((workOrder) => (
-                <Card key={workOrder.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between space-y-4 lg:space-y-0">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <Wrench className="h-5 w-5 text-green-600" />
-                          <h3 className="font-semibold text-lg">{workOrder.workOrderNumber}</h3>
-                          <Badge className={getStatusColor(workOrder.status)}>
-                            {workOrder.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <p className="text-gray-700 font-medium mb-2">{workOrder.projectName}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm text-gray-600">
-                          <div className="flex items-center space-x-2">
-                            <User className="h-4 w-4" />
-                            <span>{workOrder.customerName}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Calendar className="h-4 w-4" />
-                            <span>{format(new Date(workOrder.createdAt), "MMM d, yyyy")}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <DollarSign className="h-4 w-4" />
-                            <span>{formatCurrency(workOrder.totalAmount)}</span>
-                          </div>
-                          {workOrder.assignedTechnicianName && (
-                            <div className="flex items-center space-x-2">
-                              <User className="h-4 w-4" />
-                              <span>Tech: {workOrder.assignedTechnicianName}</span>
-                            </div>
-                          )}
-                        </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600">
+                      <div className="flex items-center space-x-2">
+                        <User className="h-4 w-4" />
+                        <span>{item.customerName}</span>
                       </div>
-                      <Link href="/work-orders">
-                        <Button variant="outline" size="sm">
-                          View Details
-                        </Button>
-                      </Link>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="billingsheets" className="space-y-4">
-          {billingSheets.length === 0 ? (
-            <Card className="p-8 text-center">
-              <div className="text-gray-500">
-                <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No billing sheets found</p>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {billingSheets.map((billingSheet) => (
-                <Card key={billingSheet.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between space-y-4 lg:space-y-0">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <ClipboardList className="h-5 w-5 text-purple-600" />
-                          <h3 className="font-semibold text-lg">{billingSheet.billingSheetNumber}</h3>
-                          <Badge className={getStatusColor(billingSheet.status)}>
-                            {billingSheet.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <p className="text-gray-700 font-medium mb-2">{billingSheet.description}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm text-gray-600">
-                          <div className="flex items-center space-x-2">
-                            <User className="h-4 w-4" />
-                            <span>{billingSheet.customerName}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Calendar className="h-4 w-4" />
-                            <span>{format(new Date(billingSheet.workDate), "MMM d, yyyy")}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <DollarSign className="h-4 w-4" />
-                            <span>{formatCurrency(billingSheet.totalAmount)}</span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <User className="h-4 w-4" />
-                            <span>Tech: {billingSheet.technicianName}</span>
-                          </div>
-                        </div>
+                      <div className="flex items-center space-x-2">
+                        <Calendar className="h-4 w-4" />
+                        <span>{format(new Date(item.createdAt), "MMM d, yyyy")}</span>
                       </div>
-                      <Link href="/billing-sheets">
-                        <Button variant="outline" size="sm">
-                          View Details
-                        </Button>
-                      </Link>
+                      <div className="flex items-center space-x-2">
+                        <DollarSign className="h-4 w-4" />
+                        <span>{formatCurrency(item.totalAmount)}</span>
+                      </div>
+                      {(item.type === 'estimate' || item.type === 'workorder') && (item as any).propertyAddress && (
+                        <div className="flex items-center space-x-2">
+                          <MapPin className="h-4 w-4" />
+                          <span className="truncate">{(item as any).propertyAddress}</span>
+                        </div>
+                      )}
+                      {item.type === 'workorder' && (item as any).assignedTechnicianName && (
+                        <div className="flex items-center space-x-2">
+                          <User className="h-4 w-4" />
+                          <span>Tech: {(item as any).assignedTechnicianName}</span>
+                        </div>
+                      )}
+                      {item.type === 'billingsheet' && (
+                        <div className="flex items-center space-x-2">
+                          <User className="h-4 w-4" />
+                          <span>Tech: {(item as any).technicianName}</span>
+                        </div>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+                    
+                    <p className="text-gray-700 mt-2 font-medium">
+                      {item.type === 'estimate' && (item as any).projectName}
+                      {item.type === 'workorder' && (item as any).projectName}
+                      {item.type === 'billingsheet' && (item as any).description}
+                    </p>
+                  </div>
+                  
+                  <div className="flex space-x-2">
+                    <Link 
+                      href={
+                        item.type === 'estimate' ? '/estimates' :
+                        item.type === 'workorder' ? '/work-orders' :
+                        '/billing-sheets'
+                      }
+                    >
+                      <Button variant="outline" size="sm">
+                        View Details
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 }
