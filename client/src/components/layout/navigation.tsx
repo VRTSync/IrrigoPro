@@ -119,16 +119,18 @@ export default function Navigation() {
               </SheetContent>
             </Sheet>
 
-            {/* Centered Logo */}
-            <div className="flex-1 flex justify-center">
-              <Link href="/" className="group relative p-2 rounded-lg hover:bg-gray-50 transition-all duration-200">
-                <img 
-                  src={companyLogo} 
-                  alt="Company Logo" 
-                  className="h-8 w-auto group-hover:scale-105 transition-transform duration-200 cursor-pointer"
-                />
+            {/* Centered Logo Button */}
+            <div className="flex-1 flex justify-center relative">
+              <Link href="/" className="group relative">
+                <div className="bg-white border border-gray-200 shadow-lg rounded-lg px-4 py-2 -mt-1 hover:shadow-xl hover:border-gray-300 hover:-mt-2 transition-all duration-200 transform hover:scale-105">
+                  <img 
+                    src={companyLogo} 
+                    alt="Company Logo" 
+                    className="h-8 w-auto cursor-pointer"
+                  />
+                </div>
                 {/* Tooltip */}
-                <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none">
+                <div className="absolute -bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-50">
                   Dashboard
                 </div>
               </Link>
@@ -142,16 +144,18 @@ export default function Navigation() {
 
           {/* Desktop Layout */}
           <div className="hidden lg:flex w-full justify-between items-center">
-            {/* Logo */}
-            <div className="flex-shrink-0">
-              <Link href="/" className="group relative p-3 rounded-lg hover:bg-gray-50 transition-all duration-200">
-                <img 
-                  src={companyLogo} 
-                  alt="Company Logo" 
-                  className="h-10 w-auto group-hover:scale-105 transition-transform duration-200 cursor-pointer"
-                />
+            {/* Logo Button */}
+            <div className="flex-shrink-0 relative">
+              <Link href="/" className="group relative">
+                <div className="bg-white border border-gray-200 shadow-lg rounded-lg px-5 py-3 -mt-2 hover:shadow-xl hover:border-gray-300 hover:-mt-3 transition-all duration-200 transform hover:scale-105">
+                  <img 
+                    src={companyLogo} 
+                    alt="Company Logo" 
+                    className="h-10 w-auto cursor-pointer"
+                  />
+                </div>
                 {/* Tooltip */}
-                <div className="absolute -bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-3 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-50">
+                <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-3 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-50">
                   ← Back to Dashboard
                 </div>
               </Link>
