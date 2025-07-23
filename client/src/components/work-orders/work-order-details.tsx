@@ -627,6 +627,22 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
         </Tabs>
 
         {/* Action Buttons - Bottom Section */}
+        {workOrder.status === 'pending' && (
+          <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => updateWorkOrderStatus.mutate('in_progress')}
+                disabled={updateWorkOrderStatus.isPending}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
+                size="lg"
+              >
+                <Play className="w-5 h-5 mr-2" />
+                Start Work Order
+              </Button>
+            </div>
+          </div>
+        )}
+        
         {workOrder.status === 'in_progress' && (
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
