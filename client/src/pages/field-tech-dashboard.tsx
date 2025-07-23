@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Package, FileText, Plus } from "lucide-react";
+import { Package, Receipt, Plus } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
 import { Link } from "wouter";
@@ -80,30 +80,16 @@ export default function FieldTechDashboard() {
           </Card>
 
           {/* Billing Sheets Card */}
-          <Card className="hover:shadow-lg transition-all duration-200 border-2 hover:border-green-200">
+          <Card className="hover:shadow-lg transition-all duration-200 border-2 hover:border-orange-200">
             <CardHeader className="pb-3">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="bg-green-100 p-2 sm:p-3 rounded-full flex-shrink-0">
-                    <FileText className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="text-lg sm:text-xl text-gray-900">Billing Sheets</CardTitle>
-                    <p className="text-gray-600 text-xs sm:text-sm">Create standalone billing</p>
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="bg-orange-100 p-2 sm:p-3 rounded-full flex-shrink-0">
+                  <Receipt className="w-6 h-6 sm:w-8 sm:h-8 text-orange-600" />
                 </div>
-                <Button 
-                  size="sm" 
-                  className="bg-green-600 hover:bg-green-700 flex-shrink-0"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setShowBillingModal(true);
-                  }}
-                >
-                  <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-                  <span className="hidden sm:inline">New</span>
-                </Button>
+                <div className="min-w-0 flex-1">
+                  <CardTitle className="text-lg sm:text-xl text-gray-900">Billing Sheets</CardTitle>
+                  <p className="text-gray-600 text-xs sm:text-sm">Create standalone billing</p>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="pt-0 space-y-4">
@@ -121,11 +107,24 @@ export default function FieldTechDashboard() {
                   <span className="font-medium">-</span>
                 </div>
               </div>
-              <Link href="/billing-sheets" className="block">
-                <Button className="w-full bg-green-600 hover:bg-green-700 text-white">
-                  View Billing Sheets
+              <div className="flex gap-2">
+                <Link href="/billing-sheets" className="flex-1">
+                  <Button className="w-full bg-orange-600 hover:bg-orange-700 text-white">
+                    View Billing Sheets
+                  </Button>
+                </Link>
+                <Button 
+                  size="sm" 
+                  className="bg-orange-600 hover:bg-orange-700 text-white px-3"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowBillingModal(true);
+                  }}
+                >
+                  <Plus className="w-4 h-4" />
                 </Button>
-              </Link>
+              </div>
             </CardContent>
           </Card>
         </div>
