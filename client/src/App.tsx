@@ -183,7 +183,7 @@ function Router() {
   return (
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
           <Navigation />
           <Switch>
             <Route path="/" component={AdminDashboard} />
