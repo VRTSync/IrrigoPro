@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 
 import { WorkOrderCompletion } from "./work-order-completion";
+import { AssignmentConfirmationModal } from "./assignment-confirmation-modal";
 import { 
   FileText, 
   Calendar, 
@@ -48,6 +49,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
   const [isEditingPriority, setIsEditingPriority] = useState(false);
+  const [showAssignmentConfirmation, setShowAssignmentConfirmation] = useState(false);
+  const [pendingTechnicianId, setPendingTechnicianId] = useState<string>("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -519,13 +522,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <Button 
                       onClick={() => {
                         if (selectedTechnicianId) {
-                          reassignWorkOrder.mutate(selectedTechnicianId);
+                          setPendingTechnicianId(selectedTechnicianId);
+                          setShowAssignmentConfirmation(true);
                         }
                       }}
                       disabled={!selectedTechnicianId || reassignWorkOrder.isPending}
                       className="bg-blue-600 hover:bg-blue-700"
                     >
-                      {reassignWorkOrder.isPending ? "Assigning..." : "Assign"}
+                      Assign
                     </Button>
                   </div>
                 </CardContent>
@@ -667,6 +671,26 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         onComplete={onUpdate}
       />
     )}
+
+    {/* Assignment Confirmation Modal */}
+    <AssignmentConfirmationModal
+      isOpen={showAssignmentConfirmation}
+      onClose={() => {
+        setShowAssignmentConfirmation(false);
+        setPendingTechnicianId("");
+      }}
+      onConfirm={() => {
+        if (pendingTechnicianId) {
+          reassignWorkOrder.mutate(pendingTechnicianId);
+          setShowAssignmentConfirmation(false);
+          setSelectedTechnicianId("");
+          setPendingTechnicianId("");
+        }
+      }}
+      workOrder={workOrder}
+      selectedTechnician={fieldTechs?.find(tech => tech.id.toString() === pendingTechnicianId) || null}
+      isLoading={reassignWorkOrder.isPending}
+    />
     </>
   );
 }
