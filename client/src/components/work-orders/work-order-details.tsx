@@ -286,13 +286,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-1">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="progress">Progress</TabsTrigger>
-            <TabsTrigger value="invoicing" className="flex items-center gap-2">
-              <Receipt className="w-4 h-4" />
-              Invoicing
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 mt-6">
@@ -583,58 +578,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 </CardContent>
               </Card>
             )}
-          </TabsContent>
-
-          <TabsContent value="progress" className="space-y-6 mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-blue-600" />
-                  Work Progress
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-600">Progress tracking features will be implemented here.</p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="invoicing" className="space-y-6 mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Receipt className="w-5 h-5 text-blue-600" />
-                  Invoice Generation
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {workOrder.status === 'completed' ? (
-                    <div className="flex gap-4">
-                      <Button
-                        onClick={() => handleCreateInvoice()}
-                        className="bg-green-600 hover:bg-green-700 text-white"
-                      >
-                        <Receipt className="w-4 h-4 mr-2" />
-                        Create Invoice
-                      </Button>
-                      <Button
-                        onClick={() => handleSyncToQuickBooks()}
-                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                        variant="outline"
-                      >
-                        <Download className="w-4 h-4 mr-2" />
-                        Sync to QuickBooks
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="text-gray-500">
-                      <p>Work order must be completed before creating an invoice.</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
         </Tabs>
 
