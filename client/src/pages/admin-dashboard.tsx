@@ -171,9 +171,9 @@ export default function AdminDashboard() {
 
   if (usersLoading && activeTab === "users") {
     return (
-      <div className="space-y-6">
+      <div className="pb-4 px-4 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold">Admin Dashboard</h1>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => (
@@ -189,10 +189,10 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="pb-4 px-4 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">Admin Dashboard</h1>
         <Badge variant="outline" className="text-sm">
           <Shield className="w-4 h-4 mr-1" />
           Administrator Access
