@@ -216,21 +216,30 @@ The application now provides a seamless experience across all device sizes, from
 ## Mobile App Bar Redesign (2025-07-23)
 
 ### Mobile-First Navigation Architecture
-- **Three-Column Layout**: Hamburger menu (left), centered logo (middle), account button (right)
+- **Clean Three-Column Layout**: Hamburger menu (left), centered logo (middle), notifications (right)
 - **Touch-Optimized**: Large tap targets and proper spacing for thumb navigation
 - **Slide-Out Menu**: Full-screen navigation drawer with organized menu items and user profile section
 
 ### Navigation Features:
 - **Hamburger Menu**: Slides out from left with all navigation items, active page highlighting, and user profile footer
 - **Centered Branding**: Company logo prominently displayed in center of mobile header
-- **Quick Account Access**: Avatar-based dropdown on right with user info, settings, and logout
+- **Notification System**: Bell icon on right with unread count badges and dropdown panel
+- **Account Access**: All user account features integrated into slide-out navigation menu
 - **Desktop Preservation**: Full horizontal navigation maintained for desktop users (lg: breakpoint)
 - **Consistent Experience**: Same functionality across all device sizes with appropriate layouts
 
 ### Technical Implementation:
 - **Sheet Component**: Using shadcn/ui Sheet for slide-out mobile navigation
-- **Avatar Components**: Consistent user representation with fallback initials
-- **Dropdown Menus**: Rich account menus with proper spacing and organization
+- **Avatar Components**: Consistent user representation with fallback initials in navigation menu
+- **Notification System**: Real-time notification bell with unread counts and sliding panel
 - **Responsive Breakpoints**: lg: (1024px) breakpoint switches between mobile and desktop layouts
 - **State Management**: Mobile menu open/close state with automatic closure on navigation
-- **Streamlined Interface**: Removed unused notification bell to focus on essential navigation and account features
+- **Streamlined Interface**: Account features consolidated into navigation menu, notifications prominently displayed
+
+## Notification System Implementation (2025-07-23)
+
+### Comprehensive Notification Architecture
+- **Database Schema**: notifications table with user targeting, types, read status, and entity linking
+- **Real-time Updates**: 30-second polling with unread count badges
+- **Workflow Integration**: Automated notifications for work order assignments, completions, and estimate approvals
+- **User Experience**: Clean notification dropdown with mark-as-read functionality and entity navigation

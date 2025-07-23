@@ -130,42 +130,9 @@ export default function Navigation() {
               </Link>
             </div>
 
-            {/* Notifications and Account - Right */}
-            <div className="flex items-center space-x-2">
+            {/* Notifications - Right */}
+            <div className="flex items-center">
               <NotificationSystem userId={user.id} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="p-2">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-primary text-white text-sm">
-                      {user.name?.charAt(0) || 'U'}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <div className="px-2 py-2">
-                  <p className="text-sm font-medium">{user.name}</p>
-                  <p className="text-xs text-gray-500">{user.email}</p>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href="/user-selector" className="w-full">
-                    <User className="mr-2 h-4 w-4" />
-                    Switch User
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={() => {
-                    localStorage.removeItem("user");
-                    window.location.href = "/login";
-                  }}
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-              </DropdownMenu>
             </div>
           </div>
 
