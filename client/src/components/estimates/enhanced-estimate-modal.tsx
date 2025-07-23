@@ -396,7 +396,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-6xl h-[95vh] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+      <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-4xl lg:max-w-6xl h-[95vh] max-h-[95vh] overflow-y-auto p-2 sm:p-4 lg:p-6">
         <DialogHeader>
           <DialogTitle>
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
@@ -426,54 +426,66 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 />
                 
                 {selectedCustomer && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="customerName"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Customer Name</FormLabel>
-                          <FormControl>
-                            <Input {...field} readOnly className="bg-gray-50" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={form.control}
-                      name="customerEmail"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Email</FormLabel>
-                          <FormControl>
-                            <Input {...field} readOnly className="bg-gray-50" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={form.control}
-                      name="customerPhone"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Phone</FormLabel>
-                          <FormControl>
-                            <Input 
-                              {...field} 
-                              readOnly 
-                              className="bg-gray-50" 
-                              placeholder="No phone number"
-                              value={field.value || ""} 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                  <div className="w-full overflow-hidden">
+                    <div className="grid grid-cols-1 gap-3 sm:gap-4">
+                      <FormField
+                        control={form.control}
+                        name="customerName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-sm">Customer Name</FormLabel>
+                            <FormControl>
+                              <Input 
+                                {...field} 
+                                readOnly 
+                                className="bg-gray-50 text-sm w-full min-w-0" 
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <FormField
+                          control={form.control}
+                          name="customerEmail"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-sm">Email</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  {...field} 
+                                  readOnly 
+                                  className="bg-gray-50 text-sm w-full min-w-0" 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        
+                        <FormField
+                          control={form.control}
+                          name="customerPhone"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-sm">Phone</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  {...field} 
+                                  readOnly 
+                                  className="bg-gray-50 text-sm w-full min-w-0" 
+                                  placeholder="No phone number"
+                                  value={field.value || ""} 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -488,7 +500,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <FormField
                     control={form.control}
                     name="projectName"
@@ -496,7 +508,11 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                       <FormItem>
                         <FormLabel>Project Name</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="e.g., Backyard Irrigation System" />
+                          <Input 
+                            {...field} 
+                            placeholder="e.g., Backyard Irrigation System" 
+                            className="w-full min-w-0" 
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -510,7 +526,11 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                       <FormItem>
                         <FormLabel>Project Address</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="Project location" />
+                          <Input 
+                            {...field} 
+                            placeholder="Project location" 
+                            className="w-full min-w-0" 
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
