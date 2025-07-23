@@ -430,20 +430,51 @@ export default function WorkOrders() {
                     {/* Action Buttons at Bottom */}
                     <div className="border-t pt-3 mt-auto">
                       {currentUser?.role === 'field_tech' ? (
-                        // Field Tech View - Only Start Work button for assigned work
+                        // Field Tech View - Only for assigned work orders
                         <>
-                          {(workOrder.status === 'in_progress' || workOrder.status === 'assigned') && 
-                           workOrder.assignedTechnicianId === currentUser.id && (
-                            <Button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWorkOrderForCompletion(workOrder);
-                              }}
-                              className="w-full bg-green-600 hover:bg-green-700 text-white"
-                            >
-                              <CheckCircle className="w-4 h-4 mr-2" />
-                              Start Work
-                            </Button>
+                          {workOrder.assignedTechnicianId === currentUser.id && (
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedWorkOrder(workOrder);
+                                }}
+                                className="flex-1"
+                              >
+                                <Eye className="w-4 h-4 mr-1" />
+                                View
+                              </Button>
+                              
+                              {workOrder.status === 'pending' && (
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStartWork(workOrder.id);
+                                  }}
+                                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                                >
+                                  <Play className="w-4 h-4 mr-1" />
+                                  Start Work Order
+                                </Button>
+                              )}
+                              
+                              {workOrder.status === 'in_progress' && (
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedWorkOrderForCompletion(workOrder);
+                                  }}
+                                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                  <CheckCircle className="w-4 h-4 mr-1" />
+                                  Complete
+                                </Button>
+                              )}
+                            </div>
                           )}
                         </>
                       ) : (
@@ -462,8 +493,11 @@ export default function WorkOrders() {
                             View
                           </Button>
                           
-                          {/* Start Work button for pending work orders */}
-                          {workOrder.status === 'pending' && (
+                          {/* Start Work Order button - only if assigned to current user or unassigned */}
+                          {workOrder.status === 'pending' && 
+                           (workOrder.assignedTechnicianId === currentUser.id || 
+                            workOrder.assignedTechnicianName === "Manager" ||
+                            !workOrder.assignedTechnicianId) && (
                             <Button
                               size="sm"
                               onClick={(e) => {
@@ -473,12 +507,14 @@ export default function WorkOrders() {
                               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                             >
                               <Play className="w-4 h-4 mr-1" />
-                              Start Work
+                              Start Work Order
                             </Button>
                           )}
                           
-                          {/* Complete button for in-progress work orders */}
-                          {workOrder.status === 'in_progress' && (
+                          {/* Complete button - only if assigned to current user */}
+                          {workOrder.status === 'in_progress' && 
+                           (workOrder.assignedTechnicianId === currentUser.id || 
+                            workOrder.assignedTechnicianName === "Manager") && (
                             <Button
                               size="sm"
                               onClick={(e) => {
