@@ -11,6 +11,8 @@ import {
   fieldWorkItems,
   workOrders,
   workOrderItems,
+  invoices,
+  invoiceItems,
   billingSheets,
   billingSheetItems,
   notifications,
@@ -26,6 +28,8 @@ import {
   type FieldWorkItem,
   type WorkOrder,
   type WorkOrderItem,
+  type Invoice,
+  type InvoiceItem,
   type BillingSheet,
   type BillingSheetItem,
   type Notification,
@@ -41,6 +45,8 @@ import {
   type InsertFieldWorkItem,
   type InsertWorkOrder,
   type InsertWorkOrderItem,
+  type InsertInvoice,
+  type InsertInvoiceItem,
   type InsertBillingSheet,
   type InsertBillingSheetItem,
   type InsertNotification,
@@ -48,6 +54,7 @@ import {
   type EstimateWithZones,
   type PropertyZoneWithZones,
   type FieldWorkSessionWithItems,
+  type InvoiceWithItems,
   type BillingSheetWithItems
 } from "@shared/schema";
 import { db } from "./db";
@@ -184,6 +191,15 @@ export interface IStorage {
   addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem>;
   updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined>;
   deleteBillingSheetItem(itemId: number): Promise<boolean>;
+
+  // Invoices - monthly consolidated billing
+  getInvoices(): Promise<Invoice[]>;
+  getInvoiceById(id: number): Promise<InvoiceWithItems | undefined>;
+  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  updateInvoice(id: number, invoice: Partial<InsertInvoice>): Promise<Invoice | undefined>;
+  deleteInvoice(id: number): Promise<boolean>;
+  createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem>;
+  getCustomerById(id: number): Promise<Customer | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -222,6 +238,14 @@ export class DatabaseStorage implements IStorage {
             name: "JoJo Durrill",
             email: "tech@irrigation.com",
             role: "field_tech",
+            isActive: true,
+          },
+          {
+            username: "billing",
+            password: "billing123",
+            name: "Sarah Martinez",
+            email: "sarah@irrigation.com",
+            role: "billing_manager",
             isActive: true,
           },
         ]);
@@ -272,6 +296,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCustomer(id: number): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+    return customer || undefined;
+  }
+
+  async getCustomerById(id: number): Promise<Customer | undefined> {
     const [customer] = await db.select().from(customers).where(eq(customers.id, id));
     return customer || undefined;
   }
@@ -985,16 +1014,16 @@ export class DatabaseStorage implements IStorage {
 
     console.log('Creating billing sheet with data:', finalSheetData);
     
-    const [newSheet] = await db.insert(billingSheets).values(finalSheetData).returning();
+    const [newSheet] = await db.insert(billingSheets).values([finalSheetData]).returning();
     
     // If items are provided, insert them
     if (items && Array.isArray(items)) {
       for (const item of items) {
-        await db.insert(billingSheetItems).values({
+        await db.insert(billingSheetItems).values([{
           ...item,
           billingSheetId: newSheet.id,
-          totalPrice: Number(item.quantity) * Number(item.unitPrice)
-        });
+          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
+        }]);
       }
     }
     
@@ -1019,7 +1048,7 @@ export class DatabaseStorage implements IStorage {
     const [newItem] = await db.insert(billingSheetItems).values({
       ...item,
       billingSheetId,
-      totalPrice: Number(item.quantity) * Number(item.unitPrice)
+      totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
     }).returning();
     return newItem;
   }
@@ -1261,9 +1290,36 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
   }
 
-  async getInvoiceById(id: number): Promise<Invoice | undefined> {
+  async getInvoiceById(id: number): Promise<InvoiceWithItems | undefined> {
     const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
-    return invoice || undefined;
+    if (!invoice) return undefined;
+    
+    const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
+    return { ...invoice, items };
+  }
+
+  async getInvoices(): Promise<Invoice[]> {
+    return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  }
+
+  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
+    const [newInvoice] = await db.insert(invoices).values(invoice).returning();
+    return newInvoice;
+  }
+
+  async updateInvoice(id: number, invoice: Partial<InsertInvoice>): Promise<Invoice | undefined> {
+    const [updatedInvoice] = await db.update(invoices).set(invoice).where(eq(invoices.id, id)).returning();
+    return updatedInvoice || undefined;
+  }
+
+  async deleteInvoice(id: number): Promise<boolean> {
+    const result = await db.delete(invoices).where(eq(invoices.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  async createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem> {
+    const [newItem] = await db.insert(invoiceItems).values(item).returning();
+    return newItem;
   }
 
   async getInvoiceItems(invoiceId: number): Promise<InvoiceItem[]> {

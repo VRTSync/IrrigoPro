@@ -17,6 +17,7 @@ import NotFound from "@/pages/not-found";
 import ManagerDashboard from "@/pages/manager-dashboard";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import BillingSheets from "@/pages/billing-sheets";
+import CustomerBilling from "@/pages/customer-billing";
 import { UserSelector } from "@/components/user-selector";
 
 interface User {
@@ -24,7 +25,7 @@ interface User {
   username: string;
   name: string;
   email: string;
-  role: "admin" | "irrigation_manager" | "field_tech";
+  role: "admin" | "irrigation_manager" | "field_tech" | "billing_manager";
   isActive: boolean;
 }
 
@@ -154,6 +155,28 @@ function Router() {
     );
   }
 
+  // Billing manager gets customer billing interface
+  if (user.role === "billing_manager") {
+    return (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <div className="min-h-screen bg-gray-50">
+            <Navigation />
+            <Switch>
+              <Route path="/" component={CustomerBilling} />
+              <Route path="/customers" component={CustomerBilling} />
+              <Route path="/customer-billing" component={CustomerBilling} />
+              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+              <Route path="/login" component={Login} />
+              <Route component={NotFound} />
+            </Switch>
+          </div>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+  }
+
   // Admin gets full access to the system with unified dashboard
   return (
     <TooltipProvider>
@@ -165,6 +188,7 @@ function Router() {
             <Route path="/estimates" component={Estimates} />
             <Route path="/parts" component={PartsCatalog} />
             <Route path="/customers" component={Customers} />
+            <Route path="/customer-billing" component={CustomerBilling} />
             <Route path="/field-tech" component={FieldTech} />
             <Route path="/work-orders" component={WorkOrders} />
             <Route path="/billing-sheets" component={BillingSheets} />

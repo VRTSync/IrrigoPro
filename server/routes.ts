@@ -114,6 +114,199 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get customer billing data - all work orders, billing sheets, and estimates for a customer
+  app.get("/api/customers/:id/billing", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      
+      // Get customer details
+      const customer = await storage.getCustomerById(customerId);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      // Get all work orders for the customer
+      const allWorkOrders = await storage.getWorkOrders();
+      const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
+
+      // Get all billing sheets for the customer
+      const allBillingSheets = await storage.getBillingSheets();
+      const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
+
+      // Get all estimates for the customer
+      const allEstimates = await storage.getEstimates();
+      const estimates = allEstimates.filter(est => est.customerId === customerId);
+
+      // Filter unbilled work (completed work orders and approved billing sheets that haven't been billed)
+      const unbilledWorkOrders = workOrders.filter(wo => 
+        wo.status === 'completed' && (!wo.billingStatus || wo.billingStatus !== 'billed')
+      );
+      const unbilledBillingSheets = billingSheets.filter(bs => 
+        bs.status === 'approved' && (!bs.billingStatus || bs.billingStatus !== 'billed')
+      );
+
+      // Calculate total unbilled amount
+      const totalUnbilledAmount = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+
+      const billingData = {
+        customer,
+        workOrders,
+        billingSheets,
+        estimates,
+        unbilledWorkOrders,
+        unbilledBillingSheets,
+        totalUnbilledAmount
+      };
+
+      res.json(billingData);
+    } catch (error) {
+      console.error("Error fetching customer billing data:", error);
+      res.status(500).json({ message: "Failed to fetch customer billing data" });
+    }
+  });
+
+  // Create monthly invoice for customer - consolidates all unbilled work
+  app.post("/api/invoices/monthly", async (req, res) => {
+    try {
+      const { customerId } = req.body;
+      
+      // Get customer details
+      const customer = await storage.getCustomerById(customerId);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      // Get all work orders for the customer
+      const allWorkOrders = await storage.getWorkOrders();
+      const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
+
+      // Get all billing sheets for the customer
+      const allBillingSheets = await storage.getBillingSheets();
+      const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
+
+      // Filter unbilled work
+      const unbilledWorkOrders = workOrders.filter(wo => 
+        wo.status === 'completed' && (!wo.billingStatus || wo.billingStatus !== 'billed')
+      );
+      const unbilledBillingSheets = billingSheets.filter(bs => 
+        bs.status === 'approved' && (!bs.billingStatus || bs.billingStatus !== 'billed')
+      );
+
+      if (unbilledWorkOrders.length === 0 && unbilledBillingSheets.length === 0) {
+        return res.status(400).json({ message: "No unbilled work found for this customer" });
+      }
+
+      // Create the consolidated monthly invoice
+      const currentDate = new Date();
+      const invoiceNumber = `INV-${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${customerId.toString().padStart(4, '0')}`;
+      
+      // Calculate totals
+      const laborSubtotal = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
+      
+      const partsSubtotal = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
+      
+      const markupAmount = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.markupAmount || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.markupAmount || '0'), 0);
+      
+      const taxAmount = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.taxAmount || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.taxAmount || '0'), 0);
+      
+      const totalAmount = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+
+      // Create the invoice
+      const invoice = await storage.createInvoice({
+        invoiceNumber,
+        customerId,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone || null,
+        invoiceMonth: currentDate.getMonth() + 1,
+        invoiceYear: currentDate.getFullYear(),
+        periodStart: new Date(currentDate.getFullYear(), currentDate.getMonth(), 1),
+        periodEnd: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0),
+        laborSubtotal: laborSubtotal.toString(),
+        partsSubtotal: partsSubtotal.toString(),
+        markupAmount: markupAmount.toString(),
+        taxAmount: taxAmount.toString(),
+        totalAmount: totalAmount.toString(),
+        status: 'generated',
+        createdAt: currentDate,
+        updatedAt: currentDate
+      });
+
+      if (!invoice) {
+        throw new Error("Failed to create invoice");
+      }
+
+      // Create invoice items for work orders
+      for (const workOrder of unbilledWorkOrders) {
+        await storage.createInvoiceItem({
+          invoiceId: invoice.id,
+          sourceType: 'work_order',
+          sourceId: workOrder.id,
+          description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
+          workDate: workOrder.completedAt || workOrder.createdAt,
+          technicianName: workOrder.assignedTechnicianName || 'Unknown',
+          laborHours: parseFloat(workOrder.totalHours || '0'),
+          laborRate: parseFloat(workOrder.laborRate || '45'),
+          laborAmount: parseFloat(workOrder.laborSubtotal || '0'),
+          laborTotal: parseFloat(workOrder.laborSubtotal || '0'),
+          partsAmount: parseFloat(workOrder.partsSubtotal || '0'),
+          markupAmount: parseFloat(workOrder.markupAmount || '0'),
+          taxAmount: parseFloat(workOrder.taxAmount || '0'),
+          totalAmount: parseFloat(workOrder.totalAmount || '0')
+        });
+
+        // Update work order billing status
+        await storage.updateWorkOrder(workOrder.id, { billingStatus: 'billed' });
+      }
+
+      // Create invoice items for billing sheets
+      for (const billingSheet of unbilledBillingSheets) {
+        await storage.createInvoiceItem({
+          invoiceId: invoice.id,
+          sourceType: 'billing_sheet',
+          sourceId: billingSheet.id,
+          description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
+          workDate: billingSheet.workDate,
+          technicianName: billingSheet.technicianName,
+          laborHours: parseFloat(billingSheet.totalHours || '0'),
+          laborRate: parseFloat(billingSheet.laborRate || '45'),
+          laborAmount: parseFloat(billingSheet.laborSubtotal || '0'),
+          laborTotal: parseFloat(billingSheet.laborSubtotal || '0'),
+          partsAmount: parseFloat(billingSheet.partsSubtotal || '0'),
+          markupAmount: parseFloat(billingSheet.markupAmount || '0'),
+          taxAmount: parseFloat(billingSheet.taxAmount || '0'),
+          totalAmount: parseFloat(billingSheet.totalAmount || '0')
+        });
+
+        // Update billing sheet billing status
+        await storage.updateBillingSheet(billingSheet.id, { billingStatus: 'billed' });
+      }
+
+      res.json({
+        message: "Monthly invoice created successfully",
+        invoice,
+        invoiceNumber,
+        totalAmount: totalAmount.toFixed(2),
+        itemCount: unbilledWorkOrders.length + unbilledBillingSheets.length
+      });
+    } catch (error) {
+      console.error("Error creating monthly invoice:", error);
+      res.status(500).json({ message: "Failed to create monthly invoice" });
+    }
+  });
+
   app.get("/api/customers/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

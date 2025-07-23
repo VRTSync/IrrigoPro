@@ -45,6 +45,8 @@ export default function Login() {
         window.location.href = "/";
       } else if (user.role === "irrigation_manager") {
         window.location.href = "/work-orders";
+      } else if (user.role === "billing_manager") {
+        window.location.href = "/customers";
       } else {
         window.location.href = "/";
       }
