@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, FileText, Wrench, ClipboardList, Calendar, DollarSign, User, MapPin } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 
 interface Estimate {
   id: number;
@@ -45,6 +46,7 @@ interface BillingSheet {
 
 export default function Operations() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'estimates' | 'workorders' | 'billingsheets'>('all');
 
   const { data: estimates = [], isLoading: estimatesLoading } = useQuery<Estimate[]>({
@@ -85,6 +87,11 @@ export default function Operations() {
     }).format(amount);
   };
 
+  const handleCreateEstimate = () => {
+    setCreateModalOpen(false);
+    setEstimateModalOpen(true);
+  };
+
   const CreateWorkModal = () => (
     <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
       <DialogContent className="sm:max-w-md">
@@ -92,15 +99,13 @@ export default function Operations() {
           <DialogTitle>Create New Work Item</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4">
-          <Link href="/estimates?create=true">
-            <Button 
-              className="w-full h-16 flex flex-col items-center justify-center space-y-2"
-              onClick={() => setCreateModalOpen(false)}
-            >
-              <FileText className="h-6 w-6" />
-              <span>Create Estimate</span>
-            </Button>
-          </Link>
+          <Button 
+            className="w-full h-16 flex flex-col items-center justify-center space-y-2"
+            onClick={handleCreateEstimate}
+          >
+            <FileText className="h-6 w-6" />
+            <span>Create Estimate</span>
+          </Button>
           <Link href="/work-orders?create=true">
             <Button
               className="w-full h-16 flex flex-col items-center justify-center space-y-2"
@@ -310,6 +315,13 @@ export default function Operations() {
           ))
         )}
       </div>
+
+      {/* Enhanced Estimate Modal */}
+      <EnhancedEstimateModal 
+        open={estimateModalOpen} 
+        onOpenChange={setEstimateModalOpen}
+        estimateId={null}
+      />
     </div>
   );
 }
