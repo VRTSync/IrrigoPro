@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2 } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail } from "lucide-react";
 import type { Estimate } from "@shared/schema";
 
 interface EstimateDetailModalProps {
@@ -52,6 +52,33 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       toast({
         title: "Error", 
         description: "Failed to approve estimate",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const sendApprovalEmailMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/estimates/${estimateId}/send-approval-email`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to send approval email');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Approval email sent to customer",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error", 
+        description: "Failed to send approval email",
         variant: "destructive",
       });
     },
@@ -338,14 +365,22 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               )}
               {/* Approval Actions for Pending Estimates */}
               {estimate.status === 'pending' && (
-                <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button 
+                    onClick={() => sendApprovalEmailMutation.mutate()}
+                    disabled={sendApprovalEmailMutation?.isPending}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Mail className="w-4 h-4 mr-2" />
+                    {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
+                  </Button>
                   <Button 
                     onClick={() => approveEstimateMutation.mutate()}
                     disabled={approveEstimateMutation.isPending}
                     className="bg-green-600 hover:bg-green-700"
                   >
                     <CheckCircle className="w-4 h-4 mr-2" />
-                    {approveEstimateMutation.isPending ? 'Approving...' : 'Approve Estimate'}
+                    {approveEstimateMutation.isPending ? 'Approving...' : 'Approve'}
                   </Button>
                   <Button 
                     onClick={() => rejectEstimateMutation.mutate()}
@@ -353,7 +388,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     variant="destructive"
                   >
                     <XCircle className="w-4 h-4 mr-2" />
-                    {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject Estimate'}
+                    {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject'}
                   </Button>
                 </div>
               )}

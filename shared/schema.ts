@@ -107,6 +107,9 @@ export const estimates = pgTable("estimates", {
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
+  approvalToken: text("approval_token"), // Secure token for email approval links
+  approvalSentAt: timestamp("approval_sent_at"), // When approval email was sent
+  approvalRespondedAt: timestamp("approval_responded_at"), // When customer responded
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),

@@ -999,6 +999,200 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Send approval email to customer
+  app.post("/api/estimates/:id/send-approval-email", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const estimate = await storage.getEstimate(id);
+      if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (estimate.status !== "pending") {
+        return res.status(400).json({ message: "Only pending estimates can have approval emails sent" });
+      }
+
+      // Generate secure approval token
+      const approvalToken = require('crypto').randomBytes(32).toString('hex');
+      
+      // Update estimate with approval token and sent timestamp
+      await storage.updateEstimate(id, {
+        approvalToken,
+        approvalSentAt: new Date()
+      });
+
+      // Get estimate zones for email
+      const zones = await storage.getEstimateZonesWithItems(id);
+      
+      // Import EmailService
+      const { EmailService } = await import('./email-service');
+      
+      // Send approval email
+      await EmailService.sendEstimateApprovalEmail({
+        estimateId: estimate.id,
+        estimateNumber: estimate.estimateNumber,
+        customerName: estimate.customerName,
+        customerEmail: estimate.customerEmail,
+        projectName: estimate.projectName,
+        projectAddress: estimate.projectAddress || undefined,
+        totalAmount: `$${parseFloat(estimate.totalAmount).toFixed(2)}`,
+        approvalToken,
+        estimateDate: new Date(estimate.estimateDate).toLocaleDateString(),
+        createdBy: estimate.createdBy,
+        zones: zones?.map(zone => ({
+          zoneName: zone.zoneName,
+          workDescription: zone.workDescription,
+          laborHours: zone.items?.reduce((sum, item) => sum + parseFloat(item.laborHours), 0) || 0,
+          partsCost: zone.items?.reduce((sum, item) => sum + parseFloat(item.totalPrice), 0) || 0,
+          laborCost: (zone.items?.reduce((sum, item) => sum + parseFloat(item.laborHours), 0) || 0) * parseFloat(estimate.laborRate),
+          zoneTotal: (zone.items?.reduce((sum, item) => sum + parseFloat(item.totalPrice), 0) || 0) + 
+                    ((zone.items?.reduce((sum, item) => sum + parseFloat(item.laborHours), 0) || 0) * parseFloat(estimate.laborRate))
+        }))
+      });
+
+      res.json({ 
+        message: "Approval email sent successfully",
+        sentAt: new Date()
+      });
+    } catch (error) {
+      console.error('Error sending approval email:', error);
+      res.status(500).json({ message: "Failed to send approval email" });
+    }
+  });
+
+  // Approve estimate via token (customer clicks link)
+  app.get("/api/estimates/approve-via-token/:token", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const estimates = await storage.getEstimates();
+      const estimate = estimates.find(e => e.approvalToken === token);
+      
+      if (!estimate) {
+        return res.status(404).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #ef4444;">Invalid or Expired Link</h2>
+            <p>This approval link is no longer valid. Please contact us directly.</p>
+          </body></html>
+        `);
+      }
+
+      if (estimate.status !== "pending") {
+        return res.status(400).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #f59e0b;">Already Responded</h2>
+            <p>You have already responded to this estimate. Thank you!</p>
+          </body></html>
+        `);
+      }
+
+      // Approve the estimate
+      await storage.updateEstimate(estimate.id, {
+        status: "approved",
+        approvalRespondedAt: new Date(),
+        approvedAt: new Date()
+      });
+
+      // Send confirmation email
+      const { EmailService } = await import('./email-service');
+      await EmailService.sendApprovalConfirmation(
+        estimate.customerEmail,
+        estimate.estimateNumber,
+        true
+      );
+
+      res.send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <div style="max-width: 600px; margin: 0 auto; background: #f0fdf4; border: 1px solid #16a34a; border-radius: 12px; padding: 40px;">
+            <h1 style="color: #16a34a; margin-bottom: 20px;">✓ Estimate Approved!</h1>
+            <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">
+              Thank you for approving estimate ${estimate.estimateNumber}.
+            </p>
+            <p style="color: #6b7280;">
+              We will begin preparing your irrigation work and will contact you soon with scheduling details.
+            </p>
+            <p style="color: #6b7280; margin-top: 30px;">
+              A confirmation email has been sent to ${estimate.customerEmail}.
+            </p>
+          </div>
+        </body></html>
+      `);
+    } catch (error) {
+      console.error('Error approving estimate via token:', error);
+      res.status(500).send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h2 style="color: #ef4444;">Error</h2>
+          <p>Something went wrong. Please contact us directly.</p>
+        </body></html>
+      `);
+    }
+  });
+
+  // Reject estimate via token (customer clicks link)
+  app.get("/api/estimates/reject-via-token/:token", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const estimates = await storage.getEstimates();
+      const estimate = estimates.find(e => e.approvalToken === token);
+      
+      if (!estimate) {
+        return res.status(404).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #ef4444;">Invalid or Expired Link</h2>
+            <p>This approval link is no longer valid. Please contact us directly.</p>
+          </body></html>
+        `);
+      }
+
+      if (estimate.status !== "pending") {
+        return res.status(400).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #f59e0b;">Already Responded</h2>
+            <p>You have already responded to this estimate. Thank you!</p>
+          </body></html>
+        `);
+      }
+
+      // Reject the estimate
+      await storage.updateEstimate(estimate.id, {
+        status: "rejected",
+        approvalRespondedAt: new Date(),
+        rejectedAt: new Date()
+      });
+
+      // Send confirmation email
+      const { EmailService } = await import('./email-service');
+      await EmailService.sendApprovalConfirmation(
+        estimate.customerEmail,
+        estimate.estimateNumber,
+        false
+      );
+
+      res.send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <div style="max-width: 600px; margin: 0 auto; background: #fef2f2; border: 1px solid #dc2626; border-radius: 12px; padding: 40px;">
+            <h1 style="color: #dc2626; margin-bottom: 20px;">Estimate Declined</h1>
+            <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">
+              Thank you for your response regarding estimate ${estimate.estimateNumber}.
+            </p>
+            <p style="color: #6b7280;">
+              We understand this estimate doesn't meet your needs at this time. Please feel free to contact us if you'd like to discuss alternatives or have any questions.
+            </p>
+            <p style="color: #6b7280; margin-top: 30px;">
+              A confirmation email has been sent to ${estimate.customerEmail}.
+            </p>
+          </div>
+        </body></html>
+      `);
+    } catch (error) {
+      console.error('Error rejecting estimate via token:', error);
+      res.status(500).send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h2 style="color: #ef4444;">Error</h2>
+          <p>Something went wrong. Please contact us directly.</p>
+        </body></html>
+      `);
+    }
+  });
+
   // Convert estimate to work order
   app.post("/api/estimates/:id/convert-to-work-order", async (req, res) => {
     try {
