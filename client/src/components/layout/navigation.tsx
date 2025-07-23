@@ -141,7 +141,7 @@ export default function Navigation() {
       {/* Mobile Navigation - Bottom */}
       <div className="lg:hidden">
         {/* Top Bar with Logo and Notifications */}
-        <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="bg-white shadow-sm border-b border-gray-200 mb-0">
           <div className="flex justify-between items-center h-16 px-4">
             {/* Logo */}
             <div className="flex items-center">
