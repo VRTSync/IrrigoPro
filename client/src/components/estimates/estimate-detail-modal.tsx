@@ -218,6 +218,22 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               </div>
             )}
 
+            {/* Prominent Status Banner for Converted to Work Order */}
+            {estimate.status === 'converted_to_work_order' && (
+              <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
+                <div className="flex items-center justify-center space-x-3">
+                  <Wrench className="w-8 h-8 flex-shrink-0" />
+                  <div className="text-center">
+                    <h3 className="text-xl sm:text-2xl font-bold">⚡ CONVERTED TO WORK ORDER</h3>
+                    <p className="text-purple-100 text-sm sm:text-base mt-1">
+                      This estimate has been converted • Work order is now active
+                    </p>
+                  </div>
+                  <Wrench className="w-8 h-8 flex-shrink-0" />
+                </div>
+              </div>
+            )}
+
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               <div className="space-y-4 sm:space-y-6">
@@ -248,6 +264,13 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                             ✓ Approved
                           </Badge>
                           <span className="text-green-600 text-sm font-medium">Customer Approved!</span>
+                        </div>
+                      ) : estimate.status === 'converted_to_work_order' ? (
+                        <div className="flex items-center space-x-2">
+                          <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-sm font-semibold px-3 py-1">
+                            ⚡ Converted
+                          </Badge>
+                          <span className="text-purple-600 text-sm font-medium">Work Order Active!</span>
                         </div>
                       ) : (
                         getStatusBadge(estimate.status)
