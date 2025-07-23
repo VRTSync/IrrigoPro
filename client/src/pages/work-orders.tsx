@@ -524,11 +524,11 @@ export default function WorkOrders() {
                             View
                           </Button>
                           
-                          {/* Start Work Order button - managers can start any work order, others only their assigned ones */}
+                          {/* Start Work Order button - only for work orders assigned to current user or unassigned (managers only) */}
                           {(workOrder.status === 'pending' || workOrder.status === 'assigned') && 
-                           (currentUser.role === 'irrigation_manager' || 
-                            workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === currentUser.name) && (
+                           (workOrder.assignedTechnicianId === currentUser.id || 
+                            workOrder.assignedTechnicianName === currentUser.name ||
+                            (currentUser.role === 'irrigation_manager' && !workOrder.assignedTechnicianId)) && (
                             <Button
                               size="sm"
                               onClick={(e) => {
@@ -542,10 +542,9 @@ export default function WorkOrders() {
                             </Button>
                           )}
                           
-                          {/* Complete button - managers can complete any work order, others only their assigned ones */}
+                          {/* Complete button - only for work orders assigned to current user */}
                           {workOrder.status === 'in_progress' && 
-                           (currentUser.role === 'irrigation_manager' || 
-                            workOrder.assignedTechnicianId === currentUser.id || 
+                           (workOrder.assignedTechnicianId === currentUser.id || 
                             workOrder.assignedTechnicianName === currentUser.name) && (
                             <Button
                               size="sm"
