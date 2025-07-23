@@ -104,7 +104,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <FileText className="w-5 h-5" />

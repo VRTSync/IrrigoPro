@@ -124,7 +124,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
     if (estimate && customers) {
       // Reset form with estimate data
       form.reset({
-        customerId: estimate.customerId,
+        customerId: estimate.customerId || 0,
         customerName: estimate.customerName,
         customerEmail: estimate.customerEmail,
         customerPhone: estimate.customerPhone || "",
@@ -391,7 +391,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-6xl h-[95vh] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
@@ -421,7 +421,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 />
                 
                 {selectedCustomer && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="customerName"
@@ -653,7 +653,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 <CardTitle>Pricing Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <FormField
                     control={form.control}
                     name="laborRate"
@@ -727,7 +727,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             </Card>
 
             {/* Action Buttons */}
-            <div className="flex gap-3 justify-end">
+            <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
               <Button
                 type="button"
                 variant="outline"

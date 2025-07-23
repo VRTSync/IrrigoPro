@@ -114,7 +114,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       <DialogTrigger asChild>
         {trigger}
       </DialogTrigger>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>
             {customer ? "Edit Customer" : "Add New Customer"}
@@ -129,7 +129,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                 <CardTitle className="text-lg">Basic Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="name"
@@ -157,7 +157,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                     )}
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="phone"
@@ -185,7 +185,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                     )}
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="totalControllers"
@@ -308,7 +308,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="laborRate"
