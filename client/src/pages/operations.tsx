@@ -8,6 +8,7 @@ import { Plus, FileText, Wrench, ClipboardList, Calendar, DollarSign, User, MapP
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
+import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 
 interface Estimate {
   id: number;
@@ -48,6 +49,11 @@ export default function Operations() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'estimates' | 'workorders' | 'billingsheets'>('all');
+  
+  // State for detail modals
+  const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingSheet | null>(null);
 
   const { data: estimates = [], isLoading: estimatesLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
@@ -297,17 +303,21 @@ export default function Operations() {
                   </div>
                   
                   <div className="flex space-x-2">
-                    <Link 
-                      href={
-                        item.type === 'estimate' ? '/estimates' :
-                        item.type === 'workorder' ? '/work-orders' :
-                        '/billing-sheets'
-                      }
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        if (item.type === 'estimate') {
+                          setSelectedEstimate(item as Estimate);
+                        } else if (item.type === 'workorder') {
+                          setSelectedWorkOrder(item as WorkOrder);
+                        } else if (item.type === 'billingsheet') {
+                          setSelectedBillingSheet(item as BillingSheet);
+                        }
+                      }}
                     >
-                      <Button variant="outline" size="sm">
-                        View Details
-                      </Button>
-                    </Link>
+                      View Details
+                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -322,6 +332,127 @@ export default function Operations() {
         onOpenChange={setEstimateModalOpen}
         estimateId={null}
       />
+
+      {/* Detail Modals */}
+      {selectedEstimate && (
+        <EstimateDetailModal
+          estimateId={selectedEstimate.id}
+          open={!!selectedEstimate}
+          onOpenChange={(open) => {
+            if (!open) setSelectedEstimate(null);
+          }}
+          onEdit={(estimateId) => {
+            setSelectedEstimate(null);
+            // Could navigate to estimates page with edit mode
+          }}
+        />
+      )}
+
+      {selectedWorkOrder && (
+        <Dialog open={!!selectedWorkOrder} onOpenChange={() => setSelectedWorkOrder(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Work Order Details - {selectedWorkOrder.workOrderNumber}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-6">
+              {/* Basic Info */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Basic Information</h3>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="font-medium">Customer:</span> {selectedWorkOrder.customerName}</div>
+                    <div><span className="font-medium">Project:</span> {selectedWorkOrder.projectName}</div>
+                    {selectedWorkOrder.assignedTechnicianName && (
+                      <div><span className="font-medium">Assigned Tech:</span> {selectedWorkOrder.assignedTechnicianName}</div>
+                    )}
+                    <div><span className="font-medium">Status:</span> 
+                      <Badge className={`ml-2 ${getStatusColor(selectedWorkOrder.status)}`}>
+                        {selectedWorkOrder.status.replace('_', ' ')}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Financial & Dates</h3>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="font-medium">Total Amount:</span> {formatCurrency(selectedWorkOrder.totalAmount)}</div>
+                    <div><span className="font-medium">Created:</span> {format(new Date(selectedWorkOrder.createdAt), "MMM d, yyyy 'at' h:mm a")}</div>
+                    {selectedWorkOrder.propertyAddress && (
+                      <div><span className="font-medium">Address:</span> {selectedWorkOrder.propertyAddress}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end space-x-2 pt-4 border-t">
+                <Button variant="outline" onClick={() => setSelectedWorkOrder(null)}>
+                  Close
+                </Button>
+                <Link href={`/work-orders`}>
+                  <Button onClick={() => setSelectedWorkOrder(null)}>
+                    View Full Details
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Billing Sheet Detail Modal */}
+      {selectedBillingSheet && (
+        <Dialog open={!!selectedBillingSheet} onOpenChange={() => setSelectedBillingSheet(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Billing Sheet Details - {selectedBillingSheet.billingSheetNumber}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-6">
+              {/* Basic Info */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Basic Information</h3>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="font-medium">Customer:</span> {selectedBillingSheet.customerName}</div>
+                    <div><span className="font-medium">Technician:</span> {selectedBillingSheet.technicianName}</div>
+                    <div><span className="font-medium">Work Date:</span> {format(new Date(selectedBillingSheet.workDate), "MMM d, yyyy")}</div>
+                    <div><span className="font-medium">Status:</span> 
+                      <Badge className={`ml-2 ${getStatusColor(selectedBillingSheet.status)}`}>
+                        {selectedBillingSheet.status.replace('_', ' ')}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Financial</h3>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="font-medium">Total Amount:</span> {formatCurrency(selectedBillingSheet.totalAmount)}</div>
+                    <div><span className="font-medium">Created:</span> {format(new Date(selectedBillingSheet.createdAt), "MMM d, yyyy 'at' h:mm a")}</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Description */}
+              <div>
+                <h3 className="font-semibold text-gray-900 mb-2">Work Description</h3>
+                <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{selectedBillingSheet.description}</p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end space-x-2 pt-4 border-t">
+                <Button variant="outline" onClick={() => setSelectedBillingSheet(null)}>
+                  Close
+                </Button>
+                <Link href={`/billing-sheets`}>
+                  <Button onClick={() => setSelectedBillingSheet(null)}>
+                    View Full Details
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
