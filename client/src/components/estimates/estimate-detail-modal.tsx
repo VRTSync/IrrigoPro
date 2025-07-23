@@ -185,23 +185,26 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="flex items-center space-x-2">
+      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+        <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+          <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
             <FileText className="w-5 h-5" />
             <span>Estimate Details</span>
           </DialogTitle>
         </DialogHeader>
 
         {isLoading ? (
-          <div className="space-y-4">
+          <div className="p-4 sm:p-6 space-y-4">
             <div className="animate-pulse">
               <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
               <div className="h-4 bg-gray-200 rounded w-1/2"></div>
             </div>
           </div>
         ) : estimate ? (
-          <div className="space-y-6">
+          <>
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="space-y-4 sm:space-y-6">
             {/* Header Information */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card>
@@ -344,68 +347,77 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 </CardContent>
               </Card>
             )}
-
-            {/* Actions */}
-            <div className="flex justify-end space-x-3 pt-4 border-t">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Close
-              </Button>
-              {estimate.status !== 'converted_to_work_order' && onEdit && (
-                <Button 
-                  onClick={() => {
-                    onEdit(estimateId!);
-                    onOpenChange(false);
-                  }}
-                  variant="outline"
-                  className="border-blue-200 text-blue-600 hover:bg-blue-50"
-                >
-                  <Edit2 className="w-4 h-4 mr-2" />
-                  Edit Estimate
-                </Button>
-              )}
-              {/* Approval Actions for Pending Estimates */}
-              {estimate.status === 'pending' && (
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button 
-                    onClick={() => sendApprovalEmailMutation.mutate()}
-                    disabled={sendApprovalEmailMutation?.isPending}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    <Mail className="w-4 h-4 mr-2" />
-                    {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
-                  </Button>
-                  <Button 
-                    onClick={() => approveEstimateMutation.mutate()}
-                    disabled={approveEstimateMutation.isPending}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    {approveEstimateMutation.isPending ? 'Approving...' : 'Approve'}
-                  </Button>
-                  <Button 
-                    onClick={() => rejectEstimateMutation.mutate()}
-                    disabled={rejectEstimateMutation.isPending}
-                    variant="destructive"
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject'}
-                  </Button>
-                </div>
-              )}
-
-              {/* Convert to Work Order for Approved Estimates */}
-              {estimate.status === 'approved' && (
-                <Button 
-                  onClick={handleConvertToWorkOrder}
-                  disabled={isConverting}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  <Wrench className="w-4 h-4 mr-2" />
-                  {isConverting ? 'Converting...' : 'Convert to Work Order'}
-                </Button>
-              )}
+              </div>
             </div>
-          </div>
+
+            {/* Fixed Footer with Actions */}
+            <div className="flex-shrink-0 p-4 sm:p-6 border-t border-gray-200 bg-gray-50">
+              <div className="flex flex-col sm:flex-row justify-end gap-3">
+                <Button 
+                  variant="outline" 
+                  onClick={() => onOpenChange(false)}
+                  className="w-full sm:w-auto"
+                >
+                  Close
+                </Button>
+                {estimate.status !== 'converted_to_work_order' && onEdit && (
+                  <Button 
+                    onClick={() => {
+                      onEdit(estimateId!);
+                      onOpenChange(false);
+                    }}
+                    variant="outline"
+                    className="border-blue-200 text-blue-600 hover:bg-blue-50 w-full sm:w-auto"
+                  >
+                    <Edit2 className="w-4 h-4 mr-2" />
+                    Edit Estimate
+                  </Button>
+                )}
+                {/* Approval Actions for Pending Estimates */}
+                {estimate.status === 'pending' && (
+                  <>
+                    <Button 
+                      onClick={() => sendApprovalEmailMutation.mutate()}
+                      disabled={sendApprovalEmailMutation?.isPending}
+                      className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                    >
+                      <Mail className="w-4 h-4 mr-2" />
+                      {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
+                    </Button>
+                    <Button 
+                      onClick={() => approveEstimateMutation.mutate()}
+                      disabled={approveEstimateMutation.isPending}
+                      className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      {approveEstimateMutation.isPending ? 'Approving...' : 'Approve'}
+                    </Button>
+                    <Button 
+                      onClick={() => rejectEstimateMutation.mutate()}
+                      disabled={rejectEstimateMutation.isPending}
+                      variant="destructive"
+                      className="w-full sm:w-auto"
+                    >
+                      <XCircle className="w-4 h-4 mr-2" />
+                      {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject'}
+                    </Button>
+                  </>
+                )}
+
+                {/* Convert to Work Order for Approved Estimates */}
+                {estimate.status === 'approved' && (
+                  <Button 
+                    onClick={handleConvertToWorkOrder}
+                    disabled={isConverting}
+                    className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                  >
+                    <Wrench className="w-4 h-4 mr-2" />
+                    {isConverting ? 'Converting...' : 'Convert to Work Order'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </>
         ) : (
           <div className="text-center py-8">
             <p className="text-gray-500">Estimate not found</p>
