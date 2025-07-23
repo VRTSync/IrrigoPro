@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
@@ -80,6 +81,14 @@ export default function WorkOrders() {
     enabled: !!currentUser,
   });
 
+  // Fetch field technicians for assignment (managers only)
+  const { data: fieldTechs } = useQuery({
+    queryKey: ['/api/users'],
+    select: (users: any[]) => users.filter(user => user.role === 'field_tech'),
+    staleTime: 300000, // 5 minutes
+    enabled: currentUser?.role === 'irrigation_manager',
+  });
+
   const filteredWorkOrders = workOrders?.filter ? workOrders.filter(workOrder => {
     const matchesSearch = workOrder.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          workOrder.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -153,6 +162,23 @@ export default function WorkOrders() {
   const handleStartWork = (workOrderId: number) => {
     startWorkMutation.mutate(workOrderId);
   };
+
+  // Reassign work order mutation
+  const reassignWorkOrder = useMutation({
+    mutationFn: async ({ workOrderId, technicianId, technicianName }: { workOrderId: number; technicianId: number; technicianName: string }) => {
+      return fetch(`/api/work-orders/${workOrderId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          technicianId: technicianId,
+          technicianName: technicianName 
+        })
+      }).then(res => res.json());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
+    }
+  });
 
   // Handle loading state for currentUser
   if (!currentUser) {
@@ -498,12 +524,11 @@ export default function WorkOrders() {
                             View
                           </Button>
                           
-                          {/* Start Work Order button - only if assigned to current user or unassigned */}
+                          {/* Start Work Order button - managers can start any work order, others only their assigned ones */}
                           {(workOrder.status === 'pending' || workOrder.status === 'assigned') && 
-                           (workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === "Manager" ||
-                            workOrder.assignedTechnicianName === currentUser.name ||
-                            !workOrder.assignedTechnicianId) && (
+                           (currentUser.role === 'irrigation_manager' || 
+                            workOrder.assignedTechnicianId === currentUser.id || 
+                            workOrder.assignedTechnicianName === currentUser.name) && (
                             <Button
                               size="sm"
                               onClick={(e) => {
@@ -517,10 +542,10 @@ export default function WorkOrders() {
                             </Button>
                           )}
                           
-                          {/* Complete button - only if assigned to current user */}
+                          {/* Complete button - managers can complete any work order, others only their assigned ones */}
                           {workOrder.status === 'in_progress' && 
-                           (workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === "Manager" ||
+                           (currentUser.role === 'irrigation_manager' || 
+                            workOrder.assignedTechnicianId === currentUser.id || 
                             workOrder.assignedTechnicianName === currentUser.name) && (
                             <Button
                               size="sm"
@@ -534,6 +559,44 @@ export default function WorkOrders() {
                               Complete
                             </Button>
                           )}
+                          
+                          {/* Assignment controls - only for managers */}
+                          {currentUser.role === 'irrigation_manager' && (
+                            <Select
+                              onValueChange={(techId: string) => {
+                                const selectedTech = fieldTechs?.find((tech: any) => tech.id.toString() === techId);
+                                if (selectedTech) {
+                                  reassignWorkOrder.mutate({
+                                    workOrderId: workOrder.id,
+                                    technicianId: selectedTech.id,
+                                    technicianName: selectedTech.name
+                                  });
+                                } else if (techId === currentUser.id.toString()) {
+                                  // Assign to manager
+                                  reassignWorkOrder.mutate({
+                                    workOrderId: workOrder.id,
+                                    technicianId: currentUser.id,
+                                    technicianName: "Manager"
+                                  });
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-32">
+                                <SelectValue placeholder="Assign" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={currentUser.id.toString()}>
+                                  Manager
+                                </SelectItem>
+                                {fieldTechs?.map((tech: any) => (
+                                  <SelectItem key={tech.id} value={tech.id.toString()}>
+                                    {tech.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+
                         </div>
                       )}
                     </div>
