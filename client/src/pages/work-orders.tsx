@@ -145,8 +145,7 @@ export default function WorkOrders() {
   const startWorkMutation = useMutation({
     mutationFn: async (workOrderId: number) => {
       const updateData = { 
-        status: 'in_progress' as const,
-        startedAt: new Date()
+        status: 'in_progress' as const
       };
       console.log('Starting work order with data:', updateData);
       return fetch(`/api/work-orders/${workOrderId}`, {

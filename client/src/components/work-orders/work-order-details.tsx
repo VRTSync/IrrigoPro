@@ -143,14 +143,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
     mutationFn: async (status: string) => {
       const updateData: any = { status };
       
-      if (status === 'in_progress' && !workOrder.startedAt) {
-        updateData.startedAt = new Date().toISOString();
-      }
-      
-      if (status === 'completed' && !workOrder.completedAt) {
-        updateData.completedAt = new Date().toISOString();
-      }
-      
       return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", updateData);
     },
     onSuccess: (data, status) => {
@@ -634,12 +626,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
               <Button
                 onClick={() => updateWorkOrderStatus.mutate('in_progress')}
                 disabled={updateWorkOrderStatus.isPending}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
+                className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg font-semibold"
                 size="lg"
               >
-                <ArrowRight className="w-5 h-5 mr-2" />
-                Add Detail
-                <div className="ml-2 text-sm opacity-80">Next Step</div>
+                <Play className="w-5 h-5 mr-2" />
+                Start Work Order
               </Button>
             </div>
           </div>
