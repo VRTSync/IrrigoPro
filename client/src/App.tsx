@@ -19,6 +19,7 @@ import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import BillingSheets from "@/pages/billing-sheets";
 import CustomerBilling from "@/pages/customer-billing";
 import AdminDashboard from "@/pages/admin-dashboard";
+import Operations from "@/pages/operations";
 import { UserSelector } from "@/components/user-selector";
 
 interface User {
@@ -187,6 +188,7 @@ function Router() {
           <Switch>
             <Route path="/" component={AdminDashboard} />
             <Route path="/admin" component={AdminDashboard} />
+            <Route path="/operations" component={Operations} />
             <Route path="/estimates" component={Estimates} />
             <Route path="/parts" component={PartsCatalog} />
             <Route path="/customers" component={Customers} />

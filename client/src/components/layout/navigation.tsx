@@ -26,7 +26,7 @@ export default function Navigation() {
     switch (userRole) {
       case "admin":
         return [
-          { path: "/estimates", label: "Operations", icon: FileText },
+          { path: "/operations", label: "Operations", icon: FileText },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/parts", label: "Parts", icon: Package },
