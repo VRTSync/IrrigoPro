@@ -221,21 +221,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const getStatusActions = () => {
     const buttons = [];
     
-    if (workOrder.status === 'pending') {
-      buttons.push(
-        <Button
-          key="start"
-          onClick={() => updateWorkOrderStatus.mutate('in_progress')}
-          disabled={updateWorkOrderStatus.isPending}
-          className="bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          <Play className="w-4 h-4 mr-2" />
-          Start Work
-        </Button>
-      );
-    }
-    
-    // Complete button moved to bottom - not included here
+    // Start button moved to bottom section - not included here
     
     if (workOrder.status !== 'cancelled' && workOrder.status !== 'completed') {
       buttons.push(
@@ -582,14 +568,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         </Tabs>
 
         {/* Action Buttons - Bottom Section */}
-        {showAddDetailsButton && (workOrder.status === 'pending' || workOrder.status === 'assigned') && (
+        {/* Start Work Order button - for pending/assigned work orders */}
+        {(workOrder.status === 'pending' || workOrder.status === 'assigned') && (
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
               <Button
                 onClick={() => {
                   // Start the work order by changing status to in_progress
-                  console.log('Add Details button clicked, starting work order');
-                  // Change status to in_progress
+                  console.log('Start Work Order button clicked, starting work order');
                   const updateStatusMutation = async () => {
                     try {
                       await apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { 
@@ -601,7 +587,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                         description: "Work order status updated to in progress",
                       });
                       onUpdate();
-                      onClose();
+                      // Don't close modal - let them continue working
                     } catch (error) {
                       toast({
                         title: "Error",
@@ -615,9 +601,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
                 size="lg"
               >
-                <ArrowRight className="w-5 h-5 mr-2" />
-                Add Details
-                <span className="ml-2 text-sm opacity-80">Next Step</span>
+                <Play className="w-5 h-5 mr-2" />
+                Start Work Order
               </Button>
             </div>
           </div>
