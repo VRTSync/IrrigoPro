@@ -173,7 +173,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
 
       // Get all billing sheets for the customer
-      const allBillingSheets = await storage.getBillingSheets();
+      const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Get all estimates for the customer
@@ -226,7 +226,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
 
       // Get all billing sheets for the customer
-      const allBillingSheets = await storage.getBillingSheets();
+      const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Filter unbilled work
@@ -1594,7 +1594,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Save used parts information
       for (const part of usedParts || []) {
-        await storage.createWorkOrderItem({
+        await storage.addWorkOrderItem({
           workOrderId,
           partId: part.partId,
           quantity: part.quantity,
@@ -1938,7 +1938,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const workOrderId = parseInt(req.params.id);
       const billingData = req.body;
-      await storage.saveBillingSheet(workOrderId, billingData);
+      await storage.createBillingSheet(workOrderId, billingData);
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to save billing sheet" });
@@ -1948,7 +1948,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/work-orders/:id/billing-sheet", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
-      const billingSheet = await storage.getBillingSheet(workOrderId);
+      const billingSheet = await storage.getBillingSheetById(workOrderId);
       if (!billingSheet) {
         return res.status(404).json({ message: "Billing sheet not found" });
       }

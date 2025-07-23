@@ -62,10 +62,7 @@ export default function SuperAdminDashboard() {
 
   const onSubmit = async (data: CompanyFormData) => {
     try {
-      await apiRequest("/api/companies", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      await apiRequest("/api/companies", "POST", data);
 
       queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       setIsCreateDialogOpen(false);

@@ -63,10 +63,7 @@ export default function SystemUserManagement() {
 
   const onSubmit = async (data: UserFormData) => {
     try {
-      await apiRequest("/api/users", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      await apiRequest("/api/users", "POST", data);
 
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       setIsCreateDialogOpen(false);

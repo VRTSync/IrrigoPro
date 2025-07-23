@@ -786,7 +786,7 @@ export class DatabaseStorage implements IStorage {
       try {
         const existing = await db.select().from(customers).where(eq(customers.email, customerData.email));
         if (existing.length === 0) {
-          await db.insert(customers).values(customerData);
+          await db.insert(customers).values({ ...customerData, companyId: 1 });
           customersAdded++;
         }
       } catch (error) {
@@ -812,7 +812,7 @@ export class DatabaseStorage implements IStorage {
       try {
         const existing = await db.select().from(customers).where(eq(customers.email, customerData.email));
         if (existing.length === 0) {
-          await db.insert(customers).values(customerData);
+          await db.insert(customers).values({ ...customerData, companyId: 1 });
           customersAdded++;
         }
       } catch (error) {
@@ -1058,21 +1058,30 @@ export class DatabaseStorage implements IStorage {
       markupAmount: markupAmount.toString(),
       taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
-      workDate: new Date(sheetData.workDate as string)
+      workDate: new Date(sheetData.workDate as string || new Date())
     };
 
     console.log('Creating billing sheet with data:', finalSheetData);
     
-    const [newSheet] = await db.insert(billingSheets).values([finalSheetData]).returning();
+    // Generate billing number
+    const count = await this.getBillingSheetCount();
+    const billingNumber = `BS-${new Date().getFullYear()}-${(count + 1).toString().padStart(4, '0')}`;
+    
+    const finalSheetDataWithNumber = {
+      ...finalSheetData,
+      billingNumber
+    };
+    
+    const [newSheet] = await db.insert(billingSheets).values(finalSheetDataWithNumber).returning();
     
     // If items are provided, insert them
     if (items && Array.isArray(items)) {
       for (const item of items) {
-        await db.insert(billingSheetItems).values([{
+        await db.insert(billingSheetItems).values({
           ...item,
           billingSheetId: newSheet.id,
           totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
-        }]);
+        });
       }
     }
     
@@ -1105,7 +1114,7 @@ export class DatabaseStorage implements IStorage {
   async updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined> {
     const updateData = { ...item };
     if (item.quantity && item.unitPrice) {
-      updateData.totalPrice = Number(item.quantity) * Number(item.unitPrice);
+      updateData.totalPrice = (Number(item.quantity) * Number(item.unitPrice)).toString();
     }
     
     const [updatedItem] = await db.update(billingSheetItems).set(updateData).where(eq(billingSheetItems.id, itemId)).returning();
@@ -1197,7 +1206,7 @@ export class DatabaseStorage implements IStorage {
     
     // Generate invoices for each customer
     const invoices: Invoice[] = [];
-    for (const [customerId, work] of customerWork) {
+    for (const [customerId, work] of Array.from(customerWork.entries())) {
       const invoice = await this.createMonthlyInvoice(customerId, work, month, year, periodStart, periodEnd);
       if (invoice) {
         invoices.push(invoice);
