@@ -183,6 +183,7 @@ The system uses comprehensive database tables:
 - **QuickBooks Integration Format**: Designed professional invoice layout with detailed line items, proper markup calculation (20% on parts only), and streamlined monthly billing
 - **Complete Responsive Design Overhaul (2025-07-23)**: Implemented mobile-first responsive design across all pages with dual-layout approach (desktop table view + mobile card view)
 - **Complete Estimate Approval Workflow (2025-07-23)**: Added missing approve/reject estimate functionality with full work order conversion process
+- **Customer Email Approval System (2025-07-23)**: Implemented Postmark email integration for automated customer estimate approvals with secure token-based approval links
 
 ## Responsive Design Implementation (2025-07-23)
 
@@ -244,3 +245,28 @@ The application now provides a seamless experience across all device sizes, from
 - **Real-time Updates**: 30-second polling with unread count badges
 - **Workflow Integration**: Automated notifications for work order assignments, completions, and estimate approvals
 - **User Experience**: Clean notification dropdown with mark-as-read functionality and entity navigation
+
+## Customer Email Approval System (2025-07-23)
+
+### Postmark Integration Architecture
+- **Email Service**: Professional transactional email delivery via Postmark API
+- **Secure Token System**: Cryptographically secure approval tokens for customer links
+- **Database Tracking**: approval_token, approval_sent_at, and approval_responded_at fields in estimates table
+- **Customer Experience**: One-click approve/reject links directly from email
+- **Confirmation System**: Automatic confirmation emails sent after customer response
+- **Professional Templates**: Mobile-responsive HTML emails with estimate details and clear action buttons
+
+### Email Workflow Process
+1. **Manager creates estimate** → System shows "Email Customer" button in estimate detail modal
+2. **Manager clicks email button** → System generates secure token and sends professional approval email
+3. **Customer receives email** → Professional template with estimate details and approve/reject buttons
+4. **Customer clicks action** → Direct approval/rejection via secure link with confirmation page
+5. **System updates status** → Estimate status changes to approved/rejected automatically
+6. **Manager notification** → System can notify manager of customer decision (future enhancement)
+
+### Technical Implementation
+- **EmailService class**: Handles Postmark API integration with error handling
+- **Approval endpoints**: `/approve-via-token/:token` and `/reject-via-token/:token` for customer responses  
+- **Email templates**: Professional HTML/text templates with responsive design
+- **Security**: Secure token generation and validation prevents unauthorized access
+- **Error handling**: Graceful handling of expired/invalid tokens with user-friendly messages
