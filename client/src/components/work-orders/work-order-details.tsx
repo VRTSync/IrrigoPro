@@ -573,30 +573,31 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
               <Button
-                onClick={() => {
-                  // Start the work order by changing status to in_progress
-                  console.log('Start Work Order button clicked, starting work order');
-                  const updateStatusMutation = async () => {
-                    try {
-                      await apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { 
-                        status: 'in_progress',
-                        startedAt: new Date().toISOString()
-                      });
-                      toast({
-                        title: "Work Started",
-                        description: "Work order status updated to in progress",
-                      });
-                      onUpdate();
-                      // Don't close modal - let them continue working
-                    } catch (error) {
-                      toast({
-                        title: "Error",
-                        description: "Failed to start work order",
-                        variant: "destructive",
-                      });
-                    }
-                  };
-                  updateStatusMutation();
+                onClick={async () => {
+                  console.log('Start Work Order button clicked, starting work and opening completion form');
+                  try {
+                    // First, change status to in_progress
+                    await apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { 
+                      status: 'in_progress',
+                      startedAt: new Date()
+                    });
+                    
+                    toast({
+                      title: "Work Started",
+                      description: "Work order status updated to in progress",
+                    });
+                    
+                    // Update the work order data and open completion form
+                    onUpdate();
+                    onClose();
+                    setShowCompletionForm(true);
+                  } catch (error) {
+                    toast({
+                      title: "Error",
+                      description: "Failed to start work order",
+                      variant: "destructive",
+                    });
+                  }
                 }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
                 size="lg"
