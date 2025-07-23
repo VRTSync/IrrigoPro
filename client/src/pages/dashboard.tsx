@@ -8,10 +8,34 @@ import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, Tren
 import { useState } from "react";
 import { Link } from "wouter";
 
+interface DashboardStats {
+  pendingEstimates: number;
+  approvedThisMonth: number;
+  totalRevenue: number;
+  workOrderStats: {
+    pending: number;
+    inProgress: number;
+    completed: number;
+  };
+  recentEstimates: Array<{
+    id: number;
+    estimateNumber: string;
+    customerName: string;
+    totalAmount: string;
+    status: string;
+    createdAt: string;
+  }>;
+  topParts: Array<{
+    id: number;
+    name: string;
+    usage: number;
+  }>;
+}
+
 export default function Dashboard() {
   const [showEstimateModal, setShowEstimateModal] = useState(false);
 
-  const { data: stats, isLoading } = useQuery({
+  const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
   });
 
@@ -207,7 +231,7 @@ export default function Dashboard() {
                     </div>
                   ))
                 ) : (
-                  stats?.recentEstimates?.map((estimate) => (
+                  stats?.recentEstimates?.map((estimate: any) => (
                     <div key={estimate.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                       <div className="flex items-center space-x-4">
                         <div className="bg-blue-50 p-2 rounded-lg">
@@ -215,7 +239,7 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <p className="font-medium text-gray-900">{estimate.estimateNumber}</p>
-                          <p className="text-sm text-gray-600">{estimate.projectName} - {estimate.customerName}</p>
+                          <p className="text-sm text-gray-600">{estimate.customerName}</p>
                           <p className="text-xs text-gray-500">Created {getTimeAgo(estimate.createdAt)}</p>
                         </div>
                       </div>
@@ -304,7 +328,7 @@ export default function Dashboard() {
                     </div>
                   ))
                 ) : (
-                  stats?.topParts?.map((part) => (
+                  stats?.topParts?.map((part: any) => (
                     <div key={part.id} className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         <div className="bg-blue-50 p-2 rounded-lg">
@@ -312,10 +336,10 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <p className="font-medium text-gray-900">{part.name}</p>
-                          <p className="text-sm text-gray-600">{part.usageCount} used</p>
+                          <p className="text-sm text-gray-600">{part.usage} used</p>
                         </div>
                       </div>
-                      <span className="text-sm font-medium text-gray-900">{formatCurrency(parseFloat(part.price))}</span>
+                      <span className="text-sm font-medium text-gray-900">{part.usage}</span>
                     </div>
                   ))
                 )}
