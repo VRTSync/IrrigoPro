@@ -202,6 +202,22 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           </div>
         ) : estimate ? (
           <>
+            {/* Prominent Status Banner for Approved Estimates */}
+            {estimate.status === 'approved' && (
+              <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
+                <div className="flex items-center justify-center space-x-3">
+                  <CheckCircle className="w-8 h-8 flex-shrink-0" />
+                  <div className="text-center">
+                    <h3 className="text-xl sm:text-2xl font-bold">✓ ESTIMATE APPROVED</h3>
+                    <p className="text-green-100 text-sm sm:text-base mt-1">
+                      Customer approved this estimate • Ready to convert to work order
+                    </p>
+                  </div>
+                  <CheckCircle className="w-8 h-8 flex-shrink-0" />
+                </div>
+              </div>
+            )}
+
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               <div className="space-y-4 sm:space-y-6">
@@ -225,7 +241,18 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Status:</span>
-                    <div className="mt-1">{getStatusBadge(estimate.status)}</div>
+                    <div className="mt-1">
+                      {estimate.status === 'approved' ? (
+                        <div className="flex items-center space-x-2">
+                          <Badge className="bg-green-100 text-green-800 border-green-200 text-sm font-semibold px-3 py-1">
+                            ✓ Approved
+                          </Badge>
+                          <span className="text-green-600 text-sm font-medium">Customer Approved!</span>
+                        </div>
+                      ) : (
+                        getStatusBadge(estimate.status)
+                      )}
+                    </div>
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Created Date:</span>
