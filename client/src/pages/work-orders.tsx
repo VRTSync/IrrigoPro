@@ -142,38 +142,7 @@ export default function WorkOrders() {
     return workOrders?.filter(wo => wo.status === status).length || 0;
   };
 
-  const startWorkMutation = useMutation({
-    mutationFn: async (workOrderId: number) => {
-      const updateData = { 
-        status: 'in_progress' as const
-      };
-      console.log('Starting work order with data:', updateData);
-      return fetch(`/api/work-orders/${workOrderId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updateData)
-      }).then(async res => {
-        if (!res.ok) {
-          const error = await res.json();
-          console.error('Start work error:', error);
-          throw new Error(`Failed to start work: ${error.message}`);
-        }
-        return res.json();
-      });
-    },
-    onSuccess: () => {
-      console.log('Start work mutation successful');
-      queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
-    },
-    onError: (error: any) => {
-      console.error('Start work mutation failed:', error);
-    }
-  });
 
-  const handleStartWork = (workOrderId: number) => {
-    console.log('handleStartWork called with ID:', workOrderId);
-    startWorkMutation.mutate(workOrderId);
-  };
 
   // Reassign work order mutation
   const reassignWorkOrder = useMutation({
@@ -545,14 +514,12 @@ export default function WorkOrders() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                console.log('Start Work Order button clicked for work order:', workOrder.id);
-                                handleStartWork(workOrder.id);
+                                setSelectedWorkOrder(workOrder);
                               }}
                               className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                              disabled={startWorkMutation.isPending}
                             >
                               <Play className="w-4 h-4 mr-1" />
-                              {startWorkMutation.isPending ? 'Starting...' : 'Start Work Order'}
+                              Start Work Order
                             </Button>
                           )}
                           
