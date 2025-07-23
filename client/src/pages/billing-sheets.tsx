@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { BillingSheet } from "@shared/schema";
 
@@ -121,6 +121,33 @@ export default function BillingSheets() {
       toast({
         title: "Error",
         description: "Failed to reject billing sheet", 
+        variant: "destructive"
+      });
+    }
+  });
+
+  // Submit billing sheet for approval (field techs only)
+  const submitForApproval = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/billing-sheets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'submitted' })
+      });
+      if (!response.ok) throw new Error('Failed to submit billing sheet for approval');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
+      toast({
+        title: "Success",
+        description: "Billing sheet submitted for manager approval"
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to submit billing sheet for approval",
         variant: "destructive"
       });
     }
@@ -266,6 +293,20 @@ export default function BillingSheets() {
                   <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
                     <div className="flex flex-col sm:items-end gap-2">
                       {getStatusBadge(sheet.status)}
+                      
+                      {/* Submit for approval button for field techs on draft billing sheets */}
+                      {currentUser?.role === 'field_tech' && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                        <Button
+                          size="sm"
+                          onClick={() => submitForApproval.mutate(sheet.id)}
+                          disabled={submitForApproval.isPending}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-3"
+                        >
+                          <Send className="w-3 h-3 mr-1" />
+                          Submit for Approval
+                        </Button>
+                      )}
+                      
                       {/* Approval buttons for managers on submitted billing sheets */}
                       {currentUser?.role !== 'field_tech' && sheet.status === 'submitted' && (
                         <div className="flex gap-2">
