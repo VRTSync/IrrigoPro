@@ -14,7 +14,8 @@ import {
   insertFieldWorkSessionSchema,
   insertFieldWorkItemSchema,
   insertWorkOrderSchema,
-  insertWorkOrderItemSchema
+  insertWorkOrderItemSchema,
+  insertNotificationSchema
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -1124,6 +1125,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Notify managers about work order completion
+      const managers = await storage.getUsers();
+      const managerUsers = managers.filter(u => u.role === "irrigation_manager" || u.role === "admin");
+      
+      for (const manager of managerUsers) {
+        await storage.createNotification({
+          userId: manager.id,
+          type: "work_order_completed",
+          title: "Work Order Completed",
+          message: `Work order ${workOrder.workOrderNumber} has been completed by ${workOrder.technicianName}.`,
+          relatedEntityType: "work_order",
+          relatedEntityId: workOrderId
+        });
+      }
+
       res.json({ message: "Work order completed successfully", workOrder });
     } catch (error) {
       console.error("Error completing work order:", error);
@@ -1141,8 +1157,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!workOrder) {
         return res.status(404).json({ message: "Work order not found" });
       }
+      
+      // Notify managers about work order completion
+      const managers = await storage.getUsers();
+      const managerUsers = managers.filter(u => u.role === "irrigation_manager" || u.role === "admin");
+      
+      for (const manager of managerUsers) {
+        await storage.createNotification({
+          userId: manager.id,
+          type: "work_order_completed",
+          title: "Work Order Completed",
+          message: `Work order ${workOrder.workOrderNumber} has been completed by ${workOrder.technicianName}.`,
+          relatedEntityType: "work_order",
+          relatedEntityId: id
+        });
+      }
+      
       res.json(workOrder);
     } catch (error) {
+      console.error("Error completing work order:", error);
       res.status(500).json({ message: "Failed to complete work order" });
     }
   });
@@ -1390,7 +1423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Work Order Assignment
+  // Work Order Assignment with Notification
   app.post("/api/work-orders/:id/assign", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
@@ -1401,8 +1434,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Work order not found or assignment failed" });
       }
       
+      // Get work order details for notification
+      const workOrder = await storage.getWorkOrder(workOrderId);
+      if (workOrder && technicianId) {
+        // Notify field technician about work order assignment
+        await storage.createNotification({
+          userId: technicianId,
+          type: "work_order_assigned",
+          title: "New Work Order Assigned",
+          message: `You have been assigned work order ${workOrder.workOrderNumber} for ${workOrder.projectName || 'irrigation project'}.`,
+          relatedEntityType: "work_order",
+          relatedEntityId: workOrderId
+        });
+      }
+      
       res.json({ message: "Work order assigned successfully" });
     } catch (error) {
+      console.error("Error assigning work order:", error);
       res.status(500).json({ message: "Failed to assign work order" });
     }
   });
@@ -1479,5 +1527,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/uploads', express.static('./uploads'));
 
   const httpServer = createServer(app);
+  // Notification routes
+  app.get("/api/notifications/:userId", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const notifications = await storage.getNotifications(userId);
+      res.json(notifications);
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
+  });
+
+  app.get("/api/notifications/:userId/count", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const count = await storage.getUnreadNotificationCount(userId);
+      res.json({ count });
+    } catch (error) {
+      console.error("Error fetching notification count:", error);
+      res.status(500).json({ message: "Failed to fetch notification count" });
+    }
+  });
+
+  app.post("/api/notifications", async (req, res) => {
+    try {
+      const validatedData = insertNotificationSchema.parse(req.body);
+      const notification = await storage.createNotification(validatedData);
+      res.status(201).json(notification);
+    } catch (error) {
+      console.error("Error creating notification:", error);
+      res.status(500).json({ message: "Failed to create notification" });
+    }
+  });
+
+  app.put("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const success = await storage.markNotificationAsRead(id);
+      if (success) {
+        res.json({ message: "Notification marked as read" });
+      } else {
+        res.status(404).json({ message: "Notification not found" });
+      }
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+      res.status(500).json({ message: "Failed to mark notification as read" });
+    }
+  });
+
+  app.put("/api/notifications/:userId/read-all", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const success = await storage.markAllNotificationsAsRead(userId);
+      res.json({ message: "All notifications marked as read" });
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      res.status(500).json({ message: "Failed to mark all notifications as read" });
+    }
+  });
+
   return httpServer;
 }

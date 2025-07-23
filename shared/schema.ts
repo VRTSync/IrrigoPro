@@ -307,6 +307,19 @@ export const invoiceItems = pgTable("invoice_items", {
   laborTotal: decimal("labor_total", { precision: 10, scale: 2 }).default("0"),
 });
 
+// Notifications table for workflow notifications
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  type: text("type").notNull(), // "work_order_assigned", "work_order_completed", "estimate_pending_approval"
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  relatedEntityType: text("related_entity_type"), // "work_order", "estimate", "billing_sheet"
+  relatedEntityId: integer("related_entity_id"),
+  isRead: boolean("is_read").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
 export const insertPartSchema = createInsertSchema(parts).omit({ id: true });
@@ -325,6 +338,7 @@ export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true,
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 
 export type User = typeof users.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
@@ -344,6 +358,7 @@ export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type BillingSheet = typeof billingSheets.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
@@ -363,6 +378,7 @@ export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
 export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 
 export type EstimateWithZones = Estimate & {
   zones: (EstimateZone & { items: EstimateItem[] })[];

@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 import { useState } from "react";
 import { Menu, User, LogOut, Settings } from "lucide-react";
+import { NotificationSystem } from "@/components/notifications/notification-system";
 
 export default function Navigation() {
   const [location] = useLocation();
@@ -129,9 +130,11 @@ export default function Navigation() {
               </Link>
             </div>
 
-            {/* Account Button - Right */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            {/* Notifications and Account - Right */}
+            <div className="flex items-center space-x-2">
+              <NotificationSystem userId={user.id} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="p-2">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-primary text-white text-sm">
@@ -162,7 +165,8 @@ export default function Navigation() {
                   Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* Desktop Layout */}
@@ -197,7 +201,8 @@ export default function Navigation() {
             </div>
 
             {/* Desktop User Menu */}
-            <div className="flex items-center">
+            <div className="flex items-center space-x-2">
+              <NotificationSystem userId={user.id} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center space-x-2 p-2">
