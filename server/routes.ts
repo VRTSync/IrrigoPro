@@ -1012,7 +1012,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Generate secure approval token
-      const approvalToken = require('crypto').randomBytes(32).toString('hex');
+      const crypto = await import('crypto');
+      const approvalToken = crypto.randomBytes(32).toString('hex');
       
       // Update estimate with approval token and sent timestamp
       await storage.updateEstimate(id, {
