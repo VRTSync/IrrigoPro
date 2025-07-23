@@ -228,7 +228,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     
     // Complete button moved to bottom - not included here
     
-    if (workOrder.status !== 'cancelled') {
+    if (workOrder.status !== 'cancelled' && workOrder.status !== 'completed') {
       buttons.push(
         <Button
           key="cancel"
