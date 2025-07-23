@@ -21,7 +21,8 @@ import {
   Eye,
   Filter,
   ArrowRight,
-  Wrench
+  Wrench,
+  Play
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
 
@@ -130,6 +131,27 @@ export default function WorkOrders() {
 
   const getStatusCount = (status: string) => {
     return workOrders?.filter(wo => wo.status === status).length || 0;
+  };
+
+  const startWorkMutation = useMutation({
+    mutationFn: async (workOrderId: number) => {
+      const updateData = { 
+        status: 'in_progress',
+        startedAt: new Date().toISOString()
+      };
+      return fetch(`/api/work-orders/${workOrderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      }).then(res => res.json());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
+    }
+  });
+
+  const handleStartWork = (workOrderId: number) => {
+    startWorkMutation.mutate(workOrderId);
   };
 
   if (isLoading) {
@@ -425,7 +447,7 @@ export default function WorkOrders() {
                           )}
                         </>
                       ) : (
-                        // Manager/Admin View - Full action buttons
+                        // Manager/Admin View - Status-based action buttons
                         <div className="flex gap-2">
                           <Button
                             variant="outline"
@@ -439,30 +461,36 @@ export default function WorkOrders() {
                             <Eye className="w-4 h-4 mr-1" />
                             View
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // TODO: Implement edit functionality
-                            }}
-                            className="flex-1"
-                          >
-                            <FileText className="w-4 h-4 mr-1" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // TODO: Implement assign technician functionality
-                            }}
-                            className="flex-1"
-                          >
-                            <User className="w-4 h-4 mr-1" />
-                            Assign
-                          </Button>
+                          
+                          {/* Start Work button for pending work orders */}
+                          {workOrder.status === 'pending' && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartWork(workOrder.id);
+                              }}
+                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                              <Play className="w-4 h-4 mr-1" />
+                              Start Work
+                            </Button>
+                          )}
+                          
+                          {/* Complete button for in-progress work orders */}
+                          {workOrder.status === 'in_progress' && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedWorkOrderForCompletion(workOrder);
+                              }}
+                              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Complete
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
