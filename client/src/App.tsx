@@ -191,7 +191,7 @@ function Router() {
       <QueryClientProvider client={queryClient}>
         <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
           <Navigation />
-          <div className="px-4 py-6">
+          <div className="px-4 pt-2">
             <Switch>
               <Route path="/" component={AdminDashboard} />
               <Route path="/admin" component={AdminDashboard} />
