@@ -65,13 +65,13 @@ export default function Navigation() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo Button */}
-            <div className="flex-shrink-0 relative">
-              <Link href="/" className="group relative">
-                <div className="bg-white border border-gray-200 shadow-lg rounded-full w-24 h-24 flex items-center justify-center -mt-8 -mb-8 hover:shadow-xl hover:border-gray-300 hover:-mt-9 hover:-mb-9 transition-all duration-200 transform hover:scale-105">
+            <div className="flex-shrink-0">
+              <Link href="/" className="group">
+                <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
                     src={companyLogo} 
                     alt="Company Logo" 
-                    className="max-h-[88px] max-w-[88px] w-auto h-auto cursor-pointer object-contain"
+                    className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
                   />
                 </div>
                 {/* Tooltip */}
