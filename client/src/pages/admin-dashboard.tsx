@@ -6,7 +6,7 @@ import { Link } from "wouter";
 export default function AdminDashboard() {
   // Simplified admin dashboard - user management moved to Users page (updated)
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto -mt-2">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -20,7 +20,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Main Admin Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4 mb-8">
         <Link href="/operations">
           <Card className="cursor-pointer hover:shadow-lg transition-shadow h-full">
             <CardContent className="p-6 text-center">
