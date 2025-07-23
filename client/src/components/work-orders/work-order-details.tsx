@@ -430,12 +430,12 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
                   <div className="bg-purple-50 p-4 rounded-lg">
                     <div className="flex items-center space-x-2">
-                      <CheckCircle className="w-5 h-5 text-purple-600" />
-                      <span className="font-medium text-purple-900">Completed</span>
+                      <Target className="w-5 h-5 text-purple-600" />
+                      <span className="font-medium text-purple-900">Status</span>
                     </div>
-                    <p className="text-lg font-bold text-purple-900 mt-1">
-                      {workOrder.completedAt ? formatDate(workOrder.completedAt) : 'In progress'}
-                    </p>
+                    <div className="mt-1">
+                      {getStatusBadge(workOrder.status)}
+                    </div>
                   </div>
                 </div>
               </CardContent>
