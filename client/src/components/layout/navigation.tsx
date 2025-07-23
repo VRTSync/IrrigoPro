@@ -26,30 +26,30 @@ export default function Navigation() {
     switch (userRole) {
       case "admin":
         return [
-          { path: "/", label: "Dashboard", icon: Home },
-          { path: "/estimates", label: "Estimates", icon: FileText },
-          { path: "/work-orders", label: "Work Orders", icon: Wrench },
+          { path: "/estimates", label: "Operations", icon: FileText },
           { path: "/customers", label: "Customers", icon: Users },
+          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/parts", label: "Parts", icon: Package },
+          { path: "/admin", label: "Users", icon: Settings },
         ];
       case "irrigation_manager":
         return [
-          { path: "/", label: "Dashboard", icon: Home },
           { path: "/estimates", label: "Estimates", icon: FileText },
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
+          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           { path: "/customers", label: "Customers", icon: Users },
         ];
       case "field_tech":
         return [
-          { path: "/", label: "Dashboard", icon: Home },
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
+          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
         ];
       case "billing_manager":
         return [
-          { path: "/", label: "Dashboard", icon: Home },
           { path: "/customers", label: "Customers", icon: Users },
+          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
         ];
       default:
         return [];
@@ -148,15 +148,13 @@ export default function Navigation() {
         <div className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
           <div className="flex justify-between items-center h-16 px-4">
             {/* Logo */}
-            <Link href="/" className="group relative">
-              <div className="bg-white border border-gray-200 shadow-lg rounded-full w-20 h-20 flex items-center justify-center -mt-6 -mb-6 hover:shadow-xl hover:border-gray-300 hover:-mt-7 hover:-mb-7 transition-all duration-200 transform hover:scale-105">
-                <img 
-                  src={companyLogo} 
-                  alt="Company Logo" 
-                  className="max-h-[72px] max-w-[72px] w-auto h-auto cursor-pointer object-contain"
-                />
-              </div>
-            </Link>
+            <div className="flex items-center">
+              <img 
+                src={companyLogo} 
+                alt="Company Logo" 
+                className="h-10 w-auto"
+              />
+            </div>
 
             {/* User Menu and Notifications */}
             <div className="flex items-center space-x-2">
@@ -201,10 +199,33 @@ export default function Navigation() {
 
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-          <div className="flex justify-around items-center py-2">
-            {navItems.map((item) => {
+          <div className="relative flex justify-around items-center py-2">
+            {navItems.map((item, index) => {
               const Icon = item.icon;
               const active = isActive(item.path);
+              const isCenter = item.isCenter;
+              
+              if (isCenter) {
+                return (
+                  <div key={item.path} className="flex-1 flex justify-center">
+                    <Link href={item.path}>
+                      <div className="relative">
+                        <Button
+                          variant="ghost"
+                          className={`flex flex-col items-center justify-center w-16 h-16 rounded-full -mt-8 border-4 border-white shadow-lg ${
+                            active
+                              ? "bg-primary text-white hover:bg-primary/90"
+                              : "bg-white text-primary hover:bg-gray-50 border-gray-200"
+                          }`}
+                        >
+                          <Icon className="h-6 w-6" />
+                          <span className="text-xs font-medium mt-1">{item.label}</span>
+                        </Button>
+                      </div>
+                    </Link>
+                  </div>
+                );
+              }
               
               return (
                 <Link key={item.path} href={item.path} className="flex-1">
