@@ -114,16 +114,18 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
-            <Switch>
-              <Route path="/" component={FieldTechDashboard} />
-              <Route path="/field-tech" component={FieldTechDashboard} />
-              <Route path="/field-portal" component={FieldPortal} />
-              <Route path="/work-orders" component={WorkOrders} />
-              <Route path="/billing-sheets" component={BillingSheets} />
-              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-              <Route path="/login" component={Login} />
-              <Route component={NotFound} />
-            </Switch>
+            <div className="lg:pt-0">
+              <Switch>
+                <Route path="/" component={FieldTechDashboard} />
+                <Route path="/field-tech" component={FieldTechDashboard} />
+                <Route path="/field-portal" component={FieldPortal} />
+                <Route path="/work-orders" component={WorkOrders} />
+                <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+                <Route path="/login" component={Login} />
+                <Route component={NotFound} />
+              </Switch>
+            </div>
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -138,18 +140,20 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
-            <Switch>
-              <Route path="/" component={ManagerDashboard} />
-              <Route path="/manager" component={ManagerDashboard} />
-              <Route path="/estimates" component={Estimates} />
-              <Route path="/parts" component={PartsCatalog} />
-              <Route path="/work-orders" component={WorkOrders} />
-              <Route path="/customers" component={Customers} />
-              <Route path="/billing-sheets" component={BillingSheets} />
-              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-              <Route path="/login" component={Login} />
-              <Route component={NotFound} />
-            </Switch>
+            <div className="lg:pt-0">
+              <Switch>
+                <Route path="/" component={ManagerDashboard} />
+                <Route path="/manager" component={ManagerDashboard} />
+                <Route path="/estimates" component={Estimates} />
+                <Route path="/parts" component={PartsCatalog} />
+                <Route path="/work-orders" component={WorkOrders} />
+                <Route path="/customers" component={Customers} />
+                <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+                <Route path="/login" component={Login} />
+                <Route component={NotFound} />
+              </Switch>
+            </div>
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -164,14 +168,16 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
-            <Switch>
-              <Route path="/" component={CustomerBilling} />
-              <Route path="/customers" component={CustomerBilling} />
-              <Route path="/customer-billing" component={CustomerBilling} />
-              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-              <Route path="/login" component={Login} />
-              <Route component={NotFound} />
-            </Switch>
+            <div className="lg:pt-0">
+              <Switch>
+                <Route path="/" component={CustomerBilling} />
+                <Route path="/customers" component={CustomerBilling} />
+                <Route path="/customer-billing" component={CustomerBilling} />
+                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+                <Route path="/login" component={Login} />
+                <Route component={NotFound} />
+              </Switch>
+            </div>
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -185,22 +191,24 @@ function Router() {
       <QueryClientProvider client={queryClient}>
         <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
           <Navigation />
-          <Switch>
-            <Route path="/" component={AdminDashboard} />
-            <Route path="/admin" component={AdminDashboard} />
-            <Route path="/operations" component={Operations} />
-            <Route path="/estimates" component={Estimates} />
-            <Route path="/parts" component={PartsCatalog} />
-            <Route path="/customers" component={Customers} />
-            <Route path="/customer-billing" component={CustomerBilling} />
-            <Route path="/field-tech" component={FieldTech} />
-            <Route path="/work-orders" component={WorkOrders} />
-            <Route path="/billing-sheets" component={BillingSheets} />
-            <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-            <Route path="/login" component={Login} />
-            <Route path="/field-portal" component={FieldPortal} />
-            <Route component={NotFound} />
-          </Switch>
+          <div className="lg:pt-0">
+            <Switch>
+              <Route path="/" component={AdminDashboard} />
+              <Route path="/admin" component={AdminDashboard} />
+              <Route path="/operations" component={Operations} />
+              <Route path="/estimates" component={Estimates} />
+              <Route path="/parts" component={PartsCatalog} />
+              <Route path="/customers" component={Customers} />
+              <Route path="/customer-billing" component={CustomerBilling} />
+              <Route path="/field-tech" component={FieldTech} />
+              <Route path="/work-orders" component={WorkOrders} />
+              <Route path="/billing-sheets" component={BillingSheets} />
+              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+              <Route path="/login" component={Login} />
+              <Route path="/field-portal" component={FieldPortal} />
+              <Route component={NotFound} />
+            </Switch>
+          </div>
         </div>
         <Toaster />
       </QueryClientProvider>
