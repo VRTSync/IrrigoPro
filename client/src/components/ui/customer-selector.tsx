@@ -122,31 +122,31 @@ export function CustomerSelector({
         <Label>Customer *</Label>
         
         {selectedCustomer ? (
-          <Card className="border-2 border-blue-200 bg-blue-50/30">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-blue-100 p-2 rounded-lg">
+          <Card className="border-2 border-blue-200 bg-blue-50/30 w-full">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-start space-x-3 min-w-0 flex-1">
+                  <div className="bg-blue-100 p-2 rounded-lg flex-shrink-0">
                     <Building className="w-4 h-4 text-blue-600" />
                   </div>
-                  <div>
-                    <h4 className="font-medium text-gray-900">{selectedCustomer.name}</h4>
-                    <div className="flex items-center space-x-4 text-sm text-gray-600 mt-1">
-                      <span className="flex items-center">
-                        <Mail className="w-3 h-3 mr-1" />
-                        {selectedCustomer.email}
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-medium text-gray-900 truncate">{selectedCustomer.name}</h4>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0 text-sm text-gray-600 mt-1">
+                      <span className="flex items-center min-w-0">
+                        <Mail className="w-3 h-3 mr-1 flex-shrink-0" />
+                        <span className="truncate">{selectedCustomer.email}</span>
                       </span>
                       {selectedCustomer.phone && (
                         <span className="flex items-center">
-                          <Phone className="w-3 h-3 mr-1" />
-                          {selectedCustomer.phone}
+                          <Phone className="w-3 h-3 mr-1 flex-shrink-0" />
+                          <span className="truncate">{selectedCustomer.phone}</span>
                         </span>
                       )}
                     </div>
                     {selectedCustomer.address && (
                       <div className="flex items-center text-sm text-gray-600 mt-1">
-                        <MapPin className="w-3 h-3 mr-1" />
-                        {selectedCustomer.address}
+                        <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
+                        <span className="truncate">{selectedCustomer.address}</span>
                       </div>
                     )}
                   </div>
@@ -155,6 +155,7 @@ export function CustomerSelector({
                   variant="outline"
                   size="sm"
                   onClick={() => setIsOpen(true)}
+                  className="flex-shrink-0 w-full sm:w-auto"
                 >
                   Change
                 </Button>
