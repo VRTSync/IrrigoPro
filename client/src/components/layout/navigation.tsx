@@ -142,13 +142,13 @@ export default function Navigation() {
       <div className="lg:hidden">
         {/* Top Bar with Logo and Notifications */}
         <div className="bg-white shadow-sm border-b border-gray-200">
-          <div className="flex justify-between items-center h-12 px-4">
+          <div className="flex justify-between items-center h-6 px-4 py-1">
             {/* Logo */}
             <div className="flex items-center">
               <img 
                 src={companyLogo} 
                 alt="Company Logo" 
-                className="h-10 w-auto"
+                className="h-6 w-auto"
               />
             </div>
 
