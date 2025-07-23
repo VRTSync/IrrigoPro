@@ -185,6 +185,7 @@ The system uses comprehensive database tables:
 - **Complete Estimate Approval Workflow (2025-07-23)**: Added missing approve/reject estimate functionality with full work order conversion process
 - **Customer Email Approval System (2025-07-23)**: Implemented Postmark email integration for automated customer estimate approvals with secure token-based approval links
 - **Work Order Details Modal Enhancement (2025-07-23)**: Applied estimate modal design patterns with prominent status banners, improved card layouts, and better information hierarchy. Subsequently streamlined by removing status banners except for completed status and moving complete button to dedicated bottom footer section for cleaner UX.
+- **Work Order Button Logic Refinement (2025-07-23)**: Implemented intelligent button visibility - "View" buttons only appear on unassigned work orders, "Start Work Order" buttons replace "View" on assigned work orders, and "Add Details" button only appears when accessing via "Start Work Order" action for proper workflow control.
 
 ## Responsive Design Implementation (2025-07-23)
 
