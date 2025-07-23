@@ -60,6 +60,19 @@
 }
 
 @layer utilities {
+  .border-pulse {
+    animation: border-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes border-pulse {
+    0%, 100% {
+      border-color: theme('colors.orange.600');
+    }
+    50% {
+      border-color: theme('colors.orange.400');
+    }
+  }
+
   .status-pending {
     @apply bg-amber-50 text-amber-700 border-amber-200;
   }
