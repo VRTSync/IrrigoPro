@@ -162,11 +162,16 @@ export default function WorkOrders() {
       });
     },
     onSuccess: () => {
+      console.log('Start work mutation successful');
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
+    },
+    onError: (error: any) => {
+      console.error('Start work mutation failed:', error);
     }
   });
 
   const handleStartWork = (workOrderId: number) => {
+    console.log('handleStartWork called with ID:', workOrderId);
     startWorkMutation.mutate(workOrderId);
   };
 
@@ -540,12 +545,14 @@ export default function WorkOrders() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                console.log('Start Work Order button clicked for work order:', workOrder.id);
                                 handleStartWork(workOrder.id);
                               }}
                               className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                              disabled={startWorkMutation.isPending}
                             >
                               <Play className="w-4 h-4 mr-1" />
-                              Start Work Order
+                              {startWorkMutation.isPending ? 'Starting...' : 'Start Work Order'}
                             </Button>
                           )}
                           
