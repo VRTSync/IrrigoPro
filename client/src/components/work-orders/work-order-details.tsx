@@ -627,7 +627,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
         </Tabs>
 
         {/* Action Buttons - Bottom Section */}
-        {workOrder.status === 'pending' && (
+        {(workOrder.status === 'pending' || workOrder.status === 'assigned') && (
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
               <Button

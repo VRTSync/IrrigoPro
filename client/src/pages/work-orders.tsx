@@ -154,10 +154,9 @@ export default function WorkOrders() {
     startWorkMutation.mutate(workOrderId);
   };
 
-  // Debug logging
-  console.log('Current user:', currentUser);
-  if (workOrders && workOrders.length > 0) {
-    console.log('Sample work order:', workOrders[0]);
+  // Handle loading state for currentUser
+  if (!currentUser) {
+    return <div>Loading user data...</div>;
   }
 
   if (isLoading) {
@@ -453,7 +452,7 @@ export default function WorkOrders() {
                                 View
                               </Button>
                               
-                              {workOrder.status === 'pending' && (
+                              {(workOrder.status === 'pending' || workOrder.status === 'assigned') && (
                                 <Button
                                   size="sm"
                                   onClick={(e) => {
@@ -500,7 +499,7 @@ export default function WorkOrders() {
                           </Button>
                           
                           {/* Start Work Order button - only if assigned to current user or unassigned */}
-                          {workOrder.status === 'pending' && 
+                          {(workOrder.status === 'pending' || workOrder.status === 'assigned') && 
                            (workOrder.assignedTechnicianId === currentUser.id || 
                             workOrder.assignedTechnicianName === "Manager" ||
                             workOrder.assignedTechnicianName === currentUser.name ||
