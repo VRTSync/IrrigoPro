@@ -118,7 +118,7 @@ export default function FieldTechDashboard() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button 
-                        className="bg-green-600 hover:bg-green-700 text-white px-3 min-w-[40px] shadow-md hover:shadow-lg transition-all h-10"
+                        className="bg-green-600 hover:bg-green-700 text-white px-3 min-w-[40px] shadow-md hover:shadow-lg transition-all h-10 border-2 border-orange-400 hover:border-orange-500"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
