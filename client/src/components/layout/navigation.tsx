@@ -122,11 +122,11 @@ export default function Navigation() {
             {/* Centered Logo Button */}
             <div className="flex-1 flex justify-center relative">
               <Link href="/" className="group relative">
-                <div className="bg-white border border-gray-200 shadow-lg rounded-lg px-4 py-2 -mt-1 hover:shadow-xl hover:border-gray-300 hover:-mt-2 transition-all duration-200 transform hover:scale-105">
+                <div className="bg-white border border-gray-200 shadow-lg rounded-lg px-6 py-3 -mt-4 hover:shadow-xl hover:border-gray-300 hover:-mt-5 transition-all duration-200 transform hover:scale-105">
                   <img 
                     src={companyLogo} 
                     alt="Company Logo" 
-                    className="h-8 w-auto cursor-pointer"
+                    className="h-12 w-auto cursor-pointer"
                   />
                 </div>
                 {/* Tooltip */}
@@ -147,11 +147,11 @@ export default function Navigation() {
             {/* Logo Button */}
             <div className="flex-shrink-0 relative">
               <Link href="/" className="group relative">
-                <div className="bg-white border border-gray-200 shadow-lg rounded-lg px-5 py-3 -mt-2 hover:shadow-xl hover:border-gray-300 hover:-mt-3 transition-all duration-200 transform hover:scale-105">
+                <div className="bg-white border border-gray-200 shadow-lg rounded-lg px-6 py-4 -mt-6 hover:shadow-xl hover:border-gray-300 hover:-mt-7 transition-all duration-200 transform hover:scale-105">
                   <img 
                     src={companyLogo} 
                     alt="Company Logo" 
-                    className="h-10 w-auto cursor-pointer"
+                    className="h-14 w-auto cursor-pointer"
                   />
                 </div>
                 {/* Tooltip */}
