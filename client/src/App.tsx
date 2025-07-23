@@ -20,6 +20,8 @@ import BillingSheets from "@/pages/billing-sheets";
 import CustomerBilling from "@/pages/customer-billing";
 import AdminDashboard from "@/pages/admin-dashboard";
 import Operations from "@/pages/operations";
+import SuperAdminDashboard from "@/pages/super-admin-dashboard";
+import SystemUserManagement from "@/pages/system-user-management";
 import { UserSelector } from "@/components/user-selector";
 
 interface User {
@@ -27,7 +29,8 @@ interface User {
   username: string;
   name: string;
   email: string;
-  role: "admin" | "irrigation_manager" | "field_tech" | "billing_manager";
+  role: "super_admin" | "company_admin" | "irrigation_manager" | "field_tech" | "billing_manager";
+  companyId?: number | null;
   isActive: boolean;
 }
 
@@ -185,7 +188,63 @@ function Router() {
     );
   }
 
-  // Admin gets access to admin-specific dashboard only
+  // Super Admin gets system-wide access
+  if (user.role === "super_admin") {
+    return (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <div className="min-h-screen pb-20 lg:pb-0">
+            <Navigation />
+            <div className="px-4 bg-gray-50">
+              <Switch>
+                <Route path="/" component={SuperAdminDashboard} />
+                <Route path="/super-admin" component={SuperAdminDashboard} />
+                <Route path="/system-users" component={SystemUserManagement} />
+                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+                <Route path="/login" component={Login} />
+                <Route component={NotFound} />
+              </Switch>
+            </div>
+          </div>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+  }
+
+  // Company Admin gets access to company-specific dashboard and management
+  if (user.role === "company_admin") {
+    return (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <div className="min-h-screen pb-20 lg:pb-0">
+            <Navigation />
+            <div className="px-4 bg-gray-50">
+              <Switch>
+                <Route path="/" component={AdminDashboard} />
+                <Route path="/admin" component={AdminDashboard} />
+                <Route path="/operations" component={Operations} />
+                <Route path="/estimates" component={Estimates} />
+                <Route path="/parts" component={PartsCatalog} />
+                <Route path="/customers" component={Customers} />
+                <Route path="/customer-billing" component={CustomerBilling} />
+                <Route path="/field-tech" component={FieldTech} />
+                <Route path="/work-orders" component={WorkOrders} />
+                <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+                <Route path="/login" component={Login} />
+                <Route path="/field-portal" component={FieldPortal} />
+                <Route component={NotFound} />
+              </Switch>
+            </div>
+          </div>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+  }
+
+  // Default fallback - treat as regular admin
   return (
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>

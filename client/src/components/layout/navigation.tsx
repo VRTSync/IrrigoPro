@@ -24,7 +24,13 @@ export default function Navigation() {
   // Define navigation items based on user role
   const getNavItems = () => {
     switch (userRole) {
-      case "admin":
+      case "super_admin":
+        return [
+          { path: "/super-admin", label: "Companies", icon: Settings },
+          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/system-users", label: "All Users", icon: Users },
+        ];
+      case "company_admin":
         return [
           { path: "/operations", label: "Operations", icon: FileText },
           { path: "/customers", label: "Customers", icon: Users },

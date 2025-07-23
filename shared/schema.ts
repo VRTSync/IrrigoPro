@@ -2,14 +2,31 @@ import { pgTable, text, serial, integer, boolean, decimal, timestamp } from "dri
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Users table for authentication
+// Companies table for multi-company support
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  address: text("address"),
+  phone: text("phone"),
+  email: text("email"),
+  website: text("website"),
+  logo: text("logo"), // Logo URL or path
+  subscription: text("subscription").notNull().default("basic"), // basic, pro, enterprise
+  subscriptionExpiry: timestamp("subscription_expiry"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Users table for authentication with company support
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   name: text("name").notNull(),
   email: text("email"),
-  role: text("role").notNull().default("field_tech"), // admin, irrigation_manager, field_tech, billing_manager
+  role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager
+  companyId: integer("company_id").references(() => companies.id), // null for super_admin
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -17,6 +34,7 @@ export const users = pgTable("users", {
 
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
   name: text("name").notNull(),
   email: text("email").notNull(),
   phone: text("phone"),
@@ -38,11 +56,12 @@ export const customers = pgTable("customers", {
 
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
   name: text("name").notNull(),
   description: text("description"),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
-  sku: text("sku").notNull().unique(),
+  sku: text("sku").notNull(),
   category: text("category"),
 });
 
@@ -323,6 +342,13 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Drizzle insert schemas
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
 export const insertPartSchema = createInsertSchema(parts).omit({ id: true });
@@ -343,6 +369,7 @@ export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 
+export type Company = typeof companies.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
@@ -363,6 +390,7 @@ export type BillingSheet = typeof billingSheets.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type InsertPart = z.infer<typeof insertPartSchema>;

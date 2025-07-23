@@ -53,6 +53,37 @@ const createEstimateWithZonesSchema = z.object({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Company routes
+  app.get("/api/companies", async (req, res) => {
+    try {
+      const companies = await storage.getCompanies();
+      res.json(companies);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch companies" });
+    }
+  });
+
+  app.post("/api/companies", async (req, res) => {
+    try {
+      const company = await storage.createCompany(req.body);
+      res.status(201).json(company);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create company" });
+    }
+  });
+
+  app.get("/api/admin/system-stats", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      res.json({
+        totalUsers: users.length,
+        activeUsers: users.filter(u => u.isActive).length,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch system stats" });
+    }
+  });
+
   // User routes
   app.get("/api/users", async (req, res) => {
     try {
@@ -80,17 +111,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
-    }
-  });
-
-  app.get("/api/users", async (req, res) => {
-    try {
-      const users = await storage.getUsers();
-      // Remove passwords from response
-      const usersWithoutPasswords = users.map(({ password, ...user }) => user);
-      res.json(usersWithoutPasswords);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch users" });
     }
   });
 
