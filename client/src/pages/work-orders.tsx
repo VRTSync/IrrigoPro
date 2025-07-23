@@ -154,6 +154,12 @@ export default function WorkOrders() {
     startWorkMutation.mutate(workOrderId);
   };
 
+  // Debug logging
+  console.log('Current user:', currentUser);
+  if (workOrders && workOrders.length > 0) {
+    console.log('Sample work order:', workOrders[0]);
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50/30 p-6">
@@ -497,6 +503,7 @@ export default function WorkOrders() {
                           {workOrder.status === 'pending' && 
                            (workOrder.assignedTechnicianId === currentUser.id || 
                             workOrder.assignedTechnicianName === "Manager" ||
+                            workOrder.assignedTechnicianName === currentUser.name ||
                             !workOrder.assignedTechnicianId) && (
                             <Button
                               size="sm"
@@ -514,7 +521,8 @@ export default function WorkOrders() {
                           {/* Complete button - only if assigned to current user */}
                           {workOrder.status === 'in_progress' && 
                            (workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === "Manager") && (
+                            workOrder.assignedTechnicianName === "Manager" ||
+                            workOrder.assignedTechnicianName === currentUser.name) && (
                             <Button
                               size="sm"
                               onClick={(e) => {
