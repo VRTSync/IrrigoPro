@@ -30,6 +30,60 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     enabled: !!estimateId && open,
   });
 
+  const approveEstimateMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/estimates/${estimateId}/approve`, {
+        method: 'PATCH',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to approve estimate');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Estimate approved successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error", 
+        description: "Failed to approve estimate",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const rejectEstimateMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/estimates/${estimateId}/reject`, {
+        method: 'PATCH',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to reject estimate');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Estimate rejected",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to reject estimate", 
+        variant: "destructive",
+      });
+    },
+  });
+
   const convertToWorkOrderMutation = useMutation({
     mutationFn: async () => {
       const response = await fetch(`/api/estimates/${estimateId}/convert-to-work-order`, {
@@ -282,13 +336,36 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   Edit Estimate
                 </Button>
               )}
-              {estimate.status === 'approved' && estimate.status !== 'converted_to_work_order' && (
+              {/* Approval Actions for Pending Estimates */}
+              {estimate.status === 'pending' && (
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button 
+                    onClick={() => approveEstimateMutation.mutate()}
+                    disabled={approveEstimateMutation.isPending}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    {approveEstimateMutation.isPending ? 'Approving...' : 'Approve Estimate'}
+                  </Button>
+                  <Button 
+                    onClick={() => rejectEstimateMutation.mutate()}
+                    disabled={rejectEstimateMutation.isPending}
+                    variant="destructive"
+                  >
+                    <XCircle className="w-4 h-4 mr-2" />
+                    {rejectEstimateMutation.isPending ? 'Rejecting...' : 'Reject Estimate'}
+                  </Button>
+                </div>
+              )}
+
+              {/* Convert to Work Order for Approved Estimates */}
+              {estimate.status === 'approved' && (
                 <Button 
                   onClick={handleConvertToWorkOrder}
                   disabled={isConverting}
-                  className="bg-green-600 hover:bg-green-700"
+                  className="bg-blue-600 hover:bg-blue-700"
                 >
-                  <CheckCircle className="w-4 h-4 mr-2" />
+                  <Wrench className="w-4 h-4 mr-2" />
                   {isConverting ? 'Converting...' : 'Convert to Work Order'}
                 </Button>
               )}

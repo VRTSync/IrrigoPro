@@ -953,6 +953,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Approve estimate
+  app.patch("/api/estimates/:id/approve", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const estimate = await storage.getEstimate(id);
+      if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (estimate.status !== "pending") {
+        return res.status(400).json({ message: "Only pending estimates can be approved" });
+      }
+      
+      const updatedEstimate = await storage.updateEstimate(id, { status: "approved" });
+      
+      res.json({ 
+        message: "Estimate approved successfully", 
+        estimate: updatedEstimate
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to approve estimate" });
+    }
+  });
+
+  // Reject estimate
+  app.patch("/api/estimates/:id/reject", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const estimate = await storage.getEstimate(id);
+      if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (estimate.status !== "pending") {
+        return res.status(400).json({ message: "Only pending estimates can be rejected" });
+      }
+      
+      const updatedEstimate = await storage.updateEstimate(id, { status: "rejected" });
+      
+      res.json({ 
+        message: "Estimate rejected successfully", 
+        estimate: updatedEstimate
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to reject estimate" });
+    }
+  });
+
   // Convert estimate to work order
   app.post("/api/estimates/:id/convert-to-work-order", async (req, res) => {
     try {
