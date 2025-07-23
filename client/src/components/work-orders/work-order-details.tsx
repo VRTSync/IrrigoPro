@@ -490,8 +490,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               </CardContent>
             </Card>
 
-            {/* Reassignment Section - Only show for managers when work order is assigned to them */}
-            {workOrder.assignedTechnicianName === "Manager" && fieldTechs && fieldTechs.length > 0 && (
+            {/* Reassignment Section - Show for managers when they can reassign work orders */}
+            {fieldTechs && fieldTechs.length > 0 && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center gap-2">
@@ -501,7 +501,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <p className="text-sm text-gray-600">
-                    This work order is currently assigned to you as the manager. Select a field technician to hand it off for field work.
+                    Current assignment: <span className="font-medium">{workOrder.assignedTechnicianName || "Unassigned"}</span>. 
+                    Select a different technician to reassign this work order.
                   </p>
                   <div className="flex gap-3">
                     <Select 
@@ -521,7 +522,9 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     </Select>
                     <Button 
                       onClick={() => {
+                        console.log('Assign button clicked, selectedTechnicianId:', selectedTechnicianId);
                         if (selectedTechnicianId) {
+                          console.log('Setting pending technician ID and showing confirmation');
                           setPendingTechnicianId(selectedTechnicianId);
                           setShowAssignmentConfirmation(true);
                         }
@@ -630,8 +633,30 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             <div className="flex justify-center">
               <Button
                 onClick={() => {
-                  // Just close the modal - user can manually start work later
-                  onClose();
+                  // Start the work order by changing status to in_progress
+                  console.log('Add Details button clicked, starting work order');
+                  // Change status to in_progress
+                  const updateStatusMutation = async () => {
+                    try {
+                      await apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { 
+                        status: 'in_progress',
+                        startedAt: new Date().toISOString()
+                      });
+                      toast({
+                        title: "Work Started",
+                        description: "Work order status updated to in progress",
+                      });
+                      onUpdate();
+                      onClose();
+                    } catch (error) {
+                      toast({
+                        title: "Error",
+                        description: "Failed to start work order",
+                        variant: "destructive",
+                      });
+                    }
+                  };
+                  updateStatusMutation();
                 }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
                 size="lg"
@@ -673,13 +698,20 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     )}
 
     {/* Assignment Confirmation Modal */}
+    {console.log('Assignment confirmation modal render check:', {
+      showAssignmentConfirmation,
+      pendingTechnicianId,
+      selectedTechnician: fieldTechs?.find(tech => tech.id.toString() === pendingTechnicianId)
+    })}
     <AssignmentConfirmationModal
       isOpen={showAssignmentConfirmation}
       onClose={() => {
+        console.log('Assignment confirmation modal closed');
         setShowAssignmentConfirmation(false);
         setPendingTechnicianId("");
       }}
       onConfirm={() => {
+        console.log('Assignment confirmed for technician:', pendingTechnicianId);
         if (pendingTechnicianId) {
           reassignWorkOrder.mutate(pendingTechnicianId);
           setShowAssignmentConfirmation(false);
