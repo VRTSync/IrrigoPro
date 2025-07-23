@@ -139,9 +139,9 @@ export default function Navigation() {
       </nav>
 
       {/* Mobile Navigation - Bottom */}
-      <div className="lg:hidden">
+      <div className="lg:hidden m-0 p-0">
         {/* Top Bar with Logo and Notifications */}
-        <div className="bg-white shadow-sm border-b border-gray-200 mb-0">
+        <div className="bg-white shadow-sm border-b border-gray-200 m-0 p-0">
           <div className="flex justify-between items-center h-16 px-4">
             {/* Logo */}
             <div className="flex items-center">
@@ -242,8 +242,7 @@ export default function Navigation() {
           </div>
         </div>
 
-        {/* Bottom padding to account for fixed bottom nav */}
-        <div className="h-20"></div>
+
       </div>
     </>
   );
