@@ -485,7 +485,7 @@ export default function WorkOrders() {
                                     e.stopPropagation();
                                     handleStartWork(workOrder.id);
                                   }}
-                                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                                 >
                                   <Play className="w-4 h-4 mr-1" />
                                   Start Work Order
@@ -535,7 +535,7 @@ export default function WorkOrders() {
                                 e.stopPropagation();
                                 handleStartWork(workOrder.id);
                               }}
-                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                             >
                               <Play className="w-4 h-4 mr-1" />
                               Start Work Order
