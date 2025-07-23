@@ -126,7 +126,7 @@ export default function Navigation() {
                   <img 
                     src={companyLogo} 
                     alt="Company Logo" 
-                    className="max-h-14 max-w-14 w-auto h-auto cursor-pointer object-contain"
+                    className="max-h-16 max-w-16 w-auto h-auto cursor-pointer object-contain"
                   />
                 </div>
                 {/* Tooltip */}
@@ -151,7 +151,7 @@ export default function Navigation() {
                   <img 
                     src={companyLogo} 
                     alt="Company Logo" 
-                    className="max-h-16 max-w-16 w-auto h-auto cursor-pointer object-contain"
+                    className="max-h-20 max-w-20 w-auto h-auto cursor-pointer object-contain"
                   />
                 </div>
                 {/* Tooltip */}
