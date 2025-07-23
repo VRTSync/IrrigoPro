@@ -114,7 +114,7 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
-            <div className="px-4 py-6">
+            <div className="px-4">
               <Switch>
                 <Route path="/" component={FieldTechDashboard} />
                 <Route path="/field-tech" component={FieldTechDashboard} />
@@ -140,7 +140,7 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
-            <div className="px-4 py-6">
+            <div className="px-4">
               <Switch>
                 <Route path="/" component={ManagerDashboard} />
                 <Route path="/manager" component={ManagerDashboard} />
@@ -168,7 +168,7 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
-            <div className="px-4 py-6">
+            <div className="px-4">
               <Switch>
                 <Route path="/" component={CustomerBilling} />
                 <Route path="/customers" component={CustomerBilling} />
