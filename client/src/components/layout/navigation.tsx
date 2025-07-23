@@ -212,14 +212,14 @@ export default function Navigation() {
                       <div className="relative">
                         <Button
                           variant="ghost"
-                          className={`flex flex-col items-center justify-center w-16 h-16 rounded-lg -mt-8 border-4 border-white shadow-lg ${
+                          className={`flex flex-col items-center justify-center w-20 h-20 rounded-lg -mt-10 border-4 border-white shadow-lg px-2 py-2 ${
                             active
                               ? "bg-primary text-white hover:bg-primary/90"
                               : "bg-white text-primary hover:bg-gray-50 border-gray-200"
                           }`}
                         >
                           <Icon className="h-6 w-6" />
-                          <span className="text-xs font-medium mt-1">{item.label}</span>
+                          <span className="text-xs font-medium mt-1 leading-tight">{item.label}</span>
                         </Button>
                       </div>
                     </Link>
