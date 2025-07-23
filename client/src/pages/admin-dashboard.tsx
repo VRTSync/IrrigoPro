@@ -136,7 +136,7 @@ export default function AdminDashboard() {
       username: user.username,
       password: "", // Don't prefill password for security
       name: user.name,
-      email: user.email,
+      email: user.email || "",
       role: user.role,
       isActive: user.isActive
     });
@@ -291,12 +291,12 @@ export default function AdminDashboard() {
                   Add User
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
+              <DialogContent className="sm:max-w-md" aria-describedby="user-dialog-description">
                 <DialogHeader>
                   <DialogTitle>
                     {selectedUser ? "Edit User" : "Add New User"}
                   </DialogTitle>
-                  <DialogDescription>
+                  <DialogDescription id="user-dialog-description">
                     {selectedUser ? "Update user information and permissions." : "Create a new user account with role-based access."}
                   </DialogDescription>
                 </DialogHeader>
