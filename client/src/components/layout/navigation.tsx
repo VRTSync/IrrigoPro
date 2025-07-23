@@ -29,6 +29,7 @@ export default function Navigation() {
     ...(userRole === "admin" ? [{ path: "/", label: "Dashboard" }] : []),
     ...(userRole === "irrigation_manager" ? [{ path: "/", label: "Manager Dashboard" }] : []),
     ...(userRole === "field_tech" ? [{ path: "/", label: "Dashboard" }] : []),
+    ...(userRole === "admin" ? [{ path: "/admin", label: "Admin Dashboard" }] : []),
     ...(userRole === "admin" || userRole === "irrigation_manager" ? [{ path: "/estimates", label: "Estimates" }] : []),
     { path: "/work-orders", label: "Work Orders" },
     { path: "/billing-sheets", label: "Billing Sheets" },
