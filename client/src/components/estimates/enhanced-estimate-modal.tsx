@@ -426,7 +426,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 />
                 
                 {selectedCustomer && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <FormField
                       control={form.control}
                       name="customerName"
@@ -434,7 +434,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                         <FormItem>
                           <FormLabel>Customer Name</FormLabel>
                           <FormControl>
-                            <Input {...field} readOnly />
+                            <Input {...field} readOnly className="bg-gray-50" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -448,7 +448,27 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                         <FormItem>
                           <FormLabel>Email</FormLabel>
                           <FormControl>
-                            <Input {...field} readOnly />
+                            <Input {...field} readOnly className="bg-gray-50" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="customerPhone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone</FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              readOnly 
+                              className="bg-gray-50" 
+                              placeholder="No phone number"
+                              value={field.value || ""} 
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
