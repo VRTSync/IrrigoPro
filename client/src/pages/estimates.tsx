@@ -147,26 +147,11 @@ export default function Estimates() {
                         <tr key={estimate.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
-                              <div 
-                                className="bg-blue-50 p-2 rounded-lg mr-3 cursor-pointer hover:bg-blue-100 transition-colors"
-                                onClick={() => {
-                                  setSelectedEstimateId(estimate.id);
-                                  setShowDetailModal(true);
-                                }}
-                              >
+                              <div className="bg-blue-50 p-2 rounded-lg mr-3">
                                 <FileText className="w-4 h-4 text-blue-600" />
                               </div>
                               <div>
                                 <div className="text-sm font-medium text-gray-900">{estimate.estimateNumber}</div>
-                                <button
-                                  onClick={() => {
-                                    setSelectedEstimateId(estimate.id);
-                                    setShowDetailModal(true);
-                                  }}
-                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                                >
-                                  View
-                                </button>
                               </div>
                             </div>
                           </td>
@@ -190,6 +175,18 @@ export default function Estimates() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div className="flex items-center space-x-2 justify-end">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="text-blue-600 hover:text-blue-800"
+                                onClick={() => {
+                                  setSelectedEstimateId(estimate.id);
+                                  setShowDetailModal(true);
+                                }}
+                              >
+                                <Eye className="w-4 h-4 mr-1" />
+                                View Details
+                              </Button>
                               {estimate.status !== 'converted_to_work_order' && (
                                 <>
                                   <Button 
@@ -260,26 +257,11 @@ export default function Estimates() {
                   {/* Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center">
-                      <div 
-                        className="bg-blue-50 p-2 rounded-lg mr-3 cursor-pointer hover:bg-blue-100 transition-colors"
-                        onClick={() => {
-                          setSelectedEstimateId(estimate.id);
-                          setShowDetailModal(true);
-                        }}
-                      >
+                      <div className="bg-blue-50 p-2 rounded-lg mr-3">
                         <FileText className="w-5 h-5 text-blue-600" />
                       </div>
                       <div>
                         <div className="text-sm font-semibold text-gray-900">{estimate.estimateNumber}</div>
-                        <button
-                          onClick={() => {
-                            setSelectedEstimateId(estimate.id);
-                            setShowDetailModal(true);
-                          }}
-                          className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                        >
-                          View Details
-                        </button>
                       </div>
                     </div>
                     {getStatusBadge(estimate.status)}
@@ -304,28 +286,40 @@ export default function Estimates() {
                     </div>
 
                     {/* Actions */}
-                    {estimate.status !== 'converted_to_work_order' && (
-                      <div className="flex items-center space-x-2 pt-3 border-t border-gray-100">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1"
-                          onClick={() => {
-                            setEditEstimateId(estimate.id);
-                            setShowEstimateModal(true);
-                          }}
-                        >
-                          <Edit2 className="w-4 h-4 mr-2" />
-                          Edit
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <Mail className="w-4 h-4" />
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <Download className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    )}
+                    <div className="flex items-center space-x-2 pt-3 border-t border-gray-100">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => {
+                          setSelectedEstimateId(estimate.id);
+                          setShowDetailModal(true);
+                        }}
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </Button>
+                      {estimate.status !== 'converted_to_work_order' && (
+                        <>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => {
+                              setEditEstimateId(estimate.id);
+                              setShowEstimateModal(true);
+                            }}
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            <Mail className="w-4 h-4" />
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            <Download className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                     {estimate.status === 'converted_to_work_order' && (
                       <div className="pt-3 border-t border-gray-100">
                         <span className="text-sm text-gray-500 italic">Converted to Work Order</span>
