@@ -501,8 +501,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               </CardContent>
             </Card>
 
-            {/* Reassignment Section - Show for managers when they can reassign work orders */}
-            {fieldTechs && fieldTechs.length > 0 && (
+            {/* Reassignment Section - Show for managers only, not field technicians */}
+            {fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center gap-2">
