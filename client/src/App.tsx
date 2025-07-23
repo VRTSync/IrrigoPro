@@ -111,7 +111,7 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50">
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
             <Switch>
               <Route path="/" component={FieldTechDashboard} />
@@ -135,7 +135,7 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50">
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
             <Switch>
               <Route path="/" component={ManagerDashboard} />
@@ -161,7 +161,7 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50">
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
             <Navigation />
             <Switch>
               <Route path="/" component={CustomerBilling} />
