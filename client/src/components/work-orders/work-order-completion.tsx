@@ -41,7 +41,6 @@ import type { WorkOrder, Part } from "@shared/schema";
 const workOrderCompletionSchema = z.object({
   workSummary: z.string().min(10, "Work summary must be at least 10 characters"),
   customerNotes: z.string().min(5, "Customer notes must be at least 5 characters"),
-  completedAt: z.string(),
   totalHours: z.number().min(0.1, "Total hours must be at least 0.1"),
 });
 
@@ -90,7 +89,6 @@ export function WorkOrderCompletion({
     defaultValues: {
       workSummary: "",
       customerNotes: "",
-      completedAt: new Date().toISOString().slice(0, 16),
       totalHours: 1,
     },
   });
@@ -180,7 +178,7 @@ export function WorkOrderCompletion({
       workOrderId: workOrder.id,
       workSummary: data.workSummary,
       customerNotes: data.customerNotes,
-      completedAt: data.completedAt,
+      completedAt: new Date().toISOString(), // Set completion time to now
       totalHours: data.totalHours,
       usedParts: usedParts.map(up => ({
         partId: up.partId,
@@ -244,44 +242,27 @@ export function WorkOrderCompletion({
                   )}
                 />
 
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="totalHours"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Total Hours Worked *</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="0.1"
-                            min="0.1"
-                            {...field}
-                            onChange={e => field.onChange(parseFloat(e.target.value))}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="completedAt"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Completion Date & Time</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="datetime-local"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                <FormField
+                  control={form.control}
+                  name="totalHours"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Hours Worked *</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          placeholder="Enter hours (e.g., 2.5)"
+                          className="max-w-xs"
+                          {...field}
+                          onChange={e => field.onChange(parseFloat(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </CardContent>
             </Card>
 
