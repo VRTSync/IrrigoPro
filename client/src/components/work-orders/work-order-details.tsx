@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -51,8 +51,17 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   const [showAssignmentConfirmation, setShowAssignmentConfirmation] = useState(false);
   const [pendingTechnicianId, setPendingTechnicianId] = useState<string>("");
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Get current user from localStorage
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+  }, []);
 
   // Get field technicians for reassignment
   const { data: fieldTechs } = useQuery<UserType[]>({
@@ -295,14 +304,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   {!isEditingPriority ? (
                     <>
                       {getPriorityBadge(workOrder.priority, true)}
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={() => setIsEditingPriority(true)}
-                        className="h-6 px-2 text-xs"
-                      >
-                        <Edit className="w-3 h-3" />
-                      </Button>
+                      {currentUser?.role !== 'field_tech' && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => setIsEditingPriority(true)}
+                          className="h-6 px-2 text-xs"
+                        >
+                          <Edit className="w-3 h-3" />
+                        </Button>
+                      )}
                     </>
                   ) : (
                     <div className="flex items-center gap-2">
