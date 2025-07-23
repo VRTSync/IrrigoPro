@@ -145,14 +145,22 @@ export default function WorkOrders() {
   const startWorkMutation = useMutation({
     mutationFn: async (workOrderId: number) => {
       const updateData = { 
-        status: 'in_progress',
-        startedAt: new Date().toISOString()
+        status: 'in_progress' as const,
+        startedAt: new Date()
       };
+      console.log('Starting work order with data:', updateData);
       return fetch(`/api/work-orders/${workOrderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData)
-      }).then(res => res.json());
+      }).then(async res => {
+        if (!res.ok) {
+          const error = await res.json();
+          console.error('Start work error:', error);
+          throw new Error(`Failed to start work: ${error.message}`);
+        }
+        return res.json();
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });

@@ -29,7 +29,8 @@ import {
   Timer,
   MessageSquare,
   Users,
-  Download
+  Download,
+  ArrowRight
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -633,11 +634,12 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
               <Button
                 onClick={() => updateWorkOrderStatus.mutate('in_progress')}
                 disabled={updateWorkOrderStatus.isPending}
-                className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg font-semibold"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
                 size="lg"
               >
-                <Play className="w-5 h-5 mr-2" />
-                Start Work Order
+                <ArrowRight className="w-5 h-5 mr-2" />
+                Add Detail
+                <div className="ml-2 text-sm opacity-80">Next Step</div>
               </Button>
             </div>
           </div>
