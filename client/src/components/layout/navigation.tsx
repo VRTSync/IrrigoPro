@@ -66,17 +66,13 @@ export default function Navigation() {
           <div className="flex justify-between items-center h-16">
             {/* Logo Button */}
             <div className="flex-shrink-0">
-              <Link href="/" className="group">
+              <Link href="/">
                 <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
                     src={companyLogo} 
                     alt="Company Logo" 
                     className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
                   />
-                </div>
-                {/* Tooltip */}
-                <div className="absolute -bottom-16 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-3 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap pointer-events-none z-50">
-                  ← Back to Dashboard
                 </div>
               </Link>
             </div>
