@@ -229,18 +229,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
       );
     }
     
-    if (workOrder.status === 'in_progress') {
-      buttons.push(
-        <Button
-          key="complete"
-          onClick={() => setShowCompletionForm(true)}
-          className="bg-green-600 hover:bg-green-700 text-white"
-        >
-          <CheckCircle className="w-4 h-4 mr-2" />
-          Complete Work Order
-        </Button>
-      );
-    }
+    // Complete button moved to bottom - not included here
     
     if (workOrder.status !== 'cancelled') {
       buttons.push(
@@ -271,22 +260,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
           </DialogTitle>
         </DialogHeader>
 
-        {/* Prominent Status Banners */}
-        {workOrder.status === 'in_progress' && (
-          <div className="bg-gradient-to-r from-blue-500 to-cyan-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
-            <div className="flex items-center justify-center space-x-3">
-              <Play className="w-8 h-8 flex-shrink-0" />
-              <div className="text-center">
-                <h3 className="text-xl sm:text-2xl font-bold">🚀 WORK IN PROGRESS</h3>
-                <p className="text-blue-100 text-sm sm:text-base mt-1">
-                  Work order is active • Field technician {workOrder.assignedTechnicianName || 'assigned'}
-                </p>
-              </div>
-              <Play className="w-8 h-8 flex-shrink-0" />
-            </div>
-          </div>
-        )}
-
+        {/* Status Banner - Only for Completed */}
         {workOrder.status === 'completed' && (
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
             <div className="flex items-center justify-center space-x-3">
@@ -298,21 +272,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
                 </p>
               </div>
               <CheckCircle className="w-8 h-8 flex-shrink-0" />
-            </div>
-          </div>
-        )}
-
-        {workOrder.status === 'pending' && (
-          <div className="bg-gradient-to-r from-yellow-500 to-orange-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
-            <div className="flex items-center justify-center space-x-3">
-              <Clock className="w-8 h-8 flex-shrink-0" />
-              <div className="text-center">
-                <h3 className="text-xl sm:text-2xl font-bold">⏳ AWAITING START</h3>
-                <p className="text-yellow-100 text-sm sm:text-base mt-1">
-                  Work order pending • Ready to begin work
-                </p>
-              </div>
-              <Clock className="w-8 h-8 flex-shrink-0" />
             </div>
           </div>
         )}
@@ -666,6 +625,22 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate }: WorkOrderDeta
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Action Buttons - Bottom Section */}
+        {workOrder.status === 'in_progress' && (
+          <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => setShowCompletionForm(true)}
+                className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg font-semibold"
+                size="lg"
+              >
+                <CheckCircle className="w-5 h-5 mr-2" />
+                Complete Work Order
+              </Button>
+            </div>
+          </div>
+        )}
         </div>
       </DialogContent>
     </Dialog>
