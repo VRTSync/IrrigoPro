@@ -1021,8 +1021,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         approvalSentAt: new Date()
       });
 
-      // Get estimate zones for email
-      const zones = await storage.getEstimateZonesWithItems(id);
+      // Get estimate with zones for email
+      const estimateWithZones = await storage.getEstimate(id);
+      const zones = estimateWithZones?.zones;
       
       // Import EmailService
       const { EmailService } = await import('./email-service');
