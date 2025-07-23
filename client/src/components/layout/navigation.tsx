@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 import { useState } from "react";
-import { Menu, User, LogOut, Settings, Bell } from "lucide-react";
+import { Menu, User, LogOut, Settings } from "lucide-react";
 
 export default function Navigation() {
   const [location] = useLocation();
@@ -197,17 +197,7 @@ export default function Navigation() {
             </div>
 
             {/* Desktop User Menu */}
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm" className="text-gray-500 hover:text-gray-700 relative">
-                <Bell className="h-5 w-5" />
-                <Badge 
-                  variant="destructive" 
-                  className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-xs"
-                >
-                  3
-                </Badge>
-              </Button>
-              
+            <div className="flex items-center">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center space-x-2 p-2">
