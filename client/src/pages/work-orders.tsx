@@ -548,12 +548,19 @@ export default function WorkOrders() {
                           {currentUser.role === 'irrigation_manager' && (
                             <Select
                               onValueChange={(techId: string) => {
-                                const selectedTech = fieldTechs?.find((tech: any) => tech.id.toString() === techId);
+                                const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
                                 if (selectedTech) {
                                   reassignWorkOrder.mutate({
                                     workOrderId: workOrder.id,
                                     technicianId: selectedTech.id,
                                     technicianName: selectedTech.name
+                                  });
+                                } else if (techId === currentUser.id.toString()) {
+                                  // Manager can assign to themselves
+                                  reassignWorkOrder.mutate({
+                                    workOrderId: workOrder.id,
+                                    technicianId: currentUser.id,
+                                    technicianName: currentUser.name
                                   });
                                 }
                               }}
@@ -562,11 +569,14 @@ export default function WorkOrders() {
                                 <SelectValue placeholder="Assign" />
                               </SelectTrigger>
                               <SelectContent>
-                                {fieldTechs?.map((tech: any) => (
+                                <SelectItem value={currentUser.id.toString()}>
+                                  Assign to Me
+                                </SelectItem>
+                                {Array.isArray(fieldTechs) ? fieldTechs.map((tech: any) => (
                                   <SelectItem key={tech.id} value={tech.id.toString()}>
                                     {tech.name}
                                   </SelectItem>
-                                ))}
+                                )) : []}
                               </SelectContent>
                             </Select>
                           )}

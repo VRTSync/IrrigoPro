@@ -92,6 +92,15 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
   const reassignWorkOrder = useMutation({
     mutationFn: async (technicianId: string) => {
+      // Check if manager is assigning to themselves
+      if (technicianId === currentUser?.id.toString()) {
+        return apiRequest(`/api/work-orders/${workOrder.id}/assign`, "POST", {
+          technicianId: currentUser.id,
+          technicianName: currentUser.name,
+        });
+      }
+      
+      // Otherwise, find the selected field technician
       const selectedTech = fieldTechs?.find(tech => tech.id.toString() === technicianId);
       if (!selectedTech) throw new Error("Technician not found");
       
@@ -504,6 +513,9 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                         <SelectValue placeholder="Choose field technician..." />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value={currentUser.id.toString()}>
+                          Assign to Me
+                        </SelectItem>
                         {fieldTechs.map((tech) => (
                           <SelectItem key={tech.id} value={tech.id.toString()}>
                             {tech.name}
