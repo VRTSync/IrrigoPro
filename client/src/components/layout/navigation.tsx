@@ -201,20 +201,20 @@ export default function Navigation() {
 
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-          <div className="relative flex items-center py-2">
-            {/* Create grid with center position absolute */}
-            <div className="flex w-full">
-              {/* Left items */}
+          <div className="relative py-2 px-2">
+            {/* Navigation Layout - Split left/center/right */}
+            <div className="flex items-center relative">
+              {/* Left Side Items */}
               <div className="flex flex-1 justify-around">
                 {navItems.filter((item, index) => index < navItems.findIndex(item => item.isCenter)).map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item.path);
                   
                   return (
-                    <Link key={item.path} href={item.path} className="flex-1 max-w-20">
+                    <Link key={item.path} href={item.path}>
                       <Button
                         variant="ghost"
-                        className={`flex flex-col items-center justify-center w-full h-16 space-y-1 ${
+                        className={`flex flex-col items-center justify-center w-16 h-16 space-y-1 ${
                           active
                             ? "text-primary bg-primary/10"
                             : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
@@ -228,16 +228,16 @@ export default function Navigation() {
                 })}
               </div>
               
-              {/* Center Dashboard Button - Absolutely positioned */}
+              {/* Center Dashboard Button - Absolute positioned */}
               {navItems.find(item => item.isCenter) && (
-                <div className="absolute left-1/2 transform -translate-x-1/2">
+                <div className="absolute left-1/2 transform -translate-x-1/2 z-10">
                   {(() => {
                     const centerItem = navItems.find(item => item.isCenter);
-                    const Icon = centerItem.icon;
-                    const active = isActive(centerItem.path);
+                    const Icon = centerItem!.icon;
+                    const active = isActive(centerItem!.path);
                     
                     return (
-                      <Link href={centerItem.path}>
+                      <Link href={centerItem!.path}>
                         <div className="relative">
                           <Button
                             variant="ghost"
@@ -248,7 +248,7 @@ export default function Navigation() {
                             }`}
                           >
                             <Icon className="h-6 w-6" />
-                            <span className="text-xs font-medium mt-1 leading-tight">{centerItem.label}</span>
+                            <span className="text-xs font-medium mt-1 leading-tight">{centerItem!.label}</span>
                           </Button>
                         </div>
                       </Link>
@@ -257,17 +257,17 @@ export default function Navigation() {
                 </div>
               )}
               
-              {/* Right items */}
+              {/* Right Side Items */}
               <div className="flex flex-1 justify-around">
                 {navItems.filter((item, index) => index > navItems.findIndex(item => item.isCenter)).map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item.path);
                   
                   return (
-                    <Link key={item.path} href={item.path} className="flex-1 max-w-20">
+                    <Link key={item.path} href={item.path}>
                       <Button
                         variant="ghost"
-                        className={`flex flex-col items-center justify-center w-full h-16 space-y-1 ${
+                        className={`flex flex-col items-center justify-center w-16 h-16 space-y-1 ${
                           active
                             ? "text-primary bg-primary/10"
                             : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
