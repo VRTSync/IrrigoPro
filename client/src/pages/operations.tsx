@@ -371,97 +371,430 @@ export default function Operations() {
 
       {selectedWorkOrder && (
         <Dialog open={!!selectedWorkOrder} onOpenChange={() => setSelectedWorkOrder(null)}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Work Order Details - {selectedWorkOrder.workOrderNumber}</DialogTitle>
+          <DialogContent className="w-[95vw] max-w-6xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+            <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+              <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
+                <Wrench className="w-5 h-5" />
+                <span>Work Order Details - {selectedWorkOrder.workOrderNumber}</span>
+              </DialogTitle>
             </DialogHeader>
-            <div className="space-y-6">
-              {/* Basic Info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-semibold text-gray-900 mb-2">Basic Information</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><span className="font-medium">Customer:</span> {selectedWorkOrder.customerName}</div>
-                    <div><span className="font-medium">Project:</span> {selectedWorkOrder.projectName}</div>
-                    {selectedWorkOrder.assignedTechnicianName && (
-                      <div><span className="font-medium">Assigned Tech:</span> {selectedWorkOrder.assignedTechnicianName}</div>
-                    )}
-                    <div><span className="font-medium">Status:</span> 
-                      <Badge className={`ml-2 ${getStatusColor(selectedWorkOrder.status)}`}>
-                        {selectedWorkOrder.status.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900 mb-2">Financial & Dates</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><span className="font-medium">Total Amount:</span> {formatCurrency(selectedWorkOrder.totalAmount)}</div>
-                    <div><span className="font-medium">Created:</span> {format(new Date(selectedWorkOrder.createdAt), "MMM d, yyyy 'at' h:mm a")}</div>
-                    {selectedWorkOrder.propertyAddress && (
-                      <div><span className="font-medium">Address:</span> {selectedWorkOrder.propertyAddress}</div>
-                    )}
-                  </div>
-                </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <Button variant="outline" onClick={() => setSelectedWorkOrder(null)}>
-                  Close
-                </Button>
+            {/* Status Banner for Completed Work Orders */}
+            {selectedWorkOrder.status === 'completed' && (
+              <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
+                <div className="flex items-center justify-center space-x-3">
+                  <CheckCircle className="w-8 h-8 flex-shrink-0" />
+                  <div className="text-center">
+                    <h3 className="text-xl sm:text-2xl font-bold">✓ WORK ORDER COMPLETED</h3>
+                    <p className="text-green-100 text-sm sm:text-base mt-1">
+                      Work has been completed and is ready for invoicing
+                    </p>
+                  </div>
+                  <CheckCircle className="w-8 h-8 flex-shrink-0" />
+                </div>
               </div>
+            )}
+
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="space-y-4 sm:space-y-6">
+                {/* Header Information */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center space-x-2">
+                        <Wrench className="w-5 h-5" />
+                        <span>Work Order Information</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div>
+                        <span className="font-medium text-gray-700">Work Order Number:</span>
+                        <p className="text-lg font-semibold text-gray-900">{selectedWorkOrder.workOrderNumber}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Project Name:</span>
+                        <p className="text-gray-900">{selectedWorkOrder.projectName}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Status:</span>
+                        <div className="mt-1">
+                          <Badge className={`${getStatusColor(selectedWorkOrder.status)} text-sm font-semibold px-3 py-1`}>
+                            {selectedWorkOrder.status.replace('_', ' ').toUpperCase()}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Created Date:</span>
+                        <p className="text-gray-900">{format(new Date(selectedWorkOrder.createdAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center space-x-2">
+                        <Users className="w-5 h-5" />
+                        <span>Customer & Assignment</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div>
+                        <span className="font-medium text-gray-700">Customer Name:</span>
+                        <p className="text-gray-900">{selectedWorkOrder.customerName}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Property Address:</span>
+                        <p className="text-gray-900">{selectedWorkOrder.propertyAddress || 'Not provided'}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Assigned Technician:</span>
+                        <p className="text-gray-900">{selectedWorkOrder.assignedTechnicianName || 'Not assigned'}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Assignment Date:</span>
+                        <p className="text-gray-900">
+                          {selectedWorkOrder.assignedAt 
+                            ? format(new Date(selectedWorkOrder.assignedAt), "MMM d, yyyy 'at' h:mm a")
+                            : 'Not assigned yet'
+                          }
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Work Summary */}
+                {(selectedWorkOrder.completionSummary || selectedWorkOrder.laborHours) && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center space-x-2">
+                        <Clock className="w-5 h-5" />
+                        <span>Work Summary</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {selectedWorkOrder.laborHours && (
+                        <div>
+                          <span className="font-medium text-gray-700">Labor Hours:</span>
+                          <p className="text-gray-900 font-semibold">{selectedWorkOrder.laborHours} hours</p>
+                        </div>
+                      )}
+                      {selectedWorkOrder.completionSummary && (
+                        <div>
+                          <span className="font-medium text-gray-700">Completion Summary:</span>
+                          <p className="text-gray-900 mt-2 bg-gray-50 p-4 rounded-lg">{selectedWorkOrder.completionSummary}</p>
+                        </div>
+                      )}
+                      {selectedWorkOrder.customerNotes && (
+                        <div>
+                          <span className="font-medium text-gray-700">Customer Notes:</span>
+                          <p className="text-gray-900 mt-2 bg-blue-50 p-4 rounded-lg border-l-4 border-blue-400">{selectedWorkOrder.customerNotes}</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Financial Summary */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center space-x-2">
+                      <DollarSign className="w-5 h-5" />
+                      <span>Financial Summary</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 p-6 rounded-lg border">
+                      <div className="flex justify-between items-center py-3 bg-white rounded-lg px-4 border-2 border-blue-200">
+                        <span className="text-xl font-bold text-gray-900">Total Amount:</span>
+                        <span className="text-2xl font-bold text-blue-600">{formatCurrency(selectedWorkOrder.totalAmount)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Work Progress */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center space-x-2">
+                      <Calendar className="w-5 h-5" />
+                      <span>Work Progress Timeline</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-3 h-3 bg-blue-500 rounded-full flex-shrink-0"></div>
+                        <div>
+                          <p className="font-medium text-gray-900">Work Order Created</p>
+                          <p className="text-sm text-gray-600">{format(new Date(selectedWorkOrder.createdAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                        </div>
+                      </div>
+                      
+                      {selectedWorkOrder.assignedAt && (
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-orange-500 rounded-full flex-shrink-0"></div>
+                          <div>
+                            <p className="font-medium text-gray-900">Assigned to Technician</p>
+                            <p className="text-sm text-gray-600">{format(new Date(selectedWorkOrder.assignedAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedWorkOrder.startedAt && (
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-yellow-500 rounded-full flex-shrink-0"></div>
+                          <div>
+                            <p className="font-medium text-gray-900">Work Started</p>
+                            <p className="text-sm text-gray-600">{format(new Date(selectedWorkOrder.startedAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedWorkOrder.completedAt && (
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
+                          <div>
+                            <p className="font-medium text-gray-900">Work Completed</p>
+                            <p className="text-sm text-gray-600">{format(new Date(selectedWorkOrder.completedAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            {/* Actions Footer */}
+            <div className="flex justify-end space-x-2 p-4 sm:p-6 border-t bg-gray-50 flex-shrink-0">
+              <Button variant="outline" onClick={() => setSelectedWorkOrder(null)}>
+                Close
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
       )}
 
-      {/* Billing Sheet Detail Modal */}
+      {/* Enhanced Billing Sheet Detail Modal */}
       {selectedBillingSheet && (
         <Dialog open={!!selectedBillingSheet} onOpenChange={() => setSelectedBillingSheet(null)}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>
-                Billing Sheet Details - {selectedBillingSheet.billingSheetNumber || `BS-${selectedBillingSheet.id}`}
+          <DialogContent className="w-[95vw] max-w-6xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+            <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+              <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
+                <FileText className="w-5 h-5" />
+                <span>Billing Sheet Details - {selectedBillingSheet.billingSheetNumber || `BS-${selectedBillingSheet.id}`}</span>
               </DialogTitle>
             </DialogHeader>
-            <div className="space-y-6">
-              {/* Basic Info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-semibold text-gray-900 mb-2">Basic Information</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><span className="font-medium">Customer:</span> {selectedBillingSheet.customerName}</div>
-                    <div><span className="font-medium">Technician:</span> {selectedBillingSheet.technicianName}</div>
-                    <div><span className="font-medium">Work Date:</span> {format(new Date(selectedBillingSheet.workDate), "MMM d, yyyy")}</div>
-                    <div><span className="font-medium">Status:</span> 
-                      <Badge className={`ml-2 ${getStatusColor(selectedBillingSheet.status)}`}>
-                        {selectedBillingSheet.status.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900 mb-2">Financial</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><span className="font-medium">Total Amount:</span> {formatCurrency(selectedBillingSheet.totalAmount)}</div>
-                    <div><span className="font-medium">Created:</span> {format(new Date(selectedBillingSheet.createdAt), "MMM d, yyyy 'at' h:mm a")}</div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Description */}
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Work Description</h3>
-                <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{selectedBillingSheet.description}</p>
-              </div>
 
-              {/* Actions */}
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <Button variant="outline" onClick={() => setSelectedBillingSheet(null)}>
-                  Close
-                </Button>
+            {/* Status Banner for Approved Billing Sheets */}
+            {selectedBillingSheet.status === 'approved' && (
+              <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
+                <div className="flex items-center justify-center space-x-3">
+                  <CheckCircle className="w-8 h-8 flex-shrink-0" />
+                  <div className="text-center">
+                    <h3 className="text-xl sm:text-2xl font-bold">✓ BILLING SHEET APPROVED</h3>
+                    <p className="text-green-100 text-sm sm:text-base mt-1">
+                      This billing sheet has been approved and is ready for invoicing
+                    </p>
+                  </div>
+                  <CheckCircle className="w-8 h-8 flex-shrink-0" />
+                </div>
               </div>
+            )}
+
+            {selectedBillingSheet.status === 'billed' && (
+              <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
+                <div className="flex items-center justify-center space-x-3">
+                  <DollarSign className="w-8 h-8 flex-shrink-0" />
+                  <div className="text-center">
+                    <h3 className="text-xl sm:text-2xl font-bold">💰 BILLED TO CUSTOMER</h3>
+                    <p className="text-purple-100 text-sm sm:text-base mt-1">
+                      This billing sheet has been included in customer invoicing
+                    </p>
+                  </div>
+                  <DollarSign className="w-8 h-8 flex-shrink-0" />
+                </div>
+              </div>
+            )}
+
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="space-y-4 sm:space-y-6">
+                {/* Header Information */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center space-x-2">
+                        <FileText className="w-5 h-5" />
+                        <span>Billing Sheet Information</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div>
+                        <span className="font-medium text-gray-700">Billing Sheet Number:</span>
+                        <p className="text-lg font-semibold text-gray-900">{selectedBillingSheet.billingSheetNumber || `BS-${selectedBillingSheet.id}`}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Work Date:</span>
+                        <p className="text-gray-900">{format(new Date(selectedBillingSheet.workDate), "MMM d, yyyy")}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Status:</span>
+                        <div className="mt-1">
+                          <Badge className={`${getStatusColor(selectedBillingSheet.status)} text-sm font-semibold px-3 py-1`}>
+                            {selectedBillingSheet.status.replace('_', ' ').toUpperCase()}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Created Date:</span>
+                        <p className="text-gray-900">{format(new Date(selectedBillingSheet.createdAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center space-x-2">
+                        <Users className="w-5 h-5" />
+                        <span>Customer & Technician</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div>
+                        <span className="font-medium text-gray-700">Customer Name:</span>
+                        <p className="text-gray-900">{selectedBillingSheet.customerName}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Property Address:</span>
+                        <p className="text-gray-900">{selectedBillingSheet.propertyAddress || 'Not provided'}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Technician:</span>
+                        <p className="text-gray-900">{selectedBillingSheet.technicianName}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Hours Worked:</span>
+                        <p className="text-gray-900 font-semibold">{selectedBillingSheet.laborHours || 0} hours</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Work Description */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center space-x-2">
+                      <Wrench className="w-5 h-5" />
+                      <span>Work Performed</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div>
+                      <span className="font-medium text-gray-700">Description of Work:</span>
+                      <p className="text-gray-900 mt-2 bg-gray-50 p-4 rounded-lg border-l-4 border-blue-400">{selectedBillingSheet.description}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Financial Breakdown */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center space-x-2">
+                      <DollarSign className="w-5 h-5" />
+                      <span>Financial Breakdown</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 p-6 rounded-lg border">
+                      <div className="space-y-4">
+                        {selectedBillingSheet.partsTotal && (
+                          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                            <span className="text-gray-700 font-medium">Parts Total:</span>
+                            <span className="text-gray-900 font-semibold">{formatCurrency(selectedBillingSheet.partsTotal)}</span>
+                          </div>
+                        )}
+                        {selectedBillingSheet.laborTotal && (
+                          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                            <span className="text-gray-700 font-medium">Labor Total:</span>
+                            <span className="text-gray-900 font-semibold">{formatCurrency(selectedBillingSheet.laborTotal)}</span>
+                          </div>
+                        )}
+                        {selectedBillingSheet.taxAmount && (
+                          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                            <span className="text-gray-700 font-medium">Tax:</span>
+                            <span className="text-gray-900 font-semibold">{formatCurrency(selectedBillingSheet.taxAmount)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center py-3 bg-white rounded-lg px-4 border-2 border-blue-200">
+                          <span className="text-xl font-bold text-gray-900">Total Amount:</span>
+                          <span className="text-2xl font-bold text-blue-600">{formatCurrency(selectedBillingSheet.totalAmount)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Status Timeline */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center space-x-2">
+                      <Calendar className="w-5 h-5" />
+                      <span>Status Timeline</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-3 h-3 bg-blue-500 rounded-full flex-shrink-0"></div>
+                        <div>
+                          <p className="font-medium text-gray-900">Billing Sheet Created</p>
+                          <p className="text-sm text-gray-600">{format(new Date(selectedBillingSheet.createdAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                        </div>
+                      </div>
+                      
+                      {selectedBillingSheet.submittedAt && (
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-yellow-500 rounded-full flex-shrink-0"></div>
+                          <div>
+                            <p className="font-medium text-gray-900">Submitted for Review</p>
+                            <p className="text-sm text-gray-600">{format(new Date(selectedBillingSheet.submittedAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedBillingSheet.approvedAt && (
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
+                          <div>
+                            <p className="font-medium text-gray-900">Approved</p>
+                            <p className="text-sm text-gray-600">{format(new Date(selectedBillingSheet.approvedAt), "MMM d, yyyy 'at' h:mm a")}</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedBillingSheet.status === 'billed' && (
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-purple-500 rounded-full flex-shrink-0"></div>
+                          <div>
+                            <p className="font-medium text-gray-900">Billed to Customer</p>
+                            <p className="text-sm text-gray-600">Included in monthly invoice</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            {/* Actions Footer */}
+            <div className="flex justify-end space-x-2 p-4 sm:p-6 border-t bg-gray-50 flex-shrink-0">
+              <Button variant="outline" onClick={() => setSelectedBillingSheet(null)}>
+                Close
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
