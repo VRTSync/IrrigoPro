@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
-import { Plus, FileText, Mail, Download, Eye, Edit2 } from "lucide-react";
+import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { Estimate } from "@shared/schema";
 
@@ -16,10 +16,23 @@ export default function Estimates() {
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const queryClient = useQueryClient();
 
   const { data: estimates, isLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
   });
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+      await queryClient.refetchQueries({ queryKey: ["/api/estimates"] });
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -60,7 +73,16 @@ export default function Estimates() {
             <h1 className="text-3xl font-bold text-gray-900">Estimates</h1>
             <p className="text-gray-600 mt-1">Manage and track your irrigation estimates</p>
           </div>
-          <div className="mt-4 sm:mt-0">
+          <div className="mt-4 sm:mt-0 flex gap-2">
+            <Button 
+              onClick={handleRefresh}
+              disabled={refreshing}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Checking...' : 'Check Status'}
+            </Button>
             <Button onClick={() => setShowEstimateModal(true)} className="bg-primary text-white hover:bg-blue-700">
               <Plus className="w-4 h-4 mr-2" />
               New Estimate
