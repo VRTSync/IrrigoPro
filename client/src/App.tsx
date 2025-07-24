@@ -224,16 +224,17 @@ function Router() {
                 <Route path="/" component={AdminDashboard} />
                 <Route path="/admin" component={AdminDashboard} />
                 <Route path="/operations" component={Operations} />
-                <Route path="/estimates" component={Estimates} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/field-tech" component={FieldTech} />
-                <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
                 <Route path="/field-portal" component={FieldPortal} />
+                {/* Redirect estimates and work-orders to operations page */}
+                <Route path="/estimates" component={Operations} />
+                <Route path="/work-orders" component={Operations} />
                 <Route component={NotFound} />
               </Switch>
             </div>
@@ -255,16 +256,17 @@ function Router() {
               <Route path="/" component={AdminDashboard} />
               <Route path="/admin" component={AdminDashboard} />
               <Route path="/operations" component={Operations} />
-              <Route path="/estimates" component={Estimates} />
               <Route path="/parts" component={PartsCatalog} />
               <Route path="/customers" component={Customers} />
               <Route path="/customer-billing" component={CustomerBilling} />
               <Route path="/field-tech" component={FieldTech} />
-              <Route path="/work-orders" component={WorkOrders} />
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
               <Route path="/login" component={Login} />
               <Route path="/field-portal" component={FieldPortal} />
+              {/* Redirect estimates and work-orders to operations page */}
+              <Route path="/estimates" component={Operations} />
+              <Route path="/work-orders" component={Operations} />
               <Route component={NotFound} />
             </Switch>
           </div>

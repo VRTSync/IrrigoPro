@@ -10,6 +10,7 @@ Preferred communication style: Simple, everyday language.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request 2025-07-22).
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching (consolidated 2025-07-22).
 Business Rules: Markup calculations apply only to parts subtotal, not parts + labor combined. Labor hours are per-part, not multiplied by quantity. Monthly invoice consolidation combines all customer work into single QuickBooks invoices.
+Admin Access Restriction (2025-07-23): Company admin users should not have direct access to estimates and work orders pages - only view through modal previews in operations page. Removed navigation paths to /estimates and /work-orders for admin role.
 
 ## System Architecture
 

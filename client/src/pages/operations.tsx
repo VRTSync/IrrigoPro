@@ -410,11 +410,6 @@ export default function Operations() {
                 <Button variant="outline" onClick={() => setSelectedWorkOrder(null)}>
                   Close
                 </Button>
-                <Link href={`/work-orders`}>
-                  <Button onClick={() => setSelectedWorkOrder(null)}>
-                    View Full Details
-                  </Button>
-                </Link>
               </div>
             </div>
           </DialogContent>
@@ -466,11 +461,6 @@ export default function Operations() {
                 <Button variant="outline" onClick={() => setSelectedBillingSheet(null)}>
                   Close
                 </Button>
-                <Link href={`/billing-sheets`}>
-                  <Button onClick={() => setSelectedBillingSheet(null)}>
-                    View Full Details
-                  </Button>
-                </Link>
               </div>
             </div>
           </DialogContent>
