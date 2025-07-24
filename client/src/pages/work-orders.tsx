@@ -84,8 +84,7 @@ export default function WorkOrders() {
 
   // Fetch field technicians for assignment (managers only)
   const { data: fieldTechs } = useQuery({
-    queryKey: ['/api/users'],
-    select: (users: any[]) => users.filter(user => user.role === 'field_tech'),
+    queryKey: ['/api/users/field-techs'],
     staleTime: 300000, // 5 minutes
     enabled: currentUser?.role === 'irrigation_manager',
   });
@@ -556,13 +555,6 @@ export default function WorkOrders() {
                                     technicianId: selectedTech.id,
                                     technicianName: selectedTech.name
                                   });
-                                } else if (techId === currentUser.id.toString()) {
-                                  // Assign to manager
-                                  reassignWorkOrder.mutate({
-                                    workOrderId: workOrder.id,
-                                    technicianId: currentUser.id,
-                                    technicianName: "Manager"
-                                  });
                                 }
                               }}
                             >
@@ -570,9 +562,6 @@ export default function WorkOrders() {
                                 <SelectValue placeholder="Assign" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value={currentUser.id.toString()}>
-                                  Manager
-                                </SelectItem>
                                 {fieldTechs?.map((tech: any) => (
                                   <SelectItem key={tech.id} value={tech.id.toString()}>
                                     {tech.name}

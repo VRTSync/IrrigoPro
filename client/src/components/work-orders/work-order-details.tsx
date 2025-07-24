@@ -65,8 +65,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
   // Get field technicians for reassignment
   const { data: fieldTechs } = useQuery<UserType[]>({
-    queryKey: ["/api/users"],
-    select: (users) => users?.filter(user => user.role === 'field_tech') || [],
+    queryKey: ["/api/users/field-techs"],
   });
 
   const updatePriority = useMutation({

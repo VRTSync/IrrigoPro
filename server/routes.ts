@@ -96,6 +96,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get field technicians only (for work order assignments)
+  app.get("/api/users/field-techs", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      // Filter to only field technicians and remove passwords
+      const fieldTechs = users
+        .filter(user => user.role === 'field_tech' && user.isActive)
+        .map(({ password, ...user }) => user);
+      res.json(fieldTechs);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch field technicians" });
+    }
+  });
+
   // Authentication routes
   app.post("/api/auth/login", async (req, res) => {
     try {
