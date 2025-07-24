@@ -271,7 +271,19 @@ export default function Navigation() {
                           }`}
                         >
                           <Icon className="h-5 w-5" />
-                          <span className="text-xs font-medium">{item.label}</span>
+                          {item.label === "Work Orders" ? (
+                            <div className="text-xs font-medium text-center leading-none">
+                              <div>Work</div>
+                              <div>Orders</div>
+                            </div>
+                          ) : item.label === "Billing" ? (
+                            <div className="text-xs font-medium text-center leading-none">
+                              <div>Billing</div>
+                              <div>Sheets</div>
+                            </div>
+                          ) : (
+                            <span className="text-xs font-medium">{item.label}</span>
+                          )}
                         </Button>
                       </Link>
                     </div>
