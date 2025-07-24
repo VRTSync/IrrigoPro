@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, FileText, Wrench, ClipboardList, Calendar, DollarSign, User, MapPin } from "lucide-react";
+import { Plus, FileText, Wrench, ClipboardList, Calendar, DollarSign, User, MapPin, Users, CheckCircle, Clock } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
