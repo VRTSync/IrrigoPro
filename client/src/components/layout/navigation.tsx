@@ -85,20 +85,31 @@ export default function Navigation() {
             
             {/* Navigation Items */}
             <div className="flex items-center space-x-8">
-              {navItems.map((item) => (
-                <Link key={item.path} href={item.path}>
-                  <Button
-                    variant="ghost"
-                    className={`font-medium ${
-                      isActive(item.path)
-                        ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  >
-                    {item.label}
-                  </Button>
-                </Link>
-              ))}
+              {(() => {
+                // Reorder items for desktop - Dashboard first, then others
+                const desktopNavItems = [...navItems];
+                const dashboardIndex = desktopNavItems.findIndex(item => item.isCenter);
+                
+                if (dashboardIndex > -1) {
+                  const dashboardItem = desktopNavItems.splice(dashboardIndex, 1)[0];
+                  desktopNavItems.unshift(dashboardItem);
+                }
+                
+                return desktopNavItems.map((item) => (
+                  <Link key={item.path} href={item.path}>
+                    <Button
+                      variant="ghost"
+                      className={`font-medium ${
+                        isActive(item.path)
+                          ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {item.label}
+                    </Button>
+                  </Link>
+                ));
+              })()}
             </div>
 
             {/* Desktop User Menu */}
