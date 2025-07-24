@@ -255,7 +255,9 @@ export default function Operations() {
                       <h3 className="font-semibold text-lg">
                         {item.type === 'estimate' && (item as any).estimateNumber}
                         {item.type === 'workorder' && (item as any).workOrderNumber}
-                        {item.type === 'billingsheet' && (item as any).billingSheetNumber}
+                        {item.type === 'billingsheet' && (
+                          (item as any).billingSheetNumber || `Billing Sheet #${(item as any).id}`
+                        )}
                       </h3>
                       <Badge className={getStatusColor(item.status)}>
                         {item.status.replace('_', ' ')}
@@ -288,18 +290,37 @@ export default function Operations() {
                         </div>
                       )}
                       {item.type === 'billingsheet' && (
-                        <div className="flex items-center space-x-2">
-                          <User className="h-4 w-4" />
-                          <span>Tech: {(item as any).technicianName}</span>
-                        </div>
+                        <>
+                          <div className="flex items-center space-x-2">
+                            <User className="h-4 w-4" />
+                            <span>Tech: {(item as any).technicianName}</span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Calendar className="h-4 w-4" />
+                            <span>Work: {format(new Date((item as any).workDate), "MMM d, yyyy")}</span>
+                          </div>
+                        </>
                       )}
                     </div>
                     
-                    <p className="text-gray-700 mt-2 font-medium">
-                      {item.type === 'estimate' && (item as any).projectName}
-                      {item.type === 'workorder' && (item as any).projectName}
-                      {item.type === 'billingsheet' && (item as any).description}
-                    </p>
+                    <div className="mt-2">
+                      {item.type === 'estimate' && (
+                        <p className="text-gray-700 font-medium">{(item as any).projectName}</p>
+                      )}
+                      {item.type === 'workorder' && (
+                        <p className="text-gray-700 font-medium">{(item as any).projectName}</p>
+                      )}
+                      {item.type === 'billingsheet' && (
+                        <div>
+                          <p className="text-gray-700 font-medium">
+                            Work for {(item as any).customerName}
+                          </p>
+                          <p className="text-gray-600 text-sm mt-1 line-clamp-2">
+                            {(item as any).description}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   
                   <div className="flex space-x-2">
@@ -405,7 +426,9 @@ export default function Operations() {
         <Dialog open={!!selectedBillingSheet} onOpenChange={() => setSelectedBillingSheet(null)}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Billing Sheet Details - {selectedBillingSheet.billingSheetNumber}</DialogTitle>
+              <DialogTitle>
+                Billing Sheet Details - {selectedBillingSheet.billingSheetNumber || `BS-${selectedBillingSheet.id}`}
+              </DialogTitle>
             </DialogHeader>
             <div className="space-y-6">
               {/* Basic Info */}
