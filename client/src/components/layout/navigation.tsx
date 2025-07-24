@@ -201,50 +201,86 @@ export default function Navigation() {
 
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-          <div className="relative flex justify-around items-center py-2">
-            {navItems.map((item, index) => {
-              const Icon = item.icon;
-              const active = isActive(item.path);
-              const isCenter = item.isCenter;
-              
-              if (isCenter) {
-                return (
-                  <div key={item.path} className="flex-1 flex justify-center">
-                    <Link href={item.path}>
-                      <div className="relative">
-                        <Button
-                          variant="ghost"
-                          className={`flex flex-col items-center justify-center w-20 h-20 rounded-lg -mt-10 border-4 border-white shadow-lg px-2 py-2 ${
-                            active
-                              ? "bg-primary text-white hover:bg-primary/90"
-                              : "bg-white text-primary hover:bg-gray-50 border-gray-200"
-                          }`}
-                        >
-                          <Icon className="h-6 w-6" />
-                          <span className="text-xs font-medium mt-1 leading-tight">{item.label}</span>
-                        </Button>
-                      </div>
+          <div className="relative flex items-center py-2">
+            {/* Create grid with center position absolute */}
+            <div className="flex w-full">
+              {/* Left items */}
+              <div className="flex flex-1 justify-around">
+                {navItems.filter((item, index) => index < navItems.findIndex(item => item.isCenter)).map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.path);
+                  
+                  return (
+                    <Link key={item.path} href={item.path} className="flex-1 max-w-20">
+                      <Button
+                        variant="ghost"
+                        className={`flex flex-col items-center justify-center w-full h-16 space-y-1 ${
+                          active
+                            ? "text-primary bg-primary/10"
+                            : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        <Icon className="h-5 w-5" />
+                        <span className="text-xs font-medium">{item.label}</span>
+                      </Button>
                     </Link>
-                  </div>
-                );
-              }
+                  );
+                })}
+              </div>
               
-              return (
-                <Link key={item.path} href={item.path} className="flex-1">
-                  <Button
-                    variant="ghost"
-                    className={`flex flex-col items-center justify-center w-full h-16 space-y-1 ${
-                      active
-                        ? "text-primary bg-primary/10"
-                        : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span className="text-xs font-medium">{item.label}</span>
-                  </Button>
-                </Link>
-              );
-            })}
+              {/* Center Dashboard Button - Absolutely positioned */}
+              {navItems.find(item => item.isCenter) && (
+                <div className="absolute left-1/2 transform -translate-x-1/2">
+                  {(() => {
+                    const centerItem = navItems.find(item => item.isCenter);
+                    const Icon = centerItem.icon;
+                    const active = isActive(centerItem.path);
+                    
+                    return (
+                      <Link href={centerItem.path}>
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            className={`flex flex-col items-center justify-center w-20 h-20 rounded-lg -mt-10 border-4 border-white shadow-lg px-2 py-2 ${
+                              active
+                                ? "bg-primary text-white hover:bg-primary/90"
+                                : "bg-white text-primary hover:bg-gray-50 border-gray-200"
+                            }`}
+                          >
+                            <Icon className="h-6 w-6" />
+                            <span className="text-xs font-medium mt-1 leading-tight">{centerItem.label}</span>
+                          </Button>
+                        </div>
+                      </Link>
+                    );
+                  })()}
+                </div>
+              )}
+              
+              {/* Right items */}
+              <div className="flex flex-1 justify-around">
+                {navItems.filter((item, index) => index > navItems.findIndex(item => item.isCenter)).map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.path);
+                  
+                  return (
+                    <Link key={item.path} href={item.path} className="flex-1 max-w-20">
+                      <Button
+                        variant="ghost"
+                        className={`flex flex-col items-center justify-center w-full h-16 space-y-1 ${
+                          active
+                            ? "text-primary bg-primary/10"
+                            : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        <Icon className="h-5 w-5" />
+                        <span className="text-xs font-medium">{item.label}</span>
+                      </Button>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
