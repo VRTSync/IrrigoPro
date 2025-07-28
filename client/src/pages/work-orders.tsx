@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +25,9 @@ import {
   Filter,
   ArrowRight,
   Wrench,
-  Play
+  Play,
+  Users,
+  List
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
 
@@ -34,8 +38,10 @@ export default function WorkOrders() {
   const [selectedWorkOrderForCompletion, setSelectedWorkOrderForCompletion] = useState<WorkOrder | null>(null);
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [groupByCustomer, setGroupByCustomer] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Get current user from localStorage and refresh user data
   useEffect(() => {
@@ -89,6 +95,8 @@ export default function WorkOrders() {
     enabled: currentUser?.role === 'irrigation_manager',
   });
 
+
+
   const filteredWorkOrders = workOrders?.filter ? workOrders.filter(workOrder => {
     const matchesSearch = workOrder.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          workOrder.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -98,6 +106,17 @@ export default function WorkOrders() {
     
     return matchesSearch && matchesStatus;
   }) : [];
+
+  // Group work orders by customer
+  const groupedWorkOrders = groupByCustomer ? 
+    filteredWorkOrders.reduce((acc, workOrder) => {
+      const customerName = workOrder.customerName;
+      if (!acc[customerName]) {
+        acc[customerName] = [];
+      }
+      acc[customerName].push(workOrder);
+      return acc;
+    }, {} as Record<string, WorkOrder[]>) : null;
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -147,18 +166,25 @@ export default function WorkOrders() {
   // Reassign work order mutation
   const reassignWorkOrder = useMutation({
     mutationFn: async ({ workOrderId, technicianId, technicianName }: { workOrderId: number; technicianId: number; technicianName: string }) => {
-      return fetch(`/api/work-orders/${workOrderId}/assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          technicianId: technicianId,
-          technicianName: technicianName 
-        })
-      }).then(res => res.json());
+      return apiRequest(`/api/work-orders/${workOrderId}/assign`, "POST", {
+        technicianId,
+        technicianName,
+      });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
-    }
+      toast({
+        title: "Work Order Reassigned",
+        description: "Work order has been successfully reassigned",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reassign work order",
+        variant: "destructive",
+      });
+    },
   });
 
   // Handle loading state for currentUser
@@ -300,7 +326,7 @@ export default function WorkOrders() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
             <Input
@@ -342,6 +368,36 @@ export default function WorkOrders() {
           </div>
         </div>
 
+        {/* View Options */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">View:</span>
+            <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+              <Button
+                variant={!groupByCustomer ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setGroupByCustomer(false)}
+                className="px-3 py-1.5 text-xs"
+              >
+                <List className="w-3 h-3 mr-1.5" />
+                List
+              </Button>
+              <Button
+                variant={groupByCustomer ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setGroupByCustomer(true)}
+                className="px-3 py-1.5 text-xs"
+              >
+                <Users className="w-3 h-3 mr-1.5" />
+                By Customer
+              </Button>
+            </div>
+          </div>
+          <div className="text-sm text-gray-600">
+            {filteredWorkOrders.length} work order{filteredWorkOrders.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+
         {/* Work Orders Grid */}
         {filteredWorkOrders?.length === 0 ? (
           <Card className="bg-white border-0 shadow-sm">
@@ -360,7 +416,145 @@ export default function WorkOrders() {
               </Button>
             </CardContent>
           </Card>
+        ) : groupByCustomer && groupedWorkOrders ? (
+          // Grouped view by customer
+          <div className="space-y-6">
+            {Object.entries(groupedWorkOrders)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([customerName, customerWorkOrders]) => (
+                <Card key={customerName} className="bg-white border-0 shadow-sm">
+                  <CardHeader className="pb-3 border-b border-gray-100">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <User className="w-5 h-5 text-blue-600" />
+                      {customerName}
+                      <Badge variant="outline" className="ml-2">
+                        {customerWorkOrders.length} work order{customerWorkOrders.length !== 1 ? 's' : ''}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="space-y-1">
+                      {customerWorkOrders
+                        .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+                        .map((workOrder) => (
+                          <div key={workOrder.id} className="p-4 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0">
+                            <div className="flex flex-col h-full">
+                              {/* Header: Work Order # and Status */}
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-semibold text-gray-900 text-base">
+                                  {workOrder.workOrderNumber}
+                                </h4>
+                                {getStatusBadge(workOrder.status)}
+                              </div>
+
+                              {/* Content Area */}
+                              <div className="flex-1 space-y-2 mb-4">
+                                {/* Project Name */}
+                                <div className="flex items-center gap-2">
+                                  <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                  <span className="text-gray-700 text-sm truncate">{workOrder.projectName}</span>
+                                </div>
+
+                                {/* Date Scheduled */}
+                                <div className="flex items-center gap-2">
+                                  <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                  <span className="text-gray-700 text-sm">
+                                    Scheduled: {formatDate(workOrder.scheduledDate)}
+                                  </span>
+                                </div>
+
+                                {/* Location */}
+                                <div className="flex items-center gap-2">
+                                  <MapPin className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                  <span className="text-gray-700 text-sm truncate">{workOrder.projectAddress}</span>
+                                </div>
+
+                                {/* Assigned Technician */}
+                                {workOrder.assignedTechnicianName && (
+                                  <div className="flex items-center gap-2">
+                                    <User className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                                    <span className="text-blue-700 text-sm font-medium">
+                                      Assigned to: {workOrder.assignedTechnicianName}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Action Buttons */}
+                              <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                                <div className="text-xs text-gray-500">
+                                  Created {formatDate(workOrder.createdAt)}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {/* Render action buttons similar to list view */}
+                                  {workOrder.status === 'pending' && !workOrder.assignedTechnicianId && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setSelectedWorkOrder(workOrder)}
+                                      className="text-xs px-3 py-1.5"
+                                    >
+                                      <Eye className="w-3 h-3 mr-1" />
+                                      View
+                                    </Button>
+                                  )}
+                                  {(workOrder.status === 'assigned' || workOrder.status === 'in_progress') && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setSelectedWorkOrderForStart(workOrder)}
+                                      className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                    >
+                                      <Play className="w-3 h-3 mr-1" />
+                                      Start Work Order
+                                    </Button>
+                                  )}
+                                  {currentUser?.role === 'irrigation_manager' && (
+                                    <Select
+                                      onValueChange={(techId: string) => {
+                                        const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
+                                        if (selectedTech) {
+                                          reassignWorkOrder.mutate({
+                                            workOrderId: workOrder.id,
+                                            technicianId: selectedTech.id,
+                                            technicianName: selectedTech.name,
+                                          });
+                                        } else if (techId === currentUser.id.toString()) {
+                                          reassignWorkOrder.mutate({
+                                            workOrderId: workOrder.id,
+                                            technicianId: currentUser.id,
+                                            technicianName: currentUser.name,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <SelectTrigger className="w-32 h-8 text-xs">
+                                        <SelectValue placeholder="Assign" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={currentUser.id.toString()}>
+                                          Assign to Me
+                                        </SelectItem>
+                                        {Array.isArray(fieldTechs) ? fieldTechs.map((tech: any) => (
+                                          <SelectItem key={tech.id} value={tech.id.toString()}>
+                                            {tech.name}
+                                          </SelectItem>
+                                        )) : []}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+          </div>
         ) : (
+          // List view (default)
           <div className="space-y-4">
             {filteredWorkOrders
               ?.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) // Sort oldest to newest
