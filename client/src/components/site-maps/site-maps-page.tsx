@@ -12,22 +12,92 @@ import {
   FileText,
   AlertTriangle
 } from "lucide-react";
-import { KMLUpload } from "./kml-upload";
-import { SiteMapViewer } from "./site-map-viewer";
+import { ControllerUpload } from "./controller-upload";
+import { ZoneUpload } from "./zone-upload";
+import { ColorCodedMapViewer } from "./color-coded-map-viewer";
+import { ColorCodedDataReview } from "./color-coded-data-review";
 import type { ParsedKMLData, KMLController, KMLZone } from "@/lib/kml-parser";
 
-export function SiteMapsPage() {
-  const [kmlData, setKMLData] = useState<ParsedKMLData | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedController, setSelectedController] = useState<KMLController | null>(null);
-  const [selectedZone, setSelectedZone] = useState<KMLZone | null>(null);
+interface ColoredController extends KMLController {
+  color: string;
+  id: string;
+}
 
-  const handleKMLParsed = (data: ParsedKMLData) => {
-    setKMLData(data);
+interface ColoredZone extends KMLZone {
+  controllerId: string;
+  color: string;
+}
+
+interface SiteMapProject {
+  controllers: ColoredController[];
+  zonesByController: { [controllerId: string]: ColoredZone[] };
+  allZones: ColoredZone[];
+}
+
+export function SiteMapsPage() {
+  const [project, setProject] = useState<SiteMapProject>({
+    controllers: [],
+    zonesByController: {},
+    allZones: []
+  });
+  const [controllerFile, setControllerFile] = useState<File | null>(null);
+  const [selectedController, setSelectedController] = useState<ColoredController | null>(null);
+  const [selectedZone, setSelectedZone] = useState<ColoredZone | null>(null);
+  const [uploadingZonesFor, setUploadingZonesFor] = useState<string | null>(null);
+
+  // Color palette for controllers
+  const controllerColors = [
+    '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+    '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1'
+  ];
+
+  const handleControllerKMLParsed = (data: ParsedKMLData) => {
+    const coloredControllers: ColoredController[] = data.controllers.map((controller, index) => ({
+      ...controller,
+      id: `controller-${index}`,
+      color: controllerColors[index % controllerColors.length]
+    }));
+
+    setProject({
+      controllers: coloredControllers,
+      zonesByController: {},
+      allZones: []
+    });
   };
 
-  const handleFileSelected = (file: File) => {
-    setSelectedFile(file);
+  const handleZoneKMLParsed = (data: ParsedKMLData, controllerId: string) => {
+    if (!uploadingZonesFor) return;
+
+    const controller = project.controllers.find(c => c.id === controllerId);
+    if (!controller) return;
+
+    const coloredZones: ColoredZone[] = data.zones.map(zone => ({
+      ...zone,
+      controllerId,
+      color: controller.color
+    }));
+
+    setProject(prev => ({
+      ...prev,
+      zonesByController: {
+        ...prev.zonesByController,
+        [controllerId]: coloredZones
+      },
+      allZones: [
+        ...prev.allZones.filter(z => z.controllerId !== controllerId),
+        ...coloredZones
+      ]
+    }));
+
+    setUploadingZonesFor(null);
+  };
+
+  const handleControllerFileSelected = (file: File) => {
+    setControllerFile(file);
+  };
+
+  const startZoneUpload = (controllerId: string) => {
+    setUploadingZonesFor(controllerId);
   };
 
   const handleSaveToDatabase = () => {
@@ -77,7 +147,7 @@ export function SiteMapsPage() {
           <TabsTrigger 
             value="map" 
             className="flex items-center gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
-            disabled={!kmlData}
+            disabled={project.controllers.length === 0}
           >
             <MapIcon className="w-4 h-4" />
             <span className="font-medium">Map View</span>
@@ -85,7 +155,7 @@ export function SiteMapsPage() {
           <TabsTrigger 
             value="data" 
             className="flex items-center gap-2 data-[state=active]:bg-purple-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
-            disabled={!kmlData}
+            disabled={project.controllers.length === 0}
           >
             <Database className="w-4 h-4" />
             <span className="font-medium">Data Review</span>
@@ -93,9 +163,17 @@ export function SiteMapsPage() {
         </TabsList>
 
         <TabsContent value="upload" className="space-y-6 mt-6">
-          <KMLUpload 
-            onKMLParsed={handleKMLParsed}
-            onFileSelected={handleFileSelected}
+          <ControllerUpload 
+            onKMLParsed={handleControllerKMLParsed}
+            onFileSelected={handleControllerFileSelected}
+          />
+          
+          <ZoneUpload
+            controllers={project.controllers}
+            onZoneKMLParsed={handleZoneKMLParsed}
+            uploadingFor={uploadingZonesFor}
+            onStartUpload={startZoneUpload}
+            zonesByController={project.zonesByController}
           />
 
           {/* Instructions */}
@@ -130,9 +208,9 @@ export function SiteMapsPage() {
         </TabsContent>
 
         <TabsContent value="map" className="space-y-6 mt-6">
-          {kmlData ? (
-            <SiteMapViewer
-              kmlData={kmlData}
+          {project.controllers.length > 0 ? (
+            <ColorCodedMapViewer
+              project={project}
               onControllerClick={setSelectedController}
               onZoneClick={setSelectedZone}
             />
@@ -150,107 +228,14 @@ export function SiteMapsPage() {
         </TabsContent>
 
         <TabsContent value="data" className="space-y-6 mt-6">
-          {kmlData ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Controllers Data */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Settings className="w-5 h-5 text-blue-600" />
-                    Controllers ({kmlData.controllers.length})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {kmlData.controllers.length === 0 ? (
-                    <p className="text-gray-500 text-center py-8">No controllers found in KML file</p>
-                  ) : (
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {kmlData.controllers.map((controller, index) => (
-                        <div 
-                          key={index}
-                          className="p-3 border border-gray-200 rounded-lg hover:bg-blue-50 cursor-pointer transition-colors"
-                          onClick={() => setSelectedController(controller)}
-                        >
-                          <h4 className="font-medium text-gray-900">{controller.name}</h4>
-                          <div className="text-sm text-gray-600 mt-1 space-y-1">
-                            {controller.model && <div>Model: {controller.model}</div>}
-                            {controller.serialNumber && <div>Serial: {controller.serialNumber}</div>}
-                            <div>Stations: {controller.stationCount || 8}</div>
-                            <div className="text-xs text-gray-500">
-                              {controller.latitude.toFixed(6)}, {controller.longitude.toFixed(6)}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Zones Data */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <MapIcon className="w-5 h-5 text-green-600" />
-                    Irrigation Zones ({kmlData.zones.length})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {kmlData.zones.length === 0 ? (
-                    <p className="text-gray-500 text-center py-8">No zones found in KML file</p>
-                  ) : (
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {kmlData.zones.map((zone, index) => (
-                        <div 
-                          key={index}
-                          className="p-3 border border-gray-200 rounded-lg hover:bg-green-50 cursor-pointer transition-colors"
-                          onClick={() => setSelectedZone(zone)}
-                        >
-                          <h4 className="font-medium text-gray-900">{zone.name}</h4>
-                          <div className="text-sm text-gray-600 mt-1 space-y-1">
-                            {zone.controllerName && <div>Controller: {zone.controllerName}</div>}
-                            {zone.stationNumber && <div>Station: {zone.stationNumber}</div>}
-                            {zone.zoneType && <div>Type: {zone.zoneType}</div>}
-                            {zone.coverage && <div>Coverage: {zone.coverage}</div>}
-                            <div className="text-xs text-gray-500">
-                              {zone.boundaries ? `${zone.boundaries.length} boundary points` : 'No boundaries'}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+          {project.controllers.length > 0 ? (
+            <ColorCodedDataReview project={project} />
           ) : (
             <Card>
-              <CardContent className="flex items-center justify-center py-16">
-                <div className="text-center">
-                  <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Data Available</h3>
-                  <p className="text-gray-600">Upload and parse a KML file to review the extracted data</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {kmlData && (
-            <Card className="border-orange-200 bg-orange-50">
-              <CardHeader>
-                <CardTitle className="text-orange-800">Ready to Save to Database?</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-orange-700 mb-4">
-                  Once you're satisfied with the data, you can save it to the database and link it to customers.
-                </p>
-                <Button 
-                  onClick={handleSaveToDatabase}
-                  className="bg-orange-600 hover:bg-orange-700"
-                  disabled
-                >
-                  Save to Database (Coming Soon)
-                </Button>
+              <CardContent className="p-12 text-center">
+                <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No KML Data Available</h3>
+                <p className="text-gray-600">Upload and process KML files to review the extracted data</p>
               </CardContent>
             </Card>
           )}
