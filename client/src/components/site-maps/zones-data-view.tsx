@@ -68,7 +68,7 @@ const getZoneTypeColor = (zoneType: string) => {
 };
 
 export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: ZonesDataViewProps) {
-  const totalZones = controllers.reduce((sum, controller) => sum + controller.zones.length, 0);
+  const totalZones = controllers.reduce((sum, controller) => sum + (controller.zones?.length || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -89,7 +89,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
         <Card>
           <CardContent className="p-4">
             <div className="text-2xl font-bold">
-              {controllers.reduce((sum, c) => sum + c.stationCount, 0)}
+              {controllers.reduce((sum, c) => sum + (c.stationCount || 0), 0)}
             </div>
             <div className="text-sm text-muted-foreground">Total Stations</div>
           </CardContent>
@@ -108,10 +108,10 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
                 <div className="flex items-center gap-2">
                   <MapPin className="h-5 w-5 text-blue-600" />
                   <span>{controller.name}</span>
-                  <Badge variant="outline">{controller.zones.length} zones</Badge>
+                  <Badge variant="outline">{controller.zones?.length || 0} zones</Badge>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  {typeof controller.latitude === 'number' ? controller.latitude.toFixed(6) : '0.000000'}, {typeof controller.longitude === 'number' ? controller.longitude.toFixed(6) : '0.000000'}
+                  {typeof controller.latitude === 'number' && !isNaN(controller.latitude) ? controller.latitude.toFixed(6) : '0.000000'}, {typeof controller.longitude === 'number' && !isNaN(controller.longitude) ? controller.longitude.toFixed(6) : '0.000000'}
                 </div>
               </CardTitle>
               {(controller.model || controller.serialNumber) && (
@@ -124,10 +124,10 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
               )}
             </CardHeader>
             
-            {controller.zones.length > 0 && (
+            {(controller.zones?.length || 0) > 0 && (
               <CardContent className="pt-0">
                 <div className="grid gap-2">
-                  {controller.zones.map((zone) => (
+                  {(controller.zones || []).map((zone) => (
                     <div
                       key={zone.id}
                       className="flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:bg-muted/50"
