@@ -168,6 +168,12 @@ The system uses comprehensive database tables:
 
 ## Recent Changes (2025-07-29)
 
+- **Role-Based Site Map Permissions**: Implemented comprehensive access control for site map system:
+  - **Admin Users (company_admin, super_admin)**: Full editing permissions - can upload KML files, create controllers and zones, modify all data
+  - **Manager Users (irrigation_manager)**: View-only access - can view maps, use display options, inspect zone details, but cannot upload or edit
+  - **Field Technicians (field_tech)**: View-only access - same viewing capabilities as managers for field reference
+  - Navigation updated to include site maps for all authorized roles
+  - Access control with clear permission messages and role-appropriate interface elements
 - **Location Management Enhancement**: Added comprehensive location fields to both estimates and work orders including:
   - Project address (existing field)
   - Location notes for additional property details and landmarks

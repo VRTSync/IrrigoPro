@@ -35,6 +35,7 @@ export default function Navigation() {
           { path: "/operations", label: "Operations", icon: FileText },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
           { path: "/parts", label: "Parts", icon: Package },
           { path: "/admin", label: "Users", icon: Settings },
         ];
@@ -60,6 +61,7 @@ export default function Navigation() {
         return [
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
         ];
       case "billing_manager":

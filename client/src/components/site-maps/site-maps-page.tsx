@@ -35,6 +35,17 @@ interface SiteMapProject {
 }
 
 export function SiteMapsPage() {
+  // Get current user role for permissions
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+  
+  const user = getCurrentUser();
+  const userRole = user?.role;
+  const canEdit = userRole === 'company_admin' || userRole === 'super_admin';
+  const canView = canEdit || userRole === 'irrigation_manager' || userRole === 'field_tech';
+
   const [project, setProject] = useState<SiteMapProject>({
     controllers: [],
     zonesByController: {},
@@ -102,8 +113,24 @@ export function SiteMapsPage() {
 
   const handleSaveToDatabase = () => {
     // TODO: Implement saving to database
-    console.log("Saving to database:", { kmlData, selectedFile });
+    console.log("Saving to database:", project);
   };
+
+  // Redirect unauthorized users
+  if (!canView) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-12 text-center">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-8">
+          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-red-800 mb-2">Access Restricted</h2>
+          <p className="text-red-600">
+            You don't have permission to access the Site Maps feature. 
+            Please contact your administrator for access.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -119,8 +146,19 @@ export function SiteMapsPage() {
                 Site Maps & Controller Management
               </h1>
               <p className="text-gray-600 text-lg">
-                Import KML files to visualize irrigation controllers and zones on interactive maps
+                {canEdit 
+                  ? "Import KML files to visualize irrigation controllers and zones on interactive maps"
+                  : "View irrigation controller and zone maps for your properties"
+                }
               </p>
+              {!canEdit && (
+                <div className="mt-4">
+                  <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+                    <Info className="w-3 h-3 mr-1" />
+                    View-Only Access
+                  </Badge>
+                </div>
+              )}
             </div>
             <div className="text-right">
               <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 mb-2">
@@ -135,15 +173,17 @@ export function SiteMapsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="upload" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 bg-white shadow-sm border border-gray-200 p-1 rounded-xl">
-          <TabsTrigger 
-            value="upload" 
-            className="flex items-center gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
-          >
-            <Upload className="w-4 h-4" />
-            <span className="font-medium">Upload KML</span>
-          </TabsTrigger>
+      <Tabs defaultValue={canEdit ? "upload" : "map"} className="w-full">
+        <TabsList className={`grid w-full ${canEdit ? 'grid-cols-3' : 'grid-cols-2'} bg-white shadow-sm border border-gray-200 p-1 rounded-xl`}>
+          {canEdit && (
+            <TabsTrigger 
+              value="upload" 
+              className="flex items-center gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
+            >
+              <Upload className="w-4 h-4" />
+              <span className="font-medium">Upload KML</span>
+            </TabsTrigger>
+          )}
           <TabsTrigger 
             value="map" 
             className="flex items-center gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
@@ -162,21 +202,22 @@ export function SiteMapsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="upload" className="space-y-6 mt-6">
-          <ControllerUpload 
-            onKMLParsed={handleControllerKMLParsed}
-            onFileSelected={handleControllerFileSelected}
-          />
-          
-          <ZoneUpload
-            controllers={project.controllers}
-            onZoneKMLParsed={handleZoneKMLParsed}
-            uploadingFor={uploadingZonesFor}
-            onStartUpload={startZoneUpload}
-            zonesByController={project.zonesByController}
-          />
+        {canEdit && (
+          <TabsContent value="upload" className="space-y-6 mt-6">
+            <ControllerUpload 
+              onKMLParsed={handleControllerKMLParsed}
+              onFileSelected={handleControllerFileSelected}
+            />
+            
+            <ZoneUpload
+              controllers={project.controllers}
+              onZoneKMLParsed={handleZoneKMLParsed}
+              uploadingFor={uploadingZonesFor}
+              onStartUpload={startZoneUpload}
+              zonesByController={project.zonesByController}
+            />
 
-          {/* Instructions */}
+            {/* Instructions */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -205,7 +246,8 @@ export function SiteMapsPage() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
+          </TabsContent>
+        )}
 
         <TabsContent value="map" className="space-y-6 mt-6">
           {project.controllers.length > 0 ? (
