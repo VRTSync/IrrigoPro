@@ -276,7 +276,7 @@ export default function Navigation() {
                 let otherItems = navItems.filter(item => !item.isCenter);
                 
                 // For mobile, expand dropdown items into individual items
-                const expandedItems = [];
+                const expandedItems: any[] = [];
                 otherItems.forEach(item => {
                   if (item.isDropdown && item.dropdownItems) {
                     expandedItems.push(...item.dropdownItems);
