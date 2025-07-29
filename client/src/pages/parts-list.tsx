@@ -12,8 +12,6 @@ import {
   Edit, 
   Trash2, 
   Filter,
-  DollarSign,
-  Clock,
   Tag
 } from "lucide-react";
 import type { Part } from "@shared/schema";
@@ -65,12 +63,7 @@ export default function PartsList() {
     }
   });
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
-  };
+
 
   const getCategoryColor = (category: string) => {
     const colors: Record<string, string> = {
@@ -97,7 +90,7 @@ export default function PartsList() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Parts Catalog</h1>
             <p className="text-gray-600 mt-1">
-              Manage your irrigation parts inventory and pricing
+              Browse and manage your irrigation parts inventory
             </p>
           </div>
           <div className="mt-4 sm:mt-0">
@@ -109,7 +102,7 @@ export default function PartsList() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -134,38 +127,6 @@ export default function PartsList() {
                   </p>
                 </div>
                 <Filter className="w-8 h-8 text-green-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Avg Price</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {parts?.length ? formatCurrency(
-                      parts.reduce((sum, part) => sum + parseFloat(part.price), 0) / parts.length
-                    ) : '$0.00'}
-                  </p>
-                </div>
-                <DollarSign className="w-8 h-8 text-purple-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Avg Labor</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {parts?.length ? (
-                      parts.reduce((sum, part) => sum + parseFloat(part.laborHours), 0) / parts.length
-                    ).toFixed(2) : '0.00'}h
-                  </p>
-                </div>
-                <Clock className="w-8 h-8 text-orange-600" />
               </div>
             </CardContent>
           </Card>
@@ -295,23 +256,11 @@ export default function PartsList() {
                 </div>
                 
                 <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                  <div className="flex flex-col">
-                    <span className="text-lg font-bold text-gray-900">
-                      {formatCurrency(parseFloat(part.price))}
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {parseFloat(part.laborHours)}h labor
-                    </span>
+                  <div className="text-sm text-gray-600">
+                    Part Number: <span className="font-medium text-gray-900">{part.sku}</span>
                   </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-600">
-                      Total Cost
-                    </div>
-                    <div className="text-sm font-medium text-gray-900">
-                      {formatCurrency(
-                        parseFloat(part.price) + (parseFloat(part.laborHours) * 45)
-                      )}
-                    </div>
+                  <div className="text-sm text-gray-600">
+                    In Stock
                   </div>
                 </div>
               </CardContent>
