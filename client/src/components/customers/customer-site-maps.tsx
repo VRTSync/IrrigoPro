@@ -145,6 +145,37 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     });
   };
 
+  // Delete site map mutation
+  const deleteSiteMapMutation = useMutation({
+    mutationFn: async (siteMapId: number) => {
+      return apiRequest(`/api/site-maps/${siteMapId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/site-maps`] });
+      toast({
+        title: "Success",
+        description: "Site map deleted successfully",
+      });
+    },
+    onError: (error: any) => {
+      console.error("Site map deletion error:", error);
+      const errorMessage = error?.message || "Failed to delete site map";
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDeleteSiteMap = (siteMapId: number, siteMapName: string) => {
+    if (confirm(`Are you sure you want to delete "${siteMapName}"? This action cannot be undone.`)) {
+      deleteSiteMapMutation.mutate(siteMapId);
+    }
+  };
+
   if (selectedProject && project) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -368,9 +399,15 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                               <Edit className="w-4 h-4 mr-2" />
                               Edit
                             </Button>
-                            <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => handleDeleteSiteMap(siteMap.id, siteMap.name)}
+                              disabled={deleteSiteMapMutation.isPending}
+                            >
                               <Trash2 className="w-4 h-4 mr-2" />
-                              Delete
+                              {deleteSiteMapMutation.isPending ? "Deleting..." : "Delete"}
                             </Button>
                           </>
                         )}

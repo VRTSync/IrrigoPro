@@ -226,6 +226,7 @@ export interface IStorage {
   getSiteMapControllers(siteMapId: number): Promise<Controller[]>;
   getSiteMapZones(siteMapId: number): Promise<IrrigationZone[]>;
   createSiteMap(siteMap: InsertSiteMap): Promise<SiteMap>;
+  deleteSiteMap(siteMapId: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1591,6 +1592,11 @@ export class DatabaseStorage implements IStorage {
   async createSiteMap(siteMap: InsertSiteMap): Promise<SiteMap> {
     const result = await db.insert(siteMaps).values(siteMap).returning();
     return result[0];
+  }
+
+  async deleteSiteMap(siteMapId: number): Promise<boolean> {
+    const result = await db.delete(siteMaps).where(eq(siteMaps.id, siteMapId));
+    return (result.rowCount || 0) > 0;
   }
 }
 

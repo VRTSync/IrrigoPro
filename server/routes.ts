@@ -284,6 +284,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/site-maps/:siteMapId", async (req, res) => {
+    try {
+      const siteMapId = parseInt(req.params.siteMapId);
+      const success = await storage.deleteSiteMap(siteMapId);
+      
+      if (!success) {
+        return res.status(404).json({ message: "Site map not found" });
+      }
+      
+      res.json({ message: "Site map deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting site map:", error);
+      res.status(500).json({ message: "Failed to delete site map" });
+    }
+  });
+
   // Create monthly invoice for customer - consolidates all unbilled work
   app.post("/api/invoices/monthly", async (req, res) => {
     try {
