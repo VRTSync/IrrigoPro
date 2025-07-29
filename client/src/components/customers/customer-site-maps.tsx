@@ -100,13 +100,19 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   // Create site map mutation
   const createSiteMapMutation = useMutation({
     mutationFn: async (data: { name: string; description: string }) => {
-      return apiRequest(`/api/customers/${customer.id}/site-maps`, {
+      const response = await fetch(`/api/customers/${customer.id}/site-maps`, {
         method: "POST",
-        body: JSON.stringify(data),
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify(data),
       });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to create site map: ${response.statusText}`);
+      }
+      
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/site-maps`] });
