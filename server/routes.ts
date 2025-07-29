@@ -15,7 +15,8 @@ import {
   insertFieldWorkItemSchema,
   insertWorkOrderSchema,
   insertWorkOrderItemSchema,
-  insertNotificationSchema
+  insertNotificationSchema,
+  insertSiteMapSchema
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -261,15 +262,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/customers/:customerId/site-maps", async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
-      const siteMapData = {
+      
+      // Validate the request body
+      const validatedData = insertSiteMapSchema.parse({
         ...req.body,
         customerId,
         companyId: 1 // Default company ID for now
-      };
-      const siteMap = await storage.createSiteMap(siteMapData);
+      });
+      
+      const siteMap = await storage.createSiteMap(validatedData);
       res.status(201).json(siteMap);
     } catch (error) {
       console.error("Error creating site map:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Invalid site map data", 
+          errors: error.errors 
+        });
+      }
       res.status(500).json({ message: "Failed to create site map" });
     }
   });

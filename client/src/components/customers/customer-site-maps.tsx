@@ -103,6 +103,9 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
       return apiRequest(`/api/customers/${customer.id}/site-maps`, {
         method: "POST",
         body: JSON.stringify(data),
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
     },
     onSuccess: () => {
@@ -115,10 +118,12 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
         description: "Site map created successfully",
       });
     },
-    onError: (error) => {
+    onError: (error: any) => {
+      console.error("Site map creation error:", error);
+      const errorMessage = error?.message || "Failed to create site map";
       toast({
         title: "Error",
-        description: "Failed to create site map",
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -271,10 +276,11 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                         Create New Site Map
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-[425px]">
+                    <DialogContent className="sm:max-w-[425px]" aria-describedby="create-site-map-header-desc">
                       <DialogHeader>
                         <DialogTitle>Create New Site Map</DialogTitle>
                       </DialogHeader>
+                      <p id="create-site-map-header-desc" className="sr-only">Create a new site map for this customer's property</p>
                       <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                           <Label htmlFor="name">Site Map Name</Label>
@@ -395,10 +401,11 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                         Create First Site Map
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-[425px]">
+                    <DialogContent className="sm:max-w-[425px]" aria-describedby="create-site-map-empty-desc">
                       <DialogHeader>
                         <DialogTitle>Create New Site Map</DialogTitle>
                       </DialogHeader>
+                      <p id="create-site-map-empty-desc" className="sr-only">Create a new site map for this customer's property</p>
                       <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                           <Label htmlFor="name-empty">Site Map Name</Label>

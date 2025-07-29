@@ -481,6 +481,9 @@ export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
 export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
+export type InsertController = z.infer<typeof insertControllerSchema>;
+export type InsertIrrigationZone = z.infer<typeof insertIrrigationZoneSchema>;
 
 export type EstimateWithZones = Estimate & {
   zones: (EstimateZone & { items: EstimateItem[] })[];
