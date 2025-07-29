@@ -78,15 +78,26 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     }, {} as Record<string, IrrigationZone[]>)
   } : null;
 
-  const handleControllerKMLParsed = async (controllers: Controller[]) => {
+  const handleControllerKMLParsed = async (data: any) => {
+    console.log("Controller KML parsed:", data);
     setUploadingControllersFor(null);
-    // Refetch data after upload
-    // This would typically trigger a refetch of the site maps
+    // Refetch controllers data after upload
+    queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject?.id}/controllers`] });
   };
 
-  const handleZoneKMLParsed = async (zones: IrrigationZone[]) => {
+  const handleZoneKMLParsed = async (data: any) => {
+    console.log("Zone KML parsed:", data);
     setUploadingZonesFor(null);
-    // Refetch data after upload
+    // Refetch zones data after upload
+    queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject?.id}/zones`] });
+  };
+
+  const handleControllerFileSelected = (file: File) => {
+    console.log("Controller file selected:", file.name);
+  };
+
+  const handleZoneFileSelected = (file: File) => {
+    console.log("Zone file selected:", file.name);
   };
 
   const startControllerUpload = (projectId: number) => {
@@ -241,16 +252,18 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                   <CardContent className="space-y-6">
                     <ControllerUpload
                       onKMLParsed={handleControllerKMLParsed}
-                      uploadingFor={uploadingControllersFor}
-                      onStartUpload={startControllerUpload}
+                      onFileSelected={handleControllerFileSelected}
                     />
 
-                    <ControllerUpload
-                      onKMLParsed={handleZoneKMLParsed}
-                      uploadingFor={uploadingZonesFor}
-                      onStartUpload={startZoneUpload}
-                      zonesByController={project.zonesByController}
-                    />
+                    <div className="pt-6">
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">
+                        Zone KML Upload
+                      </h3>
+                      <ControllerUpload
+                        onKMLParsed={handleZoneKMLParsed}
+                        onFileSelected={handleZoneFileSelected}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
