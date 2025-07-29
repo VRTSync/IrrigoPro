@@ -55,6 +55,72 @@ export const customers = pgTable("customers", {
   propertyNotes: text("property_notes"), // Property-specific notes for technicians
 });
 
+// Site maps and controller management
+export const siteMaps = pgTable("site_maps", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  kmlFile: text("kml_file"), // Path to uploaded KML file
+  kmlData: text("kml_data"), // Parsed KML content as JSON
+  centerLat: decimal("center_lat", { precision: 10, scale: 7 }),
+  centerLng: decimal("center_lng", { precision: 10, scale: 7 }),
+  zoomLevel: integer("zoom_level").default(15),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const controllers = pgTable("controllers", {
+  id: serial("id").primaryKey(),
+  siteMapId: integer("site_map_id").references(() => siteMaps.id),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id),
+  name: text("name").notNull(),
+  model: text("model"),
+  serialNumber: text("serial_number"),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  stationCount: integer("station_count").default(8),
+  installDate: timestamp("install_date"),
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const irrigationZones = pgTable("irrigation_zones", {
+  id: serial("id").primaryKey(),
+  controllerId: integer("controller_id").references(() => controllers.id),
+  siteMapId: integer("site_map_id").references(() => siteMaps.id),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id),
+  name: text("name").notNull(),
+  stationNumber: integer("station_number").notNull(),
+  zoneType: text("zone_type").default("sprinkler"), // sprinkler, drip, bubbler
+  coverage: text("coverage"), // area description
+  boundaries: text("boundaries"), // GeoJSON polygon data
+  runtime: integer("runtime").default(15), // minutes
+  flowRate: decimal("flow_rate", { precision: 8, scale: 2 }), // GPM
+  pressure: decimal("pressure", { precision: 8, scale: 2 }), // PSI
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Schema types for the new tables
+export const insertSiteMapSchema = createInsertSchema(siteMaps);
+export const insertControllerSchema = createInsertSchema(controllers);
+export const insertIrrigationZoneSchema = createInsertSchema(irrigationZones);
+
+export type SiteMap = typeof siteMaps.$inferSelect;
+export type Controller = typeof controllers.$inferSelect;
+export type IrrigationZone = typeof irrigationZones.$inferSelect;
+
+export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
+export type InsertController = z.infer<typeof insertControllerSchema>;
+export type InsertIrrigationZone = z.infer<typeof insertIrrigationZoneSchema>;
+
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").references(() => companies.id).notNull(),

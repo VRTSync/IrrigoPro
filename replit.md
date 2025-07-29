@@ -176,6 +176,14 @@ The system uses comprehensive database tables:
 - **Database Schema Updates**: Added location_notes and access_instructions columns to both estimates and work_orders tables
 - **Form Integration**: Updated estimate modal and work order form to include location fields with proper validation and auto-fill from estimates
 - **Mobile-Friendly Design**: Location fields are responsive and touch-optimized for field technician use
+- **Site Maps & Controller Management System**: Implemented comprehensive KML file import system for irrigation controllers and zones visualization:
+  - KML file upload with drag-and-drop interface and comprehensive parsing
+  - Interactive map viewer using Leaflet with controller markers and zone boundaries
+  - Database schema for site maps, controllers, and irrigation zones with spatial data
+  - Dedicated site maps page with tabbed interface (Upload, Map View, Data Review)
+  - Professional map interface with zoom controls, fullscreen mode, and detailed popups
+  - Support for controller details (model, serial number, station count) and zone properties (type, coverage, boundaries)
+  - Development preview mode - ready for customer database integration once approved
 
 ## Previous Changes (2025-07-23)
 

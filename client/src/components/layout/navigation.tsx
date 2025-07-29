@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 import { useState } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 
 export default function Navigation() {
@@ -53,6 +53,7 @@ export default function Navigation() {
           },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
           { path: "/parts-list", label: "Parts", icon: Package },
         ];
       case "field_tech":
