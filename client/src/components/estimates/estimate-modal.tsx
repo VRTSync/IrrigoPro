@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { CustomerSelector } from "@/components/ui/customer-selector";
+import { LocationFields } from "@/components/location/location-fields";
 import { Plus, Trash2, Search, User, FileText, Image, Paperclip } from "lucide-react";
 import { PartsSearchModal } from "./parts-search-modal";
 import { EstimateSummary } from "./estimate-summary";
@@ -27,6 +28,8 @@ const estimateFormSchema = z.object({
   customerPhone: z.string().optional(),
   projectName: z.string().min(1, "Project name is required"),
   projectAddress: z.string().optional(),
+  locationNotes: z.string().optional(),
+  accessInstructions: z.string().optional(),
   estimateDate: z.string().default(() => new Date().toISOString().split('T')[0]),
   createdBy: z.string().default("Irrigation Manager"),
   laborRate: z.coerce.number().min(0, "Labor rate must be positive"),
@@ -77,6 +80,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       customerPhone: "",
       projectName: "",
       projectAddress: "",
+      locationNotes: "",
+      accessInstructions: "",
       estimateDate: new Date().toISOString().split('T')[0],
       createdBy: "Irrigation Manager",
       laborRate: 45,
@@ -286,6 +291,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       customerPhone: data.customerPhone || "",
       projectName: data.projectName,
       projectAddress: data.projectAddress || "",
+      locationNotes: data.locationNotes || "",
+      accessInstructions: data.accessInstructions || "",
       status: "pending",
       partsSubtotal: totals.partsSubtotal.toFixed(2),
       laborSubtotal: totals.laborSubtotal.toFixed(2),
@@ -391,6 +398,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                       )}
                     />
                   </div>
+                  
+                  <Separator />
+                  
+                  {/* Location Fields */}
+                  <LocationFields control={form.control} />
                 </CardContent>
               </Card>
 

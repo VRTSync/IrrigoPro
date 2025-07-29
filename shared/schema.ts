@@ -113,6 +113,8 @@ export const estimates = pgTable("estimates", {
   customerPhone: text("customer_phone"),
   projectName: text("project_name").notNull(),
   projectAddress: text("project_address"),
+  locationNotes: text("location_notes"), // Additional location details
+  accessInstructions: text("access_instructions"), // How to access the property
   createdBy: text("created_by").notNull().default("Irrigation Manager"), // Who created the estimate
   estimateDate: timestamp("estimate_date").defaultNow().notNull(), // Date of estimate creation
   status: text("status").notNull().default("pending"), // pending, approved, rejected, converted_to_work_order
@@ -235,6 +237,8 @@ export const workOrders = pgTable("work_orders", {
   customerPhone: text("customer_phone"),
   projectName: text("project_name").notNull(),
   projectAddress: text("project_address"),
+  locationNotes: text("location_notes"), // Additional location details
+  accessInstructions: text("access_instructions"), // How to access the property
   workType: text("work_type").notNull().default("estimate_based"), // estimate_based, direct_billing, maintenance
   status: text("status").notNull().default("pending"), // pending, in_progress, completed, cancelled
   priority: text("priority").notNull().default("medium"), // low, medium, high, urgent

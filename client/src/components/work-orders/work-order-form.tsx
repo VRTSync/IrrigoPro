@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomerSelector } from "@/components/ui/customer-selector";
+import { LocationFields } from "@/components/location/location-fields";
 import { Calendar, User, AlertCircle, FileText, Target } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -47,6 +48,8 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
       customerPhone: "",
       projectName: "",
       projectAddress: "",
+      locationNotes: "",
+      accessInstructions: "",
       workType: "direct_billing",
       status: "pending",
       priority: "medium", // Default to standard for direct work orders
@@ -69,10 +72,12 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
       // We'll need to fetch the customer details based on the estimate
       const estimateCustomer: Customer = {
         id: selectedEstimate.customerId,
+        companyId: 1,
         name: selectedEstimate.customerName,
         email: selectedEstimate.customerEmail,
         phone: selectedEstimate.customerPhone || "",
         address: selectedEstimate.projectAddress || "",
+        totalControllers: 1,
         contractType: "standard",
         laborRate: "45.00",
         markupPercent: "20.00",
@@ -92,6 +97,8 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
     form.setValue("customerPhone", selectedEstimate.customerPhone || "");
     form.setValue("projectName", selectedEstimate.projectName);
     form.setValue("projectAddress", selectedEstimate.projectAddress || "");
+    form.setValue("locationNotes", selectedEstimate.locationNotes || "");
+    form.setValue("accessInstructions", selectedEstimate.accessInstructions || "");
     form.setValue("workType", "estimate_based");
   }
 
@@ -290,6 +297,11 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
                       </FormItem>
                     )}
                   />
+                </div>
+                
+                <div className="border-t pt-4">
+                  {/* Location Fields */}
+                  <LocationFields control={form.control} />
                 </div>
 
                 <FormField

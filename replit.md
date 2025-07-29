@@ -166,7 +166,18 @@ The system uses comprehensive database tables:
 - Vite configuration for asset handling and aliases
 - TypeScript paths for clean imports
 
-## Recent Changes (2025-07-23)
+## Recent Changes (2025-07-29)
+
+- **Location Management Enhancement**: Added comprehensive location fields to both estimates and work orders including:
+  - Project address (existing field)
+  - Location notes for additional property details and landmarks
+  - Access instructions for gate codes, key locations, and entry procedures
+- **Location Fields Component**: Created reusable LocationFields component with map pin and key icons for consistent location data entry
+- **Database Schema Updates**: Added location_notes and access_instructions columns to both estimates and work_orders tables
+- **Form Integration**: Updated estimate modal and work order form to include location fields with proper validation and auto-fill from estimates
+- **Mobile-Friendly Design**: Location fields are responsive and touch-optimized for field technician use
+
+## Previous Changes (2025-07-23)
 
 - Fixed critical pricing calculation bugs including "through the roof" labor calculations
 - Corrected markup calculation to only apply to parts subtotal (not parts + labor) per business rules
