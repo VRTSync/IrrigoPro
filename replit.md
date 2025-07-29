@@ -189,6 +189,7 @@ The system uses comprehensive database tables:
   - Added controller name extraction from zone names (Clock A/B patterns)
   - Implemented zone type detection (popup, rotor, drip, node, splice) and station number parsing
   - Fixed logic to associate zones with correct controllers rather than treating each point as separate controller
+  - Added maximum controller limit of 10 per file to prevent performance issues with large KML files
 - **Maximum Zoom Capability**: Enhanced map viewer for detailed irrigation point inspection:
   - Increased maximum zoom from 15 to 25 levels with high-resolution satellite imagery
   - Added custom zoom controls (+/- buttons and maximum detail button)

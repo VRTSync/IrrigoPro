@@ -82,6 +82,7 @@ export class KMLParser {
     const controllers: KMLController[] = [];
     const zones: KMLZone[] = [];
     let allCoordinates: Array<[number, number]> = [];
+    const MAX_CONTROLLERS = 10;
 
     console.log('Extracting from DOM document');
 
@@ -108,11 +109,15 @@ export class KMLParser {
 
       if (pointElement) {
         if (isControllerName) {
-          // This is an actual controller
-          const controller = this.parseControllerFromDOM(pointElement, name, description);
-          if (controller) {
-            controllers.push(controller);
-            allCoordinates.push([controller.latitude, controller.longitude]);
+          // This is an actual controller - check limit
+          if (controllers.length >= MAX_CONTROLLERS) {
+            console.warn(`Maximum controller limit (${MAX_CONTROLLERS}) reached. Skipping controller: ${name}`);
+          } else {
+            const controller = this.parseControllerFromDOM(pointElement, name, description);
+            if (controller) {
+              controllers.push(controller);
+              allCoordinates.push([controller.latitude, controller.longitude]);
+            }
           }
         } else {
           // This is a zone point (sprinkler, rotor, etc.)
@@ -139,6 +144,11 @@ export class KMLParser {
     });
 
     console.log(`Extraction complete: ${controllers.length} controllers, ${zones.length} zones, ${allCoordinates.length} total coordinates`);
+    
+    // Log warning if controller limit was reached
+    if (controllers.length === MAX_CONTROLLERS) {
+      console.warn(`Warning: Controller limit of ${MAX_CONTROLLERS} reached. Some controllers may have been skipped.`);
+    }
 
     // Provide default location if no coordinates found
     if (allCoordinates.length === 0) {
