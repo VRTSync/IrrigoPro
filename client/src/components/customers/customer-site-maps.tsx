@@ -137,8 +137,27 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     }
 
     try {
-      // Add controller ID to each zone
-      const zonesWithController = data.zones.map((zone: any) => ({
+      // Filter out zones without station numbers (utility markers, etc.)
+      const validZones = data.zones.filter((zone: any) => 
+        zone.stationNumber && 
+        zone.stationNumber > 0 && 
+        !zone.name.toLowerCase().includes('splice') &&
+        !zone.name.toLowerCase().includes('waste') &&
+        zone.name !== '???'
+      );
+
+      if (validZones.length === 0) {
+        toast({
+          title: "No Valid Zones Found",
+          description: "The KML file contains no valid irrigation zones with station numbers",
+          variant: "destructive",
+        });
+        setUploadingZonesFor(null);
+        return;
+      }
+
+      // Add controller ID to each valid zone
+      const zonesWithController = validZones.map((zone: any) => ({
         ...zone,
         controllerId: parseInt(controllerId)
       }));
@@ -160,9 +179,12 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
       queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/zones`] });
       
       const controllerName = project?.controllers.find(c => c.id === parseInt(controllerId))?.name || 'Controller';
+      const totalFound = data.zones.length;
+      const validSaved = zonesWithController.length;
+      
       toast({
         title: "Success",
-        description: `Saved ${data.zones.length} zones to ${controllerName}`,
+        description: `Saved ${validSaved} irrigation zones to ${controllerName} (${totalFound - validSaved} utility markers filtered out)`,
       });
     } catch (error) {
       console.error("Error saving zones:", error);
