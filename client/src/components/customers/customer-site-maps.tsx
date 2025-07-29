@@ -148,9 +148,18 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   // Delete site map mutation
   const deleteSiteMapMutation = useMutation({
     mutationFn: async (siteMapId: number) => {
-      return apiRequest(`/api/site-maps/${siteMapId}`, {
+      const response = await fetch(`/api/site-maps/${siteMapId}`, {
         method: "DELETE",
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to delete site map: ${response.statusText}`);
+      }
+      
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/site-maps`] });
