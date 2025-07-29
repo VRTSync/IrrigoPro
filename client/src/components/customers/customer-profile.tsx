@@ -17,23 +17,29 @@ import {
   Calendar,
   DollarSign,
   Clock,
-  Package
+  Package,
+  Map,
+  CreditCard
 } from "lucide-react";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
+import { CustomerSiteMaps } from "./customer-site-maps";
 
 interface CustomerProfileProps {
   customer: Customer;
   onBack: () => void;
+  userRole?: string;
 }
 
-export function CustomerProfile({ customer, onBack }: CustomerProfileProps) {
+export function CustomerProfile({ customer, onBack, userRole = "company_admin" }: CustomerProfileProps) {
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [workOrderModalOpen, setWorkOrderModalOpen] = useState(false);
+  const [showSiteMaps, setShowSiteMaps] = useState(false);
+  const [showBillingView, setShowBillingView] = useState(false);
 
   // Fetch customer-related data
   const { data: estimates = [] } = useQuery<Estimate[]>({
@@ -94,6 +100,17 @@ export function CustomerProfile({ customer, onBack }: CustomerProfileProps) {
   // Calculate totals
   const totalEstimateValue = estimates.reduce((sum, est) => sum + Number(est.totalAmount || 0), 0);
   const totalBillingValue = billingSheets.reduce((sum, sheet) => sum + Number(sheet.totalAmount || 0), 0);
+
+  // Show site maps view
+  if (showSiteMaps) {
+    return (
+      <CustomerSiteMaps 
+        customer={customer} 
+        onBack={() => setShowSiteMaps(false)}
+        userRole={userRole}
+      />
+    );
+  }
 
   return (
     <>
@@ -176,6 +193,34 @@ export function CustomerProfile({ customer, onBack }: CustomerProfileProps) {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="mb-8">
+          <Card className="bg-gradient-to-r from-slate-50 to-gray-50 border border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold text-gray-800">Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-4">
+                <Button 
+                  onClick={() => setShowSiteMaps(true)}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3"
+                >
+                  <Map className="w-5 h-5" />
+                  View Site Maps
+                </Button>
+                <Button 
+                  onClick={() => setShowBillingView(true)}
+                  variant="outline"
+                  className="flex items-center gap-2 border-gray-300 hover:bg-gray-50 px-6 py-3"
+                >
+                  <CreditCard className="w-5 h-5" />
+                  View Billing
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Property Notes Section */}

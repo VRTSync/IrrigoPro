@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
 import { CustomerForm } from "@/components/customer-form";
@@ -14,6 +14,20 @@ import { CustomerProfile } from "@/components/customers/customer-profile";
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [userRole, setUserRole] = useState<string>("company_admin");
+
+  // Get user role from localStorage
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUserRole(userData.role);
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
+  }, []);
 
   const { data: customers, isLoading } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
@@ -30,7 +44,8 @@ export default function Customers() {
     return (
       <CustomerProfile 
         customer={selectedCustomer} 
-        onBack={() => setSelectedCustomer(null)} 
+        onBack={() => setSelectedCustomer(null)}
+        userRole={userRole}
       />
     );
   }

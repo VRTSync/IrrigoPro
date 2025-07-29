@@ -18,6 +18,9 @@ import {
   billingSheetItems,
   notifications,
   quickbooksIntegration,
+  siteMaps,
+  controllers,
+  irrigationZones,
   type Company,
   type User,
   type Customer, 
@@ -36,6 +39,9 @@ import {
   type BillingSheet,
   type BillingSheetItem,
   type Notification,
+  type SiteMap,
+  type Controller,
+  type IrrigationZone,
   type InsertCompany,
   type InsertUser,
   type InsertCustomer, 
@@ -54,6 +60,9 @@ import {
   type InsertBillingSheet,
   type InsertBillingSheetItem,
   type InsertNotification,
+  type InsertSiteMap,
+  type InsertController,
+  type InsertIrrigationZone,
   type EstimateWithItems,
   type EstimateWithZones,
   type PropertyZoneWithZones,
@@ -211,6 +220,12 @@ export interface IStorage {
   deleteInvoice(id: number): Promise<boolean>;
   createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem>;
   getCustomerById(id: number): Promise<Customer | undefined>;
+
+  // Site Maps for customers
+  getCustomerSiteMaps(customerId: number): Promise<SiteMap[]>;
+  getSiteMapControllers(siteMapId: number): Promise<Controller[]>;
+  getSiteMapZones(siteMapId: number): Promise<IrrigationZone[]>;
+  createSiteMap(siteMap: InsertSiteMap): Promise<SiteMap>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1552,6 +1567,30 @@ export class DatabaseStorage implements IStorage {
       .set({ isRead: true })
       .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
     return (result.rowCount || 0) > 0;
+  }
+
+  // Site Maps methods
+  async getCustomerSiteMaps(customerId: number): Promise<SiteMap[]> {
+    return await db.select().from(siteMaps)
+      .where(eq(siteMaps.customerId, customerId))
+      .orderBy(desc(siteMaps.updatedAt));
+  }
+
+  async getSiteMapControllers(siteMapId: number): Promise<Controller[]> {
+    return await db.select().from(controllers)
+      .where(eq(controllers.siteMapId, siteMapId))
+      .orderBy(controllers.name);
+  }
+
+  async getSiteMapZones(siteMapId: number): Promise<IrrigationZone[]> {
+    return await db.select().from(irrigationZones)
+      .where(eq(irrigationZones.siteMapId, siteMapId))
+      .orderBy(irrigationZones.name);
+  }
+
+  async createSiteMap(siteMap: InsertSiteMap): Promise<SiteMap> {
+    const result = await db.insert(siteMaps).values(siteMap).returning();
+    return result[0];
   }
 }
 

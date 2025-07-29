@@ -224,6 +224,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer site maps routes
+  app.get("/api/customers/:customerId/site-maps", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.customerId);
+      const siteMaps = await storage.getCustomerSiteMaps(customerId);
+      res.json(siteMaps);
+    } catch (error) {
+      console.error("Error fetching customer site maps:", error);
+      res.status(500).json({ message: "Failed to fetch customer site maps" });
+    }
+  });
+
+  app.get("/api/site-maps/:siteMapId/controllers", async (req, res) => {
+    try {
+      const siteMapId = parseInt(req.params.siteMapId);
+      const controllers = await storage.getSiteMapControllers(siteMapId);
+      res.json(controllers);
+    } catch (error) {
+      console.error("Error fetching site map controllers:", error);
+      res.status(500).json({ message: "Failed to fetch site map controllers" });
+    }
+  });
+
+  app.get("/api/site-maps/:siteMapId/zones", async (req, res) => {
+    try {
+      const siteMapId = parseInt(req.params.siteMapId);
+      const zones = await storage.getSiteMapZones(siteMapId);
+      res.json(zones);
+    } catch (error) {
+      console.error("Error fetching site map zones:", error);
+      res.status(500).json({ message: "Failed to fetch site map zones" });
+    }
+  });
+
+  app.post("/api/customers/:customerId/site-maps", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.customerId);
+      const siteMapData = {
+        ...req.body,
+        customerId,
+        companyId: 1 // Default company ID for now
+      };
+      const siteMap = await storage.createSiteMap(siteMapData);
+      res.status(201).json(siteMap);
+    } catch (error) {
+      console.error("Error creating site map:", error);
+      res.status(500).json({ message: "Failed to create site map" });
+    }
+  });
+
   // Create monthly invoice for customer - consolidates all unbilled work
   app.post("/api/invoices/monthly", async (req, res) => {
     try {
