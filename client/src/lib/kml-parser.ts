@@ -101,19 +101,36 @@ export class KMLParser {
 
       console.log(`Placemark ${index}: name="${name}", hasPoint=${!!pointElement}, hasPolygon=${!!polygonElement}, hasLineString=${!!lineStringElement}`);
 
-      // Check if this is a controller (point) or zone (polygon/line)
+      // For zone files, all points are zones (not controllers)
+      // Determine if this looks like a controller name or zone name
+      const isControllerName = name.toLowerCase().includes('controller') || 
+                              name.toLowerCase().includes('clock') && !name.toLowerCase().includes('zone');
+
       if (pointElement) {
-        const controller = this.parseControllerFromDOM(pointElement, name, description);
-        if (controller) {
-          controllers.push(controller);
-          allCoordinates.push([controller.latitude, controller.longitude]);
+        if (isControllerName) {
+          // This is an actual controller
+          const controller = this.parseControllerFromDOM(pointElement, name, description);
+          if (controller) {
+            controllers.push(controller);
+            allCoordinates.push([controller.latitude, controller.longitude]);
+          }
+        } else {
+          // This is a zone point (sprinkler, rotor, etc.)
+          const zone = this.parseZonePointFromDOM(pointElement, name, description);
+          if (zone) {
+            zones.push(zone);
+            allCoordinates.push([zone.boundaries![0][0], zone.boundaries![0][1]]);
+          }
         }
       } else if (polygonElement || lineStringElement) {
-        const zone = this.parseZoneFromDOM(polygonElement || lineStringElement, name, description);
-        if (zone) {
-          zones.push(zone);
-          if (zone.boundaries) {
-            allCoordinates.push(...zone.boundaries);
+        const geometryElement = polygonElement || lineStringElement;
+        if (geometryElement) {
+          const zone = this.parseZoneFromDOM(geometryElement, name, description);
+          if (zone) {
+            zones.push(zone);
+            if (zone.boundaries) {
+              allCoordinates.push(...zone.boundaries);
+            }
           }
         }
       } else {
@@ -332,6 +349,49 @@ export class KMLParser {
     };
   }
 
+  private static parseZonePointFromDOM(pointElement: Element, name: string, description: string): KMLZone | null {
+    console.log('Parsing zone point from DOM:', { name });
+    
+    const coordinatesElement = pointElement.querySelector('coordinates');
+    if (!coordinatesElement) {
+      console.log('No coordinates element found for zone:', name);
+      return null;
+    }
+
+    const coordinates = coordinatesElement.textContent?.trim();
+    if (!coordinates) {
+      console.log('No coordinate text found for zone:', name);
+      return null;
+    }
+
+    console.log('Raw zone coordinates:', coordinates);
+    const coords = coordinates.split(',').map((c: string) => parseFloat(c.trim()));
+    if (coords.length < 2) {
+      console.log('Invalid coordinate format:', coords);
+      return null;
+    }
+
+    // Extract controller name from zone name (e.g., "Clock B zone 7 pop ups" -> "Clock B")
+    const controllerName = this.extractControllerFromZoneName(name);
+    
+    // Extract station number from name (e.g., "zone 7" -> 7)
+    const stationMatch = name.match(/zone\s+(\d+)/i);
+    const stationNumber = stationMatch ? parseInt(stationMatch[1]) : undefined;
+    
+    // Extract zone type from name (pop ups, rotors, drip, etc.)
+    const zoneType = this.extractZoneTypeFromName(name);
+
+    return {
+      name,
+      controllerName,
+      stationNumber,
+      boundaries: [[coords[1], coords[0]]], // Store as [lat, lng] point
+      description,
+      zoneType,
+      coverage: description
+    };
+  }
+
   private static parseZoneFromDOM(geometryElement: Element, name: string, description: string): KMLZone | null {
     let boundaries: Array<[number, number]> = [];
 
@@ -469,5 +529,34 @@ export class KMLParser {
       lat: (bounds.north + bounds.south) / 2,
       lng: (bounds.east + bounds.west) / 2
     };
+  }
+
+  private static extractControllerFromZoneName(zoneName: string): string | undefined {
+    // Extract controller name from zone names like "Clock B zone 7 pop ups"
+    const clockMatch = zoneName.match(/(Clock\s+[AB])/i);
+    if (clockMatch) {
+      return clockMatch[1];
+    }
+    
+    // Try other patterns
+    const controllerMatch = zoneName.match(/([^zone]+)(?=\s+zone)/i);
+    if (controllerMatch) {
+      return controllerMatch[1].trim();
+    }
+    
+    return undefined;
+  }
+
+  private static extractZoneTypeFromName(zoneName: string): string {
+    const lowerName = zoneName.toLowerCase();
+    
+    if (lowerName.includes('pop up') || lowerName.includes('popup')) return 'popup';
+    if (lowerName.includes('rotor')) return 'rotor';
+    if (lowerName.includes('drip')) return 'drip';
+    if (lowerName.includes('node')) return 'node';
+    if (lowerName.includes('splice')) return 'splice';
+    if (lowerName.includes('valve')) return 'valve';
+    
+    return 'sprinkler'; // default
   }
 }
