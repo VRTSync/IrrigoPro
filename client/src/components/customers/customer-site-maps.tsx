@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@shared/schema";
 import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";
+import { ZoneUpload } from "@/components/site-maps/zone-upload";
 import { ZonesDataView } from "@/components/site-maps/zones-data-view";
 
 interface CustomerSiteMapsProps {
@@ -123,8 +124,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     setUploadingControllersFor(null);
   };
 
-  const handleZoneKMLParsed = async (data: any) => {
-    console.log("Zone KML parsed:", data);
+  const handleZoneKMLParsed = async (data: any, controllerId: string) => {
+    console.log("Zone KML parsed:", data, "for controller:", controllerId);
     
     if (!selectedProject?.id) {
       toast({
@@ -136,13 +137,19 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     }
 
     try {
+      // Add controller ID to each zone
+      const zonesWithController = data.zones.map((zone: any) => ({
+        ...zone,
+        controllerId: parseInt(controllerId)
+      }));
+
       // Save zones to database
       const response = await fetch(`/api/site-maps/${selectedProject.id}/zones`, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ zones: data.zones }),
+        body: JSON.stringify({ zones: zonesWithController }),
       });
 
       if (!response.ok) {
@@ -152,9 +159,10 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
       // Refetch zones data after upload
       queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/zones`] });
       
+      const controllerName = project?.controllers.find(c => c.id === parseInt(controllerId))?.name || 'Controller';
       toast({
         title: "Success",
-        description: `Saved ${data.zones.length} zones to database`,
+        description: `Saved ${data.zones.length} zones to ${controllerName}`,
       });
     } catch (error) {
       console.error("Error saving zones:", error);
@@ -331,15 +339,17 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       onFileSelected={handleControllerFileSelected}
                     />
 
-                    <div className="pt-6">
-                      <h3 className="text-lg font-medium text-gray-900 mb-4">
-                        Zone KML Upload
-                      </h3>
-                      <ControllerUpload
-                        onKMLParsed={handleZoneKMLParsed}
-                        onFileSelected={handleZoneFileSelected}
-                      />
-                    </div>
+                    <ZoneUpload
+                      controllers={project?.controllers?.map(c => ({
+                        ...c,
+                        id: c.id.toString(),
+                        color: `hsl(${(c.id * 137.5) % 360}, 70%, 50%)`
+                      })) || []}
+                      onZoneKMLParsed={handleZoneKMLParsed}
+                      uploadingFor={uploadingZonesFor?.toString() || null}
+                      onStartUpload={(controllerId) => setUploadingZonesFor(parseInt(controllerId))}
+                      zonesByController={project?.zonesByController || {}}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
