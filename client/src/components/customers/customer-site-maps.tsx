@@ -461,18 +461,22 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
             <TabsContent value="data" className="space-y-6 mt-6">
               <ZonesDataView 
-                controllers={(project?.controllers || []).map(controller => ({
-                  ...controller,
-                  // Convert string coordinates to numbers for ZonesDataView
-                  latitude: parseFloat(controller.latitude as string) || 0,
-                  longitude: parseFloat(controller.longitude as string) || 0,
-                  zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
-                    ...zone,
-                    boundaries: zone.boundaries 
-                      ? parseBoundariesFromDB(zone.boundaries)
-                      : []
-                  }))
-                }))}
+                controllers={(project?.controllers || []).map(controller => {
+                  const transformedController = {
+                    ...controller,
+                    // Ensure coordinates are numbers
+                    latitude: typeof controller.latitude === 'string' ? parseFloat(controller.latitude) : (controller.latitude || 0),
+                    longitude: typeof controller.longitude === 'string' ? parseFloat(controller.longitude) : (controller.longitude || 0),
+                    zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
+                      ...zone,
+                      boundaries: zone.boundaries 
+                        ? parseBoundariesFromDB(zone.boundaries)
+                        : []
+                    }))
+                  };
+                  console.log('Transformed controller for ZonesDataView:', transformedController);
+                  return transformedController;
+                })}
                 onControllerClick={(controller) => console.log('Controller clicked:', controller)}
                 onZoneClick={(zone) => console.log('Zone clicked:', zone)}
               />
