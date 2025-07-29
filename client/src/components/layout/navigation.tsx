@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
 import { useState } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 
 export default function Navigation() {
@@ -40,11 +40,19 @@ export default function Navigation() {
         ];
       case "irrigation_manager":
         return [
-          { path: "/estimates", label: "Estimates", icon: FileText },
-          { path: "/work-orders", label: "Work Orders", icon: Wrench },
+          { 
+            path: "/billing", 
+            label: "Billing", 
+            icon: Calculator, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/estimates", label: "Estimates", icon: FileText },
+              { path: "/work-orders", label: "Work Orders", icon: Wrench },
+              { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
+            ]
+          },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/parts-list", label: "Parts", icon: Package },
-          { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           { path: "/customers", label: "Customers", icon: Users },
         ];
       case "field_tech":
@@ -96,20 +104,57 @@ export default function Navigation() {
                   desktopNavItems.unshift(dashboardItem);
                 }
                 
-                return desktopNavItems.map((item) => (
-                  <Link key={item.path} href={item.path}>
-                    <Button
-                      variant="ghost"
-                      className={`font-medium ${
-                        isActive(item.path)
-                          ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
-                          : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {item.label}
-                    </Button>
-                  </Link>
-                ));
+                return desktopNavItems.map((item) => {
+                  if (item.isDropdown && item.dropdownItems) {
+                    // Check if any dropdown item is active
+                    const isDropdownActive = item.dropdownItems.some(dropdownItem => isActive(dropdownItem.path));
+                    
+                    return (
+                      <DropdownMenu key={item.path}>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            className={`font-medium flex items-center space-x-1 ${
+                              isDropdownActive
+                                ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
+                                : "text-gray-500 hover:text-gray-700"
+                            }`}
+                          >
+                            <span>{item.label}</span>
+                            <ChevronDown className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          {item.dropdownItems.map((dropdownItem) => (
+                            <Link key={dropdownItem.path} href={dropdownItem.path}>
+                              <DropdownMenuItem className={`flex items-center space-x-2 ${
+                                isActive(dropdownItem.path) ? "bg-primary/10" : ""
+                              }`}>
+                                <dropdownItem.icon className="w-4 h-4" />
+                                <span>{dropdownItem.label}</span>
+                              </DropdownMenuItem>
+                            </Link>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    );
+                  }
+                  
+                  return (
+                    <Link key={item.path} href={item.path}>
+                      <Button
+                        variant="ghost"
+                        className={`font-medium ${
+                          isActive(item.path)
+                            ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
+                            : "text-gray-500 hover:text-gray-700"
+                        }`}
+                      >
+                        {item.label}
+                      </Button>
+                    </Link>
+                  );
+                });
               })()}
             </div>
 
@@ -227,8 +272,19 @@ export default function Navigation() {
                   slots[centerIndex] = centerItem;
                 }
                 
-                // Get non-center items
-                const otherItems = navItems.filter(item => !item.isCenter);
+                // Get non-center items and expand dropdown items for mobile
+                let otherItems = navItems.filter(item => !item.isCenter);
+                
+                // For mobile, expand dropdown items into individual items
+                const expandedItems = [];
+                otherItems.forEach(item => {
+                  if (item.isDropdown && item.dropdownItems) {
+                    expandedItems.push(...item.dropdownItems);
+                  } else {
+                    expandedItems.push(item);
+                  }
+                });
+                otherItems = expandedItems;
                 
                 // Fill slots around center (positions 0, 1, 3, 4)
                 let itemIndex = 0;
@@ -288,7 +344,7 @@ export default function Navigation() {
                               <div>Work</div>
                               <div>Orders</div>
                             </div>
-                          ) : item.label === "Billing" ? (
+                          ) : item.label === "Billing Sheets" ? (
                             <div className="text-xs font-medium text-center leading-none">
                               <div>Billing</div>
                               <div>Sheets</div>
