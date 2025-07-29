@@ -388,6 +388,11 @@ export class KMLParser {
     const stationMatch = name.match(/zone\s+(\d+)/i);
     const stationNumber = stationMatch ? parseInt(stationMatch[1]) : undefined;
     
+    // Debug logging for station number extraction
+    if (stationNumber) {
+      console.log(`Station number ${stationNumber} extracted from zone name: "${name}" -> Controller: "${controllerName}"`);
+    }
+    
     // Extract zone type from name (pop ups, rotors, drip, etc.)
     const zoneType = this.extractZoneTypeFromName(name);
 
@@ -545,15 +550,19 @@ export class KMLParser {
     // Extract controller name from zone names like "Clock B zone 7 pop ups"
     const clockMatch = zoneName.match(/(Clock\s+[AB])/i);
     if (clockMatch) {
+      console.log(`Extracted controller "${clockMatch[1]}" from zone name: "${zoneName}"`);
       return clockMatch[1];
     }
     
     // Try other patterns
     const controllerMatch = zoneName.match(/([^zone]+)(?=\s+zone)/i);
     if (controllerMatch) {
-      return controllerMatch[1].trim();
+      const controllerName = controllerMatch[1].trim();
+      console.log(`Extracted controller "${controllerName}" from zone name: "${zoneName}"`);
+      return controllerName;
     }
     
+    console.log(`No controller extracted from zone name: "${zoneName}"`);
     return undefined;
   }
 
