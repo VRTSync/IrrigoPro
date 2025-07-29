@@ -31,6 +31,34 @@ interface Project {
   zonesByController: Record<string, IrrigationZone[]>;
 }
 
+// Helper function to parse PostgreSQL array boundaries format
+function parseBoundariesFromDB(boundariesStr: string): [number, number][] {
+  try {
+    if (!boundariesStr) return [];
+    
+    // Remove outer braces and split by comma
+    const cleaned = boundariesStr.replace(/^{|}$/g, '');
+    
+    // Handle nested array format like {{"lat","lng"}}
+    if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+      const innerCleaned = cleaned.replace(/^{|}$/g, '');
+      const parts = innerCleaned.split(',').map(part => part.replace(/"/g, '').trim());
+      if (parts.length >= 2) {
+        const lat = parseFloat(parts[0]);
+        const lng = parseFloat(parts[1]);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          return [[lat, lng]];
+        }
+      }
+    }
+    
+    return [];
+  } catch (error) {
+    console.warn('Failed to parse boundaries:', boundariesStr, error);
+    return [];
+  }
+}
+
 export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMapsProps) {
   const [activeTab, setActiveTab] = useState("maps");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -66,15 +94,26 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     id: selectedProject.id,
     name: selectedProject.name,
     controllers: controllers || [],
-    zones: zones || [],
+    zones: (zones || []).map(zone => ({
+      ...zone,
+      // Parse PostgreSQL array format boundaries
+      boundaries: zone.boundaries 
+        ? parseBoundariesFromDB(zone.boundaries)
+        : []
+    })),
     zonesByController: (zones || []).reduce((acc, zone) => {
-      // Use zone name or description to determine controller
-      const controllerName = zone.name?.includes('Controller') ? 
-        zone.name.split(' - ')[0] : 'Unknown Controller';
-      if (!acc[controllerName]) {
-        acc[controllerName] = [];
+      // Use controller ID for proper grouping
+      const controllerId = zone.controllerId?.toString() || 'unassigned';
+      if (!acc[controllerId]) {
+        acc[controllerId] = [];
       }
-      acc[controllerName].push(zone);
+      acc[controllerId].push({
+        ...zone,
+        // Parse PostgreSQL array format boundaries
+        boundaries: zone.boundaries 
+          ? parseBoundariesFromDB(zone.boundaries)
+          : []
+      });
       return acc;
     }, {} as Record<string, IrrigationZone[]>)
   } : null;
@@ -177,6 +216,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
       // Refetch zones data after upload
       queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/zones`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/controllers`] });
       
       const controllerName = project?.controllers.find(c => c.id === parseInt(controllerId))?.name || 'Controller';
       const totalFound = data.zones.length;
@@ -370,7 +410,12 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       onZoneKMLParsed={handleZoneKMLParsed}
                       uploadingFor={uploadingZonesFor?.toString() || null}
                       onStartUpload={(controllerId) => setUploadingZonesFor(parseInt(controllerId))}
-                      zonesByController={project?.zonesByController || {}}
+                      zonesByController={Object.fromEntries(
+                        Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
+                          controllerId,
+                          zones.length
+                        ])
+                      )}
                     />
                   </CardContent>
                 </Card>
@@ -380,8 +425,26 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             <TabsContent value="maps" className="space-y-6 mt-6">
               <ColorCodedMapViewer 
                 project={{
-                  ...project,
-                  allZones: project.zones
+                  controllers: (project?.controllers || []).map(c => ({
+                    ...c,
+                    id: c.id.toString(),
+                    color: `hsl(${(c.id * 137.5) % 360}, 70%, 50%)`
+                  })),
+                  zonesByController: Object.fromEntries(
+                    Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
+                      controllerId,
+                      zones.map(zone => ({
+                        ...zone,
+                        controllerId: controllerId,
+                        color: `hsl(${(parseInt(controllerId) * 137.5) % 360}, 70%, 50%)`
+                      }))
+                    ])
+                  ),
+                  allZones: (project?.zones || []).map(zone => ({
+                    ...zone,
+                    controllerId: zone.controllerId?.toString() || 'unassigned',
+                    color: `hsl(${((zone.controllerId || 0) * 137.5) % 360}, 70%, 50%)`
+                  }))
                 }}
                 showEditControls={canEdit}
               />
