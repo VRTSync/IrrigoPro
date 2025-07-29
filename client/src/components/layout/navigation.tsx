@@ -51,9 +51,9 @@ export default function Navigation() {
               { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
             ]
           },
+          { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/parts-list", label: "Parts", icon: Package },
-          { path: "/customers", label: "Customers", icon: Users },
         ];
       case "field_tech":
         return [
