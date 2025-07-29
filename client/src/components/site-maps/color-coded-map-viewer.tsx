@@ -62,6 +62,10 @@ export function ColorCodedMapViewer({
   const [visibleControllers, setVisibleControllers] = useState<Set<string>>(
     new Set(project.controllers.map(c => c.id))
   );
+  const [displayMode, setDisplayMode] = useState<'markers' | 'circles' | 'badges' | 'minimal' | 'heatmap' | 'clusters'>('markers');
+  const [showZoneConnections, setShowZoneConnections] = useState(false);
+  const [markerSize, setMarkerSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [showControllerAreas, setShowControllerAreas] = useState(false);
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
@@ -148,22 +152,91 @@ export function ColorCodedMapViewer({
 
     const allCoordinates: [number, number][] = [];
 
-    // Add controller markers
+    // Add controller area circles if enabled
+    if (showControllerAreas) {
+      project.controllers.forEach((controller) => {
+        if (!visibleControllers.has(controller.id)) return;
+        
+        const controllerZones = project.zones.filter(z => z.controllerId === controller.id);
+        if (controllerZones.length > 0) {
+          // Calculate coverage area radius based on number of zones
+          const radius = Math.max(50, controllerZones.length * 15);
+          
+          L.circle([controller.latitude, controller.longitude], {
+            color: controller.color,
+            fillColor: controller.color,
+            fillOpacity: 0.1,
+            weight: 2,
+            radius: radius
+          }).addTo(map);
+        }
+      });
+    }
+
+    // Add controller markers with different display modes
     project.controllers.forEach((controller) => {
       if (!visibleControllers.has(controller.id)) return;
 
       allCoordinates.push([controller.latitude, controller.longitude]);
 
-      const controllerIcon = L.divIcon({
-        html: `
-          <div class="bg-white text-gray-800 rounded-full w-10 h-10 flex items-center justify-center text-xs font-bold shadow-lg border-4" style="border-color: ${controller.color}">
-            C
-          </div>
-        `,
-        className: 'custom-div-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20]
-      });
+      // Skip controller markers for heatmap mode
+      if (displayMode === 'heatmap') return;
+
+      let controllerIcon;
+      const sizes = { small: [28, 28], medium: [40, 40], large: [52, 52] };
+      const [width, height] = sizes[markerSize];
+
+      switch (displayMode) {
+        case 'circles':
+          controllerIcon = L.divIcon({
+            html: `
+              <div class="rounded-full shadow-lg flex items-center justify-center text-white font-bold border-2 border-white" 
+                   style="background-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'}">
+                ${controller.name.split(' ')[1] || 'C'}
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [width, height],
+            iconAnchor: [width/2, height/2]
+          });
+          break;
+        case 'badges':
+          controllerIcon = L.divIcon({
+            html: `
+              <div class="bg-white rounded-lg shadow-lg px-2 py-1 border-l-4 text-xs font-bold whitespace-nowrap" style="border-color: ${controller.color}">
+                ${controller.name}
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [80, 24],
+            iconAnchor: [40, 12]
+          });
+          break;
+        case 'minimal':
+          controllerIcon = L.divIcon({
+            html: `
+              <div class="rounded-full border-2 border-white shadow-md" 
+                   style="background-color: ${controller.color}; width: ${width * 0.7}px; height: ${height * 0.7}px;">
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [width * 0.7, height * 0.7],
+            iconAnchor: [width * 0.35, height * 0.35]
+          });
+          break;
+        default: // markers
+          controllerIcon = L.divIcon({
+            html: `
+              <div class="bg-white text-gray-800 rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-4" 
+                   style="border-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'}">
+                C
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [width, height],
+            iconAnchor: [width/2, height/2]
+          });
+      }
 
       const marker = L.marker([controller.latitude, controller.longitude], {
         icon: controllerIcon
@@ -194,33 +267,152 @@ export function ColorCodedMapViewer({
       });
     });
 
-    // Add zone markers
-    project.allZones.forEach((zone) => {
-      if (!visibleControllers.has(zone.controllerId)) return;
+    // Handle different display modes for zones
+    if (displayMode === 'heatmap') {
+      // Create heat map effect with colored circles
+      project.allZones.forEach((zone) => {
+        if (!visibleControllers.has(zone.controllerId)) return;
 
-      // Calculate center point from boundaries if available
-      let zoneLat: number, zoneLng: number;
-      
-      if (zone.boundaries && zone.boundaries.length > 0) {
-        const lats = zone.boundaries.map(coord => coord[0]);
-        const lngs = zone.boundaries.map(coord => coord[1]);
-        zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
-        zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
-        allCoordinates.push([zoneLat, zoneLng]);
-      } else {
-        return; // Skip zones without boundaries
-      }
+        if (zone.boundaries && zone.boundaries.length > 0) {
+          const lats = zone.boundaries.map(coord => coord[0]);
+          const lngs = zone.boundaries.map(coord => coord[1]);
+          const zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
+          const zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
+          allCoordinates.push([zoneLat, zoneLng]);
 
-      const zoneIcon = L.divIcon({
-        html: `
-          <div class="text-white rounded-full w-8 h-8 flex items-center justify-center text-xs font-bold shadow-lg border-2 border-white" style="background-color: ${zone.color}">
-            Z
-          </div>
-        `,
-        className: 'custom-div-icon',
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
+          L.circle([zoneLat, zoneLng], {
+            color: zone.color,
+            fillColor: zone.color,
+            fillOpacity: 0.6,
+            weight: 1,
+            radius: markerSize === 'small' ? 8 : markerSize === 'large' ? 20 : 15
+          }).addTo(map).bindPopup(`
+            <div class="p-2">
+              <h4 class="font-bold text-sm">${zone.name}</h4>
+              <p class="text-xs">Station: ${zone.stationNumber || 'N/A'}</p>
+              <p class="text-xs">Type: ${zone.zoneType || 'Unknown'}</p>
+            </div>
+          `);
+        }
       });
+    } else if (displayMode === 'clusters') {
+      // Group zones by controller for cluster display
+      const clusterGroups = new Map<string, typeof project.allZones>();
+      
+      project.allZones.forEach((zone) => {
+        if (!visibleControllers.has(zone.controllerId)) return;
+        
+        if (!clusterGroups.has(zone.controllerId)) {
+          clusterGroups.set(zone.controllerId, []);
+        }
+        clusterGroups.get(zone.controllerId)!.push(zone);
+      });
+
+      clusterGroups.forEach((zones, controllerId) => {
+        zones.forEach((zone, index) => {
+          if (zone.boundaries && zone.boundaries.length > 0) {
+            const lats = zone.boundaries.map(coord => coord[0]);
+            const lngs = zone.boundaries.map(coord => coord[1]);
+            const zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
+            const zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
+            allCoordinates.push([zoneLat, zoneLng]);
+
+            // Create cluster marker showing zone count
+            const clusterIcon = L.divIcon({
+              html: `
+                <div class="bg-white rounded-full shadow-lg border-2 flex items-center justify-center text-xs font-bold" 
+                     style="border-color: ${zone.color}; width: 24px; height: 24px;">
+                  ${zone.stationNumber || index + 1}
+                </div>
+              `,
+              className: 'custom-div-icon',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            });
+
+            L.marker([zoneLat, zoneLng], { icon: clusterIcon }).addTo(map).bindPopup(`
+              <div class="p-2">
+                <h4 class="font-bold text-sm">${zone.name}</h4>
+                <p class="text-xs">Station: ${zone.stationNumber || 'N/A'}</p>
+                <p class="text-xs">Type: ${zone.zoneType || 'Unknown'}</p>
+              </div>
+            `);
+          }
+        });
+      });
+    } else {
+      // Regular zone markers
+      project.allZones.forEach((zone) => {
+        if (!visibleControllers.has(zone.controllerId)) return;
+
+        // Calculate center point from boundaries if available
+        let zoneLat: number, zoneLng: number;
+        
+        if (zone.boundaries && zone.boundaries.length > 0) {
+          const lats = zone.boundaries.map(coord => coord[0]);
+          const lngs = zone.boundaries.map(coord => coord[1]);
+          zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
+          zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
+          allCoordinates.push([zoneLat, zoneLng]);
+        } else {
+          return; // Skip zones without boundaries
+        }
+
+        let zoneIcon;
+        const zoneSizes = { small: [20, 20], medium: [32, 32], large: [44, 44] };
+        const [zWidth, zHeight] = zoneSizes[markerSize];
+
+        switch (displayMode) {
+        case 'circles':
+          zoneIcon = L.divIcon({
+            html: `
+              <div class="rounded-full shadow-md border border-white flex items-center justify-center text-white font-bold" 
+                   style="background-color: ${zone.color}; width: ${zWidth}px; height: ${zHeight}px; font-size: ${markerSize === 'small' ? '8px' : markerSize === 'large' ? '12px' : '10px'}">
+                ${zone.stationNumber || 'Z'}
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [zWidth, zHeight],
+            iconAnchor: [zWidth/2, zHeight/2]
+          });
+          break;
+        case 'badges':
+          zoneIcon = L.divIcon({
+            html: `
+              <div class="bg-white rounded px-1 py-0.5 shadow text-xs font-bold border-l-2" style="border-color: ${zone.color}">
+                ${zone.stationNumber || 'Z'}
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [24, 16],
+            iconAnchor: [12, 8]
+          });
+          break;
+        case 'minimal':
+          zoneIcon = L.divIcon({
+            html: `
+              <div class="rounded-full shadow-sm" 
+                   style="background-color: ${zone.color}; width: ${zWidth * 0.6}px; height: ${zHeight * 0.6}px;">
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [zWidth * 0.6, zHeight * 0.6],
+            iconAnchor: [zWidth * 0.3, zHeight * 0.3]
+          });
+          break;
+        default: // markers
+          zoneIcon = L.divIcon({
+            html: `
+              <div class="text-white rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-2 border-white" 
+                   style="background-color: ${zone.color}; width: ${zWidth}px; height: ${zHeight}px; font-size: ${markerSize === 'small' ? '8px' : markerSize === 'large' ? '12px' : '10px'}">
+                Z
+              </div>
+            `,
+            className: 'custom-div-icon',
+            iconSize: [zWidth, zHeight],
+            iconAnchor: [zWidth/2, zHeight/2]
+          });
+      }
 
       const marker = L.marker([zoneLat, zoneLng], {
         icon: zoneIcon
@@ -248,7 +440,24 @@ export function ColorCodedMapViewer({
         setSelectedZone(zone);
         onZoneClick?.(zone);
       });
+
+      // Add connection lines between controller and zones if enabled
+      if (showZoneConnections) {
+        const zoneController = project.controllers.find(c => c.id === zone.controllerId);
+        if (zoneController && visibleControllers.has(zoneController.id)) {
+          const connectionLine = L.polyline([
+            [zoneController.latitude, zoneController.longitude],
+            [zoneLat, zoneLng]
+          ], {
+            color: zone.color,
+            weight: 1,
+            opacity: 0.5,
+            dashArray: '4, 4'
+          }).addTo(map);
+        }
+      }
     });
+    }
 
     // Fit map to show all markers with enhanced zoom for irrigation detail
     if (allCoordinates.length > 0) {
@@ -358,6 +567,59 @@ export function ColorCodedMapViewer({
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {/* Display Options */}
+          <div className="mb-4 space-y-4">
+            <div className="flex flex-wrap gap-4 items-center">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">Display Style:</label>
+                <select 
+                  value={displayMode} 
+                  onChange={(e) => setDisplayMode(e.target.value as any)}
+                  className="px-2 py-1 border rounded text-sm"
+                >
+                  <option value="markers">Classic Markers</option>
+                  <option value="circles">Colored Circles</option>
+                  <option value="badges">Name Badges</option>
+                  <option value="minimal">Minimal Dots</option>
+                  <option value="heatmap">Heat Map</option>
+                  <option value="clusters">Zone Clusters</option>
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">Size:</label>
+                <select 
+                  value={markerSize} 
+                  onChange={(e) => setMarkerSize(e.target.value as any)}
+                  className="px-2 py-1 border rounded text-sm"
+                >
+                  <option value="small">Small</option>
+                  <option value="medium">Medium</option>
+                  <option value="large">Large</option>
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showZoneConnections}
+                  onChange={(e) => setShowZoneConnections(e.target.checked)}
+                  className="rounded"
+                />
+                Show Zone Connections
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showControllerAreas}
+                  onChange={(e) => setShowControllerAreas(e.target.checked)}
+                  className="rounded"
+                />
+                Show Controller Areas
+              </label>
+            </div>
+          </div>
           {/* Controller Legend & Controls */}
           <div className="mb-4">
             <h4 className="font-medium text-gray-900 mb-3">Controller Visibility:</h4>
