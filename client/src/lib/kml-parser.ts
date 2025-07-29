@@ -40,65 +40,109 @@ export class KMLParser {
   }
 
   static async parseKMLString(kmlString: string): Promise<ParsedKMLData> {
-    return new Promise((resolve, reject) => {
-      // Validate KML string
-      if (!kmlString || kmlString.trim().length === 0) {
-        reject(new Error('KML file is empty or invalid'));
-        return;
-      }
+    // Validate KML string
+    if (!kmlString || kmlString.trim().length === 0) {
+      throw new Error('KML file is empty or invalid');
+    }
 
-      // Check if it's actually a KML file
-      if (!kmlString.toLowerCase().includes('<kml') && !kmlString.toLowerCase().includes('<?xml')) {
-        reject(new Error('File does not appear to be a valid KML file'));
-        return;
-      }
+    // Check if it's actually a KML file
+    if (!kmlString.toLowerCase().includes('<kml') && !kmlString.toLowerCase().includes('<?xml')) {
+      throw new Error('File does not appear to be a valid KML file');
+    }
 
-      console.log('Parsing KML string, length:', kmlString.length);
-      console.log('First 500 chars:', kmlString.substring(0, 500));
+    console.log('Parsing KML string, length:', kmlString.length);
+    console.log('First 500 chars:', kmlString.substring(0, 500));
+
+    try {
+      // Use browser's native DOMParser instead of xml2js
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(kmlString, 'text/xml');
       
-      parseString(kmlString, { 
-        explicitArray: true,
-        ignoreAttrs: true,
-        mergeAttrs: false,
-        trim: true,
-        normalize: true,
-        explicitRoot: false
-      }, (err, result) => {
-        if (err) {
-          console.error('XML parsing error:', err);
-          reject(new Error(`Failed to parse KML XML: ${err.message}`));
-          return;
-        }
+      // Check for parsing errors
+      const parseError = xmlDoc.querySelector('parsererror');
+      if (parseError) {
+        console.error('XML parsing error:', parseError.textContent);
+        throw new Error(`Failed to parse KML XML: ${parseError.textContent}`);
+      }
 
-        if (!result) {
-          reject(new Error('No data returned from XML parser'));
-          return;
-        }
-
-        try {
-          // Don't log full structure as it might be too large
-          console.log('Parsed KML structure keys:', Object.keys(result));
-          if (result.kml) {
-            console.log('KML root keys:', Object.keys(result.kml));
-          }
-          const parsed = this.extractKMLData(result);
-          console.log('Extraction successful:', { 
-            controllers: parsed.controllers.length, 
-            zones: parsed.zones.length 
-          });
-          resolve(parsed);
-        } catch (error) {
-          console.error('KML extraction error:', error);
-          console.error('KML structure keys:', Object.keys(result));
-          if (result.kml) {
-            console.error('KML root keys:', Object.keys(result.kml));
-          }
-          reject(new Error(`Failed to extract KML data: ${error instanceof Error ? error.message : error}`));
-        }
+      console.log('XML parsed successfully with DOMParser');
+      const parsed = this.extractKMLDataFromDOM(xmlDoc);
+      console.log('Extraction successful:', { 
+        controllers: parsed.controllers.length, 
+        zones: parsed.zones.length 
       });
-    });
+      return parsed;
+    } catch (error) {
+      console.error('KML parsing error:', error);
+      throw new Error(`Failed to parse KML data: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
+  private static extractKMLDataFromDOM(xmlDoc: Document): ParsedKMLData {
+    const controllers: KMLController[] = [];
+    const zones: KMLZone[] = [];
+    let allCoordinates: Array<[number, number]> = [];
+
+    console.log('Extracting from DOM document');
+
+    // Find all Placemark elements
+    const placemarks = xmlDoc.querySelectorAll('Placemark');
+    console.log('Found placemarks:', placemarks.length);
+
+    placemarks.forEach((placemark, index) => {
+      const nameElement = placemark.querySelector('name');
+      const descriptionElement = placemark.querySelector('description');
+      const pointElement = placemark.querySelector('Point');
+      const polygonElement = placemark.querySelector('Polygon');
+      const lineStringElement = placemark.querySelector('LineString');
+
+      const name = nameElement?.textContent?.trim() || `Unnamed ${index + 1}`;
+      const description = descriptionElement?.textContent?.trim() || '';
+
+      console.log(`Placemark ${index}: name="${name}", hasPoint=${!!pointElement}, hasPolygon=${!!polygonElement}, hasLineString=${!!lineStringElement}`);
+
+      // Check if this is a controller (point) or zone (polygon/line)
+      if (pointElement) {
+        const controller = this.parseControllerFromDOM(pointElement, name, description);
+        if (controller) {
+          controllers.push(controller);
+          allCoordinates.push([controller.latitude, controller.longitude]);
+        }
+      } else if (polygonElement || lineStringElement) {
+        const zone = this.parseZoneFromDOM(polygonElement || lineStringElement, name, description);
+        if (zone) {
+          zones.push(zone);
+          if (zone.boundaries) {
+            allCoordinates.push(...zone.boundaries);
+          }
+        }
+      } else {
+        console.log(`Placemark ${index} has no Point, Polygon, or LineString - skipping`);
+      }
+    });
+
+    console.log(`Extraction complete: ${controllers.length} controllers, ${zones.length} zones, ${allCoordinates.length} total coordinates`);
+
+    // Provide default location if no coordinates found
+    if (allCoordinates.length === 0) {
+      console.log('No coordinates found, using default location');
+      allCoordinates.push([37.7749, -122.4194]); // San Francisco default
+    }
+
+    // Calculate bounds and center
+    const bounds = this.calculateBounds(allCoordinates);
+    const center = this.calculateCenter(bounds);
+
+    return {
+      controllers,
+      zones,
+      centerLat: center.lat,
+      centerLng: center.lng,
+      bounds
+    };
+  }
+
+  // Keep the old method for backward compatibility
   private static extractKMLData(kmlData: any): ParsedKMLData {
     const controllers: KMLController[] = [];
     const zones: KMLZone[] = [];
@@ -210,6 +254,48 @@ export class KMLParser {
     return placemarks;
   }
 
+  private static parseControllerFromDOM(pointElement: Element, name: string, description: string): KMLController | null {
+    console.log('Parsing controller from DOM:', { name });
+    
+    const coordinatesElement = pointElement.querySelector('coordinates');
+    if (!coordinatesElement) {
+      console.log('No coordinates element found for controller:', name);
+      return null;
+    }
+
+    const coordinates = coordinatesElement.textContent?.trim();
+    if (!coordinates) {
+      console.log('No coordinate text found for controller:', name);
+      return null;
+    }
+
+    console.log('Raw coordinates:', coordinates);
+    const coords = coordinates.split(',').map((c: string) => parseFloat(c.trim()));
+    if (coords.length < 2) {
+      console.log('Invalid coordinate format:', coords);
+      return null;
+    }
+
+    // Extract controller details from description (if formatted)
+    const model = this.extractFromDescription(description, 'Model:', 'Serial:') || 
+                  this.extractFromDescription(description, 'model:', 'serial:');
+    const serialNumber = this.extractFromDescription(description, 'Serial:', 'Stations:') || 
+                        this.extractFromDescription(description, 'serial:', 'stations:');
+    const stationCountStr = this.extractFromDescription(description, 'Stations:', '') || 
+                           this.extractFromDescription(description, 'stations:', '');
+    const stationCount = stationCountStr ? parseInt(stationCountStr) : 8;
+
+    return {
+      name,
+      longitude: coords[0],
+      latitude: coords[1],
+      description,
+      model,
+      serialNumber,
+      stationCount: isNaN(stationCount) ? 8 : stationCount
+    };
+  }
+
   private static parseController(placemark: any, name: string, description: string): KMLController | null {
     console.log('Parsing controller placemark:', { name, hasPoint: !!placemark.Point });
     
@@ -243,6 +329,56 @@ export class KMLParser {
       model,
       serialNumber,
       stationCount: isNaN(stationCount) ? 8 : stationCount
+    };
+  }
+
+  private static parseZoneFromDOM(geometryElement: Element, name: string, description: string): KMLZone | null {
+    let boundaries: Array<[number, number]> = [];
+
+    console.log('Parsing zone from DOM:', { name, tagName: geometryElement.tagName });
+
+    // Handle polygon boundaries
+    if (geometryElement.tagName === 'Polygon') {
+      const coordinatesElement = geometryElement.querySelector('outerBoundaryIs LinearRing coordinates') ||
+                                geometryElement.querySelector('coordinates');
+      if (coordinatesElement) {
+        const coordinates = coordinatesElement.textContent?.trim();
+        if (coordinates) {
+          boundaries = this.parseCoordinateString(coordinates);
+        }
+      }
+    }
+
+    // Handle line string boundaries
+    if (geometryElement.tagName === 'LineString') {
+      const coordinatesElement = geometryElement.querySelector('coordinates');
+      if (coordinatesElement) {
+        const coordinates = coordinatesElement.textContent?.trim();
+        if (coordinates) {
+          boundaries = this.parseCoordinateString(coordinates);
+        }
+      }
+    }
+
+    // Extract zone details from description
+    const controllerName = this.extractFromDescription(description, 'Controller:', 'Station:') || 
+                          this.extractFromDescription(description, 'controller:', 'station:');
+    const stationStr = this.extractFromDescription(description, 'Station:', 'Type:') || 
+                      this.extractFromDescription(description, 'station:', 'type:');
+    const stationNumber = stationStr ? parseInt(stationStr) : undefined;
+    const zoneType = this.extractFromDescription(description, 'Type:', 'Coverage:') || 
+                     this.extractFromDescription(description, 'type:', 'coverage:') || 'sprinkler';
+    const coverage = this.extractFromDescription(description, 'Coverage:', '') || 
+                    this.extractFromDescription(description, 'coverage:', '');
+
+    return {
+      name,
+      controllerName,
+      stationNumber,
+      boundaries: boundaries.length > 0 ? boundaries : undefined,
+      description,
+      zoneType,
+      coverage
     };
   }
 
