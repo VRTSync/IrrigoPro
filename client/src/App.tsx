@@ -126,6 +126,7 @@ function Router() {
                 <Route path="/field-portal" component={FieldPortal} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
@@ -230,6 +231,7 @@ function Router() {
                 <Route path="/operations" component={Operations} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/customers" component={Customers} />
+                <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/field-tech" component={FieldTech} />
                 <Route path="/billing-sheets" component={BillingSheets} />
@@ -262,6 +264,7 @@ function Router() {
               <Route path="/operations" component={Operations} />
               <Route path="/parts" component={PartsCatalog} />
               <Route path="/customers" component={Customers} />
+              <Route path="/site-maps" component={SiteMapsPage} />
               <Route path="/customer-billing" component={CustomerBilling} />
               <Route path="/field-tech" component={FieldTech} />
               <Route path="/billing-sheets" component={BillingSheets} />
