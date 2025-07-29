@@ -22,6 +22,7 @@ import {
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
+import { PropertyNotes } from "./property-notes";
 
 interface CustomerProfileProps {
   customer: Customer;
@@ -175,6 +176,11 @@ export function CustomerProfile({ customer, onBack }: CustomerProfileProps) {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Property Notes Section */}
+        <div className="mb-8">
+          <PropertyNotes customer={customer} />
         </div>
 
         {/* Tabs for different data */}

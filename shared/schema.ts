@@ -52,6 +52,7 @@ export const customers = pgTable("customers", {
   contractEndDate: timestamp("contract_end_date"),
   paymentTerms: text("payment_terms").default("net_30"), // net_30, net_15, due_on_receipt
   notes: text("notes"),
+  propertyNotes: text("property_notes"), // Property-specific notes for technicians
 });
 
 export const parts = pgTable("parts", {
