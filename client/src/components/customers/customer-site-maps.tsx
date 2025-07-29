@@ -176,14 +176,17 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     }
 
     try {
-      // Filter out zones without station numbers (utility markers, etc.)
-      const validZones = data.zones.filter((zone: any) => 
-        zone.stationNumber && 
-        zone.stationNumber > 0 && 
-        !zone.name.toLowerCase().includes('splice') &&
-        !zone.name.toLowerCase().includes('waste') &&
-        zone.name !== '???'
+      // Split zones into irrigation zones (with station numbers) and utility markers
+      const irrigationZones = data.zones.filter((zone: any) => 
+        zone.stationNumber && zone.stationNumber > 0
       );
+      
+      const utilityMarkers = data.zones.filter((zone: any) => 
+        !zone.stationNumber || zone.stationNumber <= 0
+      );
+
+      // Save irrigation zones to database
+      const validZones = irrigationZones;
 
       if (validZones.length === 0) {
         toast({
@@ -221,10 +224,11 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
       const controllerName = project?.controllers.find(c => c.id === parseInt(controllerId))?.name || 'Controller';
       const totalFound = data.zones.length;
       const validSaved = zonesWithController.length;
+      const utilityCount = utilityMarkers.length;
       
       toast({
         title: "Success",
-        description: `Saved ${validSaved} irrigation zones to ${controllerName} (${totalFound - validSaved} utility markers filtered out)`,
+        description: `Saved ${validSaved} irrigation zones to ${controllerName}${utilityCount > 0 ? ` (${utilityCount} utility markers will show on map)` : ''}`,
       });
     } catch (error) {
       console.error("Error saving zones:", error);

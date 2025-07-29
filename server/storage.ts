@@ -1617,8 +1617,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async saveZones(siteMapId: number, zonesData: InsertIrrigationZone[]): Promise<IrrigationZone[]> {
-    // First, delete existing zones for this site map
-    await db.delete(irrigationZones).where(eq(irrigationZones.siteMapId, siteMapId));
+    if (zonesData.length === 0) return [];
+    
+    // Get the controller ID from the first zone (they should all be for the same controller)
+    const controllerId = zonesData[0].controllerId;
+    
+    if (controllerId) {
+      // Delete existing zones for this specific controller only
+      await db.delete(irrigationZones)
+        .where(and(
+          eq(irrigationZones.siteMapId, siteMapId),
+          eq(irrigationZones.controllerId, controllerId)
+        ));
+    } else {
+      // If no controller ID, delete all zones for this site map (fallback)
+      await db.delete(irrigationZones).where(eq(irrigationZones.siteMapId, siteMapId));
+    }
     
     // Insert new zones
     const zonesWithSiteMapId = zonesData.map(zone => ({

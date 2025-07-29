@@ -108,14 +108,31 @@ export const irrigationZones = pgTable("irrigation_zones", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const utilityMarkers = pgTable("utility_markers", {
+  id: serial("id").primaryKey(),
+  siteMapId: integer("site_map_id").references(() => siteMaps.id),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id),
+  name: text("name").notNull(),
+  markerType: text("marker_type").default("utility"), // utility, splice, waste, etc.
+  latitude: decimal("latitude", { precision: 10, scale: 8 }).notNull(),
+  longitude: decimal("longitude", { precision: 11, scale: 8 }).notNull(),
+  description: text("description"),
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Schema types for the new tables
 export const insertSiteMapSchema = createInsertSchema(siteMaps);
 export const insertControllerSchema = createInsertSchema(controllers);
 export const insertIrrigationZoneSchema = createInsertSchema(irrigationZones);
+export const insertUtilityMarkerSchema = createInsertSchema(utilityMarkers);
 
 export type SiteMap = typeof siteMaps.$inferSelect;
 export type Controller = typeof controllers.$inferSelect;
 export type IrrigationZone = typeof irrigationZones.$inferSelect;
+export type UtilityMarker = typeof utilityMarkers.$inferSelect;
 
 export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
 export type InsertController = z.infer<typeof insertControllerSchema>;
