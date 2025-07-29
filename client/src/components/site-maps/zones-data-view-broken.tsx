@@ -9,7 +9,8 @@ interface ZonePoint {
   controllerName: string;
   stationNumber?: number;
   zoneType: string;
-  boundaries?: [number, number][];
+  latitude: number;
+  longitude: number;
   description?: string;
 }
 
