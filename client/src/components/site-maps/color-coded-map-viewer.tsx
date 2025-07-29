@@ -157,7 +157,7 @@ export function ColorCodedMapViewer({
       project.controllers.forEach((controller) => {
         if (!visibleControllers.has(controller.id)) return;
         
-        const controllerZones = project.zones.filter(z => z.controllerId === controller.id);
+        const controllerZones = project.allZones.filter((z: any) => z.controllerId === controller.id);
         if (controllerZones.length > 0) {
           // Calculate coverage area radius based on number of zones
           const radius = Math.max(50, controllerZones.length * 15);
@@ -471,7 +471,7 @@ export function ColorCodedMapViewer({
         });
       }
     }
-  }, [project, visibleControllers, onControllerClick, onZoneClick]);
+  }, [project, visibleControllers, displayMode, markerSize, showZoneConnections, showControllerAreas, onControllerClick, onZoneClick]);
 
   const toggleControllerVisibility = (controllerId: string) => {
     setVisibleControllers(prev => {
