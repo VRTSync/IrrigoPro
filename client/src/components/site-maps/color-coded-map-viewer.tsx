@@ -66,14 +66,31 @@ export function ColorCodedMapViewer({
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
-    // Initialize map
-    const map = L.map(mapRef.current).setView([40.7128, -74.0060], 13);
+    // Initialize map with enhanced zoom capabilities
+    const map = L.map(mapRef.current, {
+      maxZoom: 25,
+      zoomSnap: 0.25,
+      zoomDelta: 0.5,
+      wheelPxPerZoomLevel: 30,
+      zoomControl: true,
+      scrollWheelZoom: true,
+      doubleClickZoom: true,
+      touchZoom: true,
+      dragging: true
+    }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
-    // Add tile layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
+    // Add high-resolution satellite tile layer with maximum zoom
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+      maxZoom: 25,
+      maxNativeZoom: 19
     }).addTo(map);
+
+    // Set map options for enhanced zooming
+    map.options.maxZoom = 25;
+    map.options.zoomSnap = 0.25;
+    map.options.zoomDelta = 0.5;
 
     return () => {
       if (mapInstanceRef.current) {
@@ -199,13 +216,16 @@ export function ColorCodedMapViewer({
       });
     });
 
-    // Fit map to show all markers
+    // Fit map to show all markers with enhanced zoom for irrigation detail
     if (allCoordinates.length > 0) {
       if (allCoordinates.length === 1) {
-        map.setView(allCoordinates[0], 16);
+        map.setView(allCoordinates[0], 22); // Much closer for single point
       } else {
         const bounds = L.latLngBounds(allCoordinates);
-        map.fitBounds(bounds, { padding: [20, 20] });
+        map.fitBounds(bounds, { 
+          padding: [20, 20],
+          maxZoom: 20  // Start closer for detailed irrigation point viewing
+        });
       }
     }
   }, [project, visibleControllers, onControllerClick, onZoneClick]);
@@ -243,23 +263,63 @@ export function ColorCodedMapViewer({
               <Badge variant="outline" className="text-sm">
                 {project.controllers.length} Controllers • {totalZones} Zones
               </Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={toggleFullscreen}
-              >
-                {isFullscreen ? (
-                  <>
-                    <Minimize className="w-4 h-4 mr-1" />
-                    Exit Fullscreen
-                  </>
-                ) : (
-                  <>
-                    <Maximize className="w-4 h-4 mr-1" />
-                    Fullscreen
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (mapInstanceRef.current) {
+                      const currentZoom = mapInstanceRef.current.getZoom();
+                      mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
+                    }
+                  }}
+                  title="Zoom In More"
+                >
+                  <span className="text-lg font-bold">+</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (mapInstanceRef.current) {
+                      const currentZoom = mapInstanceRef.current.getZoom();
+                      mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
+                    }
+                  }}
+                  title="Zoom Out More"
+                >
+                  <span className="text-lg font-bold">-</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (mapInstanceRef.current) {
+                      mapInstanceRef.current.setZoom(23);
+                    }
+                  }}
+                  title="Maximum Detail Zoom"
+                >
+                  <Eye className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleFullscreen}
+                >
+                  {isFullscreen ? (
+                    <>
+                      <Minimize className="w-4 h-4 mr-1" />
+                      Exit Fullscreen
+                    </>
+                  ) : (
+                    <>
+                      <Maximize className="w-4 h-4 mr-1" />
+                      Fullscreen
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </CardTitle>
         </CardHeader>

@@ -184,6 +184,17 @@ The system uses comprehensive database tables:
   - Professional map interface with zoom controls, fullscreen mode, and detailed popups
   - Support for controller details (model, serial number, station count) and zone properties (type, coverage, boundaries)
   - Development preview mode - ready for customer database integration once approved
+- **Enhanced KML Parser**: Fixed critical parsing issues to correctly identify zone points vs controllers:
+  - Switched from xml2js to native browser DOMParser for better compatibility
+  - Added controller name extraction from zone names (Clock A/B patterns)
+  - Implemented zone type detection (popup, rotor, drip, node, splice) and station number parsing
+  - Fixed logic to associate zones with correct controllers rather than treating each point as separate controller
+- **Maximum Zoom Capability**: Enhanced map viewer for detailed irrigation point inspection:
+  - Increased maximum zoom from 15 to 25 levels with high-resolution satellite imagery
+  - Added custom zoom controls (+/- buttons and maximum detail button)
+  - Configured enhanced zoom options (zoomSnap: 0.25, wheelPxPerZoomLevel: 30)
+  - Set initial zoom to level 20 for detailed irrigation system viewing
+  - Switched to Esri satellite tiles for better aerial detail of irrigation systems
 
 ## Previous Changes (2025-07-23)
 
