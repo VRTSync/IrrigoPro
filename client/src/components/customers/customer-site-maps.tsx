@@ -456,10 +456,17 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
             <TabsContent value="data" className="space-y-6 mt-6">
               <ZonesDataView 
-                controllers={project.controllers}
-                zones={project.zones}
-                zonesByController={project.zonesByController}
-                showEditControls={canEdit}
+                controllers={(project?.controllers || []).map(controller => ({
+                  ...controller,
+                  zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
+                    ...zone,
+                    boundaries: zone.boundaries 
+                      ? parseBoundariesFromDB(zone.boundaries)
+                      : []
+                  }))
+                }))}
+                onControllerClick={(controller) => console.log('Controller clicked:', controller)}
+                onZoneClick={(zone) => console.log('Zone clicked:', zone)}
               />
             </TabsContent>
           </Tabs>
