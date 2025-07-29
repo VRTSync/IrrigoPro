@@ -68,7 +68,17 @@ const getZoneTypeColor = (zoneType: string) => {
 };
 
 export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: ZonesDataViewProps) {
-  const totalZones = controllers.reduce((sum, controller) => sum + (controller.zones?.length || 0), 0);
+  // Ensure controllers is an array and has valid data
+  const validControllers = Array.isArray(controllers) ? controllers : [];
+  const totalZones = validControllers.reduce((sum, controller) => sum + (controller?.zones?.length || 0), 0);
+
+  if (validControllers.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-muted-foreground">No controllers found.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -76,7 +86,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
-            <div className="text-2xl font-bold">{controllers.length}</div>
+            <div className="text-2xl font-bold">{validControllers.length}</div>
             <div className="text-sm text-muted-foreground">Controllers</div>
           </CardContent>
         </Card>
@@ -89,7 +99,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
         <Card>
           <CardContent className="p-4">
             <div className="text-2xl font-bold">
-              {controllers.reduce((sum, c) => sum + (c.stationCount || 0), 0)}
+              {validControllers.reduce((sum, c) => sum + (c?.stationCount || 0), 0)}
             </div>
             <div className="text-sm text-muted-foreground">Total Stations</div>
           </CardContent>
@@ -98,84 +108,80 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
 
       {/* Controllers and Zones */}
       <div className="space-y-4">
-        {controllers.map((controller) => (
-          <Card key={controller.id} className="overflow-hidden">
-            <CardHeader 
-              className="cursor-pointer hover:bg-muted/50"
-              onClick={() => onControllerClick?.(controller)}
-            >
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-blue-600" />
-                  <span>{controller.name}</span>
-                  <Badge variant="outline">{controller.zones?.length || 0} zones</Badge>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {typeof controller.latitude === 'number' && !isNaN(controller.latitude) ? controller.latitude.toFixed(6) : '0.000000'}, {typeof controller.longitude === 'number' && !isNaN(controller.longitude) ? controller.longitude.toFixed(6) : '0.000000'}
-                </div>
-              </CardTitle>
-              {(controller.model || controller.serialNumber) && (
-                <div className="text-sm text-muted-foreground">
-                  {controller.model && <span>Model: {controller.model}</span>}
-                  {controller.model && controller.serialNumber && <span> • </span>}
-                  {controller.serialNumber && <span>Serial: {controller.serialNumber}</span>}
-                  <span> • {controller.stationCount} stations</span>
-                </div>
-              )}
-            </CardHeader>
-            
-            {(controller.zones?.length || 0) > 0 && (
-              <CardContent className="pt-0">
-                <div className="grid gap-2">
-                  {(controller.zones || []).map((zone) => (
-                    <div
-                      key={zone.id}
-                      className="flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:bg-muted/50"
-                      onClick={() => onZoneClick?.(zone)}
-                    >
-                      <div className="flex items-center gap-3">
-                        {getZoneTypeIcon(zone.zoneType)}
-                        <div>
-                          <div className="font-medium">{zone.name}</div>
-                          {zone.stationNumber && (
-                            <div className="text-sm text-muted-foreground">
-                              Station {zone.stationNumber}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <Badge 
-                          variant="secondary" 
-                          className={getZoneTypeColor(zone.zoneType)}
+        {validControllers.map((controller) => {
+          if (!controller || !controller.id) return null;
+          
+          const latitude = typeof controller.latitude === 'string' ? parseFloat(controller.latitude) : controller.latitude;
+          const longitude = typeof controller.longitude === 'string' ? parseFloat(controller.longitude) : controller.longitude;
+          const zones = controller.zones || [];
+          
+          return (
+            <Card key={controller.id} className="overflow-hidden">
+              <CardHeader 
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => onControllerClick?.(controller)}
+              >
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-5 w-5 text-blue-600" />
+                    <span>{controller.name || 'Unknown Controller'}</span>
+                    <Badge variant="outline">{zones.length} zones</Badge>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {typeof latitude === 'number' && !isNaN(latitude) ? latitude.toFixed(6) : '0.000000'}, {typeof longitude === 'number' && !isNaN(longitude) ? longitude.toFixed(6) : '0.000000'}
+                  </div>
+                </CardTitle>
+                {(controller.model || controller.serialNumber) && (
+                  <div className="text-sm text-muted-foreground">
+                    {controller.model && <span>Model: {controller.model}</span>}
+                    {controller.model && controller.serialNumber && <span> • </span>}
+                    {controller.serialNumber && <span>Serial: {controller.serialNumber}</span>}
+                    <span> • {controller.stationCount || 0} stations</span>
+                  </div>
+                )}
+              </CardHeader>
+              
+              {zones.length > 0 && (
+                <CardContent className="pt-0">
+                  <div className="grid gap-2">
+                    {zones.map((zone) => {
+                      if (!zone || !zone.id) return null;
+                      return (
+                        <div
+                          key={zone.id}
+                          className="flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:bg-muted/50"
+                          onClick={() => onZoneClick?.(zone)}
                         >
-                          {zone.zoneType}
-                        </Badge>
-                        <div className="text-sm text-muted-foreground">
-                          {zone.latitude.toFixed(6)}, {zone.longitude.toFixed(6)}
+                          <div className="flex items-center gap-3">
+                            {getZoneTypeIcon(zone.zoneType || '')}
+                            <div>
+                              <div className="font-medium">{zone.name || 'Unknown Zone'}</div>
+                              {zone.stationNumber && (
+                                <div className="text-sm text-muted-foreground">
+                                  Station {zone.stationNumber}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <Badge 
+                              variant="secondary" 
+                              className={getZoneTypeColor(zone.zoneType || '')}
+                            >
+                              {zone.zoneType || 'unknown'}
+                            </Badge>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            )}
-          </Card>
-        ))}
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          );
+        })}
       </div>
-
-      {controllers.length === 0 && (
-        <Card>
-          <CardContent className="p-8 text-center">
-            <MapPin className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <div className="text-lg font-medium mb-2">No Data Available</div>
-            <div className="text-muted-foreground">
-              Upload controller and zone KML files to view the irrigation system data.
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
