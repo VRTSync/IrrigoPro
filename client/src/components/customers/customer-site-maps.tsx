@@ -32,9 +32,14 @@ interface Project {
 }
 
 // Helper function to parse PostgreSQL array boundaries format
-function parseBoundariesFromDB(boundariesStr: string): [number, number][] {
+function parseBoundariesFromDB(boundariesStr: string | any[]): [number, number][] {
   try {
-    if (!boundariesStr) return [];
+    // If it's already an array, return it
+    if (Array.isArray(boundariesStr)) {
+      return boundariesStr;
+    }
+    
+    if (!boundariesStr || typeof boundariesStr !== 'string') return [];
     
     // Remove outer braces and split by comma
     const cleaned = boundariesStr.replace(/^{|}$/g, '');
@@ -458,6 +463,9 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
               <ZonesDataView 
                 controllers={(project?.controllers || []).map(controller => ({
                   ...controller,
+                  // Convert string coordinates to numbers for ZonesDataView
+                  latitude: parseFloat(controller.latitude as string) || 0,
+                  longitude: parseFloat(controller.longitude as string) || 0,
                   zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
                     ...zone,
                     boundaries: zone.boundaries 

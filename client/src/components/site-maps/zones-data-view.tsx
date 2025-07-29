@@ -111,7 +111,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
                   <Badge variant="outline">{controller.zones.length} zones</Badge>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  {controller.latitude.toFixed(6)}, {controller.longitude.toFixed(6)}
+                  {controller.latitude?.toFixed(6) || '0.000000'}, {controller.longitude?.toFixed(6) || '0.000000'}
                 </div>
               </CardTitle>
               {(controller.model || controller.serialNumber) && (
