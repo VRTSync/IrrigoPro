@@ -80,12 +80,46 @@ export function ColorCodedMapViewer({
     }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
-    // Add high-resolution satellite tile layer with maximum zoom
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-      maxZoom: 25,
-      maxNativeZoom: 19
-    }).addTo(map);
+    // Add multiple high-resolution tile layers for maximum detail
+    const baseLayers = {
+      'Google Satellite (Ultra HD)': L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google',
+        maxZoom: 25,
+        maxNativeZoom: 23  // Google's highest resolution
+      }),
+      'Google Hybrid': L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google',
+        maxZoom: 25,
+        maxNativeZoom: 22
+      }),
+      'CartoDB Positron': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CartoDB',
+        subdomains: 'abcd',
+        maxZoom: 25,
+        maxNativeZoom: 20
+      }),
+      'USGS Imagery': L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles courtesy of the U.S. Geological Survey',
+        maxZoom: 25,
+        maxNativeZoom: 20
+      }),
+      'Esri World Imagery': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+        maxZoom: 25,
+        maxNativeZoom: 19
+      }),
+      'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 25,
+        maxNativeZoom: 19
+      })
+    };
+
+    // Add Google satellite by default (highest resolution available)
+    baseLayers['Google Satellite (Ultra HD)'].addTo(map);
+    
+    // Add layer control for switching between tile sources
+    L.control.layers(baseLayers).addTo(map);
 
     // Set map options for enhanced zooming
     map.options.maxZoom = 25;
