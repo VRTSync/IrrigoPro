@@ -1,10 +1,16 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { ArrowLeft, MapPin, Upload, Eye, Edit, Trash2, Plus } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@shared/schema";
 import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";
@@ -29,9 +35,14 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [uploadingControllersFor, setUploadingControllersFor] = useState<number | null>(null);
   const [uploadingZonesFor, setUploadingZonesFor] = useState<number | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newSiteMapName, setNewSiteMapName] = useState("");
+  const [newSiteMapDescription, setNewSiteMapDescription] = useState("");
 
   const isAdmin = userRole === "company_admin" || userRole === "super_admin";
   const canEdit = isAdmin;
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Fetch customer site maps
   const { data: siteMaps, isLoading } = useQuery<SiteMap[]>({
@@ -84,6 +95,49 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
   const startZoneUpload = (projectId: number) => {
     setUploadingZonesFor(projectId);
+  };
+
+  // Create site map mutation
+  const createSiteMapMutation = useMutation({
+    mutationFn: async (data: { name: string; description: string }) => {
+      return apiRequest(`/api/customers/${customer.id}/site-maps`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/site-maps`] });
+      setCreateDialogOpen(false);
+      setNewSiteMapName("");
+      setNewSiteMapDescription("");
+      toast({
+        title: "Success",
+        description: "Site map created successfully",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to create site map",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateSiteMap = () => {
+    if (!newSiteMapName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a site map name",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    createSiteMapMutation.mutate({
+      name: newSiteMapName.trim(),
+      description: newSiteMapDescription.trim(),
+    });
   };
 
   if (selectedProject && project) {
@@ -210,10 +264,53 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <span>Manage Site Maps</span>
-                  <Button size="sm">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create New Site Map
-                  </Button>
+                  <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Create New Site Map
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Create New Site Map</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="name">Site Map Name</Label>
+                          <Input
+                            id="name"
+                            placeholder="Enter site map name"
+                            value={newSiteMapName}
+                            onChange={(e) => setNewSiteMapName(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="description">Description (Optional)</Label>
+                          <Textarea
+                            id="description"
+                            placeholder="Enter description"
+                            value={newSiteMapDescription}
+                            onChange={(e) => setNewSiteMapDescription(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setCreateDialogOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleCreateSiteMap}
+                          disabled={createSiteMapMutation.isPending}
+                        >
+                          {createSiteMapMutation.isPending ? "Creating..." : "Create Site Map"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </CardTitle>
               </CardHeader>
             </Card>
@@ -291,10 +388,53 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                   }
                 </p>
                 {canEdit && (
-                  <Button>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create First Site Map
-                  </Button>
+                  <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Create First Site Map
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Create New Site Map</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="name-empty">Site Map Name</Label>
+                          <Input
+                            id="name-empty"
+                            placeholder="Enter site map name"
+                            value={newSiteMapName}
+                            onChange={(e) => setNewSiteMapName(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="description-empty">Description (Optional)</Label>
+                          <Textarea
+                            id="description-empty"
+                            placeholder="Enter description"
+                            value={newSiteMapDescription}
+                            onChange={(e) => setNewSiteMapDescription(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setCreateDialogOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleCreateSiteMap}
+                          disabled={createSiteMapMutation.isPending}
+                        >
+                          {createSiteMapMutation.isPending ? "Creating..." : "Create Site Map"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 )}
               </CardContent>
             </Card>
