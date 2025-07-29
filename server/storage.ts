@@ -1601,27 +1601,27 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
-  async saveControllers(siteMapId: number, controllers: InsertController[]): Promise<Controller[]> {
+  async saveControllers(siteMapId: number, controllersData: InsertController[]): Promise<Controller[]> {
     // First, delete existing controllers for this site map
-    await db.delete(controllersTable).where(eq(controllersTable.siteMapId, siteMapId));
+    await db.delete(controllers).where(eq(controllers.siteMapId, siteMapId));
     
     // Insert new controllers
-    const controllersWithSiteMapId = controllers.map(controller => ({
+    const controllersWithSiteMapId = controllersData.map(controller => ({
       ...controller,
       siteMapId,
       companyId: 1 // Default company ID
     }));
     
-    const result = await db.insert(controllersTable).values(controllersWithSiteMapId).returning();
+    const result = await db.insert(controllers).values(controllersWithSiteMapId).returning();
     return result;
   }
 
-  async saveZones(siteMapId: number, zones: InsertIrrigationZone[]): Promise<IrrigationZone[]> {
+  async saveZones(siteMapId: number, zonesData: InsertIrrigationZone[]): Promise<IrrigationZone[]> {
     // First, delete existing zones for this site map
     await db.delete(irrigationZones).where(eq(irrigationZones.siteMapId, siteMapId));
     
     // Insert new zones
-    const zonesWithSiteMapId = zones.map(zone => ({
+    const zonesWithSiteMapId = zonesData.map(zone => ({
       ...zone,
       siteMapId,
       companyId: 1 // Default company ID
