@@ -43,6 +43,7 @@ export default function Navigation() {
           { path: "/estimates", label: "Estimates", icon: FileText },
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/parts-list", label: "Parts", icon: Package },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           { path: "/customers", label: "Customers", icon: Users },
         ];
