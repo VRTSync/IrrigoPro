@@ -8,6 +8,7 @@ import Navigation from "@/components/layout/navigation";
 import Dashboard from "@/pages/dashboard";
 import Estimates from "@/pages/estimates";
 import PartsCatalog from "@/pages/parts-catalog";
+import PartsList from "@/pages/parts-list";
 import Customers from "@/pages/customers";
 import FieldTech from "@/pages/field-tech";
 import WorkOrders from "@/pages/work-orders";
@@ -149,6 +150,7 @@ function Router() {
                 <Route path="/manager" component={ManagerDashboard} />
                 <Route path="/estimates" component={Estimates} />
                 <Route path="/parts" component={PartsCatalog} />
+                <Route path="/parts-list" component={PartsList} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/billing-sheets" component={BillingSheets} />
