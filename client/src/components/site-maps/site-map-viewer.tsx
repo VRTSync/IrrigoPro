@@ -88,30 +88,36 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
       });
     });
 
-    // Add zones as polygons/lines
+    // Add zones as point markers
     kmlData.zones.forEach((zone) => {
-      if (!zone.boundaries || zone.boundaries.length === 0) return;
-
-      const isPolygon = zone.boundaries.length > 2 && 
-        zone.boundaries[0][0] === zone.boundaries[zone.boundaries.length - 1][0] &&
-        zone.boundaries[0][1] === zone.boundaries[zone.boundaries.length - 1][1];
-
-      let layer: L.Polygon | L.Polyline;
-
-      if (isPolygon) {
-        layer = L.polygon(zone.boundaries, {
-          color: '#10b981',
-          fillColor: '#34d399',
-          fillOpacity: 0.3,
-          weight: 2
-        }).addTo(map);
+      // Calculate center point from boundaries if available, otherwise skip
+      let zoneLat: number, zoneLng: number;
+      
+      if (zone.boundaries && zone.boundaries.length > 0) {
+        // Calculate centroid of zone boundaries
+        const lats = zone.boundaries.map(coord => coord[0]);
+        const lngs = zone.boundaries.map(coord => coord[1]);
+        zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
+        zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
       } else {
-        layer = L.polyline(zone.boundaries, {
-          color: '#10b981',
-          weight: 3,
-          opacity: 0.8
-        }).addTo(map);
+        // Skip zones without boundaries
+        return;
       }
+
+      const zoneIcon = L.divIcon({
+        html: `
+          <div class="bg-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-xs font-bold shadow-lg border-2 border-white">
+            Z
+          </div>
+        `,
+        className: 'custom-div-icon',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+
+      const marker = L.marker([zoneLat, zoneLng], {
+        icon: zoneIcon
+      }).addTo(map);
 
       // Create popup content for zone
       const zonePopupContent = `
@@ -125,9 +131,9 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
         </div>
       `;
 
-      layer.bindPopup(zonePopupContent);
+      marker.bindPopup(zonePopupContent);
       
-      layer.on('click', () => {
+      marker.on('click', () => {
         setSelectedZone(zone);
         onZoneClick?.(zone);
       });
