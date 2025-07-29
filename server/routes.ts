@@ -1559,18 +1559,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/integrations/quickbooks/customers/connect", async (req, res) => {
+    try {
+      // In a real implementation, this would handle OAuth callback
+      // For demo purposes, we'll simulate a successful connection
+      await storage.connectQuickBooks("demo_access_token", "demo_refresh_token", "demo_realm_id", "Demo Company");
+      res.json({ message: "Connected to QuickBooks successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to connect to QuickBooks" });
+    }
+  });
+
   app.post("/api/integrations/quickbooks/customers/sync", async (req, res) => {
     try {
-      const result = await storage.syncCustomersFromQuickBooks();
+      const result = await storage.syncQuickBooksCustomers();
       res.json(result);
     } catch (error) {
-      res.status(500).json({ message: "Failed to sync customers from QuickBooks" });
+      res.status(500).json({ message: error.message || "Failed to sync customers from QuickBooks" });
     }
   });
 
   app.post("/api/integrations/quickbooks/customers/disconnect", async (req, res) => {
     try {
-      await storage.disconnectQuickBooksCustomers();
+      await storage.disconnectQuickBooks();
       res.json({ message: "Disconnected from QuickBooks successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to disconnect from QuickBooks" });
