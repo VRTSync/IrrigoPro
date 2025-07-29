@@ -227,6 +227,8 @@ export interface IStorage {
   getSiteMapZones(siteMapId: number): Promise<IrrigationZone[]>;
   createSiteMap(siteMap: InsertSiteMap): Promise<SiteMap>;
   deleteSiteMap(siteMapId: number): Promise<boolean>;
+  saveControllers(siteMapId: number, controllers: InsertController[]): Promise<Controller[]>;
+  saveZones(siteMapId: number, zones: InsertIrrigationZone[]): Promise<IrrigationZone[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1597,6 +1599,36 @@ export class DatabaseStorage implements IStorage {
   async deleteSiteMap(siteMapId: number): Promise<boolean> {
     const result = await db.delete(siteMaps).where(eq(siteMaps.id, siteMapId));
     return (result.rowCount || 0) > 0;
+  }
+
+  async saveControllers(siteMapId: number, controllers: InsertController[]): Promise<Controller[]> {
+    // First, delete existing controllers for this site map
+    await db.delete(controllersTable).where(eq(controllersTable.siteMapId, siteMapId));
+    
+    // Insert new controllers
+    const controllersWithSiteMapId = controllers.map(controller => ({
+      ...controller,
+      siteMapId,
+      companyId: 1 // Default company ID
+    }));
+    
+    const result = await db.insert(controllersTable).values(controllersWithSiteMapId).returning();
+    return result;
+  }
+
+  async saveZones(siteMapId: number, zones: InsertIrrigationZone[]): Promise<IrrigationZone[]> {
+    // First, delete existing zones for this site map
+    await db.delete(irrigationZones).where(eq(irrigationZones.siteMapId, siteMapId));
+    
+    // Insert new zones
+    const zonesWithSiteMapId = zones.map(zone => ({
+      ...zone,
+      siteMapId,
+      companyId: 1 // Default company ID
+    }));
+    
+    const result = await db.insert(irrigationZones).values(zonesWithSiteMapId).returning();
+    return result;
   }
 }
 

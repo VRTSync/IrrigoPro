@@ -80,16 +80,92 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
   const handleControllerKMLParsed = async (data: any) => {
     console.log("Controller KML parsed:", data);
+    
+    if (!selectedProject?.id) {
+      toast({
+        title: "Error",
+        description: "No site map selected",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Save controllers to database
+      const response = await fetch(`/api/site-maps/${selectedProject.id}/controllers`, {
+        method: "POST",
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ controllers: data.controllers }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to save controllers: ${response.statusText}`);
+      }
+
+      // Refetch controllers data after upload
+      queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/controllers`] });
+      
+      toast({
+        title: "Success",
+        description: `Saved ${data.controllers.length} controllers to database`,
+      });
+    } catch (error) {
+      console.error("Error saving controllers:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save controllers to database",
+        variant: "destructive",
+      });
+    }
+    
     setUploadingControllersFor(null);
-    // Refetch controllers data after upload
-    queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject?.id}/controllers`] });
   };
 
   const handleZoneKMLParsed = async (data: any) => {
     console.log("Zone KML parsed:", data);
+    
+    if (!selectedProject?.id) {
+      toast({
+        title: "Error",
+        description: "No site map selected",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Save zones to database
+      const response = await fetch(`/api/site-maps/${selectedProject.id}/zones`, {
+        method: "POST",
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ zones: data.zones }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to save zones: ${response.statusText}`);
+      }
+
+      // Refetch zones data after upload
+      queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/zones`] });
+      
+      toast({
+        title: "Success",
+        description: `Saved ${data.zones.length} zones to database`,
+      });
+    } catch (error) {
+      console.error("Error saving zones:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save zones to database",
+        variant: "destructive",
+      });
+    }
+    
     setUploadingZonesFor(null);
-    // Refetch zones data after upload
-    queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject?.id}/zones`] });
   };
 
   const handleControllerFileSelected = (file: File) => {

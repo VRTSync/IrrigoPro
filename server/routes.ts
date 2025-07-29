@@ -300,6 +300,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/site-maps/:siteMapId/controllers", async (req, res) => {
+    try {
+      const siteMapId = parseInt(req.params.siteMapId);
+      const controllers = req.body.controllers;
+      
+      if (!Array.isArray(controllers)) {
+        return res.status(400).json({ message: "Controllers must be an array" });
+      }
+      
+      const savedControllers = await storage.saveControllers(siteMapId, controllers);
+      res.json(savedControllers);
+    } catch (error) {
+      console.error("Error saving controllers:", error);
+      res.status(500).json({ message: "Failed to save controllers" });
+    }
+  });
+
+  app.post("/api/site-maps/:siteMapId/zones", async (req, res) => {
+    try {
+      const siteMapId = parseInt(req.params.siteMapId);
+      const zones = req.body.zones;
+      
+      if (!Array.isArray(zones)) {
+        return res.status(400).json({ message: "Zones must be an array" });
+      }
+      
+      const savedZones = await storage.saveZones(siteMapId, zones);
+      res.json(savedZones);
+    } catch (error) {
+      console.error("Error saving zones:", error);
+      res.status(500).json({ message: "Failed to save zones" });
+    }
+  });
+
   // Create monthly invoice for customer - consolidates all unbilled work
   app.post("/api/invoices/monthly", async (req, res) => {
     try {
