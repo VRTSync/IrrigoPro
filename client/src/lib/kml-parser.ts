@@ -41,17 +41,37 @@ export class KMLParser {
 
   static async parseKMLString(kmlString: string): Promise<ParsedKMLData> {
     return new Promise((resolve, reject) => {
-      parseString(kmlString, (err, result) => {
+      // Validate KML string
+      if (!kmlString || kmlString.trim().length === 0) {
+        reject(new Error('KML file is empty or invalid'));
+        return;
+      }
+
+      // Check if it's actually a KML file
+      if (!kmlString.toLowerCase().includes('<kml') && !kmlString.toLowerCase().includes('<?xml')) {
+        reject(new Error('File does not appear to be a valid KML file'));
+        return;
+      }
+
+      parseString(kmlString, { 
+        explicitArray: true,
+        ignoreAttrs: false,
+        mergeAttrs: false
+      }, (err, result) => {
         if (err) {
-          reject(new Error(`Failed to parse KML: ${err.message}`));
+          console.error('XML parsing error:', err);
+          reject(new Error(`Failed to parse KML XML: ${err.message}`));
           return;
         }
 
         try {
+          console.log('Parsed KML structure:', JSON.stringify(result, null, 2));
           const parsed = this.extractKMLData(result);
           resolve(parsed);
         } catch (error) {
-          reject(new Error(`Failed to extract KML data: ${error}`));
+          console.error('KML extraction error:', error);
+          console.error('KML structure:', result);
+          reject(new Error(`Failed to extract KML data: ${error instanceof Error ? error.message : error}`));
         }
       });
     });
@@ -62,9 +82,19 @@ export class KMLParser {
     const zones: KMLZone[] = [];
     let allCoordinates: Array<[number, number]> = [];
 
-    // Navigate KML structure
-    const document = kmlData.kml?.Document?.[0] || kmlData.kml;
+    console.log('Extracting from KML data:', kmlData);
+
+    // Navigate KML structure - try multiple approaches
+    let document = kmlData.kml?.Document?.[0] || kmlData.kml?.[0]?.Document?.[0] || kmlData.kml || kmlData;
+    
+    // If no Document, look for direct placemarks
+    if (!document && kmlData.kml) {
+      document = kmlData.kml;
+    }
+
+    console.log('Found document:', document);
     const placemarks = this.findPlacemarks(document);
+    console.log('Found placemarks:', placemarks.length);
 
     placemarks.forEach((placemark: any) => {
       const name = placemark.name?.[0] || 'Unnamed';
@@ -104,13 +134,29 @@ export class KMLParser {
   private static findPlacemarks(data: any): any[] {
     const placemarks: any[] = [];
     
+    if (!data) {
+      console.log('No data provided to findPlacemarks');
+      return placemarks;
+    }
+
+    // Direct placemarks
     if (data.Placemark) {
+      console.log('Found direct placemarks:', data.Placemark.length);
       placemarks.push(...data.Placemark);
     }
     
+    // Placemarks in folders
     if (data.Folder) {
+      console.log('Found folders:', data.Folder.length);
       data.Folder.forEach((folder: any) => {
         placemarks.push(...this.findPlacemarks(folder));
+      });
+    }
+
+    // Check if data is an array (sometimes KML structure varies)
+    if (Array.isArray(data)) {
+      data.forEach((item: any) => {
+        placemarks.push(...this.findPlacemarks(item));
       });
     }
 

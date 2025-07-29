@@ -201,12 +201,6 @@ export function ColorCodedMapViewer({
 
     // Fit map to show all markers
     if (allCoordinates.length > 0) {
-      const group = new L.FeatureGroup(map.eachLayer((layer) => {
-        if (layer instanceof L.Marker) {
-          return layer;
-        }
-      }) as any[]);
-      
       if (allCoordinates.length === 1) {
         map.setView(allCoordinates[0], 16);
       } else {
