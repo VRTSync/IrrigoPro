@@ -58,14 +58,20 @@ export class KMLParser {
       
       parseString(kmlString, { 
         explicitArray: true,
-        ignoreAttrs: false,
+        ignoreAttrs: true,
         mergeAttrs: false,
         trim: true,
-        normalize: true
+        normalize: true,
+        explicitRoot: false
       }, (err, result) => {
         if (err) {
           console.error('XML parsing error:', err);
           reject(new Error(`Failed to parse KML XML: ${err.message}`));
+          return;
+        }
+
+        if (!result) {
+          reject(new Error('No data returned from XML parser'));
           return;
         }
 
@@ -98,23 +104,38 @@ export class KMLParser {
     const zones: KMLZone[] = [];
     let allCoordinates: Array<[number, number]> = [];
 
-    console.log('Extracting from KML data:', kmlData);
+    console.log('Extracting from KML data keys:', Object.keys(kmlData || {}));
 
-    // Navigate KML structure - try multiple approaches
-    let document = kmlData.kml?.Document?.[0] || kmlData.kml?.[0]?.Document?.[0] || kmlData.kml || kmlData;
+    // Navigate KML structure - handle Google Earth exports
+    let document;
     
-    // If no Document, look for direct placemarks
-    if (!document && kmlData.kml) {
+    // Try different KML structures
+    if (kmlData.kml && kmlData.kml.Document) {
+      document = Array.isArray(kmlData.kml.Document) ? kmlData.kml.Document[0] : kmlData.kml.Document;
+    } else if (kmlData.Document) {
+      document = Array.isArray(kmlData.Document) ? kmlData.Document[0] : kmlData.Document;
+    } else if (kmlData.kml) {
       document = kmlData.kml;
+    } else {
+      document = kmlData;
     }
 
-    console.log('Found document:', document);
+    console.log('Found document with keys:', Object.keys(document || {}));
+    
+    if (!document) {
+      throw new Error('No Document element found in KML file');
+    }
+
     const placemarks = this.findPlacemarks(document);
     console.log('Found placemarks:', placemarks.length);
 
-    placemarks.forEach((placemark: any) => {
-      const name = placemark.name?.[0] || 'Unnamed';
-      const description = placemark.description?.[0] || '';
+    placemarks.forEach((placemark: any, index: number) => {
+      console.log(`Processing placemark ${index}:`, Object.keys(placemark || {}));
+      
+      const name = (Array.isArray(placemark.name) ? placemark.name[0] : placemark.name) || `Unnamed ${index + 1}`;
+      const description = (Array.isArray(placemark.description) ? placemark.description[0] : placemark.description) || '';
+      
+      console.log(`Placemark ${index}: name="${name}", hasPoint=${!!placemark.Point}, hasPolygon=${!!placemark.Polygon}, hasLineString=${!!placemark.LineString}`);
       
       // Check if this is a controller (point) or zone (polygon/line)
       if (placemark.Point) {
@@ -131,8 +152,18 @@ export class KMLParser {
             allCoordinates.push(...zone.boundaries);
           }
         }
+      } else {
+        console.log(`Placemark ${index} has no Point, Polygon, or LineString - skipping`);
       }
     });
+
+    console.log(`Extraction complete: ${controllers.length} controllers, ${zones.length} zones, ${allCoordinates.length} total coordinates`);
+
+    // Provide default location if no coordinates found
+    if (allCoordinates.length === 0) {
+      console.log('No coordinates found, using default location');
+      allCoordinates.push([37.7749, -122.4194]); // San Francisco default
+    }
 
     // Calculate bounds and center
     const bounds = this.calculateBounds(allCoordinates);
