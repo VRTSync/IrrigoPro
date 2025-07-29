@@ -53,10 +53,15 @@ export class KMLParser {
         return;
       }
 
+      console.log('Parsing KML string, length:', kmlString.length);
+      console.log('First 500 chars:', kmlString.substring(0, 500));
+      
       parseString(kmlString, { 
         explicitArray: true,
         ignoreAttrs: false,
-        mergeAttrs: false
+        mergeAttrs: false,
+        trim: true,
+        normalize: true
       }, (err, result) => {
         if (err) {
           console.error('XML parsing error:', err);
@@ -65,12 +70,23 @@ export class KMLParser {
         }
 
         try {
-          console.log('Parsed KML structure:', JSON.stringify(result, null, 2));
+          // Don't log full structure as it might be too large
+          console.log('Parsed KML structure keys:', Object.keys(result));
+          if (result.kml) {
+            console.log('KML root keys:', Object.keys(result.kml));
+          }
           const parsed = this.extractKMLData(result);
+          console.log('Extraction successful:', { 
+            controllers: parsed.controllers.length, 
+            zones: parsed.zones.length 
+          });
           resolve(parsed);
         } catch (error) {
           console.error('KML extraction error:', error);
-          console.error('KML structure:', result);
+          console.error('KML structure keys:', Object.keys(result));
+          if (result.kml) {
+            console.error('KML root keys:', Object.keys(result.kml));
+          }
           reject(new Error(`Failed to extract KML data: ${error instanceof Error ? error.message : error}`));
         }
       });
@@ -164,11 +180,20 @@ export class KMLParser {
   }
 
   private static parseController(placemark: any, name: string, description: string): KMLController | null {
+    console.log('Parsing controller placemark:', { name, hasPoint: !!placemark.Point });
+    
     const coordinates = placemark.Point?.[0]?.coordinates?.[0];
-    if (!coordinates) return null;
+    if (!coordinates) {
+      console.log('No coordinates found for controller:', name);
+      return null;
+    }
 
+    console.log('Raw coordinates:', coordinates);
     const coords = coordinates.split(',').map((c: string) => parseFloat(c.trim()));
-    if (coords.length < 2) return null;
+    if (coords.length < 2) {
+      console.log('Invalid coordinate format:', coords);
+      return null;
+    }
 
     // Extract controller details from description (if formatted)
     const model = this.extractFromDescription(description, 'Model:', 'Serial:') || 

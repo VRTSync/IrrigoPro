@@ -46,6 +46,7 @@ export function ControllerUpload({ onKMLParsed, onFileSelected }: ControllerUplo
       });
     } catch (error) {
       setParseStatus('error');
+      console.error("Full KML processing error:", error);
       toast({
         title: "KML Processing Failed",
         description: error instanceof Error ? error.message : "Failed to parse KML file",

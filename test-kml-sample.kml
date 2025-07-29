@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Test Controllers</name>
+    <Placemark>
+      <name>Main Controller</name>
+      <description>Model: Rain Bird ESP-6TM, Serial: 12345, Stations: 8</description>
+      <Point>
+        <coordinates>-122.4194,37.7749,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark>
+      <name>Back Yard Controller</name>
+      <description>Model: Hunter Pro-C, Serial: 67890, Stations: 6</description>
+      <Point>
+        <coordinates>-122.4094,37.7649,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>

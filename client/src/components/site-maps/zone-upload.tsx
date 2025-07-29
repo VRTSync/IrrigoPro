@@ -74,8 +74,9 @@ export function ZoneUpload({
       });
     } catch (error) {
       setParseStatus('error');
+      console.error("Full zone KML processing error:", error);
       toast({
-        title: "KML Processing Failed",
+        title: "KML Processing Failed", 
         description: error instanceof Error ? error.message : "Failed to parse KML file",
         variant: "destructive",
       });
