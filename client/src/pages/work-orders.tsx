@@ -638,7 +638,7 @@ export default function WorkOrders() {
                       {currentUser?.role === 'field_tech' ? (
                         // Field Tech View - Only for assigned work orders
                         <>
-                          {workOrder.assignedTechnicianId === currentUser.id && (
+                          {(workOrder.assignedTechnicianId === currentUser.id || workOrder.assignedTechnicianName === currentUser.name) && (
                             <div className="flex gap-2">
                               <Button
                                 variant="outline"
@@ -680,6 +680,13 @@ export default function WorkOrders() {
                                   Complete
                                 </Button>
                               )}
+                            </div>
+                          )}
+                          
+                          {/* Show message for unassigned work orders */}
+                          {!(workOrder.assignedTechnicianId === currentUser.id || workOrder.assignedTechnicianName === currentUser.name) && (
+                            <div className="text-center text-gray-500 text-sm py-2">
+                              Work order not assigned to you
                             </div>
                           )}
                         </>

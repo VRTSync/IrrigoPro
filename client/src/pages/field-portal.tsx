@@ -82,15 +82,12 @@ export default function FieldPortal() {
   // Start work session
   const startSession = useMutation({
     mutationFn: async (sessionData: { propertyId: string; zoneId: string; workDescription: string }) => {
-      return apiRequest("/api/field-work-sessions", {
-        method: "POST",
-        body: {
-          ...sessionData,
-          technicianId: user?.id,
-          technicianName: user?.name,
-          startTime: new Date().toISOString(),
-          status: "in-progress",
-        },
+      return apiRequest("/api/field-work-sessions", "POST", {
+        ...sessionData,
+        technicianId: user?.id,
+        technicianName: user?.name,
+        startTime: new Date().toISOString(),
+        status: "in-progress",
       });
     },
     onSuccess: (data) => {
@@ -113,9 +110,7 @@ export default function FieldPortal() {
   // Complete work session
   const completeSession = useMutation({
     mutationFn: async (sessionId: string) => {
-      return apiRequest(`/api/field-work-sessions/${sessionId}/complete`, {
-        method: "POST",
-      });
+      return apiRequest(`/api/field-work-sessions/${sessionId}/complete`, "POST", {});
     },
     onSuccess: () => {
       setActiveSession(null);
