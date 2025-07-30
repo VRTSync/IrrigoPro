@@ -231,7 +231,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     
     // Start button moved to bottom section - not included here
     
-    if (workOrder.status !== 'cancelled' && workOrder.status !== 'completed') {
+    // Only show cancel button for non-field technicians
+    if (workOrder.status !== 'cancelled' && workOrder.status !== 'completed' && currentUser?.role !== 'field_tech') {
       buttons.push(
         <Button
           key="cancel"

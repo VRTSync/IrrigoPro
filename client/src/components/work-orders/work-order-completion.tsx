@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -80,8 +80,17 @@ export function WorkOrderCompletion({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Get current user to check role
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+  }, []);
 
   const { data: parts } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
@@ -296,9 +305,11 @@ export function WorkOrderCompletion({
                     <FileText className="w-5 h-5 text-blue-600" />
                     Parts Used Summary
                   </span>
-                  <div className="text-sm font-normal text-gray-600">
-                    Total: ${getTotalPartsCost().toFixed(2)}
-                  </div>
+                  {currentUser?.role !== 'field_tech' && (
+                    <div className="text-sm font-normal text-gray-600">
+                      Total: ${getTotalPartsCost().toFixed(2)}
+                    </div>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -307,13 +318,21 @@ export function WorkOrderCompletion({
                     <div key={part.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
                       <div className="flex-1">
                         <div className="font-medium">{part.partName}</div>
-                        <div className="text-sm text-gray-500">
-                          ${part.partPrice} each × {part.quantity}
+                        {currentUser?.role !== 'field_tech' ? (
+                          <div className="text-sm text-gray-500">
+                            ${part.partPrice} each × {part.quantity}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-500">
+                            Quantity: {part.quantity}
+                          </div>
+                        )}
+                      </div>
+                      {currentUser?.role !== 'field_tech' && (
+                        <div className="text-lg font-bold text-blue-600">
+                          ${part.totalCost.toFixed(2)}
                         </div>
-                      </div>
-                      <div className="text-lg font-bold text-blue-600">
-                        ${part.totalCost.toFixed(2)}
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -431,9 +450,11 @@ export function WorkOrderCompletion({
                     <FileText className="w-5 h-5 text-blue-600" />
                     Parts Used
                   </span>
-                  <div className="text-sm font-normal text-gray-600">
-                    Total: ${getTotalPartsCost().toFixed(2)}
-                  </div>
+                  {currentUser?.role !== 'field_tech' && (
+                    <div className="text-sm font-normal text-gray-600">
+                      Total: ${getTotalPartsCost().toFixed(2)}
+                    </div>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -452,7 +473,9 @@ export function WorkOrderCompletion({
                       >
                         <div>
                           <div className="font-medium text-sm">{part.name}</div>
-                          <div className="text-xs text-gray-500">${part.price}</div>
+                          {currentUser?.role !== 'field_tech' && (
+                            <div className="text-xs text-gray-500">${part.price}</div>
+                          )}
                         </div>
                       </Button>
                     ))}
@@ -466,9 +489,15 @@ export function WorkOrderCompletion({
                       <div key={usedPart.id} className="flex items-center justify-between p-3 border rounded-lg bg-white">
                         <div className="flex-1">
                           <div className="font-medium">{usedPart.partName}</div>
-                          <div className="text-sm text-gray-500">
-                            ${usedPart.partPrice} each × {usedPart.quantity} = ${usedPart.totalCost.toFixed(2)}
-                          </div>
+                          {currentUser?.role !== 'field_tech' ? (
+                            <div className="text-sm text-gray-500">
+                              ${usedPart.partPrice} each × {usedPart.quantity} = ${usedPart.totalCost.toFixed(2)}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-500">
+                              Quantity: {usedPart.quantity}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
@@ -551,9 +580,11 @@ export function WorkOrderCompletion({
 
             {/* Submit Button */}
             <div className="flex justify-end gap-3">
-              <Button type="button" variant="outline" onClick={handleClose}>
-                Cancel
-              </Button>
+              {currentUser?.role !== 'field_tech' && (
+                <Button type="button" variant="outline" onClick={handleClose}>
+                  Cancel
+                </Button>
+              )}
               <Button 
                 type="submit" 
                 disabled={isSubmitting}

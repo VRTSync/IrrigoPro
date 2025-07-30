@@ -168,6 +168,21 @@ The system uses comprehensive database tables:
 
 ## Recent Changes (2025-07-30)
 
+### Field Tech Work Order Restrictions Implementation
+- **Security Enhancement**: Removed cancel work order functionality for field technicians to prevent unauthorized work order cancellation
+- **Pricing Information Hidden**: Completely removed all pricing, cost, and financial information from field technician interface:
+  - Hidden part prices in parts selection grid
+  - Hidden cost calculations and totals throughout completion form
+  - Hidden pricing information in parts used summary
+  - Hidden cost details in review summary screen
+  - Field technicians now see only quantities instead of pricing details
+- **Technical Changes**:
+  - Added currentUser role checking throughout work order completion flow
+  - Updated getStatusActions() to hide cancel button for field_tech role
+  - Conditional rendering of pricing information based on user role
+  - Maintained full functionality while hiding sensitive financial data
+- **User Experience**: Field technicians can complete work orders fully without access to sensitive pricing information, maintaining security while preserving workflow integrity
+
 ### Work Order UX Enhancement with Summary Review Step
 - **Enhancement**: Implemented improved work order completion flow with summary review step
 - **New UX Flow**:
