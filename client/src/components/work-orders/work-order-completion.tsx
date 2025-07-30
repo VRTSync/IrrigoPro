@@ -34,7 +34,8 @@ import {
   Camera,
   FileText,
   AlertCircle,
-  Wrench
+  Wrench,
+  Edit
 } from "lucide-react";
 import type { WorkOrder, Part } from "@shared/schema";
 
@@ -77,6 +78,8 @@ export function WorkOrderCompletion({
   const [usedParts, setUsedParts] = useState<UsedPart[]>([]);
   const [photos, setPhotos] = useState<CompletionUploadedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -172,6 +175,14 @@ export function WorkOrderCompletion({
       return;
     }
 
+    // Store the form data and show summary
+    setCompletionData(data);
+    setShowSummary(true);
+  };
+
+  const onFinalSubmit = async () => {
+    if (!completionData) return;
+
     setIsSubmitting(true);
     
     try {
@@ -184,12 +195,12 @@ export function WorkOrderCompletion({
       }
       
       // Now complete the work order
-      const completionData = {
+      const finalData = {
         workOrderId: workOrder.id,
-        workSummary: data.workSummary,
-        customerNotes: data.customerNotes,
+        workSummary: completionData.workSummary,
+        customerNotes: completionData.customerNotes,
         completedAt: new Date().toISOString(),
-        totalHours: data.totalHours,
+        totalHours: completionData.totalHours,
         usedParts: usedParts.map(up => ({
           partId: up.partId,
           quantity: up.quantity,
@@ -199,7 +210,7 @@ export function WorkOrderCompletion({
         totalPartsCost: getTotalPartsCost().toFixed(2),
       };
 
-      await completeWorkOrderMutation.mutateAsync(completionData);
+      await completeWorkOrderMutation.mutateAsync(finalData);
     } catch (error) {
       toast({
         title: "Error",
@@ -211,8 +222,22 @@ export function WorkOrderCompletion({
     }
   };
 
+  const onEditClick = () => {
+    setShowSummary(false);
+  };
+
+  // Reset states when modal closes
+  const handleClose = () => {
+    setShowSummary(false);
+    setCompletionData(null);
+    form.reset();
+    setUsedParts([]);
+    setPhotos([]);
+    onClose();
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
@@ -220,16 +245,130 @@ export function WorkOrderCompletion({
               <CheckCircle className="w-5 h-5 text-green-600" />
             </div>
             <div>
-              <span className="text-xl font-semibold">Complete Work Order</span>
+              <span className="text-xl font-semibold">
+                {showSummary ? "Review Work Order Summary" : "Complete Work Order"}
+              </span>
               <p className="text-sm text-gray-600 font-normal mt-1">
                 {workOrder.workOrderNumber} - {workOrder.projectName}
               </p>
             </div>
           </DialogTitle>
           <DialogDescription>
-            Document the completed work, parts used, and provide customer notes before marking as complete.
+            {showSummary 
+              ? "Review the work order details before final submission."
+              : "Document the completed work, parts used, and provide customer notes before marking as complete."
+            }
           </DialogDescription>
         </DialogHeader>
+
+        {showSummary ? (
+          // Summary View
+          <div className="space-y-6">
+            {/* Work Summary Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Wrench className="w-5 h-5 text-blue-600" />
+                  Work Completed Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <span className="font-medium text-gray-700">Work Summary:</span>
+                  <p className="text-gray-900 mt-1 p-3 bg-gray-50 rounded-lg">{completionData?.workSummary}</p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Customer Notes:</span>
+                  <p className="text-gray-900 mt-1 p-3 bg-gray-50 rounded-lg">{completionData?.customerNotes}</p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Total Hours Worked:</span>
+                  <p className="text-gray-900 mt-1 text-xl font-bold text-blue-600">{completionData?.totalHours} hours</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Parts Used Summary */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                    Parts Used Summary
+                  </span>
+                  <div className="text-sm font-normal text-gray-600">
+                    Total: ${getTotalPartsCost().toFixed(2)}
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {usedParts.map((part) => (
+                    <div key={part.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+                      <div className="flex-1">
+                        <div className="font-medium">{part.partName}</div>
+                        <div className="text-sm text-gray-500">
+                          ${part.partPrice} each × {part.quantity}
+                        </div>
+                      </div>
+                      <div className="text-lg font-bold text-blue-600">
+                        ${part.totalCost.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Photos Summary */}
+            {photos.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Camera className="w-5 h-5 text-blue-600" />
+                    Completion Photos ({photos.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {photos.map((photo, index) => (
+                      <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                        <img 
+                          src={photo.url} 
+                          alt={`Completion photo ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <Separator />
+
+            {/* Action Buttons for Summary */}
+            <div className="flex justify-end gap-3">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={onEditClick}
+                className="px-6"
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                Edit Details
+              </Button>
+              <Button 
+                onClick={onFinalSubmit}
+                disabled={isSubmitting}
+                className="bg-green-600 hover:bg-green-700 text-white px-6"
+              >
+                {isSubmitting ? "Submitting..." : "Submit Work Order"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          // Form View (existing form code)
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -412,7 +551,7 @@ export function WorkOrderCompletion({
 
             {/* Submit Button */}
             <div className="flex justify-end gap-3">
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
               <Button 
@@ -420,11 +559,12 @@ export function WorkOrderCompletion({
                 disabled={isSubmitting}
                 className="bg-green-600 hover:bg-green-700 text-white"
               >
-                {isSubmitting ? "Completing..." : "Complete Work Order"}
+                {isSubmitting ? "Reviewing..." : "Review Work Order"}
               </Button>
             </div>
           </form>
         </Form>
+        )}
       </DialogContent>
     </Dialog>
   );
