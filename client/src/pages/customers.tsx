@@ -10,10 +10,12 @@ import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
 import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";
+import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [showSiteMaps, setShowSiteMaps] = useState<Customer | null>(null);
   const [userRole, setUserRole] = useState<string>("company_admin");
 
   // Get user role from localStorage
@@ -39,7 +41,18 @@ export default function Customers() {
     customer.phone?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Show customer profile if selected
+  // Show site maps if selected for field tech
+  if (showSiteMaps) {
+    return (
+      <CustomerSiteMaps 
+        customer={showSiteMaps} 
+        onBack={() => setShowSiteMaps(null)}
+        userRole={userRole}
+      />
+    );
+  }
+
+  // Show customer profile if selected (non-field tech users)
   if (selectedCustomer) {
     return (
       <CustomerProfile 
@@ -160,14 +173,7 @@ export default function Customers() {
                             <div className="flex-1">
                               <div className="text-sm font-medium text-gray-900">{customer.name}</div>
                             </div>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="text-blue-600 hover:text-blue-900 ml-2"
-                              onClick={() => setSelectedCustomer(customer)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
+
                           </div>
                         </td>
                         {userRole !== 'field_tech' && (
@@ -196,7 +202,7 @@ export default function Customers() {
                                 variant="ghost" 
                                 size="sm" 
                                 className="text-blue-600 hover:text-blue-900"
-                                onClick={() => setSelectedCustomer(customer)}
+                                onClick={() => setShowSiteMaps(customer)}
                               >
                                 <Eye className="w-4 h-4 mr-1" />
                                 Map View
@@ -264,22 +270,17 @@ export default function Customers() {
                         </div>
                         <div>
                           <div className="text-sm font-semibold text-gray-900">{customer.name}</div>
-                          <button
-                            onClick={() => setSelectedCustomer(customer)}
-                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                          >
-                            View Details
-                          </button>
+                          {userRole !== 'field_tech' && (
+                            <button
+                              onClick={() => setSelectedCustomer(customer)}
+                              className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              View Details
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-blue-600 hover:text-blue-900"
-                        onClick={() => setSelectedCustomer(customer)}
-                      >
-                        <Eye className="w-4 h-4" />
-                      </Button>
+
                     </div>
 
                     {/* Contact Info */}
@@ -313,7 +314,7 @@ export default function Customers() {
                           variant="outline" 
                           size="sm" 
                           className="flex-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          onClick={() => setSelectedCustomer(customer)}
+                          onClick={() => setShowSiteMaps(customer)}
                         >
                           <Eye className="w-4 h-4 mr-2" />
                           Map View
