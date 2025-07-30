@@ -1746,13 +1746,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Save used parts information
       for (const part of usedParts || []) {
-        await storage.addWorkOrderItem({
-          workOrderId,
-          partId: part.partId,
-          quantity: part.quantity,
-          unitPrice: (parseFloat(part.totalCost) / part.quantity).toFixed(2),
-          totalPrice: part.totalCost
-        });
+        // Get part details from database
+        const partDetails = await storage.getPart(part.partId);
+        if (partDetails) {
+          await storage.addWorkOrderItem({
+            workOrderId,
+            partId: part.partId,
+            partName: partDetails.name,
+            partPrice: partDetails.price,
+            quantity: part.quantity,
+            totalPrice: part.totalCost,
+            laborHours: partDetails.laborHours || "0"
+          });
+        }
       }
 
       // Notify managers about work order completion
