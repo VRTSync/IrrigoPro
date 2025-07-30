@@ -72,6 +72,14 @@ export default function WorkOrders() {
       }
     };
     
+    // Check for create parameter in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('create') === 'true') {
+      setShowWorkOrderForm(true);
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    
     refreshUserData();
   }, []);
 
