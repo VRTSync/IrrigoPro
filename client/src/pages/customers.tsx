@@ -164,7 +164,7 @@ export default function Customers() {
                     ))
                   ) : (
                     filteredCustomers?.map((customer) => (
-                      <tr key={customer.id} className="hover:bg-gray-50">
+                      <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="bg-blue-50 p-2 rounded-lg mr-3">
@@ -209,6 +209,17 @@ export default function Customers() {
                               </Button>
                             ) : (
                               <>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="text-blue-600 hover:text-blue-900"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedCustomer(customer);
+                                  }}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
                                 <CustomerForm
                                   customer={customer}
                                   trigger={
