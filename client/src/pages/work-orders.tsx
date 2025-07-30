@@ -486,29 +486,16 @@ export default function WorkOrders() {
                                   Created {formatDate(workOrder.createdAt)}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  {/* Render action buttons similar to list view */}
-                                  {workOrder.status === 'pending' && !workOrder.assignedTechnicianId && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => setSelectedWorkOrder(workOrder)}
-                                      className="text-xs px-3 py-1.5"
-                                    >
-                                      <Eye className="w-3 h-3 mr-1" />
-                                      View
-                                    </Button>
-                                  )}
-                                  {(workOrder.status === 'assigned' || workOrder.status === 'in_progress') && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => setSelectedWorkOrderForStart(workOrder)}
-                                      className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                                    >
-                                      <Play className="w-3 h-3 mr-1" />
-                                      Start Work Order
-                                    </Button>
-                                  )}
+                                  {/* Only show green View button for all cards */}
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setSelectedWorkOrder(workOrder)}
+                                    className="text-xs px-3 py-1.5 bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                                  >
+                                    <Eye className="w-3 h-3 mr-1" />
+                                    View
+                                  </Button>
                                   {currentUser?.role === 'irrigation_manager' && (
                                     <Select
                                       onValueChange={(techId: string) => {
@@ -636,51 +623,20 @@ export default function WorkOrders() {
                     {/* Action Buttons at Bottom */}
                     <div className="border-t pt-3 mt-auto">
                       {currentUser?.role === 'field_tech' ? (
-                        // Field Tech View - Only for assigned work orders
+                        // Field Tech View - Only green View button for assigned work orders
                         <>
                           {(workOrder.assignedTechnicianId === currentUser.id || workOrder.assignedTechnicianName === currentUser.name) && (
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedWorkOrder(workOrder);
-                                }}
-                                className="flex-1"
-                              >
-                                <Eye className="w-4 h-4 mr-1" />
-                                View
-                              </Button>
-                              
-                              {(workOrder.status === 'pending' || workOrder.status === 'assigned') && (
-                                <Button
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedWorkOrderForStart(workOrder);
-                                  }}
-                                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                  <Play className="w-4 h-4 mr-1" />
-                                  Start Work Order
-                                </Button>
-                              )}
-                              
-                              {workOrder.status === 'in_progress' && (
-                                <Button
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedWorkOrderForCompletion(workOrder);
-                                  }}
-                                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                  <CheckCircle className="w-4 h-4 mr-1" />
-                                  Complete
-                                </Button>
-                              )}
-                            </div>
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedWorkOrder(workOrder);
+                              }}
+                              className="w-full bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              <Eye className="w-4 h-4 mr-1" />
+                              View
+                            </Button>
                           )}
                           
                           {/* Show message for unassigned work orders */}
@@ -691,98 +647,18 @@ export default function WorkOrders() {
                           )}
                         </>
                       ) : (
-                        // Manager/Admin View - Status-based action buttons
-                        <div className="flex gap-2">
-                          {/* Show View button only for work orders NOT assigned to current user */}
-                          {!(workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === currentUser.name) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWorkOrder(workOrder);
-                              }}
-                              className="flex-1"
-                            >
-                              <Eye className="w-4 h-4 mr-1" />
-                              View
-                            </Button>
-                          )}
-                          
-                          {/* Start Work Order button - only for work orders assigned to current user or unassigned (managers only) */}
-                          {(workOrder.status === 'pending' || workOrder.status === 'assigned') && 
-                           (workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === currentUser.name ||
-                            (currentUser.role === 'irrigation_manager' && !workOrder.assignedTechnicianId)) && (
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWorkOrderForStart(workOrder);
-                              }}
-                              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                            >
-                              <Play className="w-4 h-4 mr-1" />
-                              Start Work Order
-                            </Button>
-                          )}
-                          
-                          {/* Complete button - only for work orders assigned to current user */}
-                          {workOrder.status === 'in_progress' && 
-                           (workOrder.assignedTechnicianId === currentUser.id || 
-                            workOrder.assignedTechnicianName === currentUser.name) && (
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWorkOrderForCompletion(workOrder);
-                              }}
-                              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                            >
-                              <CheckCircle className="w-4 h-4 mr-1" />
-                              Complete
-                            </Button>
-                          )}
-                          
-                          {/* Assignment controls - only for managers */}
-                          {currentUser.role === 'irrigation_manager' && (
-                            <Select
-                              onValueChange={(techId: string) => {
-                                const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
-                                if (selectedTech) {
-                                  reassignWorkOrder.mutate({
-                                    workOrderId: workOrder.id,
-                                    technicianId: selectedTech.id,
-                                    technicianName: selectedTech.name
-                                  });
-                                } else if (techId === currentUser.id.toString()) {
-                                  // Manager can assign to themselves
-                                  reassignWorkOrder.mutate({
-                                    workOrderId: workOrder.id,
-                                    technicianId: currentUser.id,
-                                    technicianName: currentUser.name
-                                  });
-                                }
-                              }}
-                            >
-                              <SelectTrigger className="w-32">
-                                <SelectValue placeholder="Assign" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value={currentUser.id.toString()}>
-                                  Assign to Me
-                                </SelectItem>
-                                {Array.isArray(fieldTechs) ? fieldTechs.map((tech: any) => (
-                                  <SelectItem key={tech.id} value={tech.id.toString()}>
-                                    {tech.name}
-                                  </SelectItem>
-                                )) : []}
-                              </SelectContent>
-                            </Select>
-                          )}
-
-                        </div>
+                        // Manager/Admin View - Only View button
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedWorkOrder(workOrder);
+                          }}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <Eye className="w-4 h-4 mr-1" />
+                          View
+                        </Button>
                       )}
                     </div>
                   </div>

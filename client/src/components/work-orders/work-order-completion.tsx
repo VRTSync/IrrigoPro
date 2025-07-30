@@ -174,23 +174,41 @@ export function WorkOrderCompletion({
 
     setIsSubmitting(true);
     
-    const completionData = {
-      workOrderId: workOrder.id,
-      workSummary: data.workSummary,
-      customerNotes: data.customerNotes,
-      completedAt: new Date().toISOString(), // Set completion time to now
-      totalHours: data.totalHours,
-      usedParts: usedParts.map(up => ({
-        partId: up.partId,
-        quantity: up.quantity,
-        totalCost: up.totalCost.toFixed(2),
-      })),
-      photos: photos.map(photo => photo.url),
-      totalPartsCost: getTotalPartsCost().toFixed(2),
-    };
+    try {
+      // If work order hasn't been started yet, start it first
+      if (workOrder.status === 'assigned' || workOrder.status === 'pending') {
+        await apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { 
+          status: 'in_progress',
+          startedAt: new Date().toISOString()
+        });
+      }
+      
+      // Now complete the work order
+      const completionData = {
+        workOrderId: workOrder.id,
+        workSummary: data.workSummary,
+        customerNotes: data.customerNotes,
+        completedAt: new Date().toISOString(),
+        totalHours: data.totalHours,
+        usedParts: usedParts.map(up => ({
+          partId: up.partId,
+          quantity: up.quantity,
+          totalCost: up.totalCost.toFixed(2),
+        })),
+        photos: photos.map(photo => photo.url),
+        totalPartsCost: getTotalPartsCost().toFixed(2),
+      };
 
-    await completeWorkOrderMutation.mutateAsync(completionData);
-    setIsSubmitting(false);
+      await completeWorkOrderMutation.mutateAsync(completionData);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to complete work order",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
