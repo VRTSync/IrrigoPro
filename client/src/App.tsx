@@ -126,6 +126,7 @@ function Router() {
                 <Route path="/field-portal" component={FieldPortal} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/customers" component={Customers} />
                 <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
