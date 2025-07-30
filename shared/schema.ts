@@ -449,7 +449,13 @@ export const insertFieldWorkSessionSchema = createInsertSchema(fieldWorkSessions
 export const insertFieldWorkItemSchema = createInsertSchema(fieldWorkItems).omit({ id: true });
 export const insertQuickbooksIntegrationSchema = createInsertSchema(quickbooksIntegration).omit({ id: true });
 export const insertQuickbooksSyncSchema = createInsertSchema(quickbooksSync).omit({ id: true });
-export const insertWorkOrderSchema = createInsertSchema(workOrders).omit({ id: true, workOrderNumber: true, createdAt: true, updatedAt: true });
+export const insertWorkOrderSchema = createInsertSchema(workOrders)
+  .omit({ id: true, workOrderNumber: true, createdAt: true, updatedAt: true })
+  .extend({
+    scheduledDate: z.union([z.string(), z.date()]).transform(val => val instanceof Date ? val : val ? new Date(val) : undefined).optional().nullable(),
+    startedAt: z.union([z.string(), z.date()]).transform(val => val instanceof Date ? val : val ? new Date(val) : undefined).optional().nullable(),
+    completedAt: z.union([z.string(), z.date()]).transform(val => val instanceof Date ? val : val ? new Date(val) : undefined).optional().nullable(),
+  });
 export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit({ id: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
