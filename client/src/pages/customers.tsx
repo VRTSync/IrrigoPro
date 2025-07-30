@@ -59,26 +59,30 @@ export default function Customers() {
             <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
             <p className="text-gray-600 mt-1">Manage your customer database</p>
           </div>
-          <div className="mt-4 sm:mt-0">
-            <CustomerForm
-              trigger={
-                <Button className="bg-primary text-white hover:bg-blue-700">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New Customer
-                </Button>
-              }
-            />
-          </div>
+          {userRole !== 'field_tech' && (
+            <div className="mt-4 sm:mt-0">
+              <CustomerForm
+                trigger={
+                  <Button className="bg-primary text-white hover:bg-blue-700">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New Customer
+                  </Button>
+                }
+              />
+            </div>
+          )}
         </div>
       </div>
 
       <Tabs defaultValue="customers" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className={userRole === 'field_tech' ? "grid w-full grid-cols-1" : "grid w-full grid-cols-2"}>
           <TabsTrigger value="customers">Customer List</TabsTrigger>
-          <TabsTrigger value="integrations">
-            <Settings className="w-4 h-4 mr-2" />
-            Integrations
-          </TabsTrigger>
+          {userRole !== 'field_tech' && (
+            <TabsTrigger value="integrations">
+              <Settings className="w-4 h-4 mr-2" />
+              Integrations
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="customers" className="space-y-4">
@@ -108,9 +112,11 @@ export default function Customers() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Customer
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Contact
-                        </th>
+                        {userRole !== 'field_tech' && (
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Contact
+                          </th>
+                        )}
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Address
                         </th>
@@ -164,36 +170,52 @@ export default function Customers() {
                             </Button>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <div className="flex items-center text-sm text-gray-900">
-                              <Mail className="w-4 h-4 mr-2 text-gray-400" />
-                              {customer.email}
-                            </div>
-                            {customer.phone && (
-                              <div className="flex items-center text-sm text-gray-500">
-                                <Phone className="w-4 h-4 mr-2 text-gray-400" />
-                                {customer.phone}
+                        {userRole !== 'field_tech' && (
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <div className="flex items-center text-sm text-gray-900">
+                                <Mail className="w-4 h-4 mr-2 text-gray-400" />
+                                {customer.email}
                               </div>
-                            )}
-                          </div>
-                        </td>
+                              {customer.phone && (
+                                <div className="flex items-center text-sm text-gray-500">
+                                  <Phone className="w-4 h-4 mr-2 text-gray-400" />
+                                  {customer.phone}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        )}
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">{customer.address}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex items-center space-x-2 justify-end">
-                            <CustomerForm
-                              customer={customer}
-                              trigger={
-                                <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}>
-                                  <Edit className="w-4 h-4" />
+                            {userRole === 'field_tech' ? (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-blue-600 hover:text-blue-900"
+                                onClick={() => setSelectedCustomer(customer)}
+                              >
+                                <Eye className="w-4 h-4 mr-1" />
+                                Map View
+                              </Button>
+                            ) : (
+                              <>
+                                <CustomerForm
+                                  customer={customer}
+                                  trigger={
+                                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}>
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                  }
+                                />
+                                <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
+                                  <Trash2 className="w-4 h-4" />
                                 </Button>
-                              }
-                            />
-                            <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -262,15 +284,19 @@ export default function Customers() {
 
                     {/* Contact Info */}
                     <div className="space-y-2 mb-4">
-                      <div className="flex items-center text-sm text-gray-900">
-                        <Mail className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
-                        <span className="break-all">{customer.email}</span>
-                      </div>
-                      {customer.phone && (
-                        <div className="flex items-center text-sm text-gray-600">
-                          <Phone className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
-                          <span>{customer.phone}</span>
-                        </div>
+                      {userRole !== 'field_tech' && (
+                        <>
+                          <div className="flex items-center text-sm text-gray-900">
+                            <Mail className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
+                            <span className="break-all">{customer.email}</span>
+                          </div>
+                          {customer.phone && (
+                            <div className="flex items-center text-sm text-gray-600">
+                              <Phone className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
+                              <span>{customer.phone}</span>
+                            </div>
+                          )}
+                        </>
                       )}
                       <div className="flex items-start text-sm text-gray-600">
                         <div className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0 mt-0.5">
@@ -282,18 +308,32 @@ export default function Customers() {
 
                     {/* Actions */}
                     <div className="flex items-center space-x-2 pt-3 border-t border-gray-100">
-                      <CustomerForm
-                        customer={customer}
-                        trigger={
-                          <Button variant="outline" size="sm" className="flex-1">
-                            <Edit className="w-4 h-4 mr-2" />
-                            Edit
+                      {userRole === 'field_tech' ? (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          onClick={() => setSelectedCustomer(customer)}
+                        >
+                          <Eye className="w-4 h-4 mr-2" />
+                          Map View
+                        </Button>
+                      ) : (
+                        <>
+                          <CustomerForm
+                            customer={customer}
+                            trigger={
+                              <Button variant="outline" size="sm" className="flex-1">
+                                <Edit className="w-4 h-4 mr-2" />
+                                Edit
+                              </Button>
+                            }
+                          />
+                          <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                            <Trash2 className="w-4 h-4" />
                           </Button>
-                        }
-                      />
-                      <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                        </>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -308,24 +348,33 @@ export default function Customers() {
                 <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No customers found</h3>
                 <p className="text-gray-600 mb-4">
-                  {searchQuery ? "No customers match your search criteria." : "Get started by adding your first customer."}
-                </p>
-                <CustomerForm
-                  trigger={
-                    <Button className="bg-primary text-white hover:bg-blue-700">
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add New Customer
-                    </Button>
+                  {searchQuery 
+                    ? "No customers match your search criteria." 
+                    : userRole === 'field_tech' 
+                      ? "No customers available to view." 
+                      : "Get started by adding your first customer."
                   }
-                />
+                </p>
+                {userRole !== 'field_tech' && (
+                  <CustomerForm
+                    trigger={
+                      <Button className="bg-primary text-white hover:bg-blue-700">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add New Customer
+                      </Button>
+                    }
+                  />
+                )}
               </CardContent>
             </Card>
           )}
         </TabsContent>
 
-        <TabsContent value="integrations">
-          <CustomerIntegration />
-        </TabsContent>
+        {userRole !== 'field_tech' && (
+          <TabsContent value="integrations">
+            <CustomerIntegration />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

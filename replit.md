@@ -168,6 +168,20 @@ The system uses comprehensive database tables:
 
 ## Recent Changes (2025-07-30)
 
+### Field Tech Customer Access Implementation
+- **Navigation Update**: Added customer list access for field technicians in navigation, replacing site maps button
+- **Customer List Restrictions**: Field technicians can view customers with limited information:
+  - Only see customer name and address (contact information hidden)
+  - Map View button instead of edit/delete actions
+  - No access to integrations tab or customer creation
+  - Streamlined interface focused on location data only
+- **Technical Changes**:
+  - Updated navigation.tsx to include customers for field_tech role
+  - Added role-based conditional rendering throughout customer page
+  - Hidden contact information, edit buttons, and integrations for field techs
+  - Maintained consistent UX across desktop and mobile views
+- **User Experience**: Field technicians can access customer locations for navigation purposes without sensitive contact information or administrative functions
+
 ### Field Tech Work Order Restrictions Implementation
 - **Security Enhancement**: Removed cancel work order functionality for field technicians to prevent unauthorized work order cancellation
 - **Pricing Information Hidden**: Completely removed all pricing, cost, and financial information from field technician interface:

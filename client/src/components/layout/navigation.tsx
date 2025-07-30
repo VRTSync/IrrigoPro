@@ -61,7 +61,7 @@ export default function Navigation() {
         return [
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
+          { path: "/customers", label: "Customers", icon: Users },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
         ];
       case "billing_manager":
