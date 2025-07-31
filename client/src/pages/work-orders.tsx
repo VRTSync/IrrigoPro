@@ -655,18 +655,56 @@ export default function WorkOrders() {
                           )}
                         </>
                       ) : (
-                        // Manager/Admin View - Only View button
-                        <Button
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedWorkOrder(workOrder);
-                          }}
-                          className="w-full bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          View
-                        </Button>
+                        // Manager/Admin View - View button and Assignment dropdown
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedWorkOrder(workOrder);
+                            }}
+                            className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            <Eye className="w-4 h-4 mr-1" />
+                            View
+                          </Button>
+                          {currentUser?.role === 'irrigation_manager' && (
+                            <Select
+                              onValueChange={(techId: string) => {
+                                const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
+                                if (selectedTech) {
+                                  reassignWorkOrder.mutate({
+                                    workOrderId: workOrder.id,
+                                    technicianId: selectedTech.id,
+                                    technicianName: selectedTech.name,
+                                  });
+                                } else if (techId === currentUser.id.toString()) {
+                                  reassignWorkOrder.mutate({
+                                    workOrderId: workOrder.id,
+                                    technicianId: currentUser.id,
+                                    technicianName: currentUser.name,
+                                  });
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-32 h-8 text-xs">
+                                <SelectValue placeholder="Assign" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {currentUser?.id && (
+                                  <SelectItem value={currentUser.id.toString()}>
+                                    Assign to Me
+                                  </SelectItem>
+                                )}
+                                {Array.isArray(fieldTechs) ? fieldTechs.map((tech: any) => (
+                                  <SelectItem key={tech.id} value={tech.id.toString()}>
+                                    {tech.name}
+                                  </SelectItem>
+                                )) : []}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
