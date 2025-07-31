@@ -317,20 +317,14 @@ export default function Navigation() {
                             <div className={`
                               flex flex-col items-center justify-center w-16 h-16 rounded-full -mt-8
                               bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 
-                              text-white shadow-xl border-4 border-white
-                              transform transition-all duration-200 ease-out
-                              hover:scale-110 hover:shadow-2xl hover:from-blue-600 hover:to-blue-800
-                              active:scale-95
-                              ${active ? 'ring-4 ring-blue-200 ring-opacity-75' : ''}
+                              text-white shadow-lg border-4 border-white
+                              transform transition-transform duration-150 ease-out
+                              hover:scale-105 active:scale-95
+                              ${active ? 'shadow-xl scale-105' : 'shadow-lg'}
                             `}>
-                              <Icon className="h-6 w-6 drop-shadow-sm" />
-                              <span className="text-xs font-bold mt-0.5 leading-none drop-shadow-sm">Home</span>
+                              <Icon className="h-6 w-6" />
+                              <span className="text-xs font-bold mt-0.5 leading-none">Home</span>
                             </div>
-                            
-                            {/* Pulse Ring for Extra Attention */}
-                            {!active && (
-                              <div className="absolute inset-0 w-16 h-16 rounded-full -mt-8 bg-blue-400 animate-pulse opacity-20"></div>
-                            )}
                           </div>
                         </Link>
                       </div>
