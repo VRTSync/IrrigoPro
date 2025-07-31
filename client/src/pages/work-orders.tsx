@@ -552,15 +552,34 @@ export default function WorkOrders() {
           // List view (default)
           <div className="space-y-4">
             {filteredWorkOrders
-              ?.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()) // Sort oldest to newest
+              ?.sort((a, b) => {
+                // For field techs: Put completed work orders at the bottom
+                if (currentUser?.role === 'field_tech') {
+                  if (a.status === 'completed' && b.status !== 'completed') return 1;
+                  if (a.status !== 'completed' && b.status === 'completed') return -1;
+                }
+                // Otherwise sort by creation date (oldest to newest)
+                return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+              })
               ?.map((workOrder) => (
-              <Card key={workOrder.id} className="bg-white border-0 shadow-sm hover:shadow-md transition-all duration-200">
+              <Card key={workOrder.id} className={`border-0 shadow-sm hover:shadow-md transition-all duration-200 ${
+                workOrder.status === 'completed' && currentUser?.role === 'field_tech' 
+                  ? 'bg-green-50 border-l-4 border-l-green-500' 
+                  : 'bg-white'
+              }`}>
                 <CardContent className="p-4">
                   <div className="flex flex-col h-full">
                     {/* Header: Work Order # and Status */}
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-gray-900 text-base">
+                      <h3 className={`font-semibold text-base ${
+                        workOrder.status === 'completed' && currentUser?.role === 'field_tech'
+                          ? 'text-green-800'
+                          : 'text-gray-900'
+                      }`}>
                         {workOrder.workOrderNumber}
+                        {workOrder.status === 'completed' && currentUser?.role === 'field_tech' && (
+                          <span className="ml-2 text-sm font-medium text-green-600">✓ COMPLETED</span>
+                        )}
                       </h3>
                       {getStatusBadge(workOrder.status)}
                     </div>
@@ -640,10 +659,14 @@ export default function WorkOrders() {
                                 e.stopPropagation();
                                 setSelectedWorkOrder(workOrder);
                               }}
-                              className="w-full bg-green-600 hover:bg-green-700 text-white"
+                              className={`w-full ${
+                                workOrder.status === 'completed'
+                                  ? 'bg-green-700 hover:bg-green-800 text-white border border-green-600'
+                                  : 'bg-green-600 hover:bg-green-700 text-white'
+                              }`}
                             >
                               <Eye className="w-4 h-4 mr-1" />
-                              View
+                              {workOrder.status === 'completed' ? 'View Completed' : 'View'}
                             </Button>
                           )}
                           
@@ -681,6 +704,7 @@ export default function WorkOrders() {
                                 } else if (techId === currentUser.id.toString()) {
                                   reassignWorkOrder.mutate({
                                     workOrderId: workOrder.id,
+                                    technicianId: currentUser.id,
                                     technicianName: currentUser.name,
                                   });
                                 }
