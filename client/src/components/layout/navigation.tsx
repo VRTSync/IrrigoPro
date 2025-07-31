@@ -60,9 +60,10 @@ export default function Navigation() {
       case "field_tech":
         return [
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
-          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/billing-sheets", label: "Onsite", icon: ClipboardList },
+          { path: "/", label: "Home", icon: Home, isCenter: true },
           { path: "/customers", label: "Customers", icon: Users },
-          { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
+          { path: "/site-maps", label: "Maps", icon: MapIcon },
         ];
       case "billing_manager":
         return [
@@ -289,12 +290,30 @@ export default function Navigation() {
                 });
                 otherItems = expandedItems;
                 
-                // Fill slots around center (positions 0, 1, 3, 4)
-                let itemIndex = 0;
-                for (let i = 0; i < 5; i++) {
-                  if (i !== centerIndex && itemIndex < otherItems.length) {
-                    slots[i] = otherItems[itemIndex];
-                    itemIndex++;
+                // For field techs, fill all 5 slots exactly
+                if (userRole === 'field_tech') {
+                  // Field techs have exactly 5 items, place them in order
+                  const allItems = navItems;
+                  allItems.forEach((item, index) => {
+                    if (item.isCenter) {
+                      slots[centerIndex] = item;
+                    } else {
+                      // Place other items in remaining slots
+                      const otherSlots = [0, 1, 3, 4];
+                      const otherItemIndex = allItems.filter(i => !i.isCenter).indexOf(item);
+                      if (otherItemIndex < otherSlots.length) {
+                        slots[otherSlots[otherItemIndex]] = item;
+                      }
+                    }
+                  });
+                } else {
+                  // Fill slots around center (positions 0, 1, 3, 4) for other roles
+                  let itemIndex = 0;
+                  for (let i = 0; i < 5; i++) {
+                    if (i !== centerIndex && itemIndex < otherItems.length) {
+                      slots[i] = otherItems[itemIndex];
+                      itemIndex++;
+                    }
                   }
                 }
                 
@@ -348,11 +367,10 @@ export default function Navigation() {
                               <div>Work</div>
                               <div>Orders</div>
                             </div>
-                          ) : item.label === "Billing Sheets" ? (
-                            <div className="text-xs font-medium text-center leading-none">
-                              <div>Billing</div>
-                              <div>Sheets</div>
-                            </div>
+                          ) : item.label === "Onsite" ? (
+                            <span className="text-xs font-medium">Onsite</span>
+                          ) : item.label === "Maps" ? (
+                            <span className="text-xs font-medium">Maps</span>
                           ) : (
                             <span className="text-xs font-medium">{item.label}</span>
                           )}
