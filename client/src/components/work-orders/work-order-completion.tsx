@@ -35,7 +35,10 @@ import {
   FileText,
   AlertCircle,
   Wrench,
-  Edit
+  Edit,
+  Search,
+  Check,
+  ShoppingCart
 } from "lucide-react";
 import type { WorkOrder, Part } from "@shared/schema";
 
@@ -81,6 +84,8 @@ export function WorkOrderCompletion({
   const [showSummary, setShowSummary] = useState(false);
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [partsSearchQuery, setPartsSearchQuery] = useState("");
+  const [selectedParts, setSelectedParts] = useState<Set<number>>(new Set());
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -152,6 +157,36 @@ export function WorkOrderCompletion({
       setUsedParts(prev => [...prev, newUsedPart]);
     }
   };
+
+  const addSelectedParts = () => {
+    if (selectedParts.size === 0) return;
+    
+    selectedParts.forEach(partId => {
+      const part = parts?.find(p => p.id === partId);
+      if (part) {
+        addUsedPart(part);
+      }
+    });
+    
+    setSelectedParts(new Set());
+    setPartsSearchQuery("");
+  };
+
+  const togglePartSelection = (partId: number) => {
+    setSelectedParts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(partId)) {
+        newSet.delete(partId);
+      } else {
+        newSet.add(partId);
+      }
+      return newSet;
+    });
+  };
+
+  const filteredParts = parts?.filter(part =>
+    part.name.toLowerCase().includes(partsSearchQuery.toLowerCase())
+  ) || [];
 
   const updatePartQuantity = (id: number, quantity: number) => {
     if (quantity <= 0) {
@@ -239,6 +274,8 @@ export function WorkOrderCompletion({
   const handleClose = () => {
     setShowSummary(false);
     setCompletionData(null);
+    setPartsSearchQuery("");
+    setSelectedParts(new Set());
     form.reset();
     setUsedParts([]);
     setPhotos([]);
@@ -459,28 +496,95 @@ export function WorkOrderCompletion({
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Parts Selection */}
+                {/* Enhanced Parts Selection */}
                 <div className="border rounded-lg p-4 bg-gray-50">
-                  <h4 className="font-medium mb-3">Add Parts</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-40 overflow-y-auto">
-                    {parts?.map((part) => (
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium">Add Parts</h4>
+                    {selectedParts.size > 0 && (
                       <Button
-                        key={part.id}
                         type="button"
-                        variant="outline"
+                        onClick={addSelectedParts}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
                         size="sm"
-                        onClick={() => addUsedPart(part)}
-                        className="justify-start text-left h-auto p-2"
                       >
-                        <div>
-                          <div className="font-medium text-sm">{part.name}</div>
-                          {currentUser?.role !== 'field_tech' && (
-                            <div className="text-xs text-gray-500">${part.price}</div>
-                          )}
-                        </div>
+                        <ShoppingCart className="w-4 h-4 mr-2" />
+                        Add Selected ({selectedParts.size})
                       </Button>
-                    ))}
+                    )}
                   </div>
+                  
+                  {/* Search Bar */}
+                  <div className="relative mb-3">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Input
+                      placeholder="Search parts..."
+                      value={partsSearchQuery}
+                      onChange={(e) => setPartsSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+
+                  {/* Parts Grid with Checkboxes */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto">
+                    {filteredParts.map((part) => {
+                      const isSelected = selectedParts.has(part.id);
+                      const isAlreadyUsed = usedParts.some(up => up.partId === part.id);
+                      
+                      return (
+                        <div
+                          key={part.id}
+                          className={`
+                            border rounded-lg p-3 cursor-pointer transition-all
+                            ${isSelected 
+                              ? 'border-blue-500 bg-blue-50' 
+                              : isAlreadyUsed 
+                                ? 'border-green-200 bg-green-50' 
+                                : 'border-gray-200 bg-white hover:border-gray-300'
+                            }
+                          `}
+                          onClick={() => !isAlreadyUsed && togglePartSelection(part.id)}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{part.name}</div>
+                              {currentUser?.role !== 'field_tech' && (
+                                <div className="text-xs text-gray-500">${part.price}</div>
+                              )}
+                            </div>
+                            <div className="ml-2 flex-shrink-0">
+                              {isAlreadyUsed ? (
+                                <div className="w-5 h-5 bg-green-500 rounded flex items-center justify-center">
+                                  <Check className="w-3 h-3 text-white" />
+                                </div>
+                              ) : (
+                                <div className={`
+                                  w-5 h-5 border-2 rounded flex items-center justify-center
+                                  ${isSelected 
+                                    ? 'border-blue-500 bg-blue-500' 
+                                    : 'border-gray-300'
+                                  }
+                                `}>
+                                  {isSelected && <Check className="w-3 h-3 text-white" />}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {filteredParts.length === 0 && partsSearchQuery && (
+                    <div className="text-center py-4 text-gray-500">
+                      <p>No parts found matching "{partsSearchQuery}"</p>
+                    </div>
+                  )}
+
+                  {selectedParts.size > 0 && (
+                    <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+                      {selectedParts.size} part{selectedParts.size > 1 ? 's' : ''} selected. Click "Add Selected" to add them.
+                    </div>
+                  )}
                 </div>
 
                 {/* Used Parts List */}
