@@ -85,19 +85,19 @@ export function LocationPicker({
         const coords = await geocodeAddress(defaultAddress);
         if (coords) {
           initialCenter = [coords.lat, coords.lng];
-          initialZoom = 16;
+          initialZoom = 18; // Higher zoom for better detail
         }
       }
 
-      // Use selected location if available
+      // Use selected location if available (takes priority over default address)
       if (selectedLocation) {
         initialCenter = [selectedLocation.lat, selectedLocation.lng];
-        initialZoom = 16;
+        initialZoom = 20; // Even higher zoom for selected locations
       }
 
       const map = L.map(mapRef.current, {
         center: initialCenter,
-        zoom: Math.max(initialZoom, 18), // Start at higher zoom for better detail
+        zoom: initialZoom,
         zoomControl: true,
         maxZoom: 25,
         minZoom: 10,
@@ -161,7 +161,7 @@ export function LocationPicker({
     const coords = await geocodeAddress(defaultAddress);
     
     if (coords) {
-      mapInstanceRef.current.setView([coords.lat, coords.lng], 16);
+      mapInstanceRef.current.setView([coords.lat, coords.lng], 18);
       
       // Remove existing marker
       if (markerRef.current) {
