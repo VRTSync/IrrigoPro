@@ -598,11 +598,11 @@ export default function WorkOrders() {
                         <span className="text-gray-700 text-sm truncate">{workOrder.projectName}</span>
                       </div>
 
-                      {/* Date Scheduled */}
+                      {/* Date Assigned */}
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         <span className="text-gray-700 text-sm">
-                          Scheduled: {formatDate(workOrder.scheduledDate)}
+                          Assigned: {formatDate(workOrder.assignedDate)}
                         </span>
                       </div>
 
