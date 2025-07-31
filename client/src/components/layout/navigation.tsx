@@ -313,17 +313,24 @@ export default function Navigation() {
                       <div key={item.path} className="flex justify-center">
                         <Link href={item.path}>
                           <div className="relative">
-                            <Button
-                              variant="ghost"
-                              className={`flex flex-col items-center justify-center w-20 h-20 rounded-lg -mt-10 border-4 border-white shadow-lg px-2 py-2 ${
-                                active
-                                  ? "bg-primary text-white hover:bg-primary/90"
-                                  : "bg-white text-primary hover:bg-gray-50 border-gray-200"
-                              }`}
-                            >
-                              <Icon className="h-6 w-6" />
-                              <span className="text-xs font-medium mt-1 leading-tight">{item.label}</span>
-                            </Button>
+                            {/* Enhanced Dashboard Button with Gradient and Glow */}
+                            <div className={`
+                              flex flex-col items-center justify-center w-16 h-16 rounded-full -mt-8
+                              bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 
+                              text-white shadow-xl border-4 border-white
+                              transform transition-all duration-200 ease-out
+                              hover:scale-110 hover:shadow-2xl hover:from-blue-600 hover:to-blue-800
+                              active:scale-95
+                              ${active ? 'ring-4 ring-blue-200 ring-opacity-75' : ''}
+                            `}>
+                              <Icon className="h-6 w-6 drop-shadow-sm" />
+                              <span className="text-xs font-bold mt-0.5 leading-none drop-shadow-sm">Home</span>
+                            </div>
+                            
+                            {/* Pulse Ring for Extra Attention */}
+                            {!active && (
+                              <div className="absolute inset-0 w-16 h-16 rounded-full -mt-8 bg-blue-400 animate-pulse opacity-20"></div>
+                            )}
                           </div>
                         </Link>
                       </div>
@@ -333,15 +340,15 @@ export default function Navigation() {
                   return (
                     <div key={item.path} className="flex justify-center">
                       <Link href={item.path}>
-                        <Button
-                          variant="ghost"
-                          className={`flex flex-col items-center justify-center w-16 h-16 space-y-1 ${
-                            active
-                              ? "text-primary bg-primary/10"
-                              : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
-                          }`}
-                        >
-                          <Icon className="h-5 w-5" />
+                        <div className={`
+                          flex flex-col items-center justify-center w-14 h-14 rounded-xl 
+                          transition-all duration-150 ease-out transform
+                          ${active
+                            ? "text-blue-600 bg-blue-50 shadow-sm scale-105"
+                            : "text-gray-600 hover:text-blue-600 hover:bg-gray-50 hover:scale-105"
+                          }
+                        `}>
+                          <Icon className="h-5 w-5 mb-1" />
                           {item.label === "Work Orders" ? (
                             <div className="text-xs font-medium text-center leading-none">
                               <div>Work</div>
@@ -355,7 +362,7 @@ export default function Navigation() {
                           ) : (
                             <span className="text-xs font-medium">{item.label}</span>
                           )}
-                        </Button>
+                        </div>
                       </Link>
                     </div>
                   );
