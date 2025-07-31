@@ -166,6 +166,28 @@ The system uses comprehensive database tables:
 - Vite configuration for asset handling and aliases
 - TypeScript paths for clean imports
 
+## Recent Changes (2025-07-31)
+
+### Interactive Map-Based Location Selection for Work Orders
+- **Optional Location Picker**: Added button-controlled map interface that only appears when "Select Location on Map" is clicked
+- **Default Location Display**: Shows customer's default address by default with option to select custom location
+- **Interactive Map Features**:
+  - Uses Leaflet with OpenStreetMap tiles for precise location selection
+  - Geocoding support for address-to-coordinates conversion
+  - Reverse geocoding to display human-readable addresses
+  - Click-to-drop pin functionality for exact location selection
+  - Reset to default address button
+- **Work Order Form Streamlining**:
+  - Removed project name, project address, and access instructions fields per user request
+  - Added location coordinates storage (workLocationLat, workLocationLng, workLocationAddress)
+  - Reorganized form flow: Customer → Estimate → Optional Location Map → Description → Scheduling
+  - Clear custom location option with visual confirmation
+- **Technical Implementation**:
+  - Created LocationPicker component with comprehensive error handling
+  - Added proper mobile responsiveness for map interface
+  - Integrated with existing work order form validation
+  - Maintains backward compatibility with existing work orders
+
 ## Recent Changes (2025-07-30)
 
 ### Field Tech Customer Access Implementation

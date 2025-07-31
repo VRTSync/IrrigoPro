@@ -35,6 +35,7 @@ interface WorkOrderFormProps {
 export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -274,18 +275,72 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 3: Work Location */}
+            {/* Step 3: Work Location (Optional) */}
             {selectedCustomer && (
-              <LocationPicker
-                defaultAddress={selectedCustomer.address || ""}
-                onLocationSelect={(location) => {
-                  setSelectedLocation(location);
-                  form.setValue("workLocationLat", location.lat);
-                  form.setValue("workLocationLng", location.lng);
-                  form.setValue("workLocationAddress", location.address || "");
-                }}
-                selectedLocation={selectedLocation}
-              />
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <MapPin className="w-5 h-5 text-blue-600" />
+                      Work Location
+                    </span>
+                    <Button
+                      type="button"
+                      variant={showLocationPicker ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setShowLocationPicker(!showLocationPicker)}
+                    >
+                      {showLocationPicker ? "Hide Map" : "Select Location on Map"}
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {!showLocationPicker && (
+                    <div className="text-sm text-gray-600">
+                      <p><strong>Default Location:</strong> {selectedCustomer.address || "No address on file"}</p>
+                      <p className="mt-2">Click "Select Location on Map" to choose a specific work location different from the customer's address.</p>
+                    </div>
+                  )}
+                  
+                  {showLocationPicker && (
+                    <div className="mt-4">
+                      <LocationPicker
+                        defaultAddress={selectedCustomer.address || ""}
+                        onLocationSelect={(location) => {
+                          setSelectedLocation(location);
+                          form.setValue("workLocationLat", location.lat);
+                          form.setValue("workLocationLng", location.lng);
+                          form.setValue("workLocationAddress", location.address || "");
+                        }}
+                        selectedLocation={selectedLocation}
+                      />
+                    </div>
+                  )}
+
+                  {selectedLocation && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 mt-4">
+                      <p className="text-sm font-medium text-green-900">Custom Location Selected:</p>
+                      <p className="text-sm text-green-800 mt-1">
+                        {selectedLocation.address || `${selectedLocation.lat.toFixed(6)}, ${selectedLocation.lng.toFixed(6)}`}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedLocation(null);
+                          form.setValue("workLocationLat", undefined);
+                          form.setValue("workLocationLng", undefined);
+                          form.setValue("workLocationAddress", "");
+                        }}
+                        className="mt-2 text-green-700 hover:text-green-900"
+                      >
+                        Clear Custom Location
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             )}
 
             {/* Step 4: Work Description */}
