@@ -27,6 +27,7 @@ import { UserSelector } from "@/components/user-selector";
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
 
+
 interface User {
   id: number;
   username: string;
@@ -36,6 +37,8 @@ interface User {
   companyId?: number | null;
   isActive: boolean;
 }
+
+
 
 function Router() {
   const [user, setUser] = useState<User | null>(null);
@@ -128,6 +131,7 @@ function Router() {
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/customers" component={Customers} />
+                <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
                 <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
