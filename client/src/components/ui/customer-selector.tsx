@@ -224,47 +224,38 @@ export function CustomerSelector({
                   <Card
                     key={customer.id}
                     className="cursor-pointer hover:bg-blue-50 hover:border-blue-200 transition-colors"
-                    onClick={() => handleSelectCustomer(customer)}
+                    onClick={() => {
+                      onSelectCustomer(customer);
+                      setIsOpen(false);
+                    }}
                   >
                     <CardContent className="p-4">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gray-100 p-2 rounded-lg">
-                          <Building className="w-4 h-4 text-gray-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-medium text-gray-900 truncate">{customer.name}</h4>
-                          <div className="flex items-center space-x-4 text-sm text-gray-600 mt-1">
-                            <span className="flex items-center">
-                              <Mail className="w-3 h-3 mr-1" />
-                              {customer.email}
-                            </span>
+                      <div className="flex items-start justify-between">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-gray-900 truncate text-base">{customer.name}</h3>
+                          <div className="text-sm text-gray-600 space-y-1 mt-2">
+                            <div className="flex items-center">
+                              <Mail className="w-4 h-4 mr-2 flex-shrink-0 text-gray-400" />
+                              <span className="truncate">{customer.email}</span>
+                            </div>
                             {customer.phone && (
-                              <span className="flex items-center">
-                                <Phone className="w-3 h-3 mr-1" />
-                                {customer.phone}
-                              </span>
+                              <div className="flex items-center">
+                                <Phone className="w-4 h-4 mr-2 flex-shrink-0 text-gray-400" />
+                                <span>{customer.phone}</span>
+                              </div>
+                            )}
+                            {customer.address && (
+                              <div className="flex items-center">
+                                <MapPin className="w-4 h-4 mr-2 flex-shrink-0 text-gray-400" />
+                                <span className="truncate">{customer.address}</span>
+                              </div>
                             )}
                           </div>
-                          {customer.address && (
-                            <div className="flex items-center text-sm text-gray-600 mt-1">
-                              <MapPin className="w-3 h-3 mr-1" />
-                              <span className="truncate">{customer.address || ""}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center space-x-2 mt-2">
-                            <Badge variant="outline" className="text-xs">
-                              {customer.contractType || "standard"}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              ${customer.laborRate || "45.00"}/hr
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              {customer.markupPercent || "20"}% markup
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              {customer.taxPercent || "8.25"}% tax
-                            </Badge>
-                          </div>
+                        </div>
+                        <div className="ml-4 flex-shrink-0">
+                          <Badge variant="outline" className="text-xs">
+                            {customer.contractType || "Standard"}
+                          </Badge>
                         </div>
                       </div>
                     </CardContent>
