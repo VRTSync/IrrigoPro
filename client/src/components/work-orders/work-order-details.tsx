@@ -42,9 +42,10 @@ interface WorkOrderDetailsProps {
   onClose: () => void;
   onUpdate: () => void;
   showAddDetailsButton?: boolean;
+  onStartWork?: (workOrder: WorkOrder) => void;
 }
 
-export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsButton = false }: WorkOrderDetailsProps) {
+export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsButton = false, onStartWork }: WorkOrderDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>("");
@@ -589,12 +590,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               <Button
                 onClick={() => {
                   console.log('Start Work Order button clicked, opening completion form');
-                  console.log('Updating work orders');
-                  console.log('Closing work order start details');
                   
-                  // Close modal and open completion form directly
-                  onClose();
-                  setShowCompletionForm(true);
+                  // Use callback if provided, otherwise fall back to internal state
+                  if (onStartWork) {
+                    onClose();
+                    onStartWork(workOrder);
+                  } else {
+                    setShowCompletionForm(true);
+                  }
                 }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg font-semibold"
                 size="lg"

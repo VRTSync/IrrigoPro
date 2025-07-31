@@ -761,6 +761,11 @@ export default function WorkOrders() {
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
             showAddDetailsButton={false}
+            onStartWork={(workOrder) => {
+              console.log('Starting work order from details modal');
+              setSelectedWorkOrder(null);
+              setSelectedWorkOrderForCompletion(workOrder);
+            }}
           />
         )}
 
