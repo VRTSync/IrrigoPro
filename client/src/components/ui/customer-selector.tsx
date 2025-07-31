@@ -166,10 +166,10 @@ export function CustomerSelector({
           <Button
             variant="outline"
             onClick={() => setIsOpen(true)}
-            className="w-full justify-start text-gray-500 h-10"
+            className="w-full justify-start text-gray-500 h-10 min-w-0"
           >
-            <Search className="w-4 h-4 mr-2" />
-            {placeholder}
+            <Search className="w-4 h-4 mr-2 flex-shrink-0" />
+            <span className="truncate">{placeholder}</span>
           </Button>
         )}
       </div>

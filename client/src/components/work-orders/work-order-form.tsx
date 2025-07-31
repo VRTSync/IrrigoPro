@@ -182,7 +182,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
                 <CustomerSelector
                   selectedCustomer={selectedCustomer}
                   onSelectCustomer={handleCustomerSelect}
-                  placeholder="Search and select a customer to create work order for..."
+                  placeholder="Select customer for work order..."
                 />
               </CardContent>
             </Card>
