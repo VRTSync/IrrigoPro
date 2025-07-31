@@ -514,9 +514,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                         <SelectValue placeholder="Choose field technician..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={currentUser.id.toString()}>
-                          Assign to Me
-                        </SelectItem>
+                        {currentUser?.id && (
+                          <SelectItem value={currentUser.id.toString()}>
+                            Assign to Me
+                          </SelectItem>
+                        )}
                         {fieldTechs.map((tech) => (
                           <SelectItem key={tech.id} value={tech.id.toString()}>
                             {tech.name}
