@@ -247,9 +247,9 @@ export function WorkOrderCompletion({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
+      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+        <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+          <DialogTitle className="flex items-center gap-3 text-lg sm:text-xl">
             <div className="bg-green-50 p-2 rounded-lg">
               <CheckCircle className="w-5 h-5 text-green-600" />
             </div>
@@ -270,9 +270,10 @@ export function WorkOrderCompletion({
           </DialogDescription>
         </DialogHeader>
 
-        {showSummary ? (
-          // Summary View
-          <div className="space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          {showSummary ? (
+            // Summary View
+            <div className="space-y-6">
             {/* Work Summary Card */}
             <Card>
               <CardHeader>
@@ -596,6 +597,7 @@ export function WorkOrderCompletion({
           </form>
         </Form>
         )}
+        </div>
       </DialogContent>
     </Dialog>
   );

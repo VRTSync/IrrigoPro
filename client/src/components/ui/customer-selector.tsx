@@ -176,9 +176,9 @@ export function CustomerSelector({
 
       {/* Customer Selection Dialog */}
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="w-[95vw] max-w-2xl h-[90vh] max-h-[90vh] overflow-hidden p-0 flex flex-col">
+          <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
               <User className="w-5 h-5 text-blue-600" />
               Select Customer
             </DialogTitle>
@@ -187,7 +187,8 @@ export function CustomerSelector({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="space-y-4">
             {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
@@ -272,14 +273,15 @@ export function CustomerSelector({
               )}
             </div>
           </div>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* New Customer Dialog */}
       <Dialog open={showNewCustomerDialog} onOpenChange={setShowNewCustomerDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="w-[95vw] max-w-2xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+          <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
               <Plus className="w-5 h-5 text-blue-600" />
               Create New Customer
             </DialogTitle>
@@ -288,8 +290,9 @@ export function CustomerSelector({
             </DialogDescription>
           </DialogHeader>
 
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleCreateCustomer)} className="space-y-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(handleCreateCustomer)} className="space-y-6">
               {/* Basic Information */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
@@ -327,7 +330,7 @@ export function CustomerSelector({
                     <FormItem>
                       <FormLabel>Phone</FormLabel>
                       <FormControl>
-                        <Input placeholder="(555) 123-4567" {...field} value={field.value || ""} />
+                        <Input placeholder="(555) 123-4567" {...field} value={field.value ?? ""} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -452,7 +455,7 @@ export function CustomerSelector({
                         placeholder="Additional notes about the customer..." 
                         className="min-h-[80px]"
                         {...field} 
-                        value={field.value || ""}
+                        value={field.value ?? ""}
                       />
                     </FormControl>
                     <FormMessage />
@@ -477,8 +480,9 @@ export function CustomerSelector({
                   {createCustomer.isPending ? "Creating..." : "Create Customer"}
                 </Button>
               </div>
-            </form>
-          </Form>
+              </form>
+            </Form>
+          </div>
         </DialogContent>
       </Dialog>
     </>
