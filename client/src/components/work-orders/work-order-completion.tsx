@@ -86,6 +86,7 @@ export function WorkOrderCompletion({
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const [selectedParts, setSelectedParts] = useState<Set<number>>(new Set());
+  const [selectedPartQuantities, setSelectedPartQuantities] = useState<Map<number, number>>(new Map());
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -163,12 +164,18 @@ export function WorkOrderCompletion({
     
     selectedParts.forEach(partId => {
       const part = parts?.find(p => p.id === partId);
+      const quantity = selectedPartQuantities.get(partId) || 1;
+      
       if (part) {
-        addUsedPart(part);
+        // Add the part multiple times based on quantity
+        for (let i = 0; i < quantity; i++) {
+          addUsedPart(part);
+        }
       }
     });
     
     setSelectedParts(new Set());
+    setSelectedPartQuantities(new Map());
     setPartsSearchQuery("");
   };
 
@@ -177,10 +184,32 @@ export function WorkOrderCompletion({
       const newSet = new Set(prev);
       if (newSet.has(partId)) {
         newSet.delete(partId);
+        // Remove quantity when deselecting
+        setSelectedPartQuantities(prevQty => {
+          const newMap = new Map(prevQty);
+          newMap.delete(partId);
+          return newMap;
+        });
       } else {
         newSet.add(partId);
+        // Set default quantity to 1 when selecting
+        setSelectedPartQuantities(prevQty => {
+          const newMap = new Map(prevQty);
+          newMap.set(partId, 1);
+          return newMap;
+        });
       }
       return newSet;
+    });
+  };
+
+  const updateSelectedPartQuantity = (partId: number, quantity: number) => {
+    if (quantity < 1) return;
+    
+    setSelectedPartQuantities(prev => {
+      const newMap = new Map(prev);
+      newMap.set(partId, quantity);
+      return newMap;
     });
   };
 
@@ -276,6 +305,7 @@ export function WorkOrderCompletion({
     setCompletionData(null);
     setPartsSearchQuery("");
     setSelectedParts(new Set());
+    setSelectedPartQuantities(new Map());
     form.reset();
     setUsedParts([]);
     setPhotos([]);
@@ -544,30 +574,72 @@ export function WorkOrderCompletion({
                           `}
                           onClick={() => !isAlreadyUsed && togglePartSelection(part.id)}
                         >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm truncate">{part.name}</div>
-                              {currentUser?.role !== 'field_tech' && (
-                                <div className="text-xs text-gray-500">${part.price}</div>
-                              )}
+                          <div className="space-y-2">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm truncate">{part.name}</div>
+                                {currentUser?.role !== 'field_tech' && (
+                                  <div className="text-xs text-gray-500">${part.price}</div>
+                                )}
+                              </div>
+                              <div className="ml-2 flex-shrink-0">
+                                {isAlreadyUsed ? (
+                                  <div className="w-5 h-5 bg-green-500 rounded flex items-center justify-center">
+                                    <Check className="w-3 h-3 text-white" />
+                                  </div>
+                                ) : (
+                                  <div className={`
+                                    w-5 h-5 border-2 rounded flex items-center justify-center
+                                    ${isSelected 
+                                      ? 'border-blue-500 bg-blue-500' 
+                                      : 'border-gray-300'
+                                    }
+                                  `}>
+                                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div className="ml-2 flex-shrink-0">
-                              {isAlreadyUsed ? (
-                                <div className="w-5 h-5 bg-green-500 rounded flex items-center justify-center">
-                                  <Check className="w-3 h-3 text-white" />
+                            
+                            {/* Quantity Selector - appears when part is selected */}
+                            {isSelected && (
+                              <div className="flex items-center gap-2 pt-2 border-t border-blue-200">
+                                <span className="text-xs text-gray-600">Qty:</span>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 w-6 p-0"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const currentQty = selectedPartQuantities.get(part.id) || 1;
+                                      if (currentQty > 1) {
+                                        updateSelectedPartQuantity(part.id, currentQty - 1);
+                                      }
+                                    }}
+                                  >
+                                    <Minus className="w-3 h-3" />
+                                  </Button>
+                                  <span className="w-8 text-center text-sm font-medium">
+                                    {selectedPartQuantities.get(part.id) || 1}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 w-6 p-0"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const currentQty = selectedPartQuantities.get(part.id) || 1;
+                                      updateSelectedPartQuantity(part.id, currentQty + 1);
+                                    }}
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                  </Button>
                                 </div>
-                              ) : (
-                                <div className={`
-                                  w-5 h-5 border-2 rounded flex items-center justify-center
-                                  ${isSelected 
-                                    ? 'border-blue-500 bg-blue-500' 
-                                    : 'border-gray-300'
-                                  }
-                                `}>
-                                  {isSelected && <Check className="w-3 h-3 text-white" />}
-                                </div>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -581,8 +653,22 @@ export function WorkOrderCompletion({
                   )}
 
                   {selectedParts.size > 0 && (
-                    <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
-                      {selectedParts.size} part{selectedParts.size > 1 ? 's' : ''} selected. Click "Add Selected" to add them.
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                      <div className="text-sm text-blue-700 font-medium mb-2">
+                        {selectedParts.size} part{selectedParts.size > 1 ? 's' : ''} selected:
+                      </div>
+                      <div className="space-y-1">
+                        {Array.from(selectedParts).map(partId => {
+                          const part = parts?.find(p => p.id === partId);
+                          const quantity = selectedPartQuantities.get(partId) || 1;
+                          return part ? (
+                            <div key={partId} className="text-xs text-blue-600 flex justify-between">
+                              <span>{part.name}</span>
+                              <span>Qty: {quantity}</span>
+                            </div>
+                          ) : null;
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
