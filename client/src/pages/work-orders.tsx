@@ -96,6 +96,34 @@ export default function WorkOrders() {
     enabled: !!currentUser,
   });
 
+  // Fetch notifications for assignment dates (field techs only)
+  const { data: notifications } = useQuery({
+    queryKey: ["/api/notifications", currentUser?.id],
+    queryFn: () => fetch(`/api/notifications/${currentUser.id}`).then(res => res.json()),
+    enabled: !!currentUser && currentUser.role === 'field_tech',
+  });
+
+  // Helper function to get assignment date from notifications
+  const getAssignmentDate = (workOrder: WorkOrder) => {
+    if (!workOrder.assignedTechnicianId) return workOrder.updatedAt;
+    
+    // For field techs, try to find the assignment notification
+    if (currentUser?.role === 'field_tech' && notifications) {
+      const assignmentNotification = notifications.find((notif: any) => 
+        notif.type === 'work_order_assigned' && 
+        notif.relatedEntityId === workOrder.id &&
+        notif.userId === currentUser.id
+      );
+      
+      if (assignmentNotification) {
+        return assignmentNotification.createdAt;
+      }
+    }
+    
+    // Fallback to updatedAt for managers and when no notification is found
+    return workOrder.updatedAt;
+  };
+
   // Fetch field technicians for assignment (managers only)
   const { data: fieldTechs } = useQuery({
     queryKey: ['/api/users/field-techs'],
@@ -599,12 +627,14 @@ export default function WorkOrders() {
                       </div>
 
                       {/* Date Assigned */}
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                        <span className="text-gray-700 text-sm">
-                          Assigned: {formatDate(workOrder.assignedDate)}
-                        </span>
-                      </div>
+                      {workOrder.assignedTechnicianId && (
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                          <span className="text-gray-700 text-sm">
+                            Assigned: {formatDate(getAssignmentDate(workOrder))}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Location */}
                       {workOrder.projectAddress && (
