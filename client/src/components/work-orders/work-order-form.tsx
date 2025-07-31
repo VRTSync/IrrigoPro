@@ -87,6 +87,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
         contractEndDate: null,
         paymentTerms: "net_30",
         notes: null,
+        propertyNotes: null,
       };
       setSelectedCustomer(estimateCustomer);
     }
@@ -154,9 +155,9 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+        <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
             <FileText className="w-5 h-5 text-blue-600" />
             Create New Work Order
           </DialogTitle>
@@ -165,8 +166,9 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             
             {/* Step 1: Customer Selection */}
             <Card>
@@ -460,6 +462,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
             </div>
           </form>
         </Form>
+        </div>
       </DialogContent>
     </Dialog>
   );
