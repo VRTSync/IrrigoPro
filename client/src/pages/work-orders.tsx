@@ -504,7 +504,7 @@ export default function WorkOrders() {
                                     <Eye className="w-3 h-3 mr-1" />
                                     View
                                   </Button>
-                                  {currentUser?.role === 'irrigation_manager' && (
+                                  {currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
                                     <Select
                                       onValueChange={(techId: string) => {
                                         const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -523,7 +523,7 @@ export default function WorkOrders() {
                                         }
                                       }}
                                     >
-                                      <SelectTrigger className="w-32 h-8 text-xs">
+                                      <SelectTrigger className="w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
                                         <SelectValue placeholder="Assign" />
                                       </SelectTrigger>
                                       <SelectContent>
@@ -668,7 +668,7 @@ export default function WorkOrders() {
                             <Eye className="w-4 h-4 mr-1" />
                             View
                           </Button>
-                          {currentUser?.role === 'irrigation_manager' && (
+                          {currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
                             <Select
                               onValueChange={(techId: string) => {
                                 const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -681,13 +681,12 @@ export default function WorkOrders() {
                                 } else if (techId === currentUser.id.toString()) {
                                   reassignWorkOrder.mutate({
                                     workOrderId: workOrder.id,
-                                    technicianId: currentUser.id,
                                     technicianName: currentUser.name,
                                   });
                                 }
                               }}
                             >
-                              <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectTrigger className="w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
                                 <SelectValue placeholder="Assign" />
                               </SelectTrigger>
                               <SelectContent>
