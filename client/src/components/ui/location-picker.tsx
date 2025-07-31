@@ -97,17 +97,19 @@ export function LocationPicker({
 
       const map = L.map(mapRef.current, {
         center: initialCenter,
-        zoom: initialZoom,
+        zoom: Math.max(initialZoom, 18), // Start at higher zoom for better detail
         zoomControl: true,
         maxZoom: 25,
-        zoomSnap: 0.25,
-        wheelPxPerZoomLevel: 30,
+        minZoom: 10,
+        zoomSnap: 0.1, // Smoother zoom increments
+        wheelPxPerZoomLevel: 20, // More responsive zooming
       });
 
-      // Add satellite tile layer for very clear view
-      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+      // Add high-resolution satellite imagery
+      L.tileLayer("https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", {
+        attribution: '© Google',
         maxZoom: 25,
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
       }).addTo(map);
 
       // Add click handler
