@@ -3,10 +3,19 @@ import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Wrench, Clock, CheckCircle, Receipt } from "lucide-react";
+import { FileText, Wrench, Clock, CheckCircle, Receipt, Plus } from "lucide-react";
+import { useState } from "react";
+import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { WorkOrderForm } from "@/components/work-orders/work-order-form";
+import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import type { Estimate, WorkOrder } from "@shared/schema";
 
 export default function ManagerDashboard() {
+  // Modal states for quick creation
+  const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
+  const [showBillingSheetModal, setShowBillingSheetModal] = useState(false);
+
   // Get dashboard stats from API
   const { data: stats } = useQuery({
     queryKey: ["/api/dashboard/stats"],
@@ -21,10 +30,10 @@ export default function ManagerDashboard() {
   });
 
   // Calculate stats from API data
-  const pendingEstimates = stats?.pendingEstimates || 0;
-  const activeWorkOrders = stats?.workOrderStats?.inProgress || 0;
-  const recentEstimates = stats?.recentEstimates?.slice(0, 3) || [];
-  const recentWorkOrders = stats?.recentWorkOrders?.slice(0, 3) || [];
+  const pendingEstimates = (stats as any)?.pendingEstimates || 0;
+  const activeWorkOrders = (stats as any)?.workOrderStats?.inProgress || 0;
+  const recentEstimates = (stats as any)?.recentEstimates?.slice(0, 3) || [];
+  const recentWorkOrders = (stats as any)?.recentWorkOrders?.slice(0, 3) || [];
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
@@ -41,10 +50,19 @@ export default function ManagerDashboard() {
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
               {pendingEstimates > 0 && (
-                <Badge className="absolute top-2 right-2 bg-orange-100 text-orange-800">
+                <Badge className="absolute top-2 left-2 bg-orange-100 text-orange-800">
                   {pendingEstimates} pending
                 </Badge>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full bg-blue-50 hover:bg-blue-100"
+                onClick={() => setShowEstimateModal(true)}
+                title="Create New Estimate"
+              >
+                <Plus className="w-4 h-4 text-blue-600" />
+              </Button>
               <CardTitle className="text-xl">Estimates</CardTitle>
             </CardHeader>
             <CardContent className="text-center flex-1 flex flex-col">
@@ -64,10 +82,19 @@ export default function ManagerDashboard() {
                 <Wrench className="w-8 h-8 text-green-600" />
               </div>
               {activeWorkOrders > 0 && (
-                <Badge className="absolute top-2 right-2 bg-blue-100 text-blue-800">
+                <Badge className="absolute top-2 left-2 bg-blue-100 text-blue-800">
                   {activeWorkOrders} active
                 </Badge>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full bg-green-50 hover:bg-green-100"
+                onClick={() => setShowWorkOrderModal(true)}
+                title="Create New Work Order"
+              >
+                <Plus className="w-4 h-4 text-green-600" />
+              </Button>
               <CardTitle className="text-xl">Work Orders</CardTitle>
             </CardHeader>
             <CardContent className="text-center flex-1 flex flex-col">
@@ -82,10 +109,19 @@ export default function ManagerDashboard() {
 
           {/* Billing Sheets */}
           <Card className="hover:shadow-lg transition-shadow flex flex-col">
-            <CardHeader className="text-center">
+            <CardHeader className="text-center relative">
               <div className="bg-orange-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
                 <Receipt className="w-8 h-8 text-orange-600" />
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full bg-orange-50 hover:bg-orange-100"
+                onClick={() => setShowBillingSheetModal(true)}
+                title="Create New Billing Sheet"
+              >
+                <Plus className="w-4 h-4 text-orange-600" />
+              </Button>
               <CardTitle className="text-xl">Billing Sheets</CardTitle>
             </CardHeader>
             <CardContent className="text-center flex-1 flex flex-col">
@@ -124,7 +160,7 @@ export default function ManagerDashboard() {
                 <p className="text-gray-500 text-center py-4">No recent estimates</p>
               ) : (
                 <div className="space-y-3">
-                  {recentEstimates.map((estimate) => (
+                  {recentEstimates.map((estimate: any) => (
                     <Link key={estimate.id} href="/estimates">
                       <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors">
                         <div>
@@ -172,7 +208,7 @@ export default function ManagerDashboard() {
                 <p className="text-gray-500 text-center py-4">No recent work orders</p>
               ) : (
                 <div className="space-y-3">
-                  {recentWorkOrders.map((workOrder) => (
+                  {recentWorkOrders.map((workOrder: any) => (
                     <Link key={workOrder.id} href="/work-orders">
                       <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors">
                         <div>
@@ -185,7 +221,7 @@ export default function ManagerDashboard() {
                           workOrder.status === 'assigned' ? 'bg-orange-100 text-orange-800' :
                           'bg-yellow-100 text-yellow-800'
                         }>
-                          {workOrder.status.replace('_', ' ').split(' ').map(word => 
+                          {workOrder.status.replace('_', ' ').split(' ').map((word: string) => 
                             word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
                         </Badge>
                       </div>
@@ -196,6 +232,40 @@ export default function ManagerDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Modals for Quick Creation */}
+        <EstimateModal
+          open={showEstimateModal}
+          onOpenChange={(open) => {
+            setShowEstimateModal(open);
+            if (!open) {
+              // Refresh dashboard data when closed after successful creation
+              window.location.reload();
+            }
+          }}
+        />
+
+        {showWorkOrderModal && (
+          <WorkOrderForm
+            onClose={() => setShowWorkOrderModal(false)}
+            onSuccess={() => {
+              setShowWorkOrderModal(false);
+              // Refresh dashboard data
+              window.location.reload();
+            }}
+          />
+        )}
+
+        <StandaloneBillingSheet
+          open={showBillingSheetModal}
+          onOpenChange={(open) => {
+            setShowBillingSheetModal(open);
+            if (!open) {
+              // Refresh dashboard data when closed after successful creation
+              window.location.reload();
+            }
+          }}
+        />
     </div>
   );
 }
