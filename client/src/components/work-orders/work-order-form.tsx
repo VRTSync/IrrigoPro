@@ -11,8 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomerSelector } from "@/components/ui/customer-selector";
-import { LocationFields } from "@/components/location/location-fields";
-import { Calendar, User, AlertCircle, FileText, Target } from "lucide-react";
+import { LocationPicker } from "@/components/ui/location-picker";
+import { Calendar, User, AlertCircle, FileText, Target, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertWorkOrderSchema } from "@shared/schema";
@@ -20,6 +20,9 @@ import type { Customer, Estimate } from "@shared/schema";
 
 const workOrderFormSchema = insertWorkOrderSchema.extend({
   scheduledDate: z.string().optional(),
+  workLocationLat: z.number().optional(),
+  workLocationLng: z.number().optional(),
+  workLocationAddress: z.string().optional(),
 });
 
 type WorkOrderFormData = z.infer<typeof workOrderFormSchema>;
@@ -31,6 +34,7 @@ interface WorkOrderFormProps {
 
 export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -46,10 +50,12 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
       customerName: "",
       customerEmail: "",
       customerPhone: "",
-      projectName: "",
+      projectName: "Work Order",
       projectAddress: "",
       locationNotes: "",
-      accessInstructions: "",
+      workLocationLat: undefined,
+      workLocationLng: undefined,
+      workLocationAddress: "",
       workType: "direct_billing",
       status: "pending",
       priority: "medium", // Default to standard for direct work orders
@@ -96,10 +102,9 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
     form.setValue("customerName", selectedEstimate.customerName);
     form.setValue("customerEmail", selectedEstimate.customerEmail);
     form.setValue("customerPhone", selectedEstimate.customerPhone || "");
-    form.setValue("projectName", selectedEstimate.projectName);
+    form.setValue("projectName", selectedEstimate.projectName || "Work Order");
     form.setValue("projectAddress", selectedEstimate.projectAddress || "");
     form.setValue("locationNotes", selectedEstimate.locationNotes || "");
-    form.setValue("accessInstructions", selectedEstimate.accessInstructions || "");
     form.setValue("workType", "estimate_based");
   }
 
@@ -150,7 +155,15 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
       });
       return;
     }
-    createWorkOrder.mutate(data);
+
+    // Ensure we have location data
+    const finalData = {
+      ...data,
+      projectName: data.projectName || "Work Order",
+      projectAddress: selectedLocation?.address || data.projectAddress || selectedCustomer.address || "",
+    };
+
+    createWorkOrder.mutate(finalData);
   };
 
   return (
@@ -261,60 +274,57 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 3: Project Information */}
+            {/* Step 3: Work Location */}
+            {selectedCustomer && (
+              <LocationPicker
+                defaultAddress={selectedCustomer.address || ""}
+                onLocationSelect={(location) => {
+                  setSelectedLocation(location);
+                  form.setValue("workLocationLat", location.lat);
+                  form.setValue("workLocationLng", location.lng);
+                  form.setValue("workLocationAddress", location.address || "");
+                }}
+                selectedLocation={selectedLocation}
+              />
+            )}
+
+            {/* Step 4: Work Description */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Project Information</CardTitle>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  Work Description
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="projectName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Project Name *</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Sprinkler System Installation" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="projectAddress"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Project Address</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="123 Oak Street, Springfield, IL 62701" 
-                            {...field} 
-                            value={field.value || ""}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                
-                <div className="border-t pt-4">
-                  {/* Location Fields */}
-                  <LocationFields control={form.control} />
-                </div>
-
                 <FormField
                   control={form.control}
                   name="description"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Description</FormLabel>
+                      <FormLabel>Description *</FormLabel>
                       <FormControl>
                         <Textarea 
                           placeholder="Describe the work to be performed..." 
+                          className="min-h-[100px]"
+                          {...field} 
+                          value={field.value || ""}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="locationNotes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Location Notes</FormLabel>
+                      <FormControl>
+                        <Textarea 
+                          placeholder="Additional notes about the work location..." 
                           className="min-h-[80px]"
                           {...field} 
                           value={field.value || ""}
@@ -327,7 +337,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 4: Scheduling and Assignment */}
+            {/* Step 5: Scheduling and Assignment */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
