@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -62,9 +62,18 @@ type BillingItem = z.infer<typeof billingItemSchema>;
 interface StandaloneBillingSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  prefillFromWorkOrder?: {
+    customerId?: number;
+    customerName?: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    projectAddress?: string;
+    projectName?: string;
+    workOrderNumber?: string;
+  };
 }
 
-export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBillingSheetProps) {
+export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrder }: StandaloneBillingSheetProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
@@ -82,12 +91,12 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
   const form = useForm<BillingSheetData>({
     resolver: zodResolver(billingSheetSchema),
     defaultValues: {
-      customerId: 0,
-      customerName: "",
-      propertyAddress: "",
+      customerId: prefillFromWorkOrder?.customerId || 0,
+      customerName: prefillFromWorkOrder?.customerName || "",
+      propertyAddress: prefillFromWorkOrder?.projectAddress || "",
       workDate: new Date().toISOString().split('T')[0],
       technicianName: isFieldTech ? currentUser?.name || "" : "",
-      workDescription: "",
+      workDescription: prefillFromWorkOrder?.projectName ? `Work Order: ${prefillFromWorkOrder.workOrderNumber} - ${prefillFromWorkOrder.projectName}` : "",
       totalHours: 0,
       laborRate: 45,
       notes: "",
@@ -195,10 +204,55 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
   });
 
   const resetForm = () => {
-    form.reset();
-    setSelectedCustomer(null);
+    form.reset({
+      customerId: prefillFromWorkOrder?.customerId || 0,
+      customerName: prefillFromWorkOrder?.customerName || "",
+      propertyAddress: prefillFromWorkOrder?.projectAddress || "",
+      workDate: new Date().toISOString().split('T')[0],
+      technicianName: isFieldTech ? currentUser?.name || "" : "",
+      workDescription: prefillFromWorkOrder?.projectName ? `Work Order: ${prefillFromWorkOrder.workOrderNumber} - ${prefillFromWorkOrder.projectName}` : "",
+      totalHours: 0,
+      laborRate: 45,
+      notes: "",
+      items: [],
+    });
+    
+    // Set selected customer if prefilled
+    if (prefillFromWorkOrder?.customerId) {
+      // Fetch customer data to set selected customer
+      // This would ideally be done with a proper query, but for now we'll just create a basic customer object
+      setSelectedCustomer({
+        id: prefillFromWorkOrder.customerId,
+        name: prefillFromWorkOrder.customerName || "",
+        email: prefillFromWorkOrder.customerEmail || "",
+        phone: prefillFromWorkOrder.customerPhone || "",
+        companyId: currentUser?.companyId || 1,
+        isActive: true,
+        createdAt: "",
+        updatedAt: "",
+      });
+    } else {
+      setSelectedCustomer(null);
+    }
+    
     setPhotos([]);
   };
+
+  // Initialize with prefilled data when modal opens
+  useEffect(() => {
+    if (open && prefillFromWorkOrder?.customerId) {
+      setSelectedCustomer({
+        id: prefillFromWorkOrder.customerId,
+        name: prefillFromWorkOrder.customerName || "",
+        email: prefillFromWorkOrder.customerEmail || "",
+        phone: prefillFromWorkOrder.customerPhone || "",
+        companyId: currentUser?.companyId || 1,
+        isActive: true,
+        createdAt: "",
+        updatedAt: "",
+      });
+    }
+  }, [open, prefillFromWorkOrder, currentUser?.companyId]);
 
   const onSubmit = async (data: BillingSheetData) => {
     await createBillingSheetMutation.mutateAsync(data);
@@ -206,25 +260,37 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto p-4 sm:p-6">
-        <DialogHeader>
-          <DialogTitle>Create Billing Sheet</DialogTitle>
+      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+        <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+          <DialogTitle className="flex items-center gap-3 text-lg sm:text-xl">
+            <div className="bg-orange-50 p-2 rounded-lg">
+              <FileText className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+              <span className="text-xl font-semibold">Create Billing Sheet</span>
+              <p className="text-sm text-gray-600 font-normal mt-1">
+                Document standalone work and materials
+              </p>
+            </div>
+          </DialogTitle>
           <DialogDescription>
             Create a billing sheet for work performed without a work order
           </DialogDescription>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+
+          <Form {...form}>
+            <form id="billing-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
             {/* Customer & Location */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <User className="w-5 h-5" />
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <User className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                   Customer & Location
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3 sm:space-y-4">
                 <CustomerSelector 
                   onSelectCustomer={handleCustomerSelect}
                   selectedCustomer={selectedCustomer}
@@ -250,13 +316,13 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
             {/* Work Details */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                   Work Details
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3 sm:space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
@@ -329,18 +395,19 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
             {/* Parts & Materials */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Package className="w-5 h-5" />
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                   Parts & Materials Used
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
+              <CardContent className="space-y-3 sm:space-y-4">
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                   <Button
                     type="button"
                     onClick={() => setShowPartsModal(true)}
                     variant="outline"
+                    className="w-full sm:w-auto"
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Add from Catalog
@@ -349,6 +416,7 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                     type="button"
                     onClick={addManualItem}
                     variant="outline"
+                    className="w-full sm:w-auto"
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Add Manual Item
@@ -358,20 +426,20 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                 {fields.length === 0 ? (
                   <p className="text-gray-500 text-center py-4">No items added yet</p>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-3 sm:space-y-4">
                     {fields.map((field, index) => (
                       <Card key={field.id} className="border-l-4 border-l-blue-500">
-                        <CardContent className="pt-4">
-                          <div className={`grid gap-4 items-end ${isFieldTech ? 'grid-cols-4' : 'grid-cols-6'}`}>
-                            <div className="col-span-2">
+                        <CardContent className="pt-3 sm:pt-4">
+                          <div className={`grid gap-2 sm:gap-4 items-end ${isFieldTech ? 'grid-cols-3 sm:grid-cols-4' : 'grid-cols-5 sm:grid-cols-6'}`}>
+                            <div className="col-span-2 sm:col-span-2">
                               <FormField
                                 control={form.control}
                                 name={`items.${index}.partName`}
                                 render={({ field }) => (
                                   <FormItem>
-                                    <FormLabel>Item Name</FormLabel>
+                                    <FormLabel className="text-xs sm:text-sm">Item Name</FormLabel>
                                     <FormControl>
-                                      <Input {...field} placeholder="Part/Material name" />
+                                      <Input {...field} placeholder="Part/Material name" className="text-sm" />
                                     </FormControl>
                                     <FormMessage />
                                   </FormItem>
@@ -379,61 +447,70 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                               />
                             </div>
                             
-                            <FormField
-                              control={form.control}
-                              name={`items.${index}.quantity`}
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Quantity</FormLabel>
-                                  <FormControl>
-                                    <Input {...field} type="number" step="0.01" />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
+                            <div className="col-span-1 sm:col-span-1">
+                              <FormField
+                                control={form.control}
+                                name={`items.${index}.quantity`}
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel className="text-xs sm:text-sm">Qty</FormLabel>
+                                    <FormControl>
+                                      <Input {...field} type="number" step="0.01" className="text-sm" />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
                             
                             {/* Hide pricing for field techs */}
                             {!isFieldTech && (
-                              <FormField
-                                control={form.control}
-                                name={`items.${index}.unitPrice`}
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>Unit Price</FormLabel>
-                                    <FormControl>
-                                      <Input {...field} type="number" step="0.01" />
-                                    </FormControl>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
+                              <>
+                                <div className="col-span-1 sm:col-span-1">
+                                  <FormField
+                                    control={form.control}
+                                    name={`items.${index}.unitPrice`}
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel className="text-xs sm:text-sm">Price</FormLabel>
+                                        <FormControl>
+                                          <Input {...field} type="number" step="0.01" className="text-sm" />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
+                                
+                                <div className="col-span-1 sm:col-span-1">
+                                  <FormField
+                                    control={form.control}
+                                    name={`items.${index}.laborHours`}
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel className="text-xs sm:text-sm">Hours</FormLabel>
+                                        <FormControl>
+                                          <Input {...field} type="number" step="0.25" className="text-sm" />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
+                              </>
                             )}
                             
-                            {!isFieldTech && (
-                              <FormField
-                                control={form.control}
-                                name={`items.${index}.laborHours`}
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>Labor Hours</FormLabel>
-                                    <FormControl>
-                                      <Input {...field} type="number" step="0.25" />
-                                    </FormControl>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
-                            )}
-                            
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => remove(index)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                            <div className="col-span-1 sm:col-span-1 flex items-end">
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => remove(index)}
+                                className="w-full sm:w-auto"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </div>
                           
                           <div className="mt-4">
@@ -469,9 +546,9 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
             {/* Labor Hours - Field techs enter this last */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Timer className="w-5 h-5" />
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                   Labor Hours
                 </CardTitle>
               </CardHeader>
@@ -494,9 +571,9 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
             {/* Photo Upload */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Camera className="w-5 h-5" />
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                   Photos
                 </CardTitle>
               </CardHeader>
@@ -504,7 +581,7 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
                 <div className="space-y-4">
                   <FileUpload
                     files={photos}
-                    onChange={setPhotos}
+                    onUploadedFilesChange={setPhotos}
                     accept="image/*"
                     multiple
                     maxFiles={5}
@@ -519,8 +596,8 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
 
             {/* Additional Notes */}
             <Card>
-              <CardHeader>
-                <CardTitle>Additional Notes</CardTitle>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg">Additional Notes</CardTitle>
               </CardHeader>
               <CardContent>
                 <FormField
@@ -540,9 +617,9 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
             {/* Billing Summary - Hidden from field techs */}
             {!isFieldTech && (
               <Card className="bg-gray-50">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Calculator className="w-5 h-5" />
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                    <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                     Billing Summary
                   </CardTitle>
                 </CardHeader>
@@ -574,26 +651,33 @@ export function StandaloneBillingSheet({ open, onOpenChange }: StandaloneBilling
               </Card>
             )}
 
-            {/* Action Buttons */}
-            <div className="flex gap-3 justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={createBillingSheetMutation.isPending}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                {createBillingSheetMutation.isPending ? "Creating..." : "Create Billing Sheet"}
-              </Button>
-            </div>
-          </form>
-        </Form>
+
+            </form>
+          </Form>
+        </div>
+
+        {/* Action Buttons - Fixed Bottom */}
+        <div className="border-t border-gray-200 p-4 sm:p-6 flex-shrink-0">
+          <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="billing-form"
+              disabled={createBillingSheetMutation.isPending}
+              className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {createBillingSheetMutation.isPending ? "Creating..." : "Create Billing Sheet"}
+            </Button>
+          </div>
+        </div>
 
         {/* Parts Search Modal */}
         <PartsSearchModal
