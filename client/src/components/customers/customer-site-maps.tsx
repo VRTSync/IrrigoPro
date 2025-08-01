@@ -94,34 +94,30 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     enabled: !!selectedProject,
   });
 
-  // Transform data for map viewer
-  const project: Project | null = selectedProject && controllers && zones ? {
+  // Transform data for map viewer - show map even if only controllers are available
+  const project: Project | null = selectedProject && controllers ? {
     id: selectedProject.id,
     name: selectedProject.name,
     controllers: controllers || [],
-    zones: (zones || []).map(zone => ({
-      ...zone,
-      // Parse PostgreSQL array format boundaries
-      boundaries: zone.boundaries 
-        ? parseBoundariesFromDB(zone.boundaries)
-        : []
-    })),
+    zones: (zones || []),
     zonesByController: (zones || []).reduce((acc, zone) => {
       // Use controller ID for proper grouping
       const controllerId = zone.controllerId?.toString() || 'unassigned';
       if (!acc[controllerId]) {
         acc[controllerId] = [];
       }
-      acc[controllerId].push({
-        ...zone,
-        // Parse PostgreSQL array format boundaries
-        boundaries: zone.boundaries 
-          ? parseBoundariesFromDB(zone.boundaries)
-          : []
-      });
+      acc[controllerId].push(zone);
       return acc;
     }, {} as Record<string, IrrigationZone[]>)
   } : null;
+
+  // Debug logging
+  console.log('CustomerSiteMaps Debug:', {
+    selectedProject,
+    controllers: controllers?.length || 0,
+    zones: zones?.length || 0,
+    project: project ? `${project.name} with ${project.controllers.length} controllers and ${project.zones.length} zones` : 'null'
+  });
 
   const handleControllerKMLParsed = async (data: any) => {
     console.log("Controller KML parsed:", data);
@@ -452,7 +448,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                         name: zone.name || 'Unknown Zone',
                         controllerId: controllerId,
                         color: `hsl(${(parseInt(controllerId) * 137.5) % 360}, 70%, 50%)`,
-                        boundaries: zone.boundaries || undefined,
+                        boundaries: zone.boundaries ? parseBoundariesFromDB(zone.boundaries) : undefined,
                         stationNumber: zone.stationNumber || undefined,
                         zoneType: zone.zoneType || undefined,
                         coverage: zone.coverage || undefined,
@@ -464,7 +460,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                     name: zone.name || 'Unknown Zone',
                     controllerId: zone.controllerId?.toString() || 'unassigned',
                     color: `hsl(${((zone.controllerId || 0) * 137.5) % 360}, 70%, 50%)`,
-                    boundaries: zone.boundaries || undefined,
+                    boundaries: zone.boundaries ? parseBoundariesFromDB(zone.boundaries) : undefined,
                     stationNumber: zone.stationNumber || undefined,
                     zoneType: zone.zoneType || undefined,
                     coverage: zone.coverage || undefined,
