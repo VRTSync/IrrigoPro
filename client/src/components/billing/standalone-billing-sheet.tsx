@@ -182,6 +182,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
         ...data,
         ...totals,
         photos: photos.map(p => p.url),
+        // Include technicianId for proper filtering
+        technicianId: currentUser?.id || null,
       };
       return await apiRequest("/api/billing-sheets", "POST", billingSheetData);
     },
