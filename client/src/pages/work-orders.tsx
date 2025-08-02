@@ -514,6 +514,16 @@ export default function WorkOrders() {
                                     </span>
                                   </div>
                                 )}
+
+                                {/* Completion Date */}
+                                {workOrder.status === 'completed' && workOrder.completedAt && (
+                                  <div className="flex items-center gap-2">
+                                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                    <span className="text-green-700 text-sm font-medium">
+                                      Completed: {formatDate(workOrder.completedAt)}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Action Buttons */}
@@ -656,8 +666,8 @@ export default function WorkOrders() {
                         </div>
                       )}
 
-                      {/* Assignment Indicator */}
-                      <div className="mt-3">
+                      {/* Assignment and Completion Indicator */}
+                      <div className="mt-3 space-y-2">
                         {workOrder.assignedTechnicianName ? (
                           <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
                             <Wrench className="w-4 h-4 text-blue-600 flex-shrink-0" />
@@ -671,6 +681,17 @@ export default function WorkOrders() {
                             <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0" />
                             <div className="flex-1">
                               <p className="text-sm font-medium text-yellow-700">Unassigned</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Completion Date Indicator */}
+                        {workOrder.status === 'completed' && workOrder.completedAt && (
+                          <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-2">
+                            <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                            <div className="flex-1">
+                              <p className="text-xs font-medium text-green-600">Completed on</p>
+                              <p className="text-sm font-semibold text-green-700">{formatDate(workOrder.completedAt)}</p>
                             </div>
                           </div>
                         )}
