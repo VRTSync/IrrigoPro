@@ -262,7 +262,10 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+      <DialogContent 
+        className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
           <DialogTitle className="flex items-center gap-3 text-lg sm:text-xl">
             <div className="bg-orange-50 p-2 rounded-lg">
