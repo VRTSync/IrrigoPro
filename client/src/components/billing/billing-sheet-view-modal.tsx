@@ -144,7 +144,7 @@ export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingShee
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base sm:text-lg flex items-center gap-2">
                     <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                    Parts & Materials ({items.length} items)
+                    {isFieldTech ? `Parts Used (${items.length} items)` : `Parts & Materials (${items.length} items)`}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -209,19 +209,25 @@ export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingShee
               </Card>
             )}
 
-            {/* Time Summary for field techs, Billing Summary for others */}
+            {/* Work Summary for field techs, Billing Summary for others */}
             {isFieldTech ? (
-              <Card className="bg-gray-50">
+              <Card className="bg-blue-50">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                    <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                    Time Summary
+                    <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                    Work Summary
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex justify-between text-lg font-semibold">
-                    <span className="text-gray-600">Total Hours Worked:</span>
-                    <span className="text-gray-900">{sheet.totalHours} hours</span>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Hours Worked:</span>
+                      <span className="font-semibold text-gray-900">{sheet.totalHours} hours</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Parts Used:</span>
+                      <span className="font-medium text-gray-900">{items.length} items</span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
