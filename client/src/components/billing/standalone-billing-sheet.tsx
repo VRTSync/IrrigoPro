@@ -585,12 +585,12 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
               <CardContent>
                 <div className="space-y-4">
                   <FileUpload
+                    type="photo"
+                    label="Photos"
                     files={photos}
-                    onUploadedFilesChange={setPhotos}
+                    onFilesChange={setPhotos}
                     accept="image/*"
                     multiple
-                    maxFiles={5}
-                    className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors"
                   />
                   <p className="text-sm text-gray-500">
                     Upload photos of the work performed (up to 5 images)
