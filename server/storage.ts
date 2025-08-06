@@ -1282,6 +1282,10 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
+  async getBillingSheetItems(billingSheetId: number): Promise<BillingSheetItem[]> {
+    return await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
+  }
+
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {
     return await db.select().from(estimates).where(eq(estimates.customerId, customerId)).orderBy(desc(estimates.createdAt));

@@ -6,13 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send } from "lucide-react";
+import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { BillingSheet } from "@shared/schema";
 
 export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewingSheet, setViewingSheet] = useState<BillingSheet | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -324,6 +326,19 @@ export default function BillingSheets() {
                         </Button>
                       )}
                       
+                      {/* View button for submitted billing sheets */}
+                      {sheet.status !== 'draft' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setViewingSheet(sheet)}
+                          className="px-3"
+                        >
+                          <Eye className="w-3 h-3 mr-1" />
+                          View
+                        </Button>
+                      )}
+                      
                       {/* Approval buttons for managers on submitted billing sheets */}
                       {currentUser?.role !== 'field_tech' && sheet.status === 'submitted' && (
                         <div className="flex gap-2">
@@ -365,6 +380,15 @@ export default function BillingSheets() {
         open={showBillingModal}
         onOpenChange={setShowBillingModal}
       />
+
+      {/* View Billing Sheet Modal */}
+      {viewingSheet && (
+        <BillingSheetViewModal
+          sheet={viewingSheet}
+          open={!!viewingSheet}
+          onOpenChange={() => setViewingSheet(null)}
+        />
+      )}
     </div>
   );
 }

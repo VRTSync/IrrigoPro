@@ -286,7 +286,15 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
     
     // Second step: actually submit
     console.log('Actually submitting to API');
-    await createBillingSheetMutation.mutateAsync(data);
+    try {
+      await createBillingSheetMutation.mutateAsync(data);
+      // Close modal after successful submission
+      onOpenChange(false);
+      setShowReview(false);
+    } catch (error) {
+      console.error('Error submitting billing sheet:', error);
+      // Keep on review screen to allow retry
+    }
   };
 
   const handleBack = () => {

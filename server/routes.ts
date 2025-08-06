@@ -1886,9 +1886,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const count = await storage.getBillingSheetCount();
       const billingNumber = `BS-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
       
+      // Set status to 'submitted' for field techs, 'draft' for others
+      const status = billingSheetData.status || 'submitted';
+      
       const billingSheet = await storage.createBillingSheet({
         ...billingSheetData,
-        billingNumber
+        billingNumber,
+        status
       });
       
       res.json(billingSheet);
@@ -2088,6 +2092,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error assigning work order:", error);
       res.status(500).json({ message: "Failed to assign work order" });
+    }
+  });
+
+  // Get billing sheet items
+  app.get("/api/billing-sheets/:id/items", async (req, res) => {
+    try {
+      const billingSheetId = parseInt(req.params.id);
+      const items = await storage.getBillingSheetItems(billingSheetId);
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch billing sheet items" });
     }
   });
 
