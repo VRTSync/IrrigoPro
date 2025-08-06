@@ -659,9 +659,30 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                   )}
                 />
 
-                {/* Hide labor rate for field techs */}
-                {!isFieldTech && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Total Hours - visible to all users */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="totalHours"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Total Hours Worked *</FormLabel>
+                        <FormControl>
+                          <Input 
+                            {...field} 
+                            type="number" 
+                            step="0.25"
+                            min="0.01"
+                            placeholder="e.g., 2.5"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {/* Labor Rate - hidden from field techs */}
+                  {!isFieldTech && (
                     <FormField
                       control={form.control}
                       name="laborRate"
@@ -669,14 +690,20 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                         <FormItem>
                           <FormLabel>Labor Rate ($/hour)</FormLabel>
                           <FormControl>
-                            <Input {...field} type="number" step="0.01" />
+                            <Input 
+                              {...field} 
+                              type="number" 
+                              step="0.01"
+                              min="0"
+                              placeholder="e.g., 45.00"
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                  </div>
-                )}
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -1018,29 +1045,15 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                 </Button>
               </>
             ) : (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    console.log('Current form values:', form.getValues());
-                    console.log('Form errors:', form.formState.errors);
-                    console.log('Form is valid:', form.formState.isValid);
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Debug Form
-                </Button>
-                <Button
-                  type="submit"
-                  form="billing-form"
-                  disabled={createBillingSheetMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
-                </Button>
-              </>
+              <Button
+                type="submit"
+                form="billing-form"
+                disabled={createBillingSheetMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
+              </Button>
             )}
           </div>
         </div>
