@@ -314,8 +314,6 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     console.log('Form submission triggered');
     console.log('Current showReview state:', showReview);
     console.log('Form data:', data);
-    console.log('Form errors:', form.formState.errors);
-    console.log('Form validation state:', form.formState.isValid);
     
     // Check for specific validation issues
     if (!data.customerId || data.customerId === 0) {
@@ -1049,8 +1047,12 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                   Back to Edit
                 </Button>
                 <Button
-                  type="submit"
-                  form="billing-form"
+                  type="button"
+                  onClick={() => {
+                    console.log('Final submit button clicked!');
+                    const formData = form.getValues();
+                    createBillingSheetMutation.mutate(formData);
+                  }}
                   disabled={createBillingSheetMutation.isPending}
                   className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
                 >
@@ -1059,40 +1061,47 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                 </Button>
               </>
             ) : (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    const formData = form.getValues();
-                    const errors = form.formState.errors;
-                    console.log('=== FORM DEBUG ===');
-                    console.log('Form values:', formData);
-                    console.log('Form errors:', errors);
-                    console.log('Is valid:', form.formState.isValid);
-                    console.log('Customer ID:', formData.customerId);
-                    console.log('Work description:', formData.workDescription);
-                    console.log('Total hours:', formData.totalHours);
-                    console.log('Technician name:', formData.technicianName);
-                    console.log('==================');
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Debug Form
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    console.log('Submit button clicked!');
-                    form.handleSubmit(onSubmit)();
-                  }}
-                  disabled={createBillingSheetMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
-                </Button>
-              </>
+              <Button
+                type="button"
+                onClick={() => {
+                  const formData = form.getValues();
+                  
+                  // Validate manually first
+                  if (!formData.customerId || formData.customerId === 0) {
+                    toast({
+                      title: "Validation Error",
+                      description: "Please select a customer",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  if (!formData.workDescription?.trim()) {
+                    toast({
+                      title: "Validation Error", 
+                      description: "Please enter a work description",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  if (!formData.totalHours || formData.totalHours <= 0) {
+                    toast({
+                      title: "Validation Error",
+                      description: "Please enter total hours worked",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  
+                  setShowReview(true);
+                }}
+                disabled={createBillingSheetMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
+              </Button>
             )}
           </div>
         </div>
