@@ -23,7 +23,16 @@ interface BillingSheetViewModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// Helper function to get current user
+const getCurrentUser = () => {
+  const savedUser = localStorage.getItem("user");
+  return savedUser ? JSON.parse(savedUser) : null;
+};
+
 export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingSheetViewModalProps) {
+  const currentUser = getCurrentUser();
+  const isFieldTech = currentUser?.role === 'field_tech';
+
   // Fetch billing sheet items
   const { data: items = [] } = useQuery<BillingSheetItem[]>({
     queryKey: ["/api/billing-sheets", sheet.id, "items"],
@@ -151,7 +160,9 @@ export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingShee
                           </div>
                           <div className="text-right ml-4">
                             <p className="text-sm text-gray-600">Qty: {item.quantity}</p>
-                            <p className="text-sm font-medium text-gray-900">{formatCurrency(Number(item.totalPrice))}</p>
+                            {!isFieldTech && (
+                              <p className="text-sm font-medium text-gray-900">{formatCurrency(Number(item.totalPrice))}</p>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -198,40 +209,57 @@ export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingShee
               </Card>
             )}
 
-            {/* Billing Summary */}
-            <Card className="bg-gray-50">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                  <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                  Billing Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Parts Subtotal:</span>
-                  <span className="font-medium">{formatCurrency(Number(sheet.partsSubtotal))}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">
-                    Labor ({sheet.totalHours} hours @ {formatCurrency(Number(sheet.laborRate))}/hr):
-                  </span>
-                  <span className="font-medium">{formatCurrency(Number(sheet.laborSubtotal))}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Markup:</span>
-                  <span className="font-medium">{formatCurrency(Number(sheet.markupAmount))}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Tax:</span>
-                  <span className="font-medium">{formatCurrency(Number(sheet.taxAmount))}</span>
-                </div>
-                <Separator />
-                <div className="flex justify-between text-lg font-semibold">
-                  <span>Total:</span>
-                  <span>{formatCurrency(Number(sheet.totalAmount))}</span>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Time Summary for field techs, Billing Summary for others */}
+            {isFieldTech ? (
+              <Card className="bg-gray-50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                    <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                    Time Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex justify-between text-lg font-semibold">
+                    <span className="text-gray-600">Total Hours Worked:</span>
+                    <span className="text-gray-900">{sheet.totalHours} hours</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="bg-gray-50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                    <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                    Billing Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Parts Subtotal:</span>
+                    <span className="font-medium">{formatCurrency(Number(sheet.partsSubtotal))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">
+                      Labor ({sheet.totalHours} hours @ {formatCurrency(Number(sheet.laborRate))}/hr):
+                    </span>
+                    <span className="font-medium">{formatCurrency(Number(sheet.laborSubtotal))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Markup:</span>
+                    <span className="font-medium">{formatCurrency(Number(sheet.markupAmount))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Tax:</span>
+                    <span className="font-medium">{formatCurrency(Number(sheet.taxAmount))}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between text-lg font-semibold">
+                    <span>Total:</span>
+                    <span>{formatCurrency(Number(sheet.totalAmount))}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
 
