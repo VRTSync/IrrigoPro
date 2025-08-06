@@ -311,15 +311,23 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const [showReview, setShowReview] = useState(false);
   
   const onSubmit = async (data: BillingSheetData) => {
+    console.log('Form submission triggered');
+    console.log('Current showReview state:', showReview);
+    console.log('Form data:', data);
+    console.log('Form errors:', form.formState.errors);
+    
     if (!showReview) {
       // First step: show review
+      console.log('Moving to review step');
       setShowReview(true);
       return;
     }
     
     // Second step: actually submit
+    console.log('Submitting to API');
     try {
       await createBillingSheetMutation.mutateAsync(data);
+      console.log('Submission successful');
     } catch (error) {
       console.error('Error submitting billing sheet:', error);
       // Keep on review screen to allow retry
