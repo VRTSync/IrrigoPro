@@ -188,7 +188,11 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
       return await apiRequest("/api/billing-sheets", "POST", billingSheetData);
     },
     onSuccess: () => {
+      // Invalidate both general and technician-specific billing sheet queries
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      if (currentUser?.id) {
+        queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
+      }
       toast({
         title: "Success",
         description: "Billing sheet created successfully",

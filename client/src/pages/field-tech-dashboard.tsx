@@ -28,6 +28,13 @@ export default function FieldTechDashboard() {
     enabled: !!currentUser?.id,
   });
 
+  // Get billing sheets for this technician
+  const { data: billingSheets } = useQuery({
+    queryKey: ["/api/billing-sheets", "technician", currentUser?.id],
+    queryFn: () => apiRequest(`/api/billing-sheets?technician=${currentUser?.id}`, "GET"),
+    enabled: !!currentUser?.id,
+  });
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -100,15 +107,15 @@ export default function FieldTechDashboard() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs sm:text-sm">
                   <span className="text-gray-600">My sheets:</span>
-                  <span className="font-medium">-</span>
+                  <span className="font-medium">{billingSheets?.length || 0}</span>
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
                   <span className="text-gray-600">Pending:</span>
-                  <span className="font-medium">-</span>
+                  <span className="font-medium">{billingSheets?.filter((bs: any) => bs.status === 'draft' || bs.status === 'submitted').length || 0}</span>
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
                   <span className="text-gray-600">Approved:</span>
-                  <span className="font-medium">-</span>
+                  <span className="font-medium">{billingSheets?.filter((bs: any) => bs.status === 'approved' || bs.status === 'billed').length || 0}</span>
                 </div>
               </div>
               <div className="flex gap-2">
