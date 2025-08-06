@@ -24,7 +24,10 @@ import {
   MapPin,
   Calendar,
   Clock,
-  Camera
+  Camera,
+  ArrowLeft,
+  Check,
+  Minus
 } from "lucide-react";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
@@ -240,9 +243,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
         taxPercent: null,
         totalControllers: null,
         propertyNotes: null,
-        createdAt: "",
-        updatedAt: "",
-      });
+      } as Customer);
     } else {
       setSelectedCustomer(null);
     }
@@ -266,18 +267,37 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
         taxPercent: null,
         totalControllers: null,
         propertyNotes: null,
-        createdAt: "",
-        updatedAt: "",
-      });
+      } as Customer);
     }
   }, [open, prefillFromWorkOrder, currentUser?.companyId]);
 
+  const [showReview, setShowReview] = useState(false);
+  
   const onSubmit = async (data: BillingSheetData) => {
+    if (!showReview) {
+      // First step: show review
+      setShowReview(true);
+      return;
+    }
+    
+    // Second step: actually submit
     await createBillingSheetMutation.mutateAsync(data);
   };
 
+  const handleBack = () => {
+    setShowReview(false);
+  };
+
+  // Reset review state when modal closes
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      setShowReview(false);
+    }
+    onOpenChange(newOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent 
         className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col"
         onOpenAutoFocus={(e) => e.preventDefault()}
@@ -288,14 +308,22 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
               <FileText className="w-5 h-5 text-orange-600" />
             </div>
             <div>
-              <span className="text-xl font-semibold">Create Billing Sheet</span>
+              <span className="text-xl font-semibold">
+                {showReview ? 'Review Billing Sheet' : 'Create Billing Sheet'}
+              </span>
               <p className="text-sm text-gray-600 font-normal mt-1">
-                Document standalone work and materials
+                {showReview 
+                  ? 'Review your details before submitting'
+                  : 'Document standalone work and materials'
+                }
               </p>
             </div>
           </DialogTitle>
           <DialogDescription>
-            Create a billing sheet for work performed without a work order
+            {showReview
+              ? 'Please review all information before final submission'
+              : 'Create a billing sheet for work performed without a work order'
+            }
           </DialogDescription>
         </DialogHeader>
 
@@ -303,6 +331,122 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
 
           <Form {...form}>
             <form id="billing-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
+            {showReview ? (
+              // Review Screen
+              <div className="space-y-4 sm:space-y-6">
+                {/* Customer & Location Review */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                      <User className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                      Customer & Location
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Customer</p>
+                      <p className="text-gray-900">{form.watch('customerName')}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Property Address</p>
+                      <p className="text-gray-900">{form.watch('propertyAddress') || 'No address specified'}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Work Details Review */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                      <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                      Work Details
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Work Date</p>
+                      <p className="text-gray-900">{new Date(form.watch('workDate')).toLocaleDateString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Technician</p>
+                      <p className="text-gray-900">{form.watch('technicianName')}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Work Description</p>
+                      <p className="text-gray-900">{form.watch('workDescription') || 'No description provided'}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Parts & Materials Review */}
+                {form.watch('items').length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                        <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                        Parts & Materials ({form.watch('items').length} items)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {form.watch('items').map((item, index) => (
+                          <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium text-gray-900">{item.partName}</p>
+                                {item.partDescription && (
+                                  <p className="text-sm text-gray-600 mt-1">{item.partDescription}</p>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-600">Qty: {item.quantity}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Photos Review */}
+                {photos.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                        <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                        Photos ({photos.length})
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {photos.map((photo, index) => (
+                          <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                            <img 
+                              src={typeof photo === 'string' ? photo : URL.createObjectURL(photo as File)} 
+                              alt={`Photo ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Notes Review */}
+                {form.watch('notes') && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base sm:text-lg">Additional Notes</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-gray-900">{form.watch('notes')}</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            ) : (
+              // Form Screen
+              <>
             {/* Customer & Location */}
             <Card>
               <CardHeader className="pb-3">
@@ -713,8 +857,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                 </CardContent>
               </Card>
             )}
-
-
+            </>
+            )}
             </form>
           </Form>
         </div>
@@ -730,15 +874,38 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
             >
               Cancel
             </Button>
-            <Button
-              type="submit"
-              form="billing-form"
-              disabled={createBillingSheetMutation.isPending}
-              className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-            >
-              <Save className="w-4 h-4 mr-2" />
-              {createBillingSheetMutation.isPending ? "Creating..." : "Create Billing Sheet"}
-            </Button>
+            {showReview ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleBack}
+                  className="w-full sm:w-auto"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Edit
+                </Button>
+                <Button
+                  type="submit"
+                  form="billing-form"
+                  disabled={createBillingSheetMutation.isPending}
+                  className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+                >
+                  <Check className="w-4 h-4 mr-2" />
+                  {createBillingSheetMutation.isPending ? "Submitting..." : "Submit Billing Sheet"}
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="submit"
+                form="billing-form"
+                disabled={createBillingSheetMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
+              </Button>
+            )}
           </div>
         </div>
 
