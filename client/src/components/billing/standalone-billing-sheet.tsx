@@ -1081,8 +1081,11 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                   Debug Form
                 </Button>
                 <Button
-                  type="submit"
-                  form="billing-form"
+                  type="button"
+                  onClick={() => {
+                    console.log('Submit button clicked!');
+                    form.handleSubmit(onSubmit)();
+                  }}
                   disabled={createBillingSheetMutation.isPending}
                   className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
                 >
