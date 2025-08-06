@@ -233,7 +233,13 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
         email: prefillFromWorkOrder.customerEmail || "",
         phone: prefillFromWorkOrder.customerPhone || "",
         companyId: currentUser?.companyId || 1,
-        isActive: true,
+        address: null,
+        notes: null,
+        laborRate: null,
+        markupPercent: null,
+        taxPercent: null,
+        totalControllers: null,
+        propertyNotes: null,
         createdAt: "",
         updatedAt: "",
       });
@@ -253,7 +259,13 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
         email: prefillFromWorkOrder.customerEmail || "",
         phone: prefillFromWorkOrder.customerPhone || "",
         companyId: currentUser?.companyId || 1,
-        isActive: true,
+        address: null,
+        notes: null,
+        laborRate: null,
+        markupPercent: null,
+        taxPercent: null,
+        totalControllers: null,
+        propertyNotes: null,
         createdAt: "",
         updatedAt: "",
       });
@@ -448,7 +460,13 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                                   <FormItem>
                                     <FormLabel className="text-xs sm:text-sm">Item Name</FormLabel>
                                     <FormControl>
-                                      <Input {...field} placeholder="Part/Material name" className="text-sm" />
+                                      <Input 
+                                        {...field} 
+                                        placeholder="Part/Material name" 
+                                        className="text-sm" 
+                                        readOnly={!!form.watch(`items.${index}.partId`)}
+                                        disabled={!!form.watch(`items.${index}.partId`)}
+                                      />
                                     </FormControl>
                                     <FormMessage />
                                   </FormItem>
@@ -464,7 +482,41 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                                   <FormItem>
                                     <FormLabel className="text-xs sm:text-sm">Qty</FormLabel>
                                     <FormControl>
-                                      <Input {...field} type="number" step="0.01" className="text-sm" />
+                                      <div className="flex items-center gap-1">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 w-8 p-0"
+                                          onClick={() => {
+                                            const currentValue = parseFloat(field.value) || 0;
+                                            if (currentValue > 0) {
+                                              field.onChange(Math.max(0, currentValue - 1).toString());
+                                            }
+                                          }}
+                                        >
+                                          -
+                                        </Button>
+                                        <Input 
+                                          {...field} 
+                                          type="number" 
+                                          step="0.01" 
+                                          min="0"
+                                          className="text-sm text-center h-8 w-16" 
+                                        />
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 w-8 p-0"
+                                          onClick={() => {
+                                            const currentValue = parseFloat(field.value) || 0;
+                                            field.onChange((currentValue + 1).toString());
+                                          }}
+                                        >
+                                          +
+                                        </Button>
+                                      </div>
                                     </FormControl>
                                     <FormMessage />
                                   </FormItem>
