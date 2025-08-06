@@ -659,51 +659,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                   )}
                 />
 
-                {/* Total Hours - visible to all users */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="totalHours"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Total Hours Worked *</FormLabel>
-                        <FormControl>
-                          <Input 
-                            {...field} 
-                            type="number" 
-                            step="0.25"
-                            min="0.01"
-                            placeholder="e.g., 2.5"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
 
-                  {/* Labor Rate - hidden from field techs */}
-                  {!isFieldTech && (
-                    <FormField
-                      control={form.control}
-                      name="laborRate"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Labor Rate ($/hour)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              {...field} 
-                              type="number" 
-                              step="0.01"
-                              min="0"
-                              placeholder="e.g., 45.00"
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
-                </div>
               </CardContent>
             </Card>
 
@@ -898,32 +854,61 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
               </CardContent>
             </Card>
 
-            {/* Labor Hours - Only visible to non-field techs */}
-            {!isFieldTech && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                    <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                    Labor Hours
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
+            {/* Labor Hours - Visible to all users */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                  <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                  Labor Hours
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="totalHours"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Total Hours Worked</FormLabel>
+                        <FormLabel>Total Hours Worked *</FormLabel>
                         <FormControl>
-                          <Input {...field} type="number" step="0.25" placeholder="Total hours worked on this job" />
+                          <Input 
+                            {...field} 
+                            type="number" 
+                            step="0.25" 
+                            min="0.01"
+                            placeholder="e.g., 2.5" 
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                </CardContent>
-              </Card>
-            )}
+
+                  {/* Labor Rate - hidden from field techs */}
+                  {!isFieldTech && (
+                    <FormField
+                      control={form.control}
+                      name="laborRate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Labor Rate ($/hour)</FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              type="number" 
+                              step="0.01"
+                              min="0"
+                              placeholder="e.g., 45.00"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Photo Upload */}
             <Card>
