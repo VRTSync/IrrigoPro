@@ -232,7 +232,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
       }
       toast({
         title: "Success",
-        description: "Billing sheet created successfully",
+        description: draftData ? "Draft billing sheet updated successfully" : "Billing sheet created successfully",
       });
       onOpenChange(false);
       resetForm();
@@ -248,15 +248,15 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
 
   const resetForm = () => {
     form.reset({
-      customerId: prefillFromWorkOrder?.customerId || 0,
-      customerName: prefillFromWorkOrder?.customerName || "",
-      propertyAddress: prefillFromWorkOrder?.projectAddress || "",
-      workDate: new Date().toISOString().split('T')[0],
+      customerId: prefillFromWorkOrder?.customerId || draftData?.customerId || 0,
+      customerName: prefillFromWorkOrder?.customerName || draftData?.customerName || "",
+      propertyAddress: prefillFromWorkOrder?.projectAddress || draftData?.propertyAddress || "",
+      workDate: draftData?.workDate || new Date().toISOString().split('T')[0],
       technicianName: isFieldTech ? currentUser?.name || "" : "",
-      workDescription: prefillFromWorkOrder?.projectName ? `Work Order: ${prefillFromWorkOrder.workOrderNumber} - ${prefillFromWorkOrder.projectName}` : "",
-      totalHours: isFieldTech ? 0 : 0,
-      laborRate: isFieldTech ? 0 : 45,
-      notes: "",
+      workDescription: prefillFromWorkOrder?.projectName ? `Work Order: ${prefillFromWorkOrder.workOrderNumber} - ${prefillFromWorkOrder.projectName}` : draftData?.workDescription || "",
+      totalHours: isFieldTech ? 0 : draftData?.totalHours || 0,
+      laborRate: isFieldTech ? 0 : draftData?.laborRate || 45,
+      notes: draftData?.notes || "",
       items: [],
     });
     
@@ -339,6 +339,9 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {
       setShowReview(false);
+      resetForm();
+      setSelectedCustomer(null);
+      setPhotos([]);
     }
     onOpenChange(newOpen);
   };
@@ -916,7 +919,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
               className="w-full sm:w-auto"
             >
               Cancel
