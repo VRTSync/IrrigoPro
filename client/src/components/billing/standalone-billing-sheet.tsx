@@ -274,13 +274,18 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
   const [showReview, setShowReview] = useState(false);
   
   const onSubmit = async (data: BillingSheetData) => {
+    console.log('Form submitted with data:', data);
+    console.log('showReview state:', showReview);
+    
     if (!showReview) {
       // First step: show review
+      console.log('Moving to review step');
       setShowReview(true);
       return;
     }
     
     // Second step: actually submit
+    console.log('Actually submitting to API');
     await createBillingSheetMutation.mutateAsync(data);
   };
 
@@ -421,7 +426,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                         {photos.map((photo, index) => (
                           <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
                             <img 
-                              src={typeof photo === 'string' ? photo : URL.createObjectURL(photo as File)} 
+                              src={typeof photo === 'string' ? photo : (photo as any).url || URL.createObjectURL(new File([photo], 'photo'))} 
                               alt={`Photo ${index + 1}`}
                               className="w-full h-full object-cover"
                             />
@@ -635,7 +640,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                                           onClick={() => {
                                             const currentValue = parseFloat(field.value) || 0;
                                             if (currentValue > 0) {
-                                              field.onChange(Math.max(0, currentValue - 1).toString());
+                                              field.onChange(Math.max(0, currentValue - 1));
                                             }
                                           }}
                                         >
@@ -655,7 +660,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                                           className="h-8 w-8 p-0"
                                           onClick={() => {
                                             const currentValue = parseFloat(field.value) || 0;
-                                            field.onChange((currentValue + 1).toString());
+                                            field.onChange(currentValue + 1);
                                           }}
                                         >
                                           +
