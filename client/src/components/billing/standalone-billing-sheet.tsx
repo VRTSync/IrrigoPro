@@ -147,11 +147,11 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
 
   const calculateTotals = () => {
     const items = form.watch("items");
-    const laborRate = form.watch("laborRate");
-    const totalHours = form.watch("totalHours");
+    const laborRate = isFieldTech ? 0 : form.watch("laborRate");
+    const totalHours = isFieldTech ? 0 : form.watch("totalHours");
     
-    const partsSubtotal = items.reduce((sum, item) => 
-      sum + (item.quantity * item.unitPrice), 0
+    const partsSubtotal = isFieldTech ? 0 : items.reduce((sum, item) => 
+      sum + (item.quantity * (item.unitPrice || 0)), 0
     );
     
     const laborSubtotal = totalHours * laborRate;
@@ -161,9 +161,9 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
     const markupPercent = selectedCustomer?.markupPercent ? parseFloat(selectedCustomer.markupPercent) : 20;
     const taxPercent = selectedCustomer?.taxPercent ? parseFloat(selectedCustomer.taxPercent) : 8.25;
     
-    const markupAmount = subtotal * (markupPercent / 100);
-    const taxAmount = (subtotal + markupAmount) * (taxPercent / 100);
-    const totalAmount = subtotal + markupAmount + taxAmount;
+    const markupAmount = isFieldTech ? 0 : subtotal * (markupPercent / 100);
+    const taxAmount = isFieldTech ? 0 : (subtotal + markupAmount) * (taxPercent / 100);
+    const totalAmount = isFieldTech ? 0 : subtotal + markupAmount + taxAmount;
 
     return {
       partsSubtotal,
@@ -217,8 +217,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
       workDate: new Date().toISOString().split('T')[0],
       technicianName: isFieldTech ? currentUser?.name || "" : "",
       workDescription: prefillFromWorkOrder?.projectName ? `Work Order: ${prefillFromWorkOrder.workOrderNumber} - ${prefillFromWorkOrder.projectName}` : "",
-      totalHours: 0,
-      laborRate: 45,
+      totalHours: isFieldTech ? 0 : 0,
+      laborRate: isFieldTech ? 0 : 45,
       notes: "",
       items: [],
     });
@@ -439,8 +439,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
                     {fields.map((field, index) => (
                       <Card key={field.id} className="border-l-4 border-l-blue-500">
                         <CardContent className="pt-3 sm:pt-4">
-                          <div className={`grid gap-2 sm:gap-4 items-end ${isFieldTech ? 'grid-cols-3 sm:grid-cols-4' : 'grid-cols-5 sm:grid-cols-6'}`}>
-                            <div className="col-span-2 sm:col-span-2">
+                          <div className={`grid gap-2 sm:gap-4 items-end ${isFieldTech ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-5 sm:grid-cols-6'}`}>
+                            <div className={`${isFieldTech ? 'col-span-1 sm:col-span-2' : 'col-span-2 sm:col-span-2'}`}>
                               <FormField
                                 control={form.control}
                                 name={`items.${index}.partName`}
@@ -553,30 +553,32 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
               </CardContent>
             </Card>
 
-            {/* Labor Hours - Field techs enter this last */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                  <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                  Labor Hours
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <FormField
-                  control={form.control}
-                  name="totalHours"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Total Hours Worked</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="number" step="0.25" placeholder="Total hours worked on this job" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
+            {/* Labor Hours - Only visible to non-field techs */}
+            {!isFieldTech && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                    <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                    Labor Hours
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <FormField
+                    control={form.control}
+                    name="totalHours"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Total Hours Worked</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="number" step="0.25" placeholder="Total hours worked on this job" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             {/* Photo Upload */}
             <Card>
