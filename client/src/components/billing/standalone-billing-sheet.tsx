@@ -12,6 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { 
   Plus, 
   Trash2, 
@@ -81,6 +82,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -235,6 +237,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
         description: draftData ? "Draft billing sheet updated successfully" : "Billing sheet created successfully",
       });
       onOpenChange(false);
+      setShowReview(false);
       resetForm();
     },
     onError: (error) => {
@@ -308,23 +311,15 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const [showReview, setShowReview] = useState(false);
   
   const onSubmit = async (data: BillingSheetData) => {
-    console.log('Form submitted with data:', data);
-    console.log('showReview state:', showReview);
-    
     if (!showReview) {
       // First step: show review
-      console.log('Moving to review step');
       setShowReview(true);
       return;
     }
     
     // Second step: actually submit
-    console.log('Actually submitting to API');
     try {
       await createBillingSheetMutation.mutateAsync(data);
-      // Close modal after successful submission
-      onOpenChange(false);
-      setShowReview(false);
     } catch (error) {
       console.error('Error submitting billing sheet:', error);
       // Keep on review screen to allow retry
@@ -333,6 +328,75 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
 
   const handleBack = () => {
     setShowReview(false);
+  };
+
+  // Save as draft mutation
+  const saveDraftMutation = useMutation({
+    mutationFn: async (data: BillingSheetData) => {
+      const draftData = {
+        ...data,
+        ...totals,
+        photos: photos.map(p => p.url),
+        technicianId: currentUser?.id || null,
+        status: 'draft'
+      };
+      return await apiRequest("/api/billing-sheets", "POST", draftData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      if (currentUser?.id) {
+        queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
+      }
+      toast({
+        title: "Draft Saved",
+        description: "Billing sheet saved as draft successfully",
+      });
+      onOpenChange(false);
+      setShowReview(false);
+      resetForm();
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to save draft",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Check if form has data worth saving
+  const hasFormData = () => {
+    const formData = form.getValues();
+    return formData.customerId > 0 || 
+           formData.workDescription.trim().length > 0 || 
+           formData.items.length > 0 ||
+           formData.notes?.trim().length > 0;
+  };
+
+  // Handle cancel button click
+  const handleCancel = () => {
+    if (hasFormData()) {
+      setShowCancelDialog(true);
+    } else {
+      handleOpenChange(false);
+    }
+  };
+
+  // Save as draft and close
+  const handleSaveAsDraft = async () => {
+    try {
+      const formData = form.getValues();
+      await saveDraftMutation.mutateAsync(formData);
+      setShowCancelDialog(false);
+    } catch (error) {
+      // Error handled by mutation
+    }
+  };
+
+  // Discard and close
+  const handleDiscard = () => {
+    setShowCancelDialog(false);
+    handleOpenChange(false);
   };
 
   // Reset review state when modal closes
@@ -919,7 +983,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
             <Button
               type="button"
               variant="outline"
-              onClick={() => handleOpenChange(false)}
+              onClick={handleCancel}
               className="w-full sm:w-auto"
             >
               Cancel
@@ -966,6 +1030,30 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
           onSelectPart={addPart}
         />
       </DialogContent>
+
+      {/* Save Draft Confirmation Dialog */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save as Draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes. Would you like to save this billing sheet as a draft before closing?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleDiscard}>
+              Discard Changes
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleSaveAsDraft}
+              disabled={saveDraftMutation.isPending}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {saveDraftMutation.isPending ? "Saving..." : "Save as Draft"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
