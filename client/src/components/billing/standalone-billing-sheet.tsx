@@ -50,14 +50,14 @@ const billingItemSchema = z.object({
 const billingSheetSchema = z.object({
   customerId: z.number().min(1, "Customer is required"),
   customerName: z.string().min(1, "Customer name is required"),
-  propertyAddress: z.string().min(1, "Property address is required"),
+  propertyAddress: z.string().optional(),
   workDate: z.string().min(1, "Work date is required"),
   technicianName: z.string().min(1, "Technician name is required"),
   workDescription: z.string().min(1, "Work description is required"),
-  totalHours: z.coerce.number().min(0.1, "Total hours must be greater than 0"),
+  totalHours: z.coerce.number().min(0.01, "Total hours must be greater than 0"),
   laborRate: z.coerce.number().min(0, "Labor rate must be positive"),
   notes: z.string().optional(),
-  items: z.array(billingItemSchema).min(1, "At least one item is required"),
+  items: z.array(billingItemSchema).optional().default([]),
 });
 
 type BillingSheetData = z.infer<typeof billingSheetSchema>;
@@ -1018,15 +1018,29 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                 </Button>
               </>
             ) : (
-              <Button
-                type="submit"
-                form="billing-form"
-                disabled={createBillingSheetMutation.isPending}
-                className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    console.log('Current form values:', form.getValues());
+                    console.log('Form errors:', form.formState.errors);
+                    console.log('Form is valid:', form.formState.isValid);
+                  }}
+                  className="w-full sm:w-auto"
+                >
+                  Debug Form
+                </Button>
+                <Button
+                  type="submit"
+                  form="billing-form"
+                  disabled={createBillingSheetMutation.isPending}
+                  className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {createBillingSheetMutation.isPending ? "Creating..." : "Review & Submit"}
+                </Button>
+              </>
             )}
           </div>
         </div>
