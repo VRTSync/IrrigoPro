@@ -254,7 +254,9 @@ export default function BillingSheets() {
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-sm">
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
+                      currentUser?.role === 'field_tech' ? 'lg:grid-cols-2' : 'lg:grid-cols-4'
+                    }`}>
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         <div className="min-w-0">
@@ -271,21 +273,26 @@ export default function BillingSheets() {
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
-                          <p className="text-gray-500 text-xs">Total Time</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
-                          <p className="text-gray-500 text-xs">Total Amount</p>
-                        </div>
-                      </div>
+                      {/* Hide pricing info from field techs */}
+                      {currentUser?.role !== 'field_tech' && (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
+                              <p className="text-gray-500 text-xs">Total Time</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
+                              <p className="text-gray-500 text-xs">Total Amount</p>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                     
                     <div className="mt-3 space-y-1">
