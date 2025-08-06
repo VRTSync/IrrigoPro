@@ -15,6 +15,7 @@ export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewingSheet, setViewingSheet] = useState<BillingSheet | null>(null);
+  const [editingDraft, setEditingDraft] = useState<BillingSheet | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -45,6 +46,10 @@ export default function BillingSheets() {
       ? fetch(`/api/billing-sheets?technician=${currentUser.id}`).then(res => res.json())
       : fetch('/api/billing-sheets').then(res => res.json()),
   });
+
+  // Separate drafts and submitted sheets
+  const draftSheets = billingSheets?.filter(sheet => sheet.status === 'draft') || [];
+  const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -77,12 +82,20 @@ export default function BillingSheets() {
     });
   };
 
-  const filteredBillingSheets = billingSheets?.filter(sheet =>
+  // Filter billing sheets based on search query
+  const filteredDrafts = draftSheets.filter(sheet => 
     sheet.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     sheet.technicianName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredSubmitted = submittedSheets.filter(sheet => 
+    sheet.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    sheet.technicianName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   // Billing sheet approval mutation
   const approveBillingSheet = useMutation({
@@ -221,7 +234,7 @@ export default function BillingSheets() {
             </Card>
           ))}
         </div>
-      ) : filteredBillingSheets.length === 0 ? (
+      ) : (filteredDrafts.length === 0 && filteredSubmitted.length === 0) ? (
         <Card>
           <CardContent className="text-center py-12">
             <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -242,12 +255,90 @@ export default function BillingSheets() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {filteredBillingSheets.map((sheet) => (
-            <Card key={sheet.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                  <div className="flex-1 min-w-0">
+        <>
+          {/* Draft Billing Sheets Section */}
+          {filteredDrafts.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-4">
+                <FileText className="w-5 h-5 text-orange-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Draft Billing Sheets</h2>
+                <Badge variant="secondary" className="bg-orange-100 text-orange-800">
+                  {filteredDrafts.length}
+                </Badge>
+              </div>
+              <div className="space-y-4">
+                {filteredDrafts.map((sheet) => (
+                  <Card key={sheet.id} className="border-orange-200 bg-orange-50/50">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-3">
+                            <FileText className="w-5 h-5 text-orange-600 flex-shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
+                              <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                            </div>
+                            <Badge className="bg-orange-100 text-orange-800">Draft</Badge>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
+                                <p className="text-gray-500 text-xs">Work Date</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-gray-900 truncate">{sheet.technicianName}</p>
+                                <p className="text-gray-500 text-xs">Technician</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:items-end gap-2 flex-shrink-0">
+                          {/* Edit draft button for field techs */}
+                          {currentUser?.role === 'field_tech' && sheet.technicianId === currentUser.id && (
+                            <Button
+                              size="sm"
+                              onClick={() => setEditingDraft(sheet)}
+                              className="bg-orange-600 hover:bg-orange-700 text-white px-3"
+                            >
+                              <FileText className="w-3 h-3 mr-1" />
+                              Continue Draft
+                            </Button>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            Last saved: {formatDate(sheet.updatedAt)}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Submitted Billing Sheets Section */}
+          {filteredSubmitted.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Check className="w-5 h-5 text-green-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Submitted Billing Sheets</h2>
+                <Badge variant="secondary" className="bg-green-100 text-green-800">
+                  {filteredSubmitted.length}
+                </Badge>
+              </div>
+              <div className="space-y-4">
+                {filteredSubmitted.map((sheet) => (
+                  <Card key={sheet.id} className="hover:shadow-md transition-shadow">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                        <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-3">
                       <FileText className="w-5 h-5 text-blue-600 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
@@ -371,8 +462,11 @@ export default function BillingSheets() {
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Standalone Billing Sheet Modal */}
@@ -380,6 +474,15 @@ export default function BillingSheets() {
         open={showBillingModal}
         onOpenChange={setShowBillingModal}
       />
+
+      {/* Edit Draft Modal */}
+      {editingDraft && (
+        <StandaloneBillingSheet
+          open={!!editingDraft}
+          onOpenChange={() => setEditingDraft(null)}
+          draftData={editingDraft}
+        />
+      )}
 
       {/* View Billing Sheet Modal */}
       {viewingSheet && (

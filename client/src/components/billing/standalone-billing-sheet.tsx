@@ -65,6 +65,7 @@ type BillingItem = z.infer<typeof billingItemSchema>;
 interface StandaloneBillingSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  draftData?: any; // Draft data to load for editing
   prefillFromWorkOrder?: {
     customerId?: number;
     customerName?: string;
@@ -76,7 +77,7 @@ interface StandaloneBillingSheetProps {
   };
 }
 
-export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrder }: StandaloneBillingSheetProps) {
+export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillFromWorkOrder }: StandaloneBillingSheetProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
@@ -111,6 +112,39 @@ export function StandaloneBillingSheet({ open, onOpenChange, prefillFromWorkOrde
     control: form.control,
     name: "items",
   });
+
+  // Load draft data when editing
+  useEffect(() => {
+    if (draftData) {
+      form.setValue("customerId", draftData.customerId);
+      form.setValue("customerName", draftData.customerName);
+      form.setValue("propertyAddress", draftData.propertyAddress);
+      form.setValue("workDate", draftData.workDate);
+      form.setValue("technicianName", draftData.technicianName);
+      form.setValue("workDescription", draftData.workDescription);
+      form.setValue("totalHours", draftData.totalHours);
+      form.setValue("laborRate", draftData.laborRate);
+      form.setValue("notes", draftData.notes || "");
+      
+      // Clear existing items and add draft items
+      fields.forEach((_, index) => remove(index));
+      
+      // Add draft items
+      if (draftData.items && draftData.items.length > 0) {
+        draftData.items.forEach((item: any) => {
+          append({
+            partId: item.partId,
+            partName: item.partName,
+            partDescription: item.partDescription || "",
+            quantity: item.quantity,
+            unitPrice: isFieldTech ? 0 : item.unitPrice,
+            laborHours: isFieldTech ? 0 : item.laborHours,
+            notes: item.notes || "",
+          });
+        });
+      }
+    }
+  }, [draftData, form, append, remove, fields, isFieldTech]);
 
   const handleCustomerSelect = (customer: Customer) => {
     setSelectedCustomer(customer);
