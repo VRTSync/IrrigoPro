@@ -38,6 +38,7 @@ interface CustomerBillingData {
 export default function CustomerBilling() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -78,6 +79,8 @@ export default function CustomerBilling() {
     customer.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+
   const formatCurrency = (amount: number | string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
@@ -109,64 +112,7 @@ export default function CustomerBilling() {
     );
   };
 
-  return (
-    <div className="container mx-auto p-2 sm:p-4 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Customer Billing</h1>
-          <p className="text-sm text-gray-600">Manage customer invoices and billing</p>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Customer List Panel */}
-        <div className="lg:col-span-1">
-          <Card className="h-full">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <User className="w-4 h-4" />
-                Customers ({filteredCustomers.length})
-              </CardTitle>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search customers..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 h-7 text-sm"
-                />
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="max-h-[calc(100vh-180px)] overflow-y-auto">
-                {loadingCustomers ? (
-                  <div className="p-3 text-center text-gray-500 text-sm">Loading customers...</div>
-                ) : (
-                  <div className="space-y-1 p-2">
-                    {filteredCustomers.map((customer) => (
-                      <div
-                        key={customer.id}
-                        onClick={() => setSelectedCustomerId(customer.id)}
-                        className={`p-2 rounded-md border cursor-pointer transition-all hover:bg-gray-50 ${
-                          selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200'
-                        }`}
-                      >
-                        <div className="font-medium text-xs text-gray-900 truncate">{customer.name}</div>
-                        <div className="text-xs text-gray-600 truncate">{customer.email}</div>
-                        {customer.phone && (
-                          <div className="text-xs text-gray-500">{customer.phone}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Customer Details & Billing Panel */}
-        <div className="lg:col-span-2">
           {selectedCustomerId ? (
             loadingCustomerData ? (
               <Card>
