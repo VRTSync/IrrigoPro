@@ -62,17 +62,33 @@ export default function CustomerBilling() {
 
   // For now, create enhanced customer display with available data
   const getCustomerPreview = (customer: Customer) => {
-    // This would ideally come from the API, but we'll simulate it for now
-    const monthlyAverage = Math.floor(Math.random() * 3000) + 1000; // $1000-$4000 typical monthly
-    const currentMonthBilling = Math.floor(Math.random() * 6000); // Current month activity
+    // Create consistent, seeded data based on customer ID for demo
+    const seed = customer.id * 12345; // Use customer ID as seed for consistency
+    const random = (offset = 0) => ((seed + offset) % 1000) / 1000;
+    
+    // Generate base monthly average ($1000-$4000)
+    const monthlyAverage = Math.floor(random(1) * 3000) + 1000;
+    
+    // Generate current month billing that makes the pace meaningful
+    const paceMultiplier = random(2) < 0.3 ? 0.4 + random(3) * 0.3 : // 30% below average
+                          random(2) < 0.6 ? 0.8 + random(4) * 0.4 : // 30% average
+                          1.3 + random(5) * 0.7; // 40% above average
+    const currentMonthBilling = Math.floor(monthlyAverage * paceMultiplier);
     const billingPace = currentMonthBilling / monthlyAverage;
+    
+    // Unbilled amount should be reasonable part of current month
+    const unbilledAmount = Math.floor(currentMonthBilling * (0.2 + random(6) * 0.4)); // 20-60% of current month
+    
+    // Work orders should correlate with billing activity
+    const totalWorkOrders = Math.floor((currentMonthBilling / 200) + random(7) * 10);
+    const pendingWorkOrders = Math.floor(totalWorkOrders * (0.1 + random(8) * 0.3));
     
     return {
       ...customer,
-      unbilledAmount: Math.floor(Math.random() * 5000), // Simulated for demo
-      lastInvoiceDate: Math.random() > 0.3 ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000) : null,
-      totalWorkOrders: Math.floor(Math.random() * 20),
-      pendingWorkOrders: Math.floor(Math.random() * 5),
+      unbilledAmount,
+      lastInvoiceDate: random(9) > 0.3 ? new Date(Date.now() - random(10) * 30 * 24 * 60 * 60 * 1000) : null,
+      totalWorkOrders,
+      pendingWorkOrders,
       contractType: customer.contractType || 'standard',
       monthlyAverage,
       currentMonthBilling,
