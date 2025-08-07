@@ -14,7 +14,9 @@ import {
   AlertTriangle,
   Users,
   Building,
-  Save
+  Save,
+  Edit,
+  FolderOpen
 } from "lucide-react";
 import { ControllerUpload } from "./controller-upload";
 import { ZoneUpload } from "./zone-upload";
@@ -60,6 +62,8 @@ export function SiteMapsPage() {
   const [selectedController, setSelectedController] = useState<ColoredController | null>(null);
   const [selectedZone, setSelectedZone] = useState<ColoredZone | null>(null);
   const [uploadingZonesFor, setUploadingZonesFor] = useState<string | null>(null);
+  const [editingSiteMap, setEditingSiteMap] = useState<any>(null);
+  const [customerSiteMaps, setCustomerSiteMaps] = useState<any[]>([]);
 
   // Color palette for controllers
   const controllerColors = [
@@ -116,6 +120,125 @@ export function SiteMapsPage() {
     setUploadingZonesFor(controllerId);
   };
 
+  // Load existing site maps for a customer
+  const loadCustomerSiteMaps = async (customerId: number) => {
+    try {
+      const response = await fetch(`/api/customers/${customerId}/site-maps`, {
+        headers: {
+          'x-user-role': user?.role || ''
+        }
+      });
+      
+      if (response.ok) {
+        const siteMaps = await response.json();
+        setCustomerSiteMaps(siteMaps);
+      }
+    } catch (error) {
+      console.error("Error loading customer site maps:", error);
+    }
+  };
+
+  // Load a site map for editing
+  const loadSiteMapForEditing = async (siteMap: any) => {
+    try {
+      setEditingSiteMap(siteMap);
+      
+      // Load controllers
+      const controllersResponse = await fetch(`/api/site-maps/${siteMap.id}/controllers`, {
+        headers: {
+          'x-user-role': user?.role || ''
+        }
+      });
+      
+      if (!controllersResponse.ok) {
+        throw new Error('Failed to load controllers');
+      }
+      
+      const controllers = await controllersResponse.json();
+      
+      // Load zones
+      const zonesResponse = await fetch(`/api/site-maps/${siteMap.id}/zones`, {
+        headers: {
+          'x-user-role': user?.role || ''
+        }
+      });
+      
+      if (!zonesResponse.ok) {
+        throw new Error('Failed to load zones');
+      }
+      
+      const zones = await zonesResponse.json();
+      
+      // Convert database format to project format
+      const coloredControllers: ColoredController[] = controllers.map((controller: any, index: number) => ({
+        id: `controller-${controller.id}`,
+        name: controller.name,
+        latitude: parseFloat(controller.latitude),
+        longitude: parseFloat(controller.longitude),
+        model: controller.model || '',
+        serialNumber: controller.serialNumber || '',
+        stationCount: controller.stationCount || 8,
+        description: controller.description || '',
+        color: controllerColors[index % controllerColors.length]
+      }));
+      
+      // Group zones by controller
+      const zonesByController: { [controllerId: string]: ColoredZone[] } = {};
+      const allZones: ColoredZone[] = [];
+      
+      zones.forEach((zone: any) => {
+        const controller = coloredControllers.find(c => c.id === `controller-${zone.controllerId}`);
+        if (controller) {
+          const coloredZone: ColoredZone = {
+            name: zone.name,
+            stationNumber: zone.zoneNumber,
+            zoneType: zone.zoneType || 'unknown',
+            boundaries: [[parseFloat(zone.latitude), parseFloat(zone.longitude)]],
+            coverage: zone.coverage || '',
+            description: zone.description || '',
+            controllerId: controller.id,
+            color: controller.color
+          };
+          
+          if (!zonesByController[controller.id]) {
+            zonesByController[controller.id] = [];
+          }
+          zonesByController[controller.id].push(coloredZone);
+          allZones.push(coloredZone);
+        }
+      });
+      
+      setProject({
+        controllers: coloredControllers,
+        zonesByController,
+        allZones
+      });
+      
+      console.log("Site map loaded for editing:", siteMap.name);
+      
+    } catch (error) {
+      console.error("Error loading site map for editing:", error);
+      alert(`Failed to load site map: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle customer selection and load their site maps
+  const handleCustomerSelection = (customer: any) => {
+    setSelectedCustomer(customer);
+    setEditingSiteMap(null);
+    setProject({
+      controllers: [],
+      zonesByController: {},
+      allZones: []
+    });
+    
+    if (customer) {
+      loadCustomerSiteMaps(customer.id);
+    } else {
+      setCustomerSiteMaps([]);
+    }
+  };
+
   const handleSaveToDatabase = async () => {
     if (!selectedCustomer) {
       console.error("No customer selected");
@@ -128,60 +251,87 @@ export function SiteMapsPage() {
     }
     
     try {
-      const getCurrentUser = () => {
-        const savedUser = localStorage.getItem("user");
-        return savedUser ? JSON.parse(savedUser) : null;
-      };
-      
       const user = getCurrentUser();
       if (!user) {
         console.error("No user found");
         return;
       }
 
-      // Generate site map name
-      const siteMapName = `${selectedCustomer.name} - Site Map ${new Date().toLocaleDateString()}`;
-      
       // Calculate center coordinates from controllers
       const controllerCoords = project.controllers.map(c => [c.latitude, c.longitude]);
       const centerLat = controllerCoords.reduce((sum, coord) => sum + coord[0], 0) / controllerCoords.length;
       const centerLng = controllerCoords.reduce((sum, coord) => sum + coord[1], 0) / controllerCoords.length;
       
-      // Prepare site map data
-      const siteMapData = {
-        name: siteMapName,
-        description: `Irrigation site map for ${selectedCustomer.name}`,
-        customerId: selectedCustomer.id,
-        companyId: user.companyId || 1,
-        centerLat: centerLat.toString(),
-        centerLng: centerLng.toString(),
-        zoomLevel: 18,
-        kmlData: JSON.stringify({
-          controllers: project.controllers,
-          zones: project.allZones,
-          timestamp: new Date().toISOString()
-        })
-      };
+      let siteMapId: number;
       
-      console.log("Creating site map:", siteMapData);
-      
-      // Create site map
-      const response = await fetch(`/api/customers/${selectedCustomer.id}/site-maps`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': user.role
-        },
-        body: JSON.stringify(siteMapData)
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to create site map');
+      if (editingSiteMap) {
+        // Update existing site map
+        const siteMapData = {
+          name: editingSiteMap.name,
+          description: editingSiteMap.description,
+          centerLat: centerLat.toString(),
+          centerLng: centerLng.toString(),
+          zoomLevel: 18,
+          kmlData: JSON.stringify({
+            controllers: project.controllers,
+            zones: project.allZones,
+            timestamp: new Date().toISOString()
+          })
+        };
+        
+        const response = await fetch(`/api/site-maps/${editingSiteMap.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-role': user.role
+          },
+          body: JSON.stringify(siteMapData)
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to update site map');
+        }
+        
+        siteMapId = editingSiteMap.id;
+        console.log("Site map updated:", editingSiteMap.name);
+      } else {
+        // Create new site map
+        const siteMapName = `${selectedCustomer.name} - Site Map ${new Date().toLocaleDateString()}`;
+        
+        const siteMapData = {
+          name: siteMapName,
+          description: `Irrigation site map for ${selectedCustomer.name}`,
+          customerId: selectedCustomer.id,
+          companyId: user.companyId || 1,
+          centerLat: centerLat.toString(),
+          centerLng: centerLng.toString(),
+          zoomLevel: 18,
+          kmlData: JSON.stringify({
+            controllers: project.controllers,
+            zones: project.allZones,
+            timestamp: new Date().toISOString()
+          })
+        };
+        
+        const response = await fetch(`/api/customers/${selectedCustomer.id}/site-maps`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-role': user.role
+          },
+          body: JSON.stringify(siteMapData)
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to create site map');
+        }
+        
+        const newSiteMap = await response.json();
+        siteMapId = newSiteMap.id;
+        console.log("Site map created:", newSiteMap);
       }
-      
-      const newSiteMap = await response.json();
-      console.log("Site map created:", newSiteMap);
       
       // Save controllers
       const controllerData = project.controllers.map(controller => ({
@@ -196,7 +346,7 @@ export function SiteMapsPage() {
         customerId: selectedCustomer.id
       }));
       
-      const controllersResponse = await fetch(`/api/site-maps/${newSiteMap.id}/controllers`, {
+      const controllersResponse = await fetch(`/api/site-maps/${siteMapId}/controllers`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -208,9 +358,6 @@ export function SiteMapsPage() {
       if (!controllersResponse.ok) {
         throw new Error('Failed to save controllers');
       }
-      
-      const savedControllers = await controllersResponse.json();
-      console.log("Controllers saved:", savedControllers);
       
       // Save zones if any exist
       if (project.allZones.length > 0) {
@@ -226,7 +373,7 @@ export function SiteMapsPage() {
           customerId: selectedCustomer.id
         }));
         
-        const zonesResponse = await fetch(`/api/site-maps/${newSiteMap.id}/zones`, {
+        const zonesResponse = await fetch(`/api/site-maps/${siteMapId}/zones`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -238,12 +385,14 @@ export function SiteMapsPage() {
         if (!zonesResponse.ok) {
           throw new Error('Failed to save zones');
         }
-        
-        const savedZones = await zonesResponse.json();
-        console.log("Zones saved:", savedZones);
       }
       
-      alert("Site map saved successfully!");
+      alert(editingSiteMap ? "Site map updated successfully!" : "Site map saved successfully!");
+      
+      // Reload customer site maps
+      if (selectedCustomer) {
+        loadCustomerSiteMaps(selectedCustomer.id);
+      }
       
     } catch (error) {
       console.error("Error saving site map:", error);
@@ -362,9 +511,7 @@ export function SiteMapsPage() {
                   </p>
                   <CustomerSelector
                     selectedCustomer={selectedCustomer}
-                    onSelectCustomer={(customer) => {
-                      setSelectedCustomer(customer);
-                    }}
+                    onSelectCustomer={handleCustomerSelection}
                     placeholder="Select a customer for this site map..."
                   />
                   {selectedCustomer && (
@@ -378,20 +525,69 @@ export function SiteMapsPage() {
               </CardContent>
             </Card>
 
+            {/* Existing Site Maps Section */}
+            {selectedCustomer && customerSiteMaps.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5 text-blue-600" />
+                    Existing Site Maps for {selectedCustomer.name}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {customerSiteMaps.map((siteMap) => (
+                      <div key={siteMap.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+                        <div>
+                          <h4 className="font-semibold text-gray-900">{siteMap.name}</h4>
+                          <p className="text-sm text-gray-600">{siteMap.description}</p>
+                          <p className="text-xs text-gray-500">
+                            Created: {new Date(siteMap.createdAt).toLocaleDateString()}
+                            {siteMap.updatedAt !== siteMap.createdAt && (
+                              <span> • Updated: {new Date(siteMap.updatedAt).toLocaleDateString()}</span>
+                            )}
+                          </p>
+                        </div>
+                        {canEdit && (
+                          <button
+                            onClick={() => loadSiteMapForEditing(siteMap)}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center gap-2"
+                          >
+                            <Edit className="w-4 h-4" />
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Save to Database Section */}
             {selectedCustomer && project.controllers.length > 0 && (
               <Card className="border-2 border-green-200 bg-green-50">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-green-800">
                     <Save className="w-5 h-5" />
-                    Save Site Map
+                    {editingSiteMap ? 'Update Site Map' : 'Save Site Map'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
+                    {editingSiteMap && (
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-sm text-blue-800">
+                          <Edit className="w-4 h-4 inline mr-1" />
+                          Editing: {editingSiteMap.name}
+                        </p>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-green-200">
                       <div>
-                        <h4 className="font-semibold text-gray-900">Ready to Save</h4>
+                        <h4 className="font-semibold text-gray-900">
+                          {editingSiteMap ? 'Ready to Update' : 'Ready to Save'}
+                        </h4>
                         <p className="text-sm text-gray-600">
                           Customer: {selectedCustomer.name} • 
                           Controllers: {project.controllers.length} • 
@@ -403,11 +599,11 @@ export function SiteMapsPage() {
                         className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition-colors duration-200 flex items-center gap-2"
                       >
                         <Save className="w-5 h-5" />
-                        Save to Database
+                        {editingSiteMap ? 'Update Site Map' : 'Save to Database'}
                       </button>
                     </div>
                     <p className="text-xs text-green-700">
-                      This will create a permanent site map record linked to {selectedCustomer.name} with all uploaded controllers and zones.
+                      This will {editingSiteMap ? 'update the existing' : 'create a permanent'} site map record linked to {selectedCustomer.name} with all {editingSiteMap ? 'modified' : 'uploaded'} controllers and zones.
                     </p>
                   </div>
                 </CardContent>

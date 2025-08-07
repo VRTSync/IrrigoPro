@@ -312,6 +312,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.put("/api/site-maps/:siteMapId", requireAdminAccess, async (req, res) => {
+    try {
+      const siteMapId = parseInt(req.params.siteMapId);
+      
+      // Validate the request body
+      const validatedData = insertSiteMapSchema.partial().parse(req.body);
+      
+      const siteMap = await storage.updateSiteMap(siteMapId, validatedData);
+      if (!siteMap) {
+        return res.status(404).json({ message: "Site map not found" });
+      }
+      
+      res.json(siteMap);
+    } catch (error) {
+      console.error("Error updating site map:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Invalid site map data", 
+          errors: error.errors 
+        });
+      }
+      res.status(500).json({ message: "Failed to update site map" });
+    }
+  });
+
   app.delete("/api/site-maps/:siteMapId", requireAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);

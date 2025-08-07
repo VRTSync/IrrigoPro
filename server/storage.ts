@@ -1600,6 +1600,14 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async updateSiteMap(siteMapId: number, siteMap: Partial<InsertSiteMap>): Promise<SiteMap | undefined> {
+    const [updatedSiteMap] = await db.update(siteMaps)
+      .set({ ...siteMap, updatedAt: new Date() })
+      .where(eq(siteMaps.id, siteMapId))
+      .returning();
+    return updatedSiteMap || undefined;
+  }
+
   async deleteSiteMap(siteMapId: number): Promise<boolean> {
     const result = await db.delete(siteMaps).where(eq(siteMaps.id, siteMapId));
     return (result.rowCount || 0) > 0;
