@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { 
   Search, 
   FileText, 
@@ -19,7 +19,8 @@ import {
   Receipt,
   CheckCircle,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -81,7 +82,7 @@ export default function CustomerBilling() {
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
-  const formatCurrency = (amount: number | string) => {
+  const formatCurrency = (amount: string | number) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -112,310 +113,374 @@ export default function CustomerBilling() {
     );
   };
 
-
-          {selectedCustomerId ? (
-            loadingCustomerData ? (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <div className="text-gray-500">Loading customer billing data...</div>
-                </CardContent>
-              </Card>
-            ) : customerBillingData ? (
-              <div className="space-y-3">
-                {/* Customer Header - Compact */}
-                <Card>
-                  <CardHeader className="pb-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <div>
-                        <CardTitle className="text-lg">{customerBillingData.customer.name}</CardTitle>
-                        <div className="space-y-1 text-xs text-gray-600">
-                          <div className="flex items-center gap-2">
-                            <Mail className="w-3 h-3" />
-                            {customerBillingData.customer.email}
+  return (
+    <div className="w-full">
+      {/* Full-width Customer Selector Header */}
+      <div className="w-full bg-white border-b shadow-sm">
+        <div className="container mx-auto p-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <h1 className="text-xl font-bold text-gray-900">Customer Billing</h1>
+              <Dialog open={showCustomerModal} onOpenChange={setShowCustomerModal}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="flex items-center gap-2">
+                    <User className="w-4 h-4" />
+                    {selectedCustomer ? selectedCustomer.name : "Select Customer"}
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Select Customer</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <Input
+                        placeholder="Search customers..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                    <div className="max-h-96 overflow-y-auto space-y-2">
+                      {loadingCustomers ? (
+                        <div className="text-center text-gray-500 py-4">Loading customers...</div>
+                      ) : (
+                        filteredCustomers.map((customer) => (
+                          <div
+                            key={customer.id}
+                            onClick={() => {
+                              setSelectedCustomerId(customer.id);
+                              setShowCustomerModal(false);
+                              setSearchTerm("");
+                            }}
+                            className={`p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50 ${
+                              selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                            }`}
+                          >
+                            <div className="font-medium text-sm text-gray-900">{customer.name}</div>
+                            <div className="text-xs text-gray-600">{customer.email}</div>
+                            {customer.phone && (
+                              <div className="text-xs text-gray-500">{customer.phone}</div>
+                            )}
                           </div>
-                          {customerBillingData.customer.phone && (
-                            <div className="flex items-center gap-2">
-                              <Phone className="w-3 h-3" />
-                              {customerBillingData.customer.phone}
-                            </div>
-                          )}
-                          {customerBillingData.customer.address && (
-                            <div className="flex items-center gap-2">
-                              <MapPin className="w-3 h-3" />
-                              {customerBillingData.customer.address}
-                            </div>
-                          )}
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+            {selectedCustomer && (
+              <div className="text-sm text-gray-600">
+                Manage invoices and billing for {selectedCustomer.name}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="container mx-auto p-4">
+        {selectedCustomerId ? (
+          loadingCustomerData ? (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <div className="text-gray-500">Loading customer billing data...</div>
+              </CardContent>
+            </Card>
+          ) : customerBillingData ? (
+            <div className="space-y-3">
+              {/* Customer Header - Compact */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <CardTitle className="text-lg">{customerBillingData.customer.name}</CardTitle>
+                      <div className="space-y-1 text-xs text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <Mail className="w-3 h-3" />
+                          {customerBillingData.customer.email}
                         </div>
+                        {customerBillingData.customer.phone && (
+                          <div className="flex items-center gap-2">
+                            <Phone className="w-3 h-3" />
+                            {customerBillingData.customer.phone}
+                          </div>
+                        )}
+                        {customerBillingData.customer.address && (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-3 h-3" />
+                            {customerBillingData.customer.address}
+                          </div>
+                        )}
                       </div>
                     </div>
+                  </div>
+                </CardHeader>
+              </Card>
+
+              {/* Billing Summary Card - Compact */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {/* Unbilled Work Summary - Compact */}
+                <Card className="border-orange-200 bg-orange-50">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="flex items-center gap-1 text-orange-800 text-xs">
+                        <AlertTriangle className="w-3 h-3" />
+                        Unbilled Work
+                      </CardTitle>
+                      <Badge className="bg-orange-100 text-orange-800 text-xs">
+                        {formatCurrency(customerBillingData.totalUnbilledAmount)}
+                      </Badge>
+                    </div>
                   </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-2">
+                      <div className="text-xs text-orange-700">
+                        {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
+                      </div>
+                      <Button
+                        onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
+                        disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
+                        className="bg-orange-600 hover:bg-orange-700 text-white w-full h-7 text-xs"
+                      >
+                        <Receipt className="w-3 h-3 mr-1" />
+                        {createMonthlyInvoice.isPending ? "Creating..." : "Create Invoice"}
+                      </Button>
+                    </div>
+                  </CardContent>
                 </Card>
 
-                {/* Billing Summary Card - Compact */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                  {/* Unbilled Work Summary - Compact */}
-                  <Card className="border-orange-200 bg-orange-50">
+                {/* Quick Stats - Compact */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs text-gray-700">Total Work</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">Work Orders:</span>
+                        <span className="font-medium">{customerBillingData.workOrders.length}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">Billing Sheets:</span>
+                        <span className="font-medium">{customerBillingData.billingSheets.length}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">Estimates:</span>
+                        <span className="font-medium">{customerBillingData.estimates.length}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Total Revenue - Compact */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs text-gray-700">Revenue Overview</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-600">Completed Work:</span>
+                        <span className="font-medium">
+                          {formatCurrency(
+                            customerBillingData.workOrders
+                              .filter(wo => wo.status === 'completed')
+                              .reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+                            customerBillingData.billingSheets
+                              .reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0)
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs text-orange-600">
+                        <span>Unbilled:</span>
+                        <span className="font-medium">
+                          {formatCurrency(customerBillingData.totalUnbilledAmount)}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Work Details Tabs - Compact */}
+              <Tabs defaultValue="work-orders" className="w-full">
+                <TabsList className="grid w-full grid-cols-3 h-8">
+                  <TabsTrigger value="work-orders" className="text-xs">
+                    Work Orders ({customerBillingData.workOrders.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="billing-sheets" className="text-xs">
+                    Billing Sheets ({customerBillingData.billingSheets.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="estimates" className="text-xs">
+                    Estimates ({customerBillingData.estimates.length})
+                  </TabsTrigger>
+                </TabsList>
+
+                {/* Work Orders Tab */}
+                <TabsContent value="work-orders" className="space-y-2 mt-2">
+                  <Card>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-1 text-orange-800 text-xs">
-                          <AlertTriangle className="w-3 h-3" />
-                          Unbilled Work
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <FileText className="w-4 h-4" />
+                          Work Orders
                         </CardTitle>
-                        <Badge className="bg-orange-100 text-orange-800 text-xs">
-                          {formatCurrency(customerBillingData.totalUnbilledAmount)}
-                        </Badge>
+                        <div className="text-xs text-gray-600">
+                          {customerBillingData.workOrders.filter(wo => wo.status === 'completed').length} completed
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="pt-0">
-                      <div className="space-y-2">
-                        <div className="text-xs text-orange-700">
-                          {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
-                        </div>
-                        <Button
-                          onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
-                          disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
-                          className="bg-orange-600 hover:bg-orange-700 text-white w-full h-7 text-xs"
-                        >
-                          <Receipt className="w-3 h-3 mr-1" />
-                          {createMonthlyInvoice.isPending ? "Creating..." : "Create Invoice"}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Quick Stats - Compact */}
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-xs text-gray-700">Total Work</CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Work Orders:</span>
-                          <span className="font-medium">{customerBillingData.workOrders.length}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Billing Sheets:</span>
-                          <span className="font-medium">{customerBillingData.billingSheets.length}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Estimates:</span>
-                          <span className="font-medium">{customerBillingData.estimates.length}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Total Revenue - Compact */}
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-xs text-gray-700">Revenue Overview</CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-600">Completed Work:</span>
-                          <span className="font-medium">
-                            {formatCurrency(
-                              customerBillingData.workOrders
-                                .filter(wo => wo.status === 'completed')
-                                .reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-                              customerBillingData.billingSheets
-                                .reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0)
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-xs text-orange-600">
-                          <span>Unbilled:</span>
-                          <span className="font-medium">
-                            {formatCurrency(customerBillingData.totalUnbilledAmount)}
-                          </span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Work Details Tabs - Compact */}
-                <Tabs defaultValue="work-orders" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3 h-8">
-                    <TabsTrigger value="work-orders" className="text-xs">
-                      Work Orders ({customerBillingData.workOrders.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="billing-sheets" className="text-xs">
-                      Billing Sheets ({customerBillingData.billingSheets.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="estimates" className="text-xs">
-                      Estimates ({customerBillingData.estimates.length})
-                    </TabsTrigger>
-                  </TabsList>
-
-                  {/* Work Orders Tab */}
-                  <TabsContent value="work-orders" className="space-y-2 mt-2">
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                          <CardTitle className="flex items-center gap-2 text-sm">
-                            <FileText className="w-4 h-4" />
-                            Work Orders
-                          </CardTitle>
-                          <div className="text-xs text-gray-600">
-                            {customerBillingData.workOrders.filter(wo => wo.status === 'completed').length} completed
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-0">
-                        {customerBillingData.workOrders.length === 0 ? (
-                          <div className="text-center text-gray-500 py-6 text-sm">No work orders found</div>
-                        ) : (
-                          <div className="space-y-1 max-h-96 overflow-y-auto">
-                            {customerBillingData.workOrders.map((workOrder) => (
-                              <div key={workOrder.id} className={`border rounded-md p-2 transition-all ${
-                                workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
-                                  ? 'border-orange-200 bg-orange-50' 
-                                  : 'border-gray-200'
-                              }`}>
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="font-medium text-xs truncate">{workOrder.workOrderNumber}</span>
-                                      {getStatusBadge(workOrder.status)}
-                                      {workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0 && (
-                                        <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 px-1 py-0">
-                                          Ready
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    <div className="text-xs text-gray-600 truncate">{workOrder.projectName}</div>
-                                    <div className="text-xs text-gray-500 truncate">
-                                      {workOrder.assignedTechnicianName || "Unassigned"} • {formatDate(workOrder.createdAt)}
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <Badge variant="outline" className={`text-xs ${
-                                      parseFloat(workOrder.totalAmount || '0') === 0 
-                                        ? 'border-red-200 text-red-600 bg-red-50' 
-                                        : 'border-gray-200'
-                                    }`}>
-                                      {formatCurrency(workOrder.totalAmount || '0')}
-                                      {parseFloat(workOrder.totalAmount || '0') === 0 && (
-                                        <span className="ml-1 text-red-500">⚠</span>
-                                      )}
-                                    </Badge>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                  {/* Billing Sheets Tab */}
-                  <TabsContent value="billing-sheets" className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Receipt className="w-5 h-5" />
-                          Billing Sheets ({customerBillingData.billingSheets.length})
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {customerBillingData.billingSheets.length === 0 ? (
-                          <div className="text-center text-gray-500 py-8">No billing sheets found</div>
-                        ) : (
-                          <div className="space-y-3">
-                            {customerBillingData.billingSheets.map((billingSheet) => (
-                              <div key={billingSheet.id} className="border border-gray-200 rounded-lg p-4">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                  <div className="flex-1">
-                                    <div className="font-medium">{billingSheet.billingNumber}</div>
-                                    <div className="text-sm text-gray-600">{billingSheet.workDescription}</div>
-                                    <div className="text-sm text-gray-500">
-                                      Technician: {billingSheet.technicianName}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    {getStatusBadge(billingSheet.status)}
-                                    <Badge variant="outline">
-                                      {formatCurrency(billingSheet.totalAmount)}
-                                    </Badge>
-                                    <div className="text-sm text-gray-500">
-                                      {formatDate(billingSheet.workDate)}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-
-                  {/* Estimates Tab */}
-                  <TabsContent value="estimates" className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <DollarSign className="w-5 h-5" />
-                          Estimates ({customerBillingData.estimates.length})
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {customerBillingData.estimates.length === 0 ? (
-                          <div className="text-center text-gray-500 py-8">No estimates found</div>
-                        ) : (
-                          <div className="space-y-3">
-                            {customerBillingData.estimates.map((estimate) => (
-                              <div key={estimate.id} className="border border-gray-200 rounded-lg p-4">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                  <div className="flex-1">
-                                    <div className="font-medium">{estimate.estimateNumber}</div>
-                                    <div className="text-sm text-gray-600">{estimate.projectName}</div>
-                                    <div className="text-sm text-gray-500">
-                                      {estimate.projectAddress}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    {getStatusBadge(estimate.status)}
-                                    {estimate.totalAmount && (
-                                      <Badge variant="outline">
-                                        {formatCurrency(estimate.totalAmount)}
+                      {customerBillingData.workOrders.length === 0 ? (
+                        <div className="text-center text-gray-500 py-6 text-sm">No work orders found</div>
+                      ) : (
+                        <div className="space-y-1 max-h-96 overflow-y-auto">
+                          {customerBillingData.workOrders.map((workOrder) => (
+                            <div key={workOrder.id} className={`border rounded-md p-2 transition-all ${
+                              workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
+                                ? 'border-orange-200 bg-orange-50' 
+                                : 'border-gray-200'
+                            }`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-medium text-xs truncate">{workOrder.workOrderNumber}</span>
+                                    {getStatusBadge(workOrder.status)}
+                                    {workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0 && (
+                                      <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 px-1 py-0">
+                                        Ready
                                       </Badge>
                                     )}
-                                    <div className="text-sm text-gray-500">
-                                      {formatDate(estimate.createdAt)}
-                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-600 truncate">{workOrder.projectName}</div>
+                                  <div className="text-xs text-gray-500 truncate">
+                                    {workOrder.assignedTechnicianName || "Unassigned"} • {formatDate(workOrder.createdAt)}
                                   </div>
                                 </div>
+                                <div className="text-right">
+                                  <Badge variant="outline" className={`text-xs ${
+                                    parseFloat(workOrder.totalAmount || '0') === 0 
+                                      ? 'border-red-200 text-red-600 bg-red-50' 
+                                      : 'border-gray-200'
+                                  }`}>
+                                    {formatCurrency(workOrder.totalAmount || '0')}
+                                    {parseFloat(workOrder.totalAmount || '0') === 0 && (
+                                      <span className="ml-1 text-red-500">⚠</span>
+                                    )}
+                                  </Badge>
+                                </div>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-                </Tabs>
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <div className="text-gray-500">No data found for this customer</div>
-                </CardContent>
-              </Card>
-            )
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Billing Sheets Tab */}
+                <TabsContent value="billing-sheets" className="space-y-2 mt-2">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Receipt className="w-4 h-4" />
+                        Billing Sheets
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      {customerBillingData.billingSheets.length === 0 ? (
+                        <div className="text-center text-gray-500 py-6 text-sm">No billing sheets found</div>
+                      ) : (
+                        <div className="space-y-1 max-h-96 overflow-y-auto">
+                          {customerBillingData.billingSheets.map((billingSheet) => (
+                            <div key={billingSheet.id} className="border rounded-md p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-medium text-xs truncate">{billingSheet.billingNumber}</span>
+                                    {getStatusBadge(billingSheet.status)}
+                                  </div>
+                                  <div className="text-xs text-gray-600 truncate">{billingSheet.workDescription}</div>
+                                  <div className="text-xs text-gray-500 truncate">
+                                    {billingSheet.technicianName} • {formatDate(billingSheet.workDate)}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <Badge variant="outline" className="text-xs">
+                                    {formatCurrency(billingSheet.totalAmount)}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Estimates Tab */}
+                <TabsContent value="estimates" className="space-y-2 mt-2">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <DollarSign className="w-4 h-4" />
+                        Estimates
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      {customerBillingData.estimates.length === 0 ? (
+                        <div className="text-center text-gray-500 py-6 text-sm">No estimates found</div>
+                      ) : (
+                        <div className="space-y-1 max-h-96 overflow-y-auto">
+                          {customerBillingData.estimates.map((estimate) => (
+                            <div key={estimate.id} className="border rounded-md p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-medium text-xs truncate">{estimate.estimateNumber}</span>
+                                    {getStatusBadge(estimate.status)}
+                                  </div>
+                                  <div className="text-xs text-gray-600 truncate">{estimate.projectName}</div>
+                                  <div className="text-xs text-gray-500 truncate">
+                                    {formatDate(estimate.createdAt)}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <Badge variant="outline" className="text-xs">
+                                    {formatCurrency(estimate.totalAmount)}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            </div>
           ) : (
             <Card>
               <CardContent className="p-8 text-center">
-                <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Select a Customer</h3>
-                <p className="text-gray-600">Choose a customer from the list to view their billing information and create invoices.</p>
+                <div className="text-gray-500">No data found for this customer</div>
               </CardContent>
             </Card>
-          )}
-        </div>
+          )
+        ) : (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Select a Customer</h3>
+              <p className="text-gray-600">Choose a customer from the dropdown above to view their billing information and create invoices.</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
