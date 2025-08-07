@@ -186,6 +186,16 @@ export const billingSheetItems = pgTable("billing_sheet_items", {
   notes: text("notes"),
 });
 
+// Part usage tracking for frequently used parts
+export const partUsage = pgTable("part_usage", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  partId: integer("part_id").references(() => parts.id).notNull(),
+  usageCount: integer("usage_count").notNull().default(0),
+  lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const estimates = pgTable("estimates", {
   id: serial("id").primaryKey(),
   estimateNumber: text("estimate_number").notNull().unique(),
@@ -459,6 +469,7 @@ export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true,
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
+export const insertPartUsageSchema = createInsertSchema(partUsage).omit({ id: true, updatedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 
 export type Company = typeof companies.$inferSelect;
@@ -480,6 +491,7 @@ export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type BillingSheet = typeof billingSheets.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
+export type PartUsage = typeof partUsage.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
@@ -501,6 +513,7 @@ export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
 export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
+export type InsertPartUsage = z.infer<typeof insertPartUsageSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
 export type InsertController = z.infer<typeof insertControllerSchema>;

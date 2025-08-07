@@ -108,6 +108,12 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     queryFn: () => fetch("/api/parts").then(res => res.json()),
   });
 
+  // Fetch popular parts for the frequently used section
+  const { data: popularParts } = useQuery<(Part & { usageCount: number })[]>({
+    queryKey: ["/api/parts/popular"],
+    queryFn: () => fetch("/api/parts/popular?limit=6").then(res => res.json()),
+  });
+
   // Filter parts based on search query
   const filteredParts = parts?.filter(part =>
     part.name.toLowerCase().includes(partsSearchQuery.toLowerCase()) ||
@@ -216,6 +222,16 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
   };
 
+  // Track part usage when parts are added
+  const trackPartUsageMutation = useMutation({
+    mutationFn: async (partId: number) => {
+      return fetch(`/api/parts/${partId}/track-usage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    },
+  });
+
   const addPart = (part: Part, quantity: number = 1) => {
     const newItem: BillingItem = {
       partId: part.id,
@@ -229,6 +245,11 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     
     append(newItem);
     setShowPartsModal(false);
+    
+    // Track part usage for analytics
+    if (part.id) {
+      trackPartUsageMutation.mutate(part.id);
+    }
     
     // Auto-save to localStorage when parts are added
     if (selectedCustomer) {

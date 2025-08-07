@@ -21,6 +21,12 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
     enabled: open,
   });
 
+  // Fetch popular parts for the frequently used section
+  const { data: popularParts, isLoading: isLoadingPopular } = useQuery<(Part & { usageCount: number })[]>({
+    queryKey: ["/api/parts/popular"],
+    enabled: open,
+  });
+
   const filteredParts = parts?.filter(part =>
     part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -59,8 +65,38 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
             />
           </div>
 
-          {/* Parts List */}
-          <div className="space-y-3 max-h-96 overflow-y-auto">
+          {/* Popular Parts Section */}
+          {!searchQuery && popularParts && popularParts.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                <Package className="w-4 h-4 text-blue-600" />
+                Frequently Used Parts
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {popularParts.slice(0, 6).map((part) => (
+                  <button
+                    key={part.id}
+                    onClick={() => handleSelectPart(part)}
+                    className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all text-left group"
+                  >
+                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200">
+                      <Package className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">{part.name}</div>
+                      <div className="text-xs text-gray-500">Used {part.usageCount} times</div>
+                    </div>
+                    <Plus className="w-4 h-4 text-gray-400 group-hover:text-blue-600" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* All Parts List */}
+          <div className="space-y-3">
+            {!searchQuery && <h3 className="text-sm font-medium text-gray-900">All Parts Catalog</h3>}
+            <div className="space-y-3 max-h-96 overflow-y-auto">
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
@@ -110,17 +146,18 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
                 </div>
               ))
             )}
-          </div>
-
-          {/* Empty State */}
-          {!isLoading && filteredParts?.length === 0 && (
-            <div className="text-center py-8">
-              <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">
-                {searchQuery ? "No parts match your search criteria." : "No parts available."}
-              </p>
             </div>
-          )}
+
+            {/* Empty State */}
+            {!isLoading && filteredParts?.length === 0 && (
+              <div className="text-center py-8">
+                <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500">
+                  {searchQuery ? "No parts match your search criteria." : "No parts available."}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

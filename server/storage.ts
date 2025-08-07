@@ -21,6 +21,7 @@ import {
   siteMaps,
   controllers,
   irrigationZones,
+  partUsage,
   type Company,
   type User,
   type Customer, 
@@ -42,6 +43,7 @@ import {
   type SiteMap,
   type Controller,
   type IrrigationZone,
+  type PartUsage,
   type InsertCompany,
   type InsertUser,
   type InsertCustomer, 
@@ -63,6 +65,7 @@ import {
   type InsertSiteMap,
   type InsertController,
   type InsertIrrigationZone,
+  type InsertPartUsage,
   type EstimateWithItems,
   type EstimateWithZones,
   type PropertyZoneWithZones,
@@ -1655,6 +1658,53 @@ export class DatabaseStorage implements IStorage {
     
     const result = await db.insert(irrigationZones).values(zonesWithSiteMapId).returning();
     return result;
+  }
+
+  // Part usage tracking methods
+  async trackPartUsage(companyId: number, partId: number): Promise<void> {
+    const existingUsage = await db.select()
+      .from(partUsage)
+      .where(and(eq(partUsage.companyId, companyId), eq(partUsage.partId, partId)))
+      .limit(1);
+
+    if (existingUsage.length > 0) {
+      // Update existing usage
+      await db.update(partUsage)
+        .set({
+          usageCount: existingUsage[0].usageCount + 1,
+          lastUsedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(partUsage.id, existingUsage[0].id));
+    } else {
+      // Create new usage record
+      await db.insert(partUsage).values({
+        companyId,
+        partId,
+        usageCount: 1,
+        lastUsedAt: new Date()
+      });
+    }
+  }
+
+  async getPopularParts(companyId: number, limit: number = 10): Promise<(Part & { usageCount: number })[]> {
+    const results = await db.select({
+      id: parts.id,
+      companyId: parts.companyId,
+      name: parts.name,
+      description: parts.description,
+      sku: parts.sku,
+      price: parts.price,
+      laborHours: parts.laborHours,
+      usageCount: partUsage.usageCount
+    })
+    .from(parts)
+    .innerJoin(partUsage, eq(parts.id, partUsage.partId))
+    .where(eq(partUsage.companyId, companyId))
+    .orderBy(desc(partUsage.usageCount), desc(partUsage.lastUsedAt))
+    .limit(limit);
+
+    return results;
   }
 }
 

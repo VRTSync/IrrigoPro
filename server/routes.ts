@@ -735,12 +735,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Parts routes
-  app.get("/api/parts", async (req, res) => {
+  // Get popular parts (frequently used) - this must come before /api/parts/:id
+  app.get("/api/parts/popular", async (req, res) => {
     try {
-      const parts = await storage.getParts();
-      res.json(parts);
+      const companyId = 1; // Default company ID - in real app this would come from user session
+      const limit = parseInt(req.query.limit as string) || 10;
+      const popularParts = await storage.getPopularParts(companyId, limit);
+      res.json(popularParts);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch parts" });
+      res.status(500).json({ message: "Failed to fetch popular parts" });
     }
   });
 
@@ -797,6 +800,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid part data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to update part" });
+    }
+  });
+
+  app.get("/api/parts", async (req, res) => {
+    try {
+      const parts = await storage.getParts();
+      res.json(parts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch parts" });
+    }
+  });
+
+  // Track part usage (called when a part is used in work order or billing sheet)
+  app.post("/api/parts/:id/track-usage", async (req, res) => {
+    try {
+      const partId = parseInt(req.params.id);
+      const companyId = 1; // Default company ID - in real app this would come from user session
+      await storage.trackPartUsage(companyId, partId);
+      res.json({ message: "Part usage tracked successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to track part usage" });
     }
   });
 
