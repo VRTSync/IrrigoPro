@@ -134,9 +134,7 @@ export type Controller = typeof controllers.$inferSelect;
 export type IrrigationZone = typeof irrigationZones.$inferSelect;
 export type UtilityMarker = typeof utilityMarkers.$inferSelect;
 
-export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
-export type InsertController = z.infer<typeof insertControllerSchema>;
-export type InsertIrrigationZone = z.infer<typeof insertIrrigationZoneSchema>;
+export type InsertUtilityMarker = z.infer<typeof insertUtilityMarkerSchema>;
 
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),

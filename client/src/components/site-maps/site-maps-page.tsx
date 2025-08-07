@@ -13,7 +13,8 @@ import {
   FileText,
   AlertTriangle,
   Users,
-  Building
+  Building,
+  Save
 } from "lucide-react";
 import { ControllerUpload } from "./controller-upload";
 import { ZoneUpload } from "./zone-upload";
@@ -115,18 +116,139 @@ export function SiteMapsPage() {
     setUploadingZonesFor(controllerId);
   };
 
-  const handleSaveToDatabase = () => {
+  const handleSaveToDatabase = async () => {
     if (!selectedCustomer) {
       console.error("No customer selected");
       return;
     }
     
-    // TODO: Implement saving to database with customer ID
-    console.log("Saving to database:", { 
-      customerId: selectedCustomer.id,
-      customerName: selectedCustomer.name,
-      project 
-    });
+    if (project.controllers.length === 0) {
+      console.error("No controllers to save");
+      return;
+    }
+    
+    try {
+      const getCurrentUser = () => {
+        const savedUser = localStorage.getItem("user");
+        return savedUser ? JSON.parse(savedUser) : null;
+      };
+      
+      const user = getCurrentUser();
+      if (!user) {
+        console.error("No user found");
+        return;
+      }
+
+      // Generate site map name
+      const siteMapName = `${selectedCustomer.name} - Site Map ${new Date().toLocaleDateString()}`;
+      
+      // Calculate center coordinates from controllers
+      const controllerCoords = project.controllers.map(c => [c.latitude, c.longitude]);
+      const centerLat = controllerCoords.reduce((sum, coord) => sum + coord[0], 0) / controllerCoords.length;
+      const centerLng = controllerCoords.reduce((sum, coord) => sum + coord[1], 0) / controllerCoords.length;
+      
+      // Prepare site map data
+      const siteMapData = {
+        name: siteMapName,
+        description: `Irrigation site map for ${selectedCustomer.name}`,
+        customerId: selectedCustomer.id,
+        companyId: user.companyId || 1,
+        centerLat: centerLat.toString(),
+        centerLng: centerLng.toString(),
+        zoomLevel: 18,
+        kmlData: JSON.stringify({
+          controllers: project.controllers,
+          zones: project.allZones,
+          timestamp: new Date().toISOString()
+        })
+      };
+      
+      console.log("Creating site map:", siteMapData);
+      
+      // Create site map
+      const response = await fetch(`/api/customers/${selectedCustomer.id}/site-maps`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': user.role
+        },
+        body: JSON.stringify(siteMapData)
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to create site map');
+      }
+      
+      const newSiteMap = await response.json();
+      console.log("Site map created:", newSiteMap);
+      
+      // Save controllers
+      const controllerData = project.controllers.map(controller => ({
+        name: controller.name,
+        model: controller.model || '',
+        serialNumber: controller.serialNumber || '',
+        stationCount: controller.stationCount || 8,
+        latitude: controller.latitude.toString(),
+        longitude: controller.longitude.toString(),
+        description: controller.description || '',
+        companyId: user.companyId || 1,
+        customerId: selectedCustomer.id
+      }));
+      
+      const controllersResponse = await fetch(`/api/site-maps/${newSiteMap.id}/controllers`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': user.role
+        },
+        body: JSON.stringify({ controllers: controllerData })
+      });
+      
+      if (!controllersResponse.ok) {
+        throw new Error('Failed to save controllers');
+      }
+      
+      const savedControllers = await controllersResponse.json();
+      console.log("Controllers saved:", savedControllers);
+      
+      // Save zones if any exist
+      if (project.allZones.length > 0) {
+        const zoneData = project.allZones.map(zone => ({
+          name: zone.name,
+          zoneNumber: zone.stationNumber || 0,
+          zoneType: zone.zoneType || 'unknown',
+          latitude: zone.boundaries?.[0]?.[0]?.toString() || '0',
+          longitude: zone.boundaries?.[0]?.[1]?.toString() || '0',
+          coverage: zone.coverage || '',
+          description: zone.description || '',
+          companyId: user.companyId || 1,
+          customerId: selectedCustomer.id
+        }));
+        
+        const zonesResponse = await fetch(`/api/site-maps/${newSiteMap.id}/zones`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-role': user.role
+          },
+          body: JSON.stringify({ zones: zoneData })
+        });
+        
+        if (!zonesResponse.ok) {
+          throw new Error('Failed to save zones');
+        }
+        
+        const savedZones = await zonesResponse.json();
+        console.log("Zones saved:", savedZones);
+      }
+      
+      alert("Site map saved successfully!");
+      
+    } catch (error) {
+      console.error("Error saving site map:", error);
+      alert(`Failed to save site map: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   // Redirect unauthorized users
@@ -255,6 +377,42 @@ export function SiteMapsPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Save to Database Section */}
+            {selectedCustomer && project.controllers.length > 0 && (
+              <Card className="border-2 border-green-200 bg-green-50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-green-800">
+                    <Save className="w-5 h-5" />
+                    Save Site Map
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-green-200">
+                      <div>
+                        <h4 className="font-semibold text-gray-900">Ready to Save</h4>
+                        <p className="text-sm text-gray-600">
+                          Customer: {selectedCustomer.name} • 
+                          Controllers: {project.controllers.length} • 
+                          Zones: {project.allZones.length}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleSaveToDatabase}
+                        className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition-colors duration-200 flex items-center gap-2"
+                      >
+                        <Save className="w-5 h-5" />
+                        Save to Database
+                      </button>
+                    </div>
+                    <p className="text-xs text-green-700">
+                      This will create a permanent site map record linked to {selectedCustomer.name} with all uploaded controllers and zones.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* File Upload Sections - Only show if customer is selected */}
             {selectedCustomer ? (
