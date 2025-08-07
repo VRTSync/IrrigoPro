@@ -27,6 +27,8 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
     enabled: open,
   });
 
+
+
   const filteredParts = parts?.filter(part =>
     part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -50,7 +52,7 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add Parts to Estimate</DialogTitle>
+          <DialogTitle>Add Parts to Billing Sheet</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
