@@ -721,49 +721,84 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                 </div>
 
                 {fields.length === 0 ? (
-                  <p className="text-gray-500 text-center py-4">No items added yet</p>
+                  <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg">
+                    <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-500 text-sm">No items added yet</p>
+                    <p className="text-gray-400 text-xs mt-1">Use the buttons above to add parts and materials</p>
+                  </div>
                 ) : (
-                  <div className="space-y-3 sm:space-y-4">
+                  <div className="space-y-4">
                     {fields.map((field, index) => (
-                      <Card key={field.id} className="border-l-4 border-l-blue-500">
-                        <CardContent className="pt-3 sm:pt-4">
-                          <div className={`grid gap-2 sm:gap-4 items-end ${isFieldTech ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-5 sm:grid-cols-6'}`}>
-                            <div className={`${isFieldTech ? 'col-span-1 sm:col-span-2' : 'col-span-2 sm:col-span-2'}`}>
-                              <FormField
-                                control={form.control}
-                                name={`items.${index}.partName`}
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel className="text-xs sm:text-sm">Item Name</FormLabel>
-                                    <FormControl>
-                                      <Input 
-                                        {...field} 
-                                        placeholder="Part/Material name" 
-                                        className="text-sm" 
-                                        readOnly={!!form.watch(`items.${index}.partId`)}
-                                        disabled={!!form.watch(`items.${index}.partId`)}
-                                      />
-                                    </FormControl>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
+                      <Card key={field.id} className="border-l-4 border-l-blue-500 shadow-sm">
+                        <CardContent className="p-4">
+                          {/* Mobile-first responsive layout */}
+                          <div className="space-y-4">
+                            {/* Item header with name and remove button */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1">
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.partName`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel className="text-sm font-medium">Item Name</FormLabel>
+                                      <FormControl>
+                                        <Input 
+                                          {...field} 
+                                          placeholder="Part/Material name" 
+                                          className="text-sm font-medium" 
+                                          readOnly={!!form.watch(`items.${index}.partId`)}
+                                          disabled={!!form.watch(`items.${index}.partId`)}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => remove(index)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50 mt-6"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
                             </div>
-                            
-                            <div className="col-span-1 sm:col-span-1">
+
+                            {/* Description field */}
+                            <FormField
+                              control={form.control}
+                              name={`items.${index}.partDescription`}
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel className="text-sm text-gray-600">Description (Optional)</FormLabel>
+                                  <FormControl>
+                                    <Input {...field} placeholder="Additional details about this item" className="text-sm" />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            {/* Quantity section with better mobile controls */}
+                            <div className="bg-gray-50 rounded-lg p-3">
                               <FormField
                                 control={form.control}
                                 name={`items.${index}.quantity`}
                                 render={({ field }) => (
                                   <FormItem>
-                                    <FormLabel className="text-xs sm:text-sm">Qty</FormLabel>
+                                    <FormLabel className="text-sm font-medium flex items-center gap-2">
+                                      <span>Quantity</span>
+                                    </FormLabel>
                                     <FormControl>
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center justify-center gap-3 mt-2">
                                         <Button
                                           type="button"
                                           variant="outline"
                                           size="sm"
-                                          className="h-8 w-8 p-0"
+                                          className="h-9 w-9 rounded-full"
                                           onClick={() => {
                                             const currentValue = parseFloat(field.value) || 0;
                                             if (currentValue > 0) {
@@ -773,18 +808,20 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                                         >
                                           -
                                         </Button>
-                                        <Input 
-                                          {...field} 
-                                          type="number" 
-                                          step="0.01" 
-                                          min="0"
-                                          className="text-sm text-center h-8 w-16" 
-                                        />
+                                        <div className="flex-1 max-w-24">
+                                          <Input 
+                                            {...field} 
+                                            type="number" 
+                                            step="0.01" 
+                                            min="0"
+                                            className="text-center text-lg font-semibold h-9 bg-white" 
+                                          />
+                                        </div>
                                         <Button
                                           type="button"
                                           variant="outline"
                                           size="sm"
-                                          className="h-8 w-8 p-0"
+                                          className="h-9 w-9 rounded-full"
                                           onClick={() => {
                                             const currentValue = parseFloat(field.value) || 0;
                                             field.onChange(currentValue + 1);
@@ -800,79 +837,63 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                               />
                             </div>
                             
-                            {/* Hide pricing for field techs */}
+                            {/* Pricing section - hidden for field techs */}
                             {!isFieldTech && (
-                              <>
-                                <div className="col-span-1 sm:col-span-1">
-                                  <FormField
-                                    control={form.control}
-                                    name={`items.${index}.unitPrice`}
-                                    render={({ field }) => (
-                                      <FormItem>
-                                        <FormLabel className="text-xs sm:text-sm">Price</FormLabel>
-                                        <FormControl>
-                                          <Input {...field} type="number" step="0.01" className="text-sm" />
-                                        </FormControl>
-                                        <FormMessage />
-                                      </FormItem>
-                                    )}
-                                  />
-                                </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 bg-blue-50 rounded-lg">
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.unitPrice`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel className="text-sm font-medium">Unit Price ($)</FormLabel>
+                                      <FormControl>
+                                        <Input 
+                                          {...field} 
+                                          type="number" 
+                                          step="0.01" 
+                                          placeholder="0.00"
+                                          className="text-sm font-mono"
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
                                 
-                                <div className="col-span-1 sm:col-span-1">
-                                  <FormField
-                                    control={form.control}
-                                    name={`items.${index}.laborHours`}
-                                    render={({ field }) => (
-                                      <FormItem>
-                                        <FormLabel className="text-xs sm:text-sm">Hours</FormLabel>
-                                        <FormControl>
-                                          <Input {...field} type="number" step="0.25" className="text-sm" />
-                                        </FormControl>
-                                        <FormMessage />
-                                      </FormItem>
-                                    )}
-                                  />
-                                </div>
-                              </>
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.laborHours`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel className="text-sm font-medium">Labor Hours</FormLabel>
+                                      <FormControl>
+                                        <Input 
+                                          {...field} 
+                                          type="number" 
+                                          step="0.25" 
+                                          placeholder="0.00"
+                                          className="text-sm font-mono"
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
                             )}
                             
-                            <div className="col-span-1 sm:col-span-1 flex items-end">
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => remove(index)}
-                                className="w-full sm:w-auto"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
+                            {/* Item total - hidden for field techs */}
+                            {!isFieldTech && (
+                              <div className="border-t pt-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm text-gray-600">Item Total:</span>
+                                  <span className="text-lg font-semibold text-green-600">
+                                    ${(form.watch(`items.${index}.quantity`) * form.watch(`items.${index}.unitPrice`)).toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          
-                          <div className="mt-4">
-                            <FormField
-                              control={form.control}
-                              name={`items.${index}.partDescription`}
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Description (Optional)</FormLabel>
-                                  <FormControl>
-                                    <Input {...field} placeholder="Additional details" />
-                                  </FormControl>
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          
-                          {/* Hide pricing totals for field techs */}
-                          {!isFieldTech && (
-                            <div className="mt-2 text-right">
-                              <span className="text-sm text-gray-600">
-                                Total: ${(form.watch(`items.${index}.quantity`) * form.watch(`items.${index}.unitPrice`)).toFixed(2)}
-                              </span>
-                            </div>
-                          )}
                         </CardContent>
                       </Card>
                     ))}
