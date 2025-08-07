@@ -118,14 +118,14 @@ export default function CustomerBilling() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Customer List Panel */}
-        <div className="lg:col-span-1">
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+        {/* Customer List Panel - Optimized */}
+        <div className="xl:col-span-1">
           <Card className="h-full">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Customers
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <User className="w-4 h-4" />
+                Customers ({filteredCustomers.length})
               </CardTitle>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -133,28 +133,28 @@ export default function CustomerBilling() {
                   placeholder="Search customers..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 h-8"
                 />
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-96 overflow-y-auto">
+              <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
                 {loadingCustomers ? (
                   <div className="p-4 text-center text-gray-500">Loading customers...</div>
                 ) : (
-                  <div className="space-y-2 p-4">
+                  <div className="space-y-1 p-2">
                     {filteredCustomers.map((customer) => (
                       <div
                         key={customer.id}
                         onClick={() => setSelectedCustomerId(customer.id)}
-                        className={`p-3 rounded-lg border cursor-pointer transition-colors hover:bg-gray-50 ${
-                          selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                        className={`p-2 rounded-md border cursor-pointer transition-all hover:bg-gray-50 ${
+                          selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200'
                         }`}
                       >
-                        <div className="font-medium text-gray-900">{customer.name}</div>
-                        <div className="text-sm text-gray-600">{customer.email}</div>
+                        <div className="font-medium text-sm text-gray-900 truncate">{customer.name}</div>
+                        <div className="text-xs text-gray-600 truncate">{customer.email}</div>
                         {customer.phone && (
-                          <div className="text-sm text-gray-500">{customer.phone}</div>
+                          <div className="text-xs text-gray-500">{customer.phone}</div>
                         )}
                       </div>
                     ))}
@@ -165,8 +165,8 @@ export default function CustomerBilling() {
           </Card>
         </div>
 
-        {/* Customer Details & Billing Panel */}
-        <div className="lg:col-span-2">
+        {/* Customer Details & Billing Panel - Expanded */}
+        <div className="xl:col-span-3">
           {selectedCustomerId ? (
             loadingCustomerData ? (
               <Card>
@@ -205,79 +205,161 @@ export default function CustomerBilling() {
                   </CardHeader>
                 </Card>
 
-                {/* Unbilled Work Summary */}
-                {(customerBillingData.unbilledWorkOrders.length > 0 || customerBillingData.unbilledBillingSheets.length > 0) && (
+                {/* Billing Summary Card - Optimized */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* Unbilled Work Summary */}
                   <Card className="border-orange-200 bg-orange-50">
-                    <CardHeader>
+                    <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-2 text-orange-800">
-                          <AlertTriangle className="w-5 h-5" />
+                        <CardTitle className="flex items-center gap-2 text-orange-800 text-sm">
+                          <AlertTriangle className="w-4 h-4" />
                           Unbilled Work
                         </CardTitle>
-                        <Badge className="bg-orange-100 text-orange-800">
+                        <Badge className="bg-orange-100 text-orange-800 text-sm">
                           {formatCurrency(customerBillingData.totalUnbilledAmount)}
                         </Badge>
                       </div>
                     </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                        <div className="text-sm text-orange-700">
-                          {customerBillingData.unbilledWorkOrders.length} completed work orders, {customerBillingData.unbilledBillingSheets.length} approved billing sheets ready for invoicing
+                    <CardContent className="pt-0">
+                      <div className="space-y-3">
+                        <div className="text-xs text-orange-700">
+                          {customerBillingData.unbilledWorkOrders.length} work orders, {customerBillingData.unbilledBillingSheets.length} billing sheets ready
                         </div>
                         <Button
                           onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
-                          disabled={createMonthlyInvoice.isPending}
-                          className="bg-orange-600 hover:bg-orange-700 text-white"
+                          disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
+                          className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
                         >
-                          <Receipt className="w-4 h-4 mr-2" />
+                          <Receipt className="w-3 h-3 mr-1" />
                           {createMonthlyInvoice.isPending ? "Creating..." : "Create Monthly Invoice"}
                         </Button>
                       </div>
                     </CardContent>
                   </Card>
-                )}
+
+                  {/* Quick Stats */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm text-gray-700">Total Work</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Work Orders:</span>
+                          <span className="font-medium">{customerBillingData.workOrders.length}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Billing Sheets:</span>
+                          <span className="font-medium">{customerBillingData.billingSheets.length}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Estimates:</span>
+                          <span className="font-medium">{customerBillingData.estimates.length}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Total Revenue */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm text-gray-700">Revenue Overview</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Completed Work:</span>
+                          <span className="font-medium">
+                            {formatCurrency(
+                              customerBillingData.workOrders
+                                .filter(wo => wo.status === 'completed')
+                                .reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+                              customerBillingData.billingSheets
+                                .reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0)
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm text-orange-600">
+                          <span>Unbilled:</span>
+                          <span className="font-medium">
+                            {formatCurrency(customerBillingData.totalUnbilledAmount)}
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
 
                 {/* Work Details Tabs */}
                 <Tabs defaultValue="work-orders" className="w-full">
                   <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="work-orders">Work Orders</TabsTrigger>
-                    <TabsTrigger value="billing-sheets">Billing Sheets</TabsTrigger>
-                    <TabsTrigger value="estimates">Estimates</TabsTrigger>
+                    <TabsTrigger value="work-orders" className="text-xs sm:text-sm">
+                      Work Orders ({customerBillingData.workOrders.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="billing-sheets" className="text-xs sm:text-sm">
+                      Billing Sheets ({customerBillingData.billingSheets.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="estimates" className="text-xs sm:text-sm">
+                      Estimates ({customerBillingData.estimates.length})
+                    </TabsTrigger>
                   </TabsList>
 
                   {/* Work Orders Tab */}
                   <TabsContent value="work-orders" className="space-y-4">
                     <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <FileText className="w-5 h-5" />
-                          Work Orders ({customerBillingData.workOrders.length})
-                        </CardTitle>
+                      <CardHeader className="pb-4">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="flex items-center gap-2 text-base">
+                            <FileText className="w-4 h-4" />
+                            Work Orders
+                          </CardTitle>
+                          <div className="text-sm text-gray-600">
+                            {customerBillingData.workOrders.filter(wo => wo.status === 'completed').length} completed
+                          </div>
+                        </div>
                       </CardHeader>
                       <CardContent>
                         {customerBillingData.workOrders.length === 0 ? (
                           <div className="text-center text-gray-500 py-8">No work orders found</div>
                         ) : (
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {customerBillingData.workOrders.map((workOrder) => (
-                              <div key={workOrder.id} className="border border-gray-200 rounded-lg p-4">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                  <div className="flex-1">
-                                    <div className="font-medium">{workOrder.workOrderNumber}</div>
-                                    <div className="text-sm text-gray-600">{workOrder.projectName}</div>
-                                    <div className="text-sm text-gray-500">
+                              <div key={workOrder.id} className={`border rounded-lg p-3 transition-all ${
+                                workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
+                                  ? 'border-orange-200 bg-orange-50' 
+                                  : 'border-gray-200'
+                              }`}>
+                                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium text-sm">{workOrder.workOrderNumber}</span>
+                                      {getStatusBadge(workOrder.status)}
+                                      {workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0 && (
+                                        <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800">
+                                          Ready to Bill
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="text-sm text-gray-600 truncate">{workOrder.projectName}</div>
+                                    <div className="text-xs text-gray-500">
                                       Technician: {workOrder.assignedTechnicianName || "Unassigned"}
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-3">
-                                    {getStatusBadge(workOrder.status)}
-                                    {workOrder.totalAmount && (
-                                      <Badge variant="outline">
-                                        {formatCurrency(workOrder.totalAmount)}
+                                  <div className="flex items-center gap-3 text-right">
+                                    <div className="flex flex-col">
+                                      <Badge variant="outline" className={`text-xs ${
+                                        parseFloat(workOrder.totalAmount || '0') === 0 
+                                          ? 'border-red-200 text-red-600 bg-red-50' 
+                                          : 'border-gray-200'
+                                      }`}>
+                                        {formatCurrency(workOrder.totalAmount || '0')}
+                                        {parseFloat(workOrder.totalAmount || '0') === 0 && (
+                                          <span className="ml-1 text-red-500">⚠</span>
+                                        )}
                                       </Badge>
-                                    )}
-                                    <div className="text-sm text-gray-500">
-                                      {formatDate(workOrder.createdAt)}
+                                      <div className="text-xs text-gray-400 mt-1">
+                                        {formatDate(workOrder.createdAt)}
+                                      </div>
                                     </div>
                                   </div>
                                 </div>

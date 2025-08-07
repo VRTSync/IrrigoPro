@@ -1806,15 +1806,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalPartsCost
       } = req.body;
 
-      // Update work order with completion details
+      // Calculate totals
+      const laborRate = 45; // Default labor rate per hour
+      const markupRate = 0.15; // 15% markup on parts
+      const taxRate = 0.08; // 8% tax
+      
+      const laborHours = parseFloat(totalHours || '0');
+      const partsCost = parseFloat(totalPartsCost || '0');
+      
+      const laborSubtotal = laborHours * laborRate;
+      const partsSubtotal = partsCost;
+      const markupAmount = partsSubtotal * markupRate;
+      const subtotal = laborSubtotal + partsSubtotal + markupAmount;
+      const taxAmount = subtotal * taxRate;
+      const totalAmount = subtotal + taxAmount;
+
+      // Update work order with completion details and calculated totals
       const workOrder = await storage.updateWorkOrder(workOrderId, {
         status: 'completed',
         completedAt: new Date(completedAt),
         workSummary,
         customerNotes,
-        totalHours: parseFloat(totalHours),
+        totalHours: laborHours,
         photos: photos || [],
-        totalPartsCost: parseFloat(totalPartsCost || '0')
+        totalPartsCost: partsCost,
+        totalAmount: totalAmount.toFixed(2)
       });
 
       if (!workOrder) {
