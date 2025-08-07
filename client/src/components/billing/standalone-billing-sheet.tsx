@@ -767,20 +767,15 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                               </Button>
                             </div>
 
-                            {/* Description field */}
-                            <FormField
-                              control={form.control}
-                              name={`items.${index}.partDescription`}
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel className="text-sm text-gray-600">Description (Optional)</FormLabel>
-                                  <FormControl>
-                                    <Input {...field} placeholder="Additional details about this item" className="text-sm" />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
+                            {/* Description field - read-only */}
+                            {form.watch(`items.${index}.partDescription`) && (
+                              <div>
+                                <label className="text-sm text-gray-600 block mb-1">Description</label>
+                                <div className="text-sm text-gray-800 p-2 bg-gray-50 rounded border">
+                                  {form.watch(`items.${index}.partDescription`)}
+                                </div>
+                              </div>
+                            )}
 
                             {/* Quantity section with better mobile controls */}
                             <div className="bg-gray-50 rounded-lg p-3">
