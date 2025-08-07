@@ -19,7 +19,7 @@ interface ZoneUploadProps {
   onZoneKMLParsed: (data: ParsedKMLData, controllerId: string) => void;
   uploadingFor: string | null;
   onStartUpload: (controllerId: string) => void;
-  zonesByController: { [controllerId: string]: number };
+  zonesByController: { [controllerId: string]: any[] };
 }
 
 export function ZoneUpload({ 
@@ -133,7 +133,8 @@ export function ZoneUpload({
           <h4 className="font-medium text-gray-900 mb-3">Select Controller for Zone Upload:</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {controllers.map((controller) => {
-              const zoneCount = zonesByController[controller.id] || 0;
+              const zones = zonesByController[controller.id] || [];
+              const zoneCount = Array.isArray(zones) ? zones.length : 0;
               const isSelected = uploadingFor === controller.id;
               
               return (
