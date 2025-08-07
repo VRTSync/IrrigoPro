@@ -9,7 +9,7 @@ Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (P
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching.
 Business Rules: Markup calculations apply only to parts subtotal, not parts + labor combined. Labor hours are per-part, not multiplied by quantity. Monthly invoice consolidation combines all customer work into single QuickBooks invoices.
 Admin Access Restriction: Company admin users should not have direct access to estimates and work orders pages - only view through modal previews in operations page. Removed navigation paths to /estimates and /work-orders for admin role.
-Site Map Access Control: Site map creation page is now restricted to admin and super admin roles only. Removed navigation links for irrigation managers and field techs. Backend API routes protected with role-based middleware.
+Site Map Access Control: Site map creation is restricted to admin and super admin roles only. Managers and field techs can view existing site maps but cannot create new ones. Backend API creation routes protected with role-based middleware.
 
 ## System Architecture
 

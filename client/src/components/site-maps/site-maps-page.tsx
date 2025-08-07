@@ -44,7 +44,7 @@ export function SiteMapsPage() {
   const user = getCurrentUser();
   const userRole = user?.role;
   const canEdit = userRole === 'company_admin' || userRole === 'super_admin';
-  const canView = userRole === 'company_admin' || userRole === 'super_admin';
+  const canView = userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'irrigation_manager' || userRole === 'field_tech';
 
   const [project, setProject] = useState<SiteMapProject>({
     controllers: [],
