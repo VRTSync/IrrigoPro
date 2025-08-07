@@ -892,11 +892,54 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                     />
                   </div>
 
+                  {/* Frequently Used Parts Section */}
+                  {!partsSearchQuery && popularParts && popularParts.length > 0 && (
+                    <div className="border rounded-lg bg-white mb-4">
+                      <div className="p-3 border-b bg-blue-50">
+                        <h4 className="font-medium text-gray-900 flex items-center gap-2">
+                          <Package className="w-4 h-4 text-blue-600" />
+                          Frequently Used Parts
+                        </h4>
+                        <p className="text-sm text-gray-600">Your most commonly used parts for quick access</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
+                        {popularParts.slice(0, 6).map((part) => {
+                          const isAlreadyUsed = fields.some(field => field.partId === part.id);
+                          
+                          return (
+                            <button
+                              key={part.id}
+                              onClick={() => addPart(part, 1)}
+                              className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all text-left group"
+                            >
+                              <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200">
+                                <Package className="w-4 h-4 text-blue-600" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-gray-900 truncate">{part.name}</div>
+                                <div className="text-xs text-gray-500">Used {part.usageCount} times</div>
+                                {!isFieldTech && (
+                                  <div className="text-xs text-green-600">{formatCurrency(parseFloat(part.price))}</div>
+                                )}
+                              </div>
+                              {isAlreadyUsed ? (
+                                <Check className="w-4 h-4 text-green-600" />
+                              ) : (
+                                <Plus className="w-4 h-4 text-gray-400 group-hover:text-blue-600" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Quick Add Parts - Simple List */}
                   <div className="border rounded-lg bg-white">
                     <div className="p-3 border-b bg-gray-50">
-                      <h4 className="font-medium text-gray-900">Quick Add Parts</h4>
-                      <p className="text-sm text-gray-600">Click + to add parts directly, or add manual items</p>
+                      <h4 className="font-medium text-gray-900">All Parts Catalog</h4>
+                      <p className="text-sm text-gray-600">Search and add any part from your catalog</p>
                     </div>
                     
                     <div className="max-h-48 overflow-y-auto">
