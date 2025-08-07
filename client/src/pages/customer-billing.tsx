@@ -201,15 +201,22 @@ export default function CustomerBilling() {
                       selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
                     }`}
                   >
-                    {/* Customer Name and Contract Type */}
+                    {/* Customer Name and Priority Badge */}
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-medium text-gray-900 truncate">{customer.name}</div>
-                      <Badge 
-                        variant={preview.contractType === 'premium' ? 'default' : 'secondary'}
-                        className="text-xs"
-                      >
-                        {preview.contractType?.toUpperCase()}
-                      </Badge>
+                      {preview.unbilledAmount > 2000 ? (
+                        <Badge className="bg-red-100 text-red-800 text-xs">
+                          HIGH VALUE
+                        </Badge>
+                      ) : preview.contractType === 'premium' ? (
+                        <Badge className="bg-green-100 text-green-800 text-xs">
+                          PREMIUM
+                        </Badge>
+                      ) : preview.pendingWorkOrders > 3 ? (
+                        <Badge className="bg-blue-100 text-blue-800 text-xs">
+                          ACTIVE
+                        </Badge>
+                      ) : null}
                     </div>
 
                     {/* Contact Info */}
