@@ -110,20 +110,20 @@ export default function CustomerBilling() {
   };
 
   return (
-    <div className="container mx-auto p-4 sm:p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="container mx-auto p-2 sm:p-4 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Customer Billing</h1>
-          <p className="text-gray-600">Manage customer invoices and billing</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Customer Billing</h1>
+          <p className="text-sm text-gray-600">Manage customer invoices and billing</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-        {/* Customer List Panel - Optimized */}
-        <div className="xl:col-span-1">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Customer List Panel */}
+        <div className="lg:col-span-1">
           <Card className="h-full">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
                 <User className="w-4 h-4" />
                 Customers ({filteredCustomers.length})
               </CardTitle>
@@ -133,14 +133,14 @@ export default function CustomerBilling() {
                   placeholder="Search customers..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 h-8"
+                  className="pl-10 h-7 text-sm"
                 />
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
+              <div className="max-h-[calc(100vh-180px)] overflow-y-auto">
                 {loadingCustomers ? (
-                  <div className="p-4 text-center text-gray-500">Loading customers...</div>
+                  <div className="p-3 text-center text-gray-500 text-sm">Loading customers...</div>
                 ) : (
                   <div className="space-y-1 p-2">
                     {filteredCustomers.map((customer) => (
@@ -151,7 +151,7 @@ export default function CustomerBilling() {
                           selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200'
                         }`}
                       >
-                        <div className="font-medium text-sm text-gray-900 truncate">{customer.name}</div>
+                        <div className="font-medium text-xs text-gray-900 truncate">{customer.name}</div>
                         <div className="text-xs text-gray-600 truncate">{customer.email}</div>
                         {customer.phone && (
                           <div className="text-xs text-gray-500">{customer.phone}</div>
@@ -165,8 +165,8 @@ export default function CustomerBilling() {
           </Card>
         </div>
 
-        {/* Customer Details & Billing Panel - Expanded */}
-        <div className="xl:col-span-3">
+        {/* Customer Details & Billing Panel */}
+        <div className="lg:col-span-2">
           {selectedCustomerId ? (
             loadingCustomerData ? (
               <Card>
@@ -175,27 +175,27 @@ export default function CustomerBilling() {
                 </CardContent>
               </Card>
             ) : customerBillingData ? (
-              <div className="space-y-6">
-                {/* Customer Header */}
+              <div className="space-y-3">
+                {/* Customer Header - Compact */}
                 <Card>
-                  <CardHeader>
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <CardHeader className="pb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <div>
-                        <CardTitle className="text-xl">{customerBillingData.customer.name}</CardTitle>
-                        <div className="space-y-1 text-sm text-gray-600">
+                        <CardTitle className="text-lg">{customerBillingData.customer.name}</CardTitle>
+                        <div className="space-y-1 text-xs text-gray-600">
                           <div className="flex items-center gap-2">
-                            <Mail className="w-4 h-4" />
+                            <Mail className="w-3 h-3" />
                             {customerBillingData.customer.email}
                           </div>
                           {customerBillingData.customer.phone && (
                             <div className="flex items-center gap-2">
-                              <Phone className="w-4 h-4" />
+                              <Phone className="w-3 h-3" />
                               {customerBillingData.customer.phone}
                             </div>
                           )}
                           {customerBillingData.customer.address && (
                             <div className="flex items-center gap-2">
-                              <MapPin className="w-4 h-4" />
+                              <MapPin className="w-3 h-3" />
                               {customerBillingData.customer.address}
                             </div>
                           )}
@@ -205,54 +205,54 @@ export default function CustomerBilling() {
                   </CardHeader>
                 </Card>
 
-                {/* Billing Summary Card - Optimized */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  {/* Unbilled Work Summary */}
+                {/* Billing Summary Card - Compact */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {/* Unbilled Work Summary - Compact */}
                   <Card className="border-orange-200 bg-orange-50">
-                    <CardHeader className="pb-3">
+                    <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-2 text-orange-800 text-sm">
-                          <AlertTriangle className="w-4 h-4" />
+                        <CardTitle className="flex items-center gap-1 text-orange-800 text-xs">
+                          <AlertTriangle className="w-3 h-3" />
                           Unbilled Work
                         </CardTitle>
-                        <Badge className="bg-orange-100 text-orange-800 text-sm">
+                        <Badge className="bg-orange-100 text-orange-800 text-xs">
                           {formatCurrency(customerBillingData.totalUnbilledAmount)}
                         </Badge>
                       </div>
                     </CardHeader>
                     <CardContent className="pt-0">
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         <div className="text-xs text-orange-700">
-                          {customerBillingData.unbilledWorkOrders.length} work orders, {customerBillingData.unbilledBillingSheets.length} billing sheets ready
+                          {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
                         </div>
                         <Button
                           onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
                           disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
-                          className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
+                          className="bg-orange-600 hover:bg-orange-700 text-white w-full h-7 text-xs"
                         >
                           <Receipt className="w-3 h-3 mr-1" />
-                          {createMonthlyInvoice.isPending ? "Creating..." : "Create Monthly Invoice"}
+                          {createMonthlyInvoice.isPending ? "Creating..." : "Create Invoice"}
                         </Button>
                       </div>
                     </CardContent>
                   </Card>
 
-                  {/* Quick Stats */}
+                  {/* Quick Stats - Compact */}
                   <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm text-gray-700">Total Work</CardTitle>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs text-gray-700">Total Work</CardTitle>
                     </CardHeader>
                     <CardContent className="pt-0">
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
                           <span className="text-gray-600">Work Orders:</span>
                           <span className="font-medium">{customerBillingData.workOrders.length}</span>
                         </div>
-                        <div className="flex justify-between text-sm">
+                        <div className="flex justify-between text-xs">
                           <span className="text-gray-600">Billing Sheets:</span>
                           <span className="font-medium">{customerBillingData.billingSheets.length}</span>
                         </div>
-                        <div className="flex justify-between text-sm">
+                        <div className="flex justify-between text-xs">
                           <span className="text-gray-600">Estimates:</span>
                           <span className="font-medium">{customerBillingData.estimates.length}</span>
                         </div>
@@ -260,14 +260,14 @@ export default function CustomerBilling() {
                     </CardContent>
                   </Card>
 
-                  {/* Total Revenue */}
+                  {/* Total Revenue - Compact */}
                   <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm text-gray-700">Revenue Overview</CardTitle>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs text-gray-700">Revenue Overview</CardTitle>
                     </CardHeader>
                     <CardContent className="pt-0">
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
                           <span className="text-gray-600">Completed Work:</span>
                           <span className="font-medium">
                             {formatCurrency(
@@ -279,7 +279,7 @@ export default function CustomerBilling() {
                             )}
                           </span>
                         </div>
-                        <div className="flex justify-between text-sm text-orange-600">
+                        <div className="flex justify-between text-xs text-orange-600">
                           <span>Unbilled:</span>
                           <span className="font-medium">
                             {formatCurrency(customerBillingData.totalUnbilledAmount)}
@@ -290,77 +290,72 @@ export default function CustomerBilling() {
                   </Card>
                 </div>
 
-                {/* Work Details Tabs */}
+                {/* Work Details Tabs - Compact */}
                 <Tabs defaultValue="work-orders" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="work-orders" className="text-xs sm:text-sm">
+                  <TabsList className="grid w-full grid-cols-3 h-8">
+                    <TabsTrigger value="work-orders" className="text-xs">
                       Work Orders ({customerBillingData.workOrders.length})
                     </TabsTrigger>
-                    <TabsTrigger value="billing-sheets" className="text-xs sm:text-sm">
+                    <TabsTrigger value="billing-sheets" className="text-xs">
                       Billing Sheets ({customerBillingData.billingSheets.length})
                     </TabsTrigger>
-                    <TabsTrigger value="estimates" className="text-xs sm:text-sm">
+                    <TabsTrigger value="estimates" className="text-xs">
                       Estimates ({customerBillingData.estimates.length})
                     </TabsTrigger>
                   </TabsList>
 
                   {/* Work Orders Tab */}
-                  <TabsContent value="work-orders" className="space-y-4">
+                  <TabsContent value="work-orders" className="space-y-2 mt-2">
                     <Card>
-                      <CardHeader className="pb-4">
+                      <CardHeader className="pb-2">
                         <div className="flex items-center justify-between">
-                          <CardTitle className="flex items-center gap-2 text-base">
+                          <CardTitle className="flex items-center gap-2 text-sm">
                             <FileText className="w-4 h-4" />
                             Work Orders
                           </CardTitle>
-                          <div className="text-sm text-gray-600">
+                          <div className="text-xs text-gray-600">
                             {customerBillingData.workOrders.filter(wo => wo.status === 'completed').length} completed
                           </div>
                         </div>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="pt-0">
                         {customerBillingData.workOrders.length === 0 ? (
-                          <div className="text-center text-gray-500 py-8">No work orders found</div>
+                          <div className="text-center text-gray-500 py-6 text-sm">No work orders found</div>
                         ) : (
-                          <div className="space-y-2">
+                          <div className="space-y-1 max-h-96 overflow-y-auto">
                             {customerBillingData.workOrders.map((workOrder) => (
-                              <div key={workOrder.id} className={`border rounded-lg p-3 transition-all ${
+                              <div key={workOrder.id} className={`border rounded-md p-2 transition-all ${
                                 workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
                                   ? 'border-orange-200 bg-orange-50' 
                                   : 'border-gray-200'
                               }`}>
-                                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                                <div className="flex items-center justify-between gap-2">
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-medium text-sm">{workOrder.workOrderNumber}</span>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="font-medium text-xs truncate">{workOrder.workOrderNumber}</span>
                                       {getStatusBadge(workOrder.status)}
                                       {workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0 && (
-                                        <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800">
-                                          Ready to Bill
+                                        <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 px-1 py-0">
+                                          Ready
                                         </Badge>
                                       )}
                                     </div>
-                                    <div className="text-sm text-gray-600 truncate">{workOrder.projectName}</div>
-                                    <div className="text-xs text-gray-500">
-                                      Technician: {workOrder.assignedTechnicianName || "Unassigned"}
+                                    <div className="text-xs text-gray-600 truncate">{workOrder.projectName}</div>
+                                    <div className="text-xs text-gray-500 truncate">
+                                      {workOrder.assignedTechnicianName || "Unassigned"} • {formatDate(workOrder.createdAt)}
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-3 text-right">
-                                    <div className="flex flex-col">
-                                      <Badge variant="outline" className={`text-xs ${
-                                        parseFloat(workOrder.totalAmount || '0') === 0 
-                                          ? 'border-red-200 text-red-600 bg-red-50' 
-                                          : 'border-gray-200'
-                                      }`}>
-                                        {formatCurrency(workOrder.totalAmount || '0')}
-                                        {parseFloat(workOrder.totalAmount || '0') === 0 && (
-                                          <span className="ml-1 text-red-500">⚠</span>
-                                        )}
-                                      </Badge>
-                                      <div className="text-xs text-gray-400 mt-1">
-                                        {formatDate(workOrder.createdAt)}
-                                      </div>
-                                    </div>
+                                  <div className="text-right">
+                                    <Badge variant="outline" className={`text-xs ${
+                                      parseFloat(workOrder.totalAmount || '0') === 0 
+                                        ? 'border-red-200 text-red-600 bg-red-50' 
+                                        : 'border-gray-200'
+                                    }`}>
+                                      {formatCurrency(workOrder.totalAmount || '0')}
+                                      {parseFloat(workOrder.totalAmount || '0') === 0 && (
+                                        <span className="ml-1 text-red-500">⚠</span>
+                                      )}
+                                    </Badge>
                                   </div>
                                 </div>
                               </div>
