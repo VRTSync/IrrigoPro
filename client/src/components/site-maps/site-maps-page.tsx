@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CustomerSelector } from "@/components/ui/customer-selector";
 import { 
   MapIcon, 
   Upload, 
@@ -10,7 +11,9 @@ import {
   Settings, 
   Info,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Users,
+  Building
 } from "lucide-react";
 import { ControllerUpload } from "./controller-upload";
 import { ZoneUpload } from "./zone-upload";
@@ -46,6 +49,7 @@ export function SiteMapsPage() {
   const canEdit = userRole === 'company_admin' || userRole === 'super_admin';
   const canView = userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'irrigation_manager' || userRole === 'field_tech';
 
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [project, setProject] = useState<SiteMapProject>({
     controllers: [],
     zonesByController: {},
@@ -112,8 +116,17 @@ export function SiteMapsPage() {
   };
 
   const handleSaveToDatabase = () => {
-    // TODO: Implement saving to database
-    console.log("Saving to database:", project);
+    if (!selectedCustomer) {
+      console.error("No customer selected");
+      return;
+    }
+    
+    // TODO: Implement saving to database with customer ID
+    console.log("Saving to database:", { 
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      project 
+    });
   };
 
   // Redirect unauthorized users
@@ -151,6 +164,14 @@ export function SiteMapsPage() {
                   : "View irrigation controller and zone maps for your properties"
                 }
               </p>
+              {selectedCustomer && canEdit && (
+                <div className="mt-4">
+                  <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+                    <Building className="w-3 h-3 mr-1" />
+                    Creating site map for: {selectedCustomer.name}
+                  </Badge>
+                </div>
+              )}
               {!canEdit && (
                 <div className="mt-4">
                   <Badge className="bg-blue-100 text-blue-800 border-blue-300">
@@ -204,48 +225,94 @@ export function SiteMapsPage() {
 
         {canEdit && (
           <TabsContent value="upload" className="space-y-6 mt-6">
-            <ControllerUpload 
-              onKMLParsed={handleControllerKMLParsed}
-              onFileSelected={handleControllerFileSelected}
-            />
-            
-            <ZoneUpload
-              controllers={project.controllers}
-              onZoneKMLParsed={handleZoneKMLParsed}
-              uploadingFor={uploadingZonesFor}
-              onStartUpload={startZoneUpload}
-              zonesByController={project.zonesByController}
-            />
+            {/* Customer Selection */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-blue-600" />
+                  Select Customer
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Choose the customer to attach this site map to before uploading KML files.
+                  </p>
+                  <CustomerSelector
+                    selectedCustomer={selectedCustomer}
+                    onSelectCustomer={(customer) => {
+                      setSelectedCustomer(customer);
+                    }}
+                    placeholder="Select a customer for this site map..."
+                  />
+                  {selectedCustomer && (
+                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <p className="text-sm text-green-800">
+                        ✓ Customer selected. You can now upload KML files for this site map.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* File Upload Sections - Only show if customer is selected */}
+            {selectedCustomer ? (
+              <>
+                <ControllerUpload 
+                  onKMLParsed={handleControllerKMLParsed}
+                  onFileSelected={handleControllerFileSelected}
+                />
+                
+                <ZoneUpload
+                  controllers={project.controllers}
+                  onZoneKMLParsed={handleZoneKMLParsed}
+                  uploadingFor={uploadingZonesFor}
+                  onStartUpload={startZoneUpload}
+                  zonesByController={project.zonesByController}
+                />
+              </>
+            ) : (
+              <Card>
+                <CardContent className="flex items-center justify-center py-16">
+                  <div className="text-center">
+                    <Upload className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Select Customer First</h3>
+                    <p className="text-gray-600">Choose a customer above to begin uploading site map files</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Instructions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Info className="w-5 h-5 text-blue-600" />
-                KML File Requirements
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4 text-sm text-gray-600">
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-2">For Irrigation Controllers:</h4>
-                  <ul className="list-disc list-inside space-y-1 ml-4">
-                    <li>Use <strong>Point</strong> placemarks to mark controller locations</li>
-                    <li>Include controller details in description: Model, Serial Number, Station Count</li>
-                    <li>Example description: "Model: Rain Bird ESP-6TM, Serial: 12345, Stations: 8"</li>
-                  </ul>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Info className="w-5 h-5 text-blue-600" />
+                  KML File Requirements
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4 text-sm text-gray-600">
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">For Irrigation Controllers:</h4>
+                    <ul className="list-disc list-inside space-y-1 ml-4">
+                      <li>Use <strong>Point</strong> placemarks to mark controller locations</li>
+                      <li>Include controller details in description: Model, Serial Number, Station Count</li>
+                      <li>Example description: "Model: Rain Bird ESP-6TM, Serial: 12345, Stations: 8"</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">For Irrigation Zones:</h4>
+                    <ul className="list-disc list-inside space-y-1 ml-4">
+                      <li>Use <strong>Polygon</strong> or <strong>LineString</strong> placemarks to define zone boundaries</li>
+                      <li>Include zone details: Controller name, Station number, Zone type, Coverage area</li>
+                      <li>Example description: "Controller: Main Controller, Station: 1, Type: Sprinkler, Coverage: Front lawn"</li>
+                    </ul>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-2">For Irrigation Zones:</h4>
-                  <ul className="list-disc list-inside space-y-1 ml-4">
-                    <li>Use <strong>Polygon</strong> or <strong>LineString</strong> placemarks to define zone boundaries</li>
-                    <li>Include zone details: Controller name, Station number, Zone type, Coverage area</li>
-                    <li>Example description: "Controller: Main Controller, Station: 1, Type: Sprinkler, Coverage: Front lawn"</li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
           </TabsContent>
         )}
 
