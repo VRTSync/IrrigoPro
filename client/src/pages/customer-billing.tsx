@@ -60,35 +60,27 @@ export default function CustomerBilling() {
     queryKey: ["/api/customers"],
   });
 
-  // For now, create billing data from work orders when available
-  // This will be replaced with the API endpoint once it's working
+  // Get comprehensive customer billing data including work orders, estimates, and billing sheets
+  const { data: customerPreviews = [], isLoading: loadingPreviews } = useQuery<any[]>({
+    queryKey: ["/api/customers/billing-preview"],
+  });
+
+  // Create a map for easy lookup of preview data by customer ID
+  const previewMap = customerPreviews.reduce((map, preview) => {
+    map[preview.id] = preview;
+    return map;
+  }, {} as Record<number, any>);
+
   const getCustomerPreview = (customer: Customer) => {
-    // Generate realistic billing data based on customer ID for consistency
-    const seed = customer.id * 12345;
-    const random = (offset = 0) => ((seed + offset) % 1000) / 1000;
-    
-    // Generate base monthly average ($500-$3000)
-    const monthlyAverage = Math.floor(random(1) * 2500) + 500;
-    
-    // Generate current month billing with meaningful pace
-    const paceMultiplier = random(2) < 0.3 ? 0.3 + random(3) * 0.4 : // 30% below average
-                          random(2) < 0.6 ? 0.7 + random(4) * 0.6 : // 30% average  
-                          1.2 + random(5) * 0.8; // 40% above average
-    const currentMonthBilling = Math.floor(monthlyAverage * paceMultiplier);
-    const billingPace = currentMonthBilling / monthlyAverage;
-    
-    // Unbilled amount should be reasonable part of current month
-    const unbilledAmount = Math.floor(currentMonthBilling * (0.3 + random(6) * 0.5));
-    
-    return {
+    return previewMap[customer.id] || {
       ...customer,
-      currentMonthBilling,
-      monthlyAverage,
-      billingPace,
-      unbilledAmount,
-      lastInvoiceDate: random(9) > 0.2 ? new Date(Date.now() - random(10) * 45 * 24 * 60 * 60 * 1000) : null,
-      pendingWorkOrders: Math.floor(random(8) * 4),
-      totalWorkOrders: Math.floor(random(7) * 15) + 5
+      currentMonthBilling: 0,
+      monthlyAverage: 0,
+      billingPace: 0,
+      unbilledAmount: 0,
+      lastInvoiceDate: null,
+      pendingWorkOrders: 0,
+      totalWorkOrders: 0
     };
   };
 
@@ -165,26 +157,22 @@ export default function CustomerBilling() {
           <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
           
           {/* Summary Stats */}
-          {!loadingCustomers && customers.length > 0 && (
+          {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
             <div className="grid grid-cols-2 gap-2 mb-4">
               <div className="bg-orange-50 p-2 rounded-lg text-center">
                 <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
                 <div className="text-sm font-bold text-orange-800">
                   {formatCurrency(
-                    customers.reduce((sum, customer) => {
-                      const preview = getCustomerPreview(customer);
-                      return sum + preview.unbilledAmount;
-                    }, 0)
+                    customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
                   )}
                 </div>
               </div>
               <div className="bg-blue-50 p-2 rounded-lg text-center">
                 <div className="text-xs text-blue-700 font-medium">Active Customers</div>
                 <div className="text-sm font-bold text-blue-800">
-                  {customers.filter(customer => {
-                    const preview = getCustomerPreview(customer);
-                    return preview.unbilledAmount > 0 || preview.pendingWorkOrders > 0;
-                  }).length}
+                  {customerPreviews.filter(preview => 
+                    (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
+                  ).length}
                 </div>
               </div>
             </div>
@@ -202,7 +190,7 @@ export default function CustomerBilling() {
         </div>
         
         <div className="flex-1 overflow-y-auto">
-          {loadingCustomers ? (
+          {(loadingCustomers || loadingPreviews) ? (
             <div className="p-4 text-center text-gray-500">Loading customer billing data...</div>
           ) : (
             <div className="divide-y divide-gray-200">
