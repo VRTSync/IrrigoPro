@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CustomerSelector } from "@/components/ui/customer-selector";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { 
+  Search, 
   FileText, 
   DollarSign, 
   Calendar,
@@ -17,7 +19,8 @@ import {
   Receipt,
   CheckCircle,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -34,14 +37,21 @@ interface CustomerBillingData {
 }
 
 export default function CustomerBilling() {
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Get all customers
+  const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
+    queryKey: ["/api/customers"],
+  });
+
   // Get detailed billing data for selected customer
   const { data: customerBillingData, isLoading: loadingCustomerData } = useQuery<CustomerBillingData>({
-    queryKey: ["/api/customers", selectedCustomer?.id, "billing"],
-    enabled: !!selectedCustomer?.id,
+    queryKey: ["/api/customers", selectedCustomerId, "billing"],
+    enabled: !!selectedCustomerId,
   });
 
   // Create monthly invoice mutation
@@ -54,7 +64,7 @@ export default function CustomerBilling() {
         title: "Monthly Invoice Created",
         description: `Invoice ${data.invoiceNumber} created successfully for ${data.totalAmount}`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomer?.id, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
     },
     onError: (error: any) => {
       toast({
@@ -64,6 +74,13 @@ export default function CustomerBilling() {
       });
     },
   });
+
+  const filteredCustomers = customers.filter(customer =>
+    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    customer.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -108,14 +125,86 @@ export default function CustomerBilling() {
       {/* Main Content Area */}
       <div className="container mx-auto p-4 space-y-4">
         {/* Full Width Customer Selector */}
-        <CustomerSelector
-          selectedCustomer={selectedCustomer}
-          onSelectCustomer={setSelectedCustomer}
-          placeholder="Search and select a customer to manage billing..."
-          className="w-full"
-        />
+        <Card className="w-full">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between gap-6">
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-semibold text-gray-900">Customer Selection</h2>
+                <Dialog open={showCustomerModal} onOpenChange={setShowCustomerModal}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="lg" className="flex items-center gap-2 min-w-[250px] h-12">
+                      <User className="w-5 h-5" />
+                      {selectedCustomer ? selectedCustomer.name : "Select Customer"}
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl max-h-[80vh]">
+                    <DialogHeader>
+                      <DialogTitle className="text-xl">Select Customer</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-6">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                        <Input
+                          placeholder="Search customers by name, email, or phone..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-12 h-12 text-base"
+                        />
+                      </div>
+                      <div className="max-h-96 overflow-y-auto space-y-3">
+                        {loadingCustomers ? (
+                          <div className="text-center text-gray-500 py-8">Loading customers...</div>
+                        ) : (
+                          filteredCustomers.map((customer) => (
+                            <div
+                              key={customer.id}
+                              onClick={() => {
+                                setSelectedCustomerId(customer.id);
+                                setShowCustomerModal(false);
+                                setSearchTerm("");
+                              }}
+                              className={`p-4 rounded-lg border-2 cursor-pointer transition-all hover:bg-gray-50 hover:border-blue-300 ${
+                                selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                              }`}
+                            >
+                              <div className="font-semibold text-base text-gray-900 mb-2">{customer.name}</div>
+                              <div className="space-y-1">
+                                <div className="text-sm text-gray-600 flex items-center gap-2">
+                                  <Mail className="w-4 h-4" />
+                                  {customer.email}
+                                </div>
+                                {customer.phone && (
+                                  <div className="text-sm text-gray-600 flex items-center gap-2">
+                                    <Phone className="w-4 h-4" />
+                                    {customer.phone}
+                                  </div>
+                                )}
+                                {customer.address && (
+                                  <div className="text-sm text-gray-500 flex items-center gap-2">
+                                    <MapPin className="w-4 h-4" />
+                                    {customer.address}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              {selectedCustomer && (
+                <div className="text-base text-gray-600">
+                  Managing billing for <span className="font-semibold text-gray-900">{selectedCustomer.name}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
-        {selectedCustomer ? (
+        {selectedCustomerId ? (
           loadingCustomerData ? (
             <Card>
               <CardContent className="p-8 text-center">
@@ -174,7 +263,7 @@ export default function CustomerBilling() {
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
                       </div>
                       <Button
-                        onClick={() => selectedCustomer && createMonthlyInvoice.mutate(selectedCustomer.id)}
+                        onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
                         disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
                         className="bg-orange-600 hover:bg-orange-700 text-white w-full h-7 text-xs"
                       >
