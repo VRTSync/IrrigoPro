@@ -154,6 +154,12 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     form.setValue("customerName", customer.name);
     form.setValue("propertyAddress", customer.address || "");
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
+    
+    // Auto-save as draft when customer is selected and there's meaningful data
+    const hasContent = hasFormData() || form.watch("items").length > 0;
+    if (hasContent) {
+      autoSaveDraft();
+    }
   };
 
   const addPart = (part: Part, quantity: number = 1) => {
@@ -169,6 +175,11 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     
     append(newItem);
     setShowPartsModal(false);
+    
+    // Auto-save as draft when parts are added and customer is selected
+    if (selectedCustomer) {
+      setTimeout(() => autoSaveDraft(), 500); // Small delay to ensure form state is updated
+    }
   };
 
   const addManualItem = () => {
@@ -182,6 +193,11 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     };
     
     append(newItem);
+    
+    // Auto-save as draft when manual items are added and customer is selected
+    if (selectedCustomer) {
+      setTimeout(() => autoSaveDraft(), 500); // Small delay to ensure form state is updated
+    }
   };
 
   const calculateTotals = () => {
@@ -407,6 +423,43 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
            formData.items.length > 0 ||
            formData.notes?.trim().length > 0;
   };
+
+  // Auto-save as draft
+  const autoSaveDraft = async () => {
+    try {
+      if (!hasFormData()) return;
+      
+      const formData = form.getValues();
+      // Only auto-save if there's a customer selected
+      if (formData.customerId > 0) {
+        await saveDraftMutation.mutateAsync(formData);
+      }
+    } catch (error) {
+      // Silently handle auto-save errors to avoid disrupting user flow
+      console.warn("Auto-save failed:", error);
+    }
+  };
+
+  // Auto-save when meaningful content is added
+  useEffect(() => {
+    const subscription = form.watch((value, { name }) => {
+      // Auto-save when important fields change and customer is selected
+      if (selectedCustomer && name && [
+        'workDescription', 
+        'totalHours', 
+        'technicianName',
+        'workDate'
+      ].includes(name)) {
+        const timeoutId = setTimeout(() => {
+          autoSaveDraft();
+        }, 2000); // 2 second delay to avoid excessive saves
+
+        return () => clearTimeout(timeoutId);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [form, selectedCustomer]);
 
   // Handle cancel button click
   const handleCancel = () => {
