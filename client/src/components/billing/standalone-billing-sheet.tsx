@@ -504,9 +504,9 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const hasFormData = () => {
     const formData = form.getValues();
     return formData.customerId > 0 || 
-           formData.workDescription.trim().length > 0 || 
+           (formData.workDescription || '').trim().length > 0 || 
            formData.items.length > 0 ||
-           formData.notes?.trim().length > 0;
+           (formData.notes || '').trim().length > 0;
   };
 
   // Auto-save to localStorage (temporary storage, not database)
@@ -747,7 +747,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                         {photos.map((photo, index) => (
                           <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
                             <img 
-                              src={typeof photo === 'string' ? photo : (photo as any).url || URL.createObjectURL(new File([photo], 'photo'))} 
+                              src={typeof photo === 'string' ? photo : (photo as any).url || URL.createObjectURL(photo as unknown as File)} 
                               alt={`Photo ${index + 1}`}
                               className="w-full h-full object-cover"
                             />
@@ -990,9 +990,9 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                         </div>
                     
                     <div className="max-h-48 overflow-y-auto">
-                      {filteredParts?.length > 0 ? (
+                      {(filteredParts?.length ?? 0) > 0 ? (
                         <div className="divide-y">
-                          {filteredParts.map((part) => {
+                          {filteredParts!.map((part) => {
                             const isAlreadyUsed = fields.some(field => field.partId === part.id);
                             
                             return (
@@ -1066,15 +1066,16 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                   )}
                 </div>
 
-                {fields.length === 0 ? (
-                  <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg">
-                    <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-500 text-sm">No items added yet</p>
-                    <p className="text-gray-400 text-xs mt-1">Use the buttons above to add parts and materials</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {fields.map((field, index) => (
+                <div className="space-y-4">
+                  {fields.length === 0 ? (
+                    <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg">
+                      <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-500 text-sm">No items added yet</p>
+                      <p className="text-gray-400 text-xs mt-1">Use the buttons above to add parts and materials</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {fields.map((field, index) => (
                       <Card key={field.id} className="border-l-4 border-l-blue-500 shadow-sm">
                         <CardContent className="p-4">
                           {/* Mobile-first responsive layout */}
@@ -1143,7 +1144,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                                           onClick={() => {
                                             const currentValue = parseFloat(field.value) || 0;
                                             if (currentValue > 0) {
-                                              field.onChange(Math.max(0, currentValue - 1));
+                                              field.onChange(String(Math.max(0, currentValue - 1)));
                                             }
                                           }}
                                         >
@@ -1165,7 +1166,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                                           className="h-9 w-9 rounded-full"
                                           onClick={() => {
                                             const currentValue = parseFloat(field.value) || 0;
-                                            field.onChange(currentValue + 1);
+                                            field.onChange(String(currentValue + 1));
                                           }}
                                         >
                                           +
@@ -1237,9 +1238,10 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -1379,8 +1381,23 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                   </div>
                 </CardContent>
               </Card>
-            )}
-            </>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  {fields.length === 0 ? (
+                    <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg">
+                      <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-500 text-sm">No items added yet</p>
+                      <p className="text-gray-400 text-xs mt-1">Use the buttons above to add parts and materials</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <p>Parts list would go here</p>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
             </form>
           </Form>
