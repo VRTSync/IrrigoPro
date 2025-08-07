@@ -305,7 +305,7 @@ export function SiteMapsPage() {
                   <div>
                     <h4 className="font-medium text-gray-900 mb-2">For Irrigation Zones:</h4>
                     <ul className="list-disc list-inside space-y-1 ml-4">
-                      <li>Use <strong>Polygon</strong> or <strong>LineString</strong> placemarks to define zone boundaries</li>
+                      <li>Use <strong>Point</strong> placemarks to mark irrigation zone locations</li>
                       <li>Include zone details: Controller name, Station number, Zone type, Coverage area</li>
                       <li>Example description: "Controller: Main Controller, Station: 1, Type: Sprinkler, Coverage: Front lawn"</li>
                     </ul>
