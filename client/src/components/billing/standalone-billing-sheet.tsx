@@ -154,12 +154,6 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     form.setValue("customerName", customer.name);
     form.setValue("propertyAddress", customer.address || "");
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
-    
-    // Auto-save as draft when customer is selected and there's meaningful data
-    const hasContent = hasFormData() || form.watch("items").length > 0;
-    if (hasContent) {
-      autoSaveDraft();
-    }
   };
 
   const addPart = (part: Part, quantity: number = 1) => {
@@ -178,7 +172,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     
     // Auto-save as draft when parts are added and customer is selected
     if (selectedCustomer) {
-      setTimeout(() => autoSaveDraft(), 500); // Small delay to ensure form state is updated
+      setTimeout(() => autoSaveDraft(), 1000); // Delay to ensure form state is updated
     }
   };
 
@@ -194,10 +188,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     
     append(newItem);
     
-    // Auto-save as draft when manual items are added and customer is selected
-    if (selectedCustomer) {
-      setTimeout(() => autoSaveDraft(), 500); // Small delay to ensure form state is updated
-    }
+    // Don't auto-save on manual item creation - wait for user to fill it out
+    // Auto-save will trigger when they start entering meaningful content
   };
 
   const calculateTotals = () => {
@@ -440,21 +432,29 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     }
   };
 
-  // Auto-save when meaningful content is added
+  // Auto-save when meaningful content is added (but not immediately on customer selection)
   useEffect(() => {
     const subscription = form.watch((value, { name }) => {
-      // Auto-save when important fields change and customer is selected
+      // Only auto-save when there's substantial content, not just customer selection
       if (selectedCustomer && name && [
         'workDescription', 
         'totalHours', 
         'technicianName',
         'workDate'
       ].includes(name)) {
-        const timeoutId = setTimeout(() => {
-          autoSaveDraft();
-        }, 2000); // 2 second delay to avoid excessive saves
+        const formData = form.getValues();
+        // Only auto-save if there's actual work content beyond just customer selection
+        const hasSubstantialContent = formData.workDescription.trim().length > 10 || 
+                                    formData.totalHours > 0 || 
+                                    formData.items.length > 0;
+        
+        if (hasSubstantialContent) {
+          const timeoutId = setTimeout(() => {
+            autoSaveDraft();
+          }, 3000); // 3 second delay to avoid excessive saves
 
-        return () => clearTimeout(timeoutId);
+          return () => clearTimeout(timeoutId);
+        }
       }
     });
 
