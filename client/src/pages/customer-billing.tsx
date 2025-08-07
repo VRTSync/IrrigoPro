@@ -115,74 +115,79 @@ export default function CustomerBilling() {
 
   return (
     <div className="w-full">
-      {/* Full-width Customer Selector Header */}
+      {/* Page Header */}
       <div className="w-full bg-white border-b shadow-sm">
-        <div className="container mx-auto p-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <h1 className="text-xl font-bold text-gray-900">Customer Billing</h1>
-              <Dialog open={showCustomerModal} onOpenChange={setShowCustomerModal}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="flex items-center gap-2">
-                    <User className="w-4 h-4" />
-                    {selectedCustomer ? selectedCustomer.name : "Select Customer"}
-                    <ChevronDown className="w-4 h-4" />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Select Customer</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                      <Input
-                        placeholder="Search customers..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                    <div className="max-h-96 overflow-y-auto space-y-2">
-                      {loadingCustomers ? (
-                        <div className="text-center text-gray-500 py-4">Loading customers...</div>
-                      ) : (
-                        filteredCustomers.map((customer) => (
-                          <div
-                            key={customer.id}
-                            onClick={() => {
-                              setSelectedCustomerId(customer.id);
-                              setShowCustomerModal(false);
-                              setSearchTerm("");
-                            }}
-                            className={`p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50 ${
-                              selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                            }`}
-                          >
-                            <div className="font-medium text-sm text-gray-900">{customer.name}</div>
-                            <div className="text-xs text-gray-600">{customer.email}</div>
-                            {customer.phone && (
-                              <div className="text-xs text-gray-500">{customer.phone}</div>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-            {selectedCustomer && (
-              <div className="text-sm text-gray-600">
-                Manage invoices and billing for {selectedCustomer.name}
-              </div>
-            )}
-          </div>
+        <div className="container mx-auto p-4">
+          <h1 className="text-2xl font-bold text-gray-900">Customer Billing</h1>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="container mx-auto p-4">
+      <div className="container mx-auto p-4 space-y-4">
+        {/* Full Width Customer Selector */}
+        <Card className="w-full">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <Dialog open={showCustomerModal} onOpenChange={setShowCustomerModal}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="flex items-center gap-2 min-w-[200px]">
+                      <User className="w-4 h-4" />
+                      {selectedCustomer ? selectedCustomer.name : "Select Customer"}
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Select Customer</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <Input
+                          placeholder="Search customers..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                      <div className="max-h-96 overflow-y-auto space-y-2">
+                        {loadingCustomers ? (
+                          <div className="text-center text-gray-500 py-4">Loading customers...</div>
+                        ) : (
+                          filteredCustomers.map((customer) => (
+                            <div
+                              key={customer.id}
+                              onClick={() => {
+                                setSelectedCustomerId(customer.id);
+                                setShowCustomerModal(false);
+                                setSearchTerm("");
+                              }}
+                              className={`p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50 ${
+                                selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                              }`}
+                            >
+                              <div className="font-medium text-sm text-gray-900">{customer.name}</div>
+                              <div className="text-xs text-gray-600">{customer.email}</div>
+                              {customer.phone && (
+                                <div className="text-xs text-gray-500">{customer.phone}</div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              {selectedCustomer && (
+                <div className="text-sm text-gray-600">
+                  Manage invoices and billing for {selectedCustomer.name}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
         {selectedCustomerId ? (
           loadingCustomerData ? (
             <Card>
