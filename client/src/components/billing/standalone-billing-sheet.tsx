@@ -28,7 +28,8 @@ import {
   Camera,
   ArrowLeft,
   Check,
-  Minus
+  Minus,
+  Search
 } from "lucide-react";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
@@ -83,6 +84,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -99,6 +101,19 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     queryKey: ["/api/customers"],
     queryFn: () => fetch("/api/customers").then(res => res.json()),
   });
+
+  // Fetch parts for the improved parts selection
+  const { data: parts } = useQuery<Part[]>({
+    queryKey: ["/api/parts"],
+    queryFn: () => fetch("/api/parts").then(res => res.json()),
+  });
+
+  // Filter parts based on search query
+  const filteredParts = parts?.filter(part =>
+    part.name.toLowerCase().includes(partsSearchQuery.toLowerCase()) ||
+    part.description?.toLowerCase().includes(partsSearchQuery.toLowerCase()) ||
+    part.sku?.toLowerCase().includes(partsSearchQuery.toLowerCase())
+  );
 
   const form = useForm<BillingSheetData>({
     resolver: zodResolver(billingSheetSchema),
@@ -267,6 +282,14 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   };
 
   const totals = calculateTotals();
+
+  // Format currency helper
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(amount);
+  };
 
   const createBillingSheetMutation = useMutation({
     mutationFn: async (data: BillingSheetData) => {
@@ -822,31 +845,114 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
             {/* Parts & Materials */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                  Parts & Materials Used
+                <CardTitle className="text-base sm:text-lg flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                    Parts & Materials Used
+                  </span>
+                  {!isFieldTech && fields.length > 0 && (
+                    <div className="text-sm font-normal text-gray-600">
+                      Total: {formatCurrency(totals.partsSubtotal)}
+                    </div>
+                  )}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 sm:space-y-4">
-                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                  <Button
-                    type="button"
-                    onClick={() => setShowPartsModal(true)}
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add from Catalog
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={addManualItem}
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Manual Item
-                  </Button>
+              <CardContent className="space-y-4">
+                {/* Improved Parts Selection Interface */}
+                <div className="space-y-4">
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Input
+                      placeholder="Search parts by name..."
+                      value={partsSearchQuery}
+                      onChange={(e) => setPartsSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+
+                  {/* Quick Add Parts - Simple List */}
+                  <div className="border rounded-lg bg-white">
+                    <div className="p-3 border-b bg-gray-50">
+                      <h4 className="font-medium text-gray-900">Quick Add Parts</h4>
+                      <p className="text-sm text-gray-600">Click + to add parts directly, or add manual items</p>
+                    </div>
+                    
+                    <div className="max-h-48 overflow-y-auto">
+                      {filteredParts?.length > 0 ? (
+                        <div className="divide-y">
+                          {filteredParts.map((part) => {
+                            const isAlreadyUsed = fields.some(field => field.partId === part.id);
+                            
+                            return (
+                              <div
+                                key={part.id}
+                                className={`
+                                  flex items-center justify-between p-3 hover:bg-gray-50 transition-colors
+                                  ${isAlreadyUsed ? 'bg-green-50' : ''}
+                                `}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-sm text-gray-900">{part.name}</div>
+                                  <div className="text-xs text-gray-500">{part.description}</div>
+                                  {!isFieldTech && (
+                                    <div className="text-xs text-gray-500">{formatCurrency(parseFloat(part.price))}</div>
+                                  )}
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                  {isAlreadyUsed && (
+                                    <div className="flex items-center gap-1 text-xs text-green-600">
+                                      <Check className="w-3 h-3" />
+                                      <span>Added</span>
+                                    </div>
+                                  )}
+                                  
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => addPart(part, 1)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white h-8 w-8 p-0"
+                                    title="Add part"
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : partsSearchQuery ? (
+                        <div className="p-6 text-center text-gray-500">
+                          <p>No parts found matching "{partsSearchQuery}"</p>
+                          <Button
+                            type="button"
+                            onClick={addManualItem}
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add as Manual Item
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center text-gray-500">
+                          <p>Start typing to search for parts</p>
+                          <Button
+                            type="button"
+                            onClick={addManualItem}
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add Manual Item
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {fields.length === 0 ? (
