@@ -269,11 +269,14 @@ export default function CustomerBilling() {
                       )}
 
                       {/* Last Invoice Date */}
-                      {daysSinceInvoice !== null && (
+                      {preview.lastInvoiceDate && (
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-500">Last invoiced:</span>
-                          <span className={`text-xs ${daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
-                            {daysSinceInvoice === 0 ? 'Today' : `${daysSinceInvoice}d ago`}
+                          <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
+                            {preview.lastInvoiceDate.toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric' 
+                            })}
                           </span>
                         </div>
                       )}
