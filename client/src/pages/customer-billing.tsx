@@ -288,21 +288,7 @@ export default function CustomerBilling() {
                         </div>
                       )}
 
-                      {/* Activity Indicator */}
-                      <div className="flex items-center gap-1 mt-2">
-                        {preview.unbilledAmount > 0 && (
-                          <div className="w-2 h-2 bg-orange-400 rounded-full" title="Has unbilled work" />
-                        )}
-                        {daysSinceInvoice && daysSinceInvoice > 30 && (
-                          <div className="w-2 h-2 bg-red-400 rounded-full" title="Invoice overdue" />
-                        )}
-                        {preview.pendingWorkOrders > 0 && (
-                          <div className="w-2 h-2 bg-blue-400 rounded-full" title="Active work orders" />
-                        )}
-                        {preview.contractType === 'premium' && (
-                          <div className="w-2 h-2 bg-green-400 rounded-full" title="Premium customer" />
-                        )}
-                      </div>
+
                     </div>
                   </div>
                 );
