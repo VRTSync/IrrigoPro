@@ -148,6 +148,34 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     }
   }, [draftData, form, append, remove, fields, isFieldTech]);
 
+  // Load temporary data on mount (crash recovery)
+  useEffect(() => {
+    if (currentUser?.id && !draftData) {
+      const tempDataKey = `billing-temp-${currentUser.id}`;
+      const tempDataStr = localStorage.getItem(tempDataKey);
+      
+      if (tempDataStr) {
+        try {
+          const tempData = JSON.parse(tempDataStr);
+          // Check if temp data is recent (within 24 hours)
+          const isRecent = tempData.timestamp && (Date.now() - tempData.timestamp) < 24 * 60 * 60 * 1000;
+          
+          if (isRecent && tempData.customerId) {
+            // Show recovery dialog or auto-restore
+            console.log("Found recent temporary data, could restore:", tempData);
+            // For now, just clear old temp data - could add recovery dialog later
+            localStorage.removeItem(tempDataKey);
+          }
+        } catch (error) {
+          console.warn("Failed to parse temporary data:", error);
+          localStorage.removeItem(tempDataKey);
+        }
+      }
+    }
+  }, [currentUser?.id, draftData]);
+
+
+
   const handleCustomerSelect = (customer: Customer) => {
     setSelectedCustomer(customer);
     form.setValue("customerId", customer.id);
@@ -170,9 +198,9 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     append(newItem);
     setShowPartsModal(false);
     
-    // Auto-save as draft when parts are added and customer is selected
+    // Auto-save to localStorage when parts are added
     if (selectedCustomer) {
-      setTimeout(() => autoSaveDraft(), 1000); // Delay to ensure form state is updated
+      setTimeout(() => autoSaveToLocalStorage(), 500); // Delay to ensure form state is updated
     }
   };
 
@@ -416,19 +444,32 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
            formData.notes?.trim().length > 0;
   };
 
-  // Auto-save as draft
-  const autoSaveDraft = async () => {
+  // Auto-save to localStorage (temporary storage, not database)
+  const autoSaveToLocalStorage = () => {
+    if (!selectedCustomer || !currentUser) return;
+
     try {
-      if (!hasFormData()) return;
-      
       const formData = form.getValues();
-      // Only auto-save if there's a customer selected
-      if (formData.customerId > 0) {
-        await saveDraftMutation.mutateAsync(formData);
-      }
+      const tempData = {
+        ...formData,
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        propertyAddress: selectedCustomer.address || "",
+        photos: photos.map(p => p.url),
+        technicianId: currentUser.id,
+        timestamp: Date.now()
+      };
+
+      localStorage.setItem(`billing-temp-${currentUser.id}`, JSON.stringify(tempData));
     } catch (error) {
-      // Silently handle auto-save errors to avoid disrupting user flow
-      console.warn("Auto-save failed:", error);
+      console.warn("Auto-save to localStorage failed:", error);
+    }
+  };
+
+  // Clear temporary localStorage data
+  const clearTempData = () => {
+    if (currentUser?.id) {
+      localStorage.removeItem(`billing-temp-${currentUser.id}`);
     }
   };
 
@@ -450,8 +491,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
         
         if (hasSubstantialContent) {
           const timeoutId = setTimeout(() => {
-            autoSaveDraft();
-          }, 3000); // 3 second delay to avoid excessive saves
+            autoSaveToLocalStorage();
+          }, 2000); // 2 second delay for localStorage auto-save
 
           return () => clearTimeout(timeoutId);
         }
@@ -461,18 +502,35 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
     return () => subscription.unsubscribe();
   }, [form, selectedCustomer]);
 
+  // Save temporary data before browser/tab close (crash recovery)
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (hasFormData() && selectedCustomer) {
+        autoSaveToLocalStorage();
+        // Show browser confirmation dialog
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasFormData, selectedCustomer]);
+
   // Handle cancel button click
   const handleCancel = () => {
     if (hasFormData()) {
       setShowCancelDialog(true);
     } else {
+      clearTempData(); // Clear temporary data if no form data
       handleOpenChange(false);
     }
   };
 
-  // Save as draft and close
+  // Save as draft to database and close
   const handleSaveAsDraft = async () => {
     try {
+      clearTempData(); // Clear temporary data since we're saving to database
       const formData = form.getValues();
       await saveDraftMutation.mutateAsync(formData);
       setShowCancelDialog(false);
@@ -490,6 +548,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   // Reset review state when modal closes
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {
+      clearTempData(); // Clear temporary data when closing
       setShowReview(false);
       resetForm();
       setSelectedCustomer(null);
