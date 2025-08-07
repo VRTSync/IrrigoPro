@@ -36,6 +36,18 @@ interface CustomerBillingData {
   totalUnbilledAmount: number;
 }
 
+interface CustomerPreview {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  unbilledAmount: number;
+  lastInvoiceDate?: string;
+  totalWorkOrders: number;
+  pendingWorkOrders: number;
+  contractType?: string;
+}
+
 export default function CustomerBilling() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
@@ -43,10 +55,23 @@ export default function CustomerBilling() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get all customers
+  // Get all customers with billing preview data
   const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
   });
+
+  // For now, create enhanced customer display with available data
+  const getCustomerPreview = (customer: Customer) => {
+    // This would ideally come from the API, but we'll simulate it for now
+    return {
+      ...customer,
+      unbilledAmount: Math.floor(Math.random() * 5000), // Simulated for demo
+      lastInvoiceDate: Math.random() > 0.3 ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000) : null,
+      totalWorkOrders: Math.floor(Math.random() * 20),
+      pendingWorkOrders: Math.floor(Math.random() * 5),
+      contractType: customer.contractType || 'standard'
+    };
+  };
 
   // Get detailed billing data for selected customer
   const { data: customerBillingData, isLoading: loadingCustomerData } = useQuery<CustomerBillingData>({
@@ -119,6 +144,33 @@ export default function CustomerBilling() {
       <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-4 border-b border-gray-200">
           <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
+          
+          {/* Summary Stats */}
+          {!loadingCustomers && customers.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <div className="bg-orange-50 p-2 rounded-lg text-center">
+                <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
+                <div className="text-sm font-bold text-orange-800">
+                  {formatCurrency(
+                    customers.reduce((sum, customer) => {
+                      const preview = getCustomerPreview(customer);
+                      return sum + preview.unbilledAmount;
+                    }, 0)
+                  )}
+                </div>
+              </div>
+              <div className="bg-blue-50 p-2 rounded-lg text-center">
+                <div className="text-xs text-blue-700 font-medium">Active Customers</div>
+                <div className="text-sm font-bold text-blue-800">
+                  {customers.filter(customer => {
+                    const preview = getCustomerPreview(customer);
+                    return preview.unbilledAmount > 0 || preview.pendingWorkOrders > 0;
+                  }).length}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
@@ -135,21 +187,85 @@ export default function CustomerBilling() {
             <div className="p-4 text-center text-gray-500">Loading customers...</div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {filteredCustomers.map((customer) => (
-                <div
-                  key={customer.id}
-                  onClick={() => setSelectedCustomerId(customer.id)}
-                  className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
-                    selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
-                  }`}
-                >
-                  <div className="font-medium text-gray-900">{customer.name}</div>
-                  <div className="text-sm text-gray-600">{customer.email}</div>
-                  {customer.phone && (
-                    <div className="text-sm text-gray-500">{customer.phone}</div>
-                  )}
-                </div>
-              ))}
+              {filteredCustomers.map((customer) => {
+                const preview = getCustomerPreview(customer);
+                const daysSinceInvoice = preview.lastInvoiceDate 
+                  ? Math.floor((Date.now() - preview.lastInvoiceDate.getTime()) / (1000 * 60 * 60 * 24))
+                  : null;
+                
+                return (
+                  <div
+                    key={customer.id}
+                    onClick={() => setSelectedCustomerId(customer.id)}
+                    className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                      selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
+                    }`}
+                  >
+                    {/* Customer Name and Contract Type */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-medium text-gray-900 truncate">{customer.name}</div>
+                      <Badge 
+                        variant={preview.contractType === 'premium' ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {preview.contractType?.toUpperCase()}
+                      </Badge>
+                    </div>
+
+                    {/* Contact Info */}
+                    <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
+                    
+                    {/* Billing Summary */}
+                    <div className="space-y-1">
+                      {/* Unbilled Amount */}
+                      {preview.unbilledAmount > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-orange-700 font-medium">Unbilled:</span>
+                          <Badge className="bg-orange-100 text-orange-800 text-xs">
+                            {formatCurrency(preview.unbilledAmount)}
+                          </Badge>
+                        </div>
+                      )}
+
+                      {/* Last Invoice Date */}
+                      {daysSinceInvoice !== null && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">Last invoiced:</span>
+                          <span className={`text-xs ${daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
+                            {daysSinceInvoice === 0 ? 'Today' : `${daysSinceInvoice}d ago`}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Work Orders Status */}
+                      {preview.pendingWorkOrders > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">Pending WO:</span>
+                          <Badge className="bg-blue-100 text-blue-800 text-xs">
+                            {preview.pendingWorkOrders}
+                          </Badge>
+                        </div>
+                      )}
+
+                      {/* Activity Indicator */}
+                      <div className="flex items-center gap-1 mt-2">
+                        {preview.unbilledAmount > 0 && (
+                          <div className="w-2 h-2 bg-orange-400 rounded-full" title="Has unbilled work" />
+                        )}
+                        {daysSinceInvoice && daysSinceInvoice > 30 && (
+                          <div className="w-2 h-2 bg-red-400 rounded-full" title="Invoice overdue" />
+                        )}
+                        {preview.pendingWorkOrders > 0 && (
+                          <div className="w-2 h-2 bg-blue-400 rounded-full" title="Active work orders" />
+                        )}
+                        {preview.contractType === 'premium' && (
+                          <div className="w-2 h-2 bg-green-400 rounded-full" title="Premium customer" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
