@@ -2,12 +2,10 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { CustomerSelector } from "@/components/ui/customer-selector";
 import { 
-  Search, 
   FileText, 
   DollarSign, 
   Calendar,
@@ -19,8 +17,7 @@ import {
   Receipt,
   CheckCircle,
   Clock,
-  AlertTriangle,
-  ChevronDown
+  AlertTriangle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -37,21 +34,14 @@ interface CustomerBillingData {
 }
 
 export default function CustomerBilling() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
-  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get all customers
-  const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
-    queryKey: ["/api/customers"],
-  });
-
   // Get detailed billing data for selected customer
   const { data: customerBillingData, isLoading: loadingCustomerData } = useQuery<CustomerBillingData>({
-    queryKey: ["/api/customers", selectedCustomerId, "billing"],
-    enabled: !!selectedCustomerId,
+    queryKey: ["/api/customers", selectedCustomer?.id, "billing"],
+    enabled: !!selectedCustomer?.id,
   });
 
   // Create monthly invoice mutation
@@ -64,7 +54,7 @@ export default function CustomerBilling() {
         title: "Monthly Invoice Created",
         description: `Invoice ${data.invoiceNumber} created successfully for ${data.totalAmount}`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomer?.id, "billing"] });
     },
     onError: (error: any) => {
       toast({
@@ -74,13 +64,6 @@ export default function CustomerBilling() {
       });
     },
   });
-
-  const filteredCustomers = customers.filter(customer =>
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -125,70 +108,14 @@ export default function CustomerBilling() {
       {/* Main Content Area */}
       <div className="container mx-auto p-4 space-y-4">
         {/* Full Width Customer Selector */}
-        <Card className="w-full">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <Dialog open={showCustomerModal} onOpenChange={setShowCustomerModal}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="flex items-center gap-2 min-w-[200px]">
-                      <User className="w-4 h-4" />
-                      {selectedCustomer ? selectedCustomer.name : "Select Customer"}
-                      <ChevronDown className="w-4 h-4" />
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Select Customer</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                        <Input
-                          placeholder="Search customers..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-10"
-                        />
-                      </div>
-                      <div className="max-h-96 overflow-y-auto space-y-2">
-                        {loadingCustomers ? (
-                          <div className="text-center text-gray-500 py-4">Loading customers...</div>
-                        ) : (
-                          filteredCustomers.map((customer) => (
-                            <div
-                              key={customer.id}
-                              onClick={() => {
-                                setSelectedCustomerId(customer.id);
-                                setShowCustomerModal(false);
-                                setSearchTerm("");
-                              }}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50 ${
-                                selectedCustomerId === customer.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                              }`}
-                            >
-                              <div className="font-medium text-sm text-gray-900">{customer.name}</div>
-                              <div className="text-xs text-gray-600">{customer.email}</div>
-                              {customer.phone && (
-                                <div className="text-xs text-gray-500">{customer.phone}</div>
-                              )}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              {selectedCustomer && (
-                <div className="text-sm text-gray-600">
-                  Manage invoices and billing for {selectedCustomer.name}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        {selectedCustomerId ? (
+        <CustomerSelector
+          selectedCustomer={selectedCustomer}
+          onSelectCustomer={setSelectedCustomer}
+          placeholder="Search and select a customer to manage billing..."
+          className="w-full"
+        />
+
+        {selectedCustomer ? (
           loadingCustomerData ? (
             <Card>
               <CardContent className="p-8 text-center">
@@ -247,7 +174,7 @@ export default function CustomerBilling() {
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
                       </div>
                       <Button
-                        onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
+                        onClick={() => selectedCustomer && createMonthlyInvoice.mutate(selectedCustomer.id)}
                         disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
                         className="bg-orange-600 hover:bg-orange-700 text-white w-full h-7 text-xs"
                       >
