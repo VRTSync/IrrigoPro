@@ -37,18 +37,27 @@ export default function BillingSheets() {
     }
   }, []);
 
-  // For field techs, only show their own billing sheets
+  // Get billing sheets based on role:
+  // - Field techs: only their own billing sheets
+  // - Managers/Admins: all billing sheets for oversight, but drafts filtered client-side
   const { data: billingSheets, isLoading } = useQuery<BillingSheet[]>({
     queryKey: currentUser?.role === 'field_tech' 
       ? ["/api/billing-sheets", "technician", currentUser?.id]
       : ["/api/billing-sheets"],
-    queryFn: () => currentUser?.role === 'field_tech' 
-      ? fetch(`/api/billing-sheets?technician=${currentUser.id}`).then(res => res.json())
-      : fetch('/api/billing-sheets').then(res => res.json()),
+    queryFn: () => {
+      if (currentUser?.role === 'field_tech' && currentUser?.id) {
+        return fetch(`/api/billing-sheets?technician=${currentUser.id}`).then(res => res.json());
+      } else {
+        return fetch('/api/billing-sheets').then(res => res.json());
+      }
+    },
   });
 
   // Separate drafts and submitted sheets
-  const draftSheets = billingSheets?.filter(sheet => sheet.status === 'draft') || [];
+  // Drafts are always user-specific, submitted sheets are visible to all with role-based access
+  const draftSheets = billingSheets?.filter(sheet => 
+    sheet.status === 'draft' && sheet.technicianId === currentUser?.id
+  ) || [];
   const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
 
   const formatCurrency = (amount: number | string) => {
