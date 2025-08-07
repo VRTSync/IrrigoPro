@@ -53,6 +53,21 @@ const createEstimateWithZonesSchema = z.object({
   }))
 });
 
+// Middleware to check if user has admin permissions for site map operations
+const requireAdminAccess = (req: Request, res: any, next: any) => {
+  // For now, we'll add a simple header check
+  // In a production app, this would check a proper session or JWT token
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole !== 'company_admin' && userRole !== 'super_admin') {
+    return res.status(403).json({ 
+      message: "Access denied. Site map creation is restricted to administrators only." 
+    });
+  }
+  
+  next();
+};
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Company routes
   app.get("/api/companies", async (req, res) => {
@@ -259,7 +274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers/:customerId/site-maps", async (req, res) => {
+  app.post("/api/customers/:customerId/site-maps", requireAdminAccess, async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
       
@@ -284,7 +299,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/site-maps/:siteMapId", async (req, res) => {
+  app.delete("/api/site-maps/:siteMapId", requireAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const success = await storage.deleteSiteMap(siteMapId);
@@ -300,7 +315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/controllers", async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/controllers", requireAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const controllers = req.body.controllers;
@@ -317,7 +332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/zones", async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/zones", requireAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const zones = req.body.zones;

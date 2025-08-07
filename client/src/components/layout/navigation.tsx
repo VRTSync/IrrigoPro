@@ -54,7 +54,6 @@ export default function Navigation() {
           },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
           { path: "/parts-list", label: "Parts", icon: Package },
         ];
       case "field_tech":
@@ -63,7 +62,6 @@ export default function Navigation() {
           { path: "/billing-sheets", label: "Onsite", icon: ClipboardList },
           { path: "/", label: "Home", icon: Home, isCenter: true },
           { path: "/customers", label: "Customers", icon: Users },
-          { path: "/site-maps", label: "Maps", icon: MapIcon },
         ];
       case "billing_manager":
         return [

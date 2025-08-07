@@ -12,9 +12,23 @@ export async function apiRequest(
   method: string = "GET",
   data?: unknown | undefined,
 ): Promise<any> {
+  // Get current user role from localStorage for access control
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+  
+  const user = getCurrentUser();
+  const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
+  
+  // Add user role header if user is logged in
+  if (user?.role) {
+    headers["X-User-Role"] = user.role;
+  }
+
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
