@@ -29,7 +29,9 @@ import {
   ArrowLeft,
   Check,
   Minus,
-  Search
+  Search,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
@@ -85,6 +87,8 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
+  const [isFrequentPartsExpanded, setIsFrequentPartsExpanded] = useState(false);
+  const [isAllPartsExpanded, setIsAllPartsExpanded] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -881,66 +885,109 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
               <CardContent className="space-y-4">
                 {/* Improved Parts Selection Interface */}
                 <div className="space-y-4">
-                  {/* Search Bar */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <Input
-                      placeholder="Search parts by name..."
-                      value={partsSearchQuery}
-                      onChange={(e) => setPartsSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
 
-                  {/* Frequently Used Parts Section */}
-                  {!partsSearchQuery && popularParts && popularParts.length > 0 && (
-                    <div className="border rounded-lg bg-white mb-4">
-                      <div className="p-3 border-b bg-blue-50">
-                        <h4 className="font-medium text-gray-900 flex items-center gap-2">
-                          <Package className="w-4 h-4 text-blue-600" />
-                          Frequently Used Parts
-                        </h4>
-                        <p className="text-sm text-gray-600">Your most commonly used parts for quick access</p>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
-                        {popularParts.slice(0, 6).map((part) => {
-                          const isAlreadyUsed = fields.some(field => field.partId === part.id);
-                          
-                          return (
-                            <button
-                              key={part.id}
-                              onClick={() => addPart(part, 1)}
-                              className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all text-left group"
-                            >
-                              <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200">
-                                <Package className="w-4 h-4 text-blue-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium text-gray-900 truncate">{part.name}</div>
-                                <div className="text-xs text-gray-500">Used {part.usageCount} times</div>
-                                {!isFieldTech && (
-                                  <div className="text-xs text-green-600">{formatCurrency(parseFloat(part.price))}</div>
-                                )}
-                              </div>
-                              {isAlreadyUsed ? (
-                                <Check className="w-4 h-4 text-green-600" />
-                              ) : (
-                                <Plus className="w-4 h-4 text-gray-400 group-hover:text-blue-600" />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
+                  {/* Hide search when parts sections are available, they have their own search */}
+                  {!popularParts || popularParts.length === 0 && (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <Input
+                        placeholder="Search parts by name..."
+                        value={partsSearchQuery}
+                        onChange={(e) => setPartsSearchQuery(e.target.value)}
+                        className="pl-10"
+                      />
                     </div>
                   )}
 
-                  {/* Quick Add Parts - Simple List */}
-                  <div className="border rounded-lg bg-white">
-                    <div className="p-3 border-b bg-gray-50">
-                      <h4 className="font-medium text-gray-900">All Parts Catalog</h4>
-                      <p className="text-sm text-gray-600">Search and add any part from your catalog</p>
+                  {/* Frequently Used Parts Section - Collapsible */}
+                  {!partsSearchQuery && popularParts && popularParts.length > 0 && (
+                    <div className="border rounded-lg bg-white mb-4">
+                      <button
+                        type="button"
+                        onClick={() => setIsFrequentPartsExpanded(!isFrequentPartsExpanded)}
+                        className="w-full p-3 border-b bg-blue-50 hover:bg-blue-100 transition-colors flex items-center justify-between text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-blue-600" />
+                          <div>
+                            <h4 className="font-medium text-gray-900">Frequently Used Parts</h4>
+                            <p className="text-sm text-gray-600">Quick access to your most used parts ({popularParts.length} available)</p>
+                          </div>
+                        </div>
+                        {isFrequentPartsExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-gray-600" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-gray-600" />
+                        )}
+                      </button>
+                      
+                      {isFrequentPartsExpanded && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
+                          {popularParts.slice(0, 6).map((part) => {
+                            const isAlreadyUsed = fields.some(field => field.partId === part.id);
+                            
+                            return (
+                              <button
+                                key={part.id}
+                                onClick={() => addPart(part, 1)}
+                                className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all text-left group"
+                              >
+                                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200">
+                                  <Package className="w-4 h-4 text-blue-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-medium text-gray-900 truncate">{part.name}</div>
+                                  <div className="text-xs text-gray-500">Used {part.usageCount} times</div>
+                                  {!isFieldTech && (
+                                    <div className="text-xs text-green-600">{formatCurrency(parseFloat(part.price))}</div>
+                                  )}
+                                </div>
+                                {isAlreadyUsed ? (
+                                  <Check className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <Plus className="w-4 h-4 text-gray-400 group-hover:text-blue-600" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
+                  )}
+
+                  {/* All Parts Catalog - Collapsible */}
+                  <div className="border rounded-lg bg-white">
+                    <button
+                      type="button"
+                      onClick={() => setIsAllPartsExpanded(!isAllPartsExpanded)}
+                      className="w-full p-3 border-b bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Search className="w-4 h-4 text-gray-600" />
+                        <div>
+                          <h4 className="font-medium text-gray-900">Add from Catalog</h4>
+                          <p className="text-sm text-gray-600">Search and add any part from your inventory ({parts?.length || 0} total parts)</p>
+                        </div>
+                      </div>
+                      {isAllPartsExpanded ? (
+                        <ChevronUp className="w-4 h-4 text-gray-600" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-gray-600" />
+                      )}
+                    </button>
+
+                    {isAllPartsExpanded && (
+                      <div className="p-3 space-y-3">
+                        {/* Search Bar - only show when expanded */}
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Input
+                            placeholder="Search parts by name..."
+                            value={partsSearchQuery}
+                            onChange={(e) => setPartsSearchQuery(e.target.value)}
+                            className="pl-10"
+                          />
+                        </div>
                     
                     <div className="max-h-48 overflow-y-auto">
                       {filteredParts?.length > 0 ? (
@@ -1016,7 +1063,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
                         </div>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {fields.length === 0 ? (
