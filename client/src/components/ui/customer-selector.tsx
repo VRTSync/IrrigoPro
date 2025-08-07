@@ -176,7 +176,7 @@ export function CustomerSelector({
 
       {/* Customer Selection Dialog */}
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="w-[95vw] max-w-2xl h-[90vh] max-h-[90vh] overflow-hidden p-0 flex flex-col">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[600px] overflow-hidden p-0 flex flex-col">
           <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
             <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
               <User className="w-5 h-5 text-blue-600" />
@@ -187,7 +187,7 @@ export function CustomerSelector({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 min-h-0">
             <div className="space-y-4">
             {/* Search */}
             <div className="relative">
@@ -210,7 +210,7 @@ export function CustomerSelector({
             </Button>
 
             {/* Customer List */}
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="space-y-2 flex-1 overflow-y-auto">
               {filteredCustomers.length === 0 ? (
                 <div className="text-center py-8">
                   <Building className="w-12 h-12 text-gray-300 mx-auto mb-4" />
