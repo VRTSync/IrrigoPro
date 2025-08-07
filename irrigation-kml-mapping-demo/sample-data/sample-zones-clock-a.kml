@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Clock A Zones</name>
+    <description>Sample irrigation zones for Clock A controller</description>
+    
+    <Placemark>
+      <name>Clock A zone 1 pop ups</name>
+      <description>Controller: Clock A, Station: 1, Type: Pop-ups, Coverage: Front entrance lawn</description>
+      <Point>
+        <coordinates>-105.0199000,39.9499000,1600</coordinates>
+      </Point>
+    </Placemark>
+    
+    <Placemark>
+      <name>Clock A zone 2 rotors</name>
+      <description>Controller: Clock A, Station: 2, Type: Rotors, Coverage: Large lawn area</description>
+      <Point>
+        <coordinates>-105.0198000,39.9498000,1598</coordinates>
+      </Point>
+    </Placemark>
+    
+    <Placemark>
+      <name>Clock A zone 3 pop ups</name>
+      <description>Controller: Clock A, Station: 3, Type: Pop-ups, Coverage: Side garden beds</description>
+      <Point>
+        <coordinates>-105.0197000,39.9497000,1596</coordinates>
+      </Point>
+    </Placemark>
+    
+    <Placemark>
+      <name>Clock A zone 4 drip</name>
+      <description>Controller: Clock A, Station: 4, Type: Drip, Coverage: Foundation plantings</description>
+      <Point>
+        <coordinates>-105.0196000,39.9496000,1594</coordinates>
+      </Point>
+    </Placemark>
+    
+    <Placemark>
+      <name>Clock A zone 5 rotors</name>
+      <description>Controller: Clock A, Station: 5, Type: Rotors, Coverage: Athletic field</description>
+      <Point>
+        <coordinates>-105.0195000,39.9495000,1592</coordinates>
+      </Point>
+    </Placemark>
+    
+    <Placemark>
+      <name>Clock A zone 6 pop ups</name>
+      <description>Controller: Clock A, Station: 6, Type: Pop-ups, Coverage: Courtyard area</description>
+      <Point>
+        <coordinates>-105.0194000,39.9494000,1590</coordinates>
+      </Point>
+    </Placemark>
+    
+  </Document>
+</kml>
