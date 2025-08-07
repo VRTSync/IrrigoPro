@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,19 @@ export function ZoneUpload({
   const { toast } = useToast();
 
   const uploadingController = controllers.find(c => c.id === uploadingFor);
+
+  // Clear upload state when switching controllers
+  useEffect(() => {
+    setFileName(null);
+    setParseStatus('idle');
+    setParseResults(null);
+    setIsProcessing(false);
+    setIsDragging(false);
+    // Clear file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [uploadingFor]);
 
   const handleFileSelect = async (file: File) => {
     if (!uploadingFor) {
