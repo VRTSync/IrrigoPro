@@ -94,6 +94,12 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   const currentUser = getCurrentUser();
   const isFieldTech = currentUser?.role === 'field_tech';
 
+  // Fetch customers for draft loading
+  const { data: customers } = useQuery<Customer[]>({
+    queryKey: ["/api/customers"],
+    queryFn: () => fetch("/api/customers").then(res => res.json()),
+  });
+
   const form = useForm<BillingSheetData>({
     resolver: zodResolver(billingSheetSchema),
     defaultValues: {
@@ -118,15 +124,26 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
   // Load draft data when editing
   useEffect(() => {
     if (draftData) {
-      form.setValue("customerId", draftData.customerId);
-      form.setValue("customerName", draftData.customerName);
-      form.setValue("propertyAddress", draftData.propertyAddress);
-      form.setValue("workDate", draftData.workDate);
-      form.setValue("technicianName", draftData.technicianName);
-      form.setValue("workDescription", draftData.workDescription);
-      form.setValue("totalHours", draftData.totalHours);
-      form.setValue("laborRate", draftData.laborRate);
-      form.setValue("notes", draftData.notes || "");
+      // Set selected customer first - this is crucial for form functionality
+      if (customers && draftData.customerId) {
+        const customer = customers.find(c => c.id === draftData.customerId);
+        if (customer) {
+          setSelectedCustomer(customer);
+        }
+      }
+      
+      form.reset({
+        customerId: draftData.customerId,
+        customerName: draftData.customerName,
+        propertyAddress: draftData.propertyAddress,
+        workDate: draftData.workDate,
+        technicianName: draftData.technicianName,
+        workDescription: draftData.workDescription,
+        totalHours: draftData.totalHours,
+        laborRate: draftData.laborRate,
+        notes: draftData.notes || "",
+        items: [],
+      });
       
       // Clear existing items and add draft items
       fields.forEach((_, index) => remove(index));
@@ -146,7 +163,7 @@ export function StandaloneBillingSheet({ open, onOpenChange, draftData, prefillF
         });
       }
     }
-  }, [draftData, form, append, remove, fields, isFieldTech]);
+  }, [draftData, form, append, remove, fields, isFieldTech, customers]);
 
   // Load temporary data on mount (crash recovery)
   useEffect(() => {
