@@ -63,13 +63,20 @@ export default function CustomerBilling() {
   // For now, create enhanced customer display with available data
   const getCustomerPreview = (customer: Customer) => {
     // This would ideally come from the API, but we'll simulate it for now
+    const monthlyAverage = Math.floor(Math.random() * 3000) + 1000; // $1000-$4000 typical monthly
+    const currentMonthBilling = Math.floor(Math.random() * 6000); // Current month activity
+    const billingPace = currentMonthBilling / monthlyAverage;
+    
     return {
       ...customer,
       unbilledAmount: Math.floor(Math.random() * 5000), // Simulated for demo
       lastInvoiceDate: Math.random() > 0.3 ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000) : null,
       totalWorkOrders: Math.floor(Math.random() * 20),
       pendingWorkOrders: Math.floor(Math.random() * 5),
-      contractType: customer.contractType || 'standard'
+      contractType: customer.contractType || 'standard',
+      monthlyAverage,
+      currentMonthBilling,
+      billingPace
     };
   };
 
@@ -201,22 +208,22 @@ export default function CustomerBilling() {
                       selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
                     }`}
                   >
-                    {/* Customer Name and Priority Badge */}
+                    {/* Customer Name and Billing Pace Badge */}
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-medium text-gray-900 truncate">{customer.name}</div>
-                      {preview.unbilledAmount > 2000 ? (
-                        <Badge className="bg-red-100 text-red-800 text-xs">
-                          HIGH VALUE
-                        </Badge>
-                      ) : preview.contractType === 'premium' ? (
+                      {preview.billingPace >= 1.3 ? (
                         <Badge className="bg-green-100 text-green-800 text-xs">
-                          PREMIUM
+                          ABOVE AVG
                         </Badge>
-                      ) : preview.pendingWorkOrders > 3 ? (
+                      ) : preview.billingPace <= 0.7 ? (
+                        <Badge className="bg-red-100 text-red-800 text-xs">
+                          BELOW AVG
+                        </Badge>
+                      ) : (
                         <Badge className="bg-blue-100 text-blue-800 text-xs">
-                          ACTIVE
+                          ON PACE
                         </Badge>
-                      ) : null}
+                      )}
                     </div>
 
                     {/* Contact Info */}
@@ -224,6 +231,17 @@ export default function CustomerBilling() {
                     
                     {/* Billing Summary */}
                     <div className="space-y-1">
+                      {/* Monthly Billing Pace */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500">This month:</span>
+                        <span className="text-xs font-medium">
+                          {formatCurrency(preview.currentMonthBilling)} 
+                          <span className="text-gray-400 ml-1">
+                            (avg: {formatCurrency(preview.monthlyAverage)})
+                          </span>
+                        </span>
+                      </div>
+
                       {/* Unbilled Amount */}
                       {preview.unbilledAmount > 0 && (
                         <div className="flex items-center justify-between">
