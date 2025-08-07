@@ -2331,5 +2331,120 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer billing data endpoint - calculates billing metrics from actual work orders
+  app.get("/api/customers/billing-preview", async (req, res) => {
+    try {
+      console.log("Fetching customer billing previews...");
+      const customers = await storage.getCustomers();
+      console.log(`Found ${customers.length} customers`);
+      
+      const currentDate = new Date();
+      const currentMonth = currentDate.getMonth();
+      const currentYear = currentDate.getFullYear();
+      
+      // Get first day of current month
+      const currentMonthStart = new Date(currentYear, currentMonth, 1);
+      console.log(`Current month start: ${currentMonthStart}`);
+      
+      // Get billing previews for all customers
+      const customerPreviews = await Promise.all(customers.map(async (customer) => {
+        try {
+          console.log(`Processing customer: ${customer.name} (ID: ${customer.id})`);
+          
+          // Get all work orders for this customer
+          const workOrders = await storage.getWorkOrdersByCustomer(customer.id);
+          console.log(`Found ${workOrders.length} work orders for customer ${customer.id}`);
+          
+          const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
+          console.log(`${completedWorkOrders.length} completed work orders`);
+          
+          // Calculate current month work orders
+          const currentMonthWorkOrders = completedWorkOrders.filter(wo => 
+            wo.completedAt && new Date(wo.completedAt) >= currentMonthStart
+          );
+          
+          // Calculate current month billing
+          const currentMonthBilling = currentMonthWorkOrders.reduce((sum, wo) => 
+            sum + parseFloat(wo.totalAmount || '0'), 0
+          );
+          
+          // Calculate historical monthly averages (last 6 months, excluding current)
+          const monthlyTotals = [];
+          for (let i = 1; i <= 6; i++) {
+            const monthStart = new Date(currentYear, currentMonth - i, 1);
+            const monthEnd = new Date(currentYear, currentMonth - i + 1, 0);
+            
+            const monthWorkOrders = completedWorkOrders.filter(wo => 
+              wo.completedAt && 
+              new Date(wo.completedAt) >= monthStart && 
+              new Date(wo.completedAt) <= monthEnd
+            );
+            
+            const monthTotal = monthWorkOrders.reduce((sum, wo) => 
+              sum + parseFloat(wo.totalAmount || '0'), 0
+            );
+            
+            if (monthTotal > 0) monthlyTotals.push(monthTotal);
+          }
+          
+          // Calculate monthly average
+          const monthlyAverage = monthlyTotals.length > 0 
+            ? monthlyTotals.reduce((sum, total) => sum + total, 0) / monthlyTotals.length
+            : Math.max(currentMonthBilling, 1000); // Default to current or $1000 if no history
+          
+          const billingPace = monthlyAverage > 0 ? currentMonthBilling / monthlyAverage : 1;
+          
+          // Calculate unbilled amount (all completed work orders are considered unbilled until invoiced)
+          // For now, assume all completed work orders in current month are unbilled
+          const unbilledAmount = currentMonthBilling;
+          
+          // Get last invoice date (approximate from most recent completed work order)
+          const lastCompletedWorkOrder = completedWorkOrders
+            .filter(wo => wo.completedAt)
+            .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime())[0];
+          
+          const lastInvoiceDate = lastCompletedWorkOrder?.completedAt 
+            ? new Date(lastCompletedWorkOrder.completedAt) 
+            : null;
+          
+          // Count pending work orders
+          const pendingWorkOrders = workOrders.filter(wo => 
+            wo.status === 'pending' || wo.status === 'in_progress'
+          ).length;
+          
+          return {
+            ...customer,
+            currentMonthBilling: Math.round(currentMonthBilling * 100) / 100,
+            monthlyAverage: Math.round(monthlyAverage * 100) / 100,
+            billingPace: Math.round(billingPace * 100) / 100,
+            unbilledAmount: Math.round(unbilledAmount * 100) / 100,
+            lastInvoiceDate,
+            pendingWorkOrders,
+            totalWorkOrders: completedWorkOrders.length
+          };
+        } catch (customerError) {
+          console.error(`Error processing customer ${customer.id}:`, customerError);
+          // Return customer with default values on error
+          return {
+            ...customer,
+            currentMonthBilling: 0,
+            monthlyAverage: 1000,
+            billingPace: 0,
+            unbilledAmount: 0,
+            lastInvoiceDate: null,
+            pendingWorkOrders: 0,
+            totalWorkOrders: 0
+          };
+        }
+      }));
+      
+      console.log("Successfully processed all customers");
+      res.json(customerPreviews);
+    } catch (error) {
+      console.error("Error fetching customer billing previews:", error);
+      res.status(500).json({ message: "Failed to fetch customer billing data" });
+    }
+  });
+
   return httpServer;
 }

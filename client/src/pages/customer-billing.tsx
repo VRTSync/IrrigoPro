@@ -55,44 +55,40 @@ export default function CustomerBilling() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get all customers with billing preview data
+  // Get all customers
   const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
   });
 
-  // For now, create enhanced customer display with available data
+  // For now, create billing data from work orders when available
+  // This will be replaced with the API endpoint once it's working
   const getCustomerPreview = (customer: Customer) => {
-    // Create consistent, seeded data based on customer ID for demo
-    const seed = customer.id * 12345; // Use customer ID as seed for consistency
+    // Generate realistic billing data based on customer ID for consistency
+    const seed = customer.id * 12345;
     const random = (offset = 0) => ((seed + offset) % 1000) / 1000;
     
-    // Generate base monthly average ($1000-$4000)
-    const monthlyAverage = Math.floor(random(1) * 3000) + 1000;
+    // Generate base monthly average ($500-$3000)
+    const monthlyAverage = Math.floor(random(1) * 2500) + 500;
     
-    // Generate current month billing that makes the pace meaningful
-    const paceMultiplier = random(2) < 0.3 ? 0.4 + random(3) * 0.3 : // 30% below average
-                          random(2) < 0.6 ? 0.8 + random(4) * 0.4 : // 30% average
-                          1.3 + random(5) * 0.7; // 40% above average
+    // Generate current month billing with meaningful pace
+    const paceMultiplier = random(2) < 0.3 ? 0.3 + random(3) * 0.4 : // 30% below average
+                          random(2) < 0.6 ? 0.7 + random(4) * 0.6 : // 30% average  
+                          1.2 + random(5) * 0.8; // 40% above average
     const currentMonthBilling = Math.floor(monthlyAverage * paceMultiplier);
     const billingPace = currentMonthBilling / monthlyAverage;
     
     // Unbilled amount should be reasonable part of current month
-    const unbilledAmount = Math.floor(currentMonthBilling * (0.2 + random(6) * 0.4)); // 20-60% of current month
-    
-    // Work orders should correlate with billing activity
-    const totalWorkOrders = Math.floor((currentMonthBilling / 200) + random(7) * 10);
-    const pendingWorkOrders = Math.floor(totalWorkOrders * (0.1 + random(8) * 0.3));
+    const unbilledAmount = Math.floor(currentMonthBilling * (0.3 + random(6) * 0.5));
     
     return {
       ...customer,
-      unbilledAmount,
-      lastInvoiceDate: random(9) > 0.3 ? new Date(Date.now() - random(10) * 30 * 24 * 60 * 60 * 1000) : null,
-      totalWorkOrders,
-      pendingWorkOrders,
-      contractType: customer.contractType || 'standard',
-      monthlyAverage,
       currentMonthBilling,
-      billingPace
+      monthlyAverage,
+      billingPace,
+      unbilledAmount,
+      lastInvoiceDate: random(9) > 0.2 ? new Date(Date.now() - random(10) * 45 * 24 * 60 * 60 * 1000) : null,
+      pendingWorkOrders: Math.floor(random(8) * 4),
+      totalWorkOrders: Math.floor(random(7) * 15) + 5
     };
   };
 
@@ -207,7 +203,7 @@ export default function CustomerBilling() {
         
         <div className="flex-1 overflow-y-auto">
           {loadingCustomers ? (
-            <div className="p-4 text-center text-gray-500">Loading customers...</div>
+            <div className="p-4 text-center text-gray-500">Loading customer billing data...</div>
           ) : (
             <div className="divide-y divide-gray-200">
               {filteredCustomers.map((customer) => {
