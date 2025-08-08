@@ -197,7 +197,7 @@ export default function CustomerBilling() {
               {filteredCustomers.map((customer) => {
                 const preview = getCustomerPreview(customer);
                 const daysSinceInvoice = preview.lastInvoiceDate 
-                  ? Math.floor((Date.now() - preview.lastInvoiceDate.getTime()) / (1000 * 60 * 60 * 24))
+                  ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate).getTime()) / (1000 * 60 * 60 * 24))
                   : null;
                 
                 return (
@@ -257,7 +257,7 @@ export default function CustomerBilling() {
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-500">Last invoiced:</span>
                           <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
-                            {preview.lastInvoiceDate.toLocaleDateString('en-US', { 
+                            {new Date(preview.lastInvoiceDate).toLocaleDateString('en-US', { 
                               month: 'short', 
                               day: 'numeric' 
                             })}
