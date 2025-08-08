@@ -169,12 +169,37 @@ export function StandaloneBillingSheet({
         photos: uploadedPhotos.map(photo => photo.url),
       };
       
-      return apiRequest("/api/billing-sheets", {
-        method: "POST",
-        body: payload,
-      });
+      console.log('API payload:', payload);
+      
+      try {
+        const response = await fetch("/api/billing-sheets", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-User-Role": currentUser?.role || ""
+          },
+          body: JSON.stringify(payload),
+        });
+        
+        console.log('Response status:', response.status);
+        console.log('Response ok:', response.ok);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Response error text:', errorText);
+          throw new Error(`${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('API response:', result);
+        return result;
+      } catch (error) {
+        console.error('API error:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
+      console.log('Billing sheet created successfully');
       toast({
         title: "Success",
         description: isFieldTech 
@@ -185,6 +210,7 @@ export function StandaloneBillingSheet({
       handleClose();
     },
     onError: (error: any) => {
+      console.error('Mutation error:', error);
       toast({
         title: "Error",
         description: error.message || "Failed to save billing sheet",
