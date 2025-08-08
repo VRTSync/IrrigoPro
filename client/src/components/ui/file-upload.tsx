@@ -20,7 +20,7 @@ export interface UploadedFile {
   originalName: string;
 }
 
-export function FileUpload({ type, label, accept, multiple = true, files, onFilesChange }: FileUploadProps) {
+export function FileUpload({ type, label, accept, multiple = true, files = [], onFilesChange }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -51,7 +51,7 @@ export function FileUpload({ type, label, accept, multiple = true, files, onFile
         uploadedFiles.push(uploadedFile);
       }
 
-      onFilesChange(multiple ? [...files, ...uploadedFiles] : uploadedFiles);
+      onFilesChange(multiple ? [...(Array.isArray(files) ? files : []), ...uploadedFiles] : uploadedFiles);
       
       toast({
         title: "Upload Successful",
@@ -72,7 +72,8 @@ export function FileUpload({ type, label, accept, multiple = true, files, onFile
   };
 
   const removeFile = (index: number) => {
-    const updatedFiles = files.filter((_, i) => i !== index);
+    const fileArray = Array.isArray(files) ? files : [];
+    const updatedFiles = fileArray.filter((_, i) => i !== index);
     onFilesChange(updatedFiles);
   };
 
@@ -110,7 +111,7 @@ export function FileUpload({ type, label, accept, multiple = true, files, onFile
         className="hidden"
       />
 
-      {files.length > 0 && (
+      {Array.isArray(files) && files.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {files.map((file, index) => (
             <Card key={index} className="relative">
