@@ -52,6 +52,9 @@ export default function CustomerBilling() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingSheet | null>(null);
+  const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -437,11 +440,14 @@ export default function CustomerBilling() {
                       ) : (
                         <div className="space-y-1 max-h-96 overflow-y-auto">
                           {customerBillingData.workOrders.map((workOrder) => (
-                            <div key={workOrder.id} className={`border rounded-md p-2 transition-all ${
-                              workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
-                                ? 'border-orange-200 bg-orange-50' 
-                                : 'border-gray-200'
-                            }`}>
+                            <div 
+                              key={workOrder.id} 
+                              onClick={() => setSelectedWorkOrder(workOrder)}
+                              className={`border rounded-md p-2 transition-all cursor-pointer hover:shadow-md ${
+                                workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
+                                  ? 'border-orange-200 bg-orange-50 hover:bg-orange-100' 
+                                  : 'border-gray-200 hover:bg-gray-50'
+                              }`}>
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
@@ -494,7 +500,10 @@ export default function CustomerBilling() {
                       ) : (
                         <div className="space-y-1 max-h-96 overflow-y-auto">
                           {customerBillingData.billingSheets.map((billingSheet) => (
-                            <div key={billingSheet.id} className="border rounded-md p-2">
+                            <div 
+                              key={billingSheet.id} 
+                              onClick={() => setSelectedBillingSheet(billingSheet)}
+                              className="border rounded-md p-2 cursor-pointer hover:shadow-md hover:bg-gray-50 transition-all">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
@@ -535,7 +544,10 @@ export default function CustomerBilling() {
                       ) : (
                         <div className="space-y-1 max-h-96 overflow-y-auto">
                           {customerBillingData.estimates.map((estimate) => (
-                            <div key={estimate.id} className="border rounded-md p-2">
+                            <div 
+                              key={estimate.id} 
+                              onClick={() => setSelectedEstimate(estimate)}
+                              className="border rounded-md p-2 cursor-pointer hover:shadow-md hover:bg-gray-50 transition-all">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
@@ -580,6 +592,204 @@ export default function CustomerBilling() {
         )}
         </div>
       </div>
+
+      {/* Work Order Details Modal */}
+      <Dialog open={!!selectedWorkOrder} onOpenChange={() => setSelectedWorkOrder(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Work Order Details - {selectedWorkOrder?.workOrderNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedWorkOrder && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Project Name</label>
+                    <p className="text-sm">{selectedWorkOrder.projectName}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Status</label>
+                    <div className="mt-1">{getStatusBadge(selectedWorkOrder.status)}</div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Assigned Technician</label>
+                    <p className="text-sm">{selectedWorkOrder.assignedTechnicianName || "Unassigned"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Total Amount</label>
+                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedWorkOrder.totalAmount || '0')}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Created Date</label>
+                    <p className="text-sm">{formatDate(selectedWorkOrder.createdAt)}</p>
+                  </div>
+                  {selectedWorkOrder.completedAt && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-600">Completed Date</label>
+                      <p className="text-sm">{formatDate(selectedWorkOrder.completedAt)}</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Priority</label>
+                    <p className="text-sm capitalize">{selectedWorkOrder.priority || 'Normal'}</p>
+                  </div>
+                </div>
+              </div>
+              
+              {selectedWorkOrder.workDescription && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Work Description</label>
+                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedWorkOrder.workDescription}</p>
+                </div>
+              )}
+              
+              {selectedWorkOrder.location && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Location</label>
+                  <p className="text-sm">{selectedWorkOrder.location}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Billing Sheet Details Modal */}
+      <Dialog open={!!selectedBillingSheet} onOpenChange={() => setSelectedBillingSheet(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              Billing Sheet Details - {selectedBillingSheet?.billingNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedBillingSheet && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Work Description</label>
+                    <p className="text-sm">{selectedBillingSheet.workDescription}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Status</label>
+                    <div className="mt-1">{getStatusBadge(selectedBillingSheet.status)}</div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Technician</label>
+                    <p className="text-sm">{selectedBillingSheet.technicianName}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Total Amount</label>
+                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedBillingSheet.totalAmount)}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Work Date</label>
+                    <p className="text-sm">{formatDate(selectedBillingSheet.workDate)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Created Date</label>
+                    <p className="text-sm">{formatDate(selectedBillingSheet.createdAt)}</p>
+                  </div>
+                  {selectedBillingSheet.hours && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-600">Hours Worked</label>
+                      <p className="text-sm">{selectedBillingSheet.hours}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {selectedBillingSheet.notes && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Notes</label>
+                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedBillingSheet.notes}</p>
+                </div>
+              )}
+              
+              {selectedBillingSheet.location && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Location</label>
+                  <p className="text-sm">{selectedBillingSheet.location}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Estimate Details Modal */}
+      <Dialog open={!!selectedEstimate} onOpenChange={() => setSelectedEstimate(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="w-5 h-5" />
+              Estimate Details - {selectedEstimate?.estimateNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedEstimate && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Project Name</label>
+                    <p className="text-sm">{selectedEstimate.projectName}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Status</label>
+                    <div className="mt-1">{getStatusBadge(selectedEstimate.status)}</div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Total Amount</label>
+                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedEstimate.totalAmount)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Valid Until</label>
+                    <p className="text-sm">{selectedEstimate.validUntil ? formatDate(selectedEstimate.validUntil) : 'No expiration'}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Created Date</label>
+                    <p className="text-sm">{formatDate(selectedEstimate.createdAt)}</p>
+                  </div>
+                  {selectedEstimate.approvedAt && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-600">Approved Date</label>
+                      <p className="text-sm">{formatDate(selectedEstimate.approvedAt)}</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Priority</label>
+                    <p className="text-sm capitalize">{selectedEstimate.priority || 'Normal'}</p>
+                  </div>
+                </div>
+              </div>
+              
+              {selectedEstimate.projectDescription && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Project Description</label>
+                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedEstimate.projectDescription}</p>
+                </div>
+              )}
+              
+              {selectedEstimate.location && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Location</label>
+                  <p className="text-sm">{selectedEstimate.location}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
