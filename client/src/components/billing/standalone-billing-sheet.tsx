@@ -171,14 +171,7 @@ export function StandaloneBillingSheet({
       
       console.log('API payload:', payload);
       
-      try {
-        const response = await apiRequest("/api/billing-sheets", "POST", payload);
-        console.log('API response:', response);
-        return response;
-      } catch (error) {
-        console.error('API error:', error);
-        throw error;
-      }
+      return apiRequest("/api/billing-sheets", "POST", payload);
     },
     onSuccess: () => {
       console.log('Billing sheet created successfully');
@@ -361,7 +354,7 @@ export function StandaloneBillingSheet({
     });
   };
 
-  const onSubmit = async (data: BillingSheetData) => {
+  const onSubmit = (data: BillingSheetData) => {
     console.log('Form submission triggered, showReview:', showReview);
     console.log('Form data:', data);
     console.log('Form errors:', form.formState.errors);
@@ -383,14 +376,10 @@ export function StandaloneBillingSheet({
 
       console.log('Submitting data:', submissionData);
 
-      try {
-        if (draftData) {
-          await updateBillingSheet.mutateAsync(submissionData);
-        } else {
-          await createBillingSheet.mutateAsync(submissionData);
-        }
-      } catch (error) {
-        console.error('Submission error caught:', error);
+      if (draftData) {
+        updateBillingSheet.mutate(submissionData);
+      } else {
+        createBillingSheet.mutate(submissionData);
       }
     } else {
       // Go to review screen
