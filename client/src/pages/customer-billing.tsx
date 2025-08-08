@@ -609,9 +609,10 @@ export default function CustomerBilling() {
             </DialogTitle>
           </DialogHeader>
           {selectedWorkOrder && (
-            <div className="space-y-4">
+            <div className="space-y-6">
+              {/* Header Information */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div>
                     <label className="text-sm font-medium text-gray-600">Project Name</label>
                     <p className="text-sm">{selectedWorkOrder.projectName}</p>
@@ -625,15 +626,21 @@ export default function CustomerBilling() {
                     <p className="text-sm">{selectedWorkOrder.assignedTechnicianName || "Unassigned"}</p>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-600">Total Amount</label>
-                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedWorkOrder.totalAmount || '0')}</p>
+                    <label className="text-sm font-medium text-gray-600">Work Type</label>
+                    <p className="text-sm capitalize">{selectedWorkOrder.workType?.replace('_', ' ') || 'Standard'}</p>
                   </div>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div>
                     <label className="text-sm font-medium text-gray-600">Created Date</label>
                     <p className="text-sm">{formatDate(selectedWorkOrder.createdAt)}</p>
                   </div>
+                  {selectedWorkOrder.startedAt && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-600">Started Date</label>
+                      <p className="text-sm">{formatDate(selectedWorkOrder.startedAt)}</p>
+                    </div>
+                  )}
                   {selectedWorkOrder.completedAt && (
                     <div>
                       <label className="text-sm font-medium text-gray-600">Completed Date</label>
@@ -646,18 +653,126 @@ export default function CustomerBilling() {
                   </div>
                 </div>
               </div>
-              
-              {selectedWorkOrder.description && (
+
+              {/* Location & Instructions */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {selectedWorkOrder.projectAddress && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Project Address</label>
+                    <p className="text-sm bg-gray-50 p-2 rounded">{selectedWorkOrder.projectAddress}</p>
+                  </div>
+                )}
+                {selectedWorkOrder.locationNotes && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Location Notes</label>
+                    <p className="text-sm bg-gray-50 p-2 rounded">{selectedWorkOrder.locationNotes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Work Details */}
+              <div className="space-y-4">
+                {selectedWorkOrder.description && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Work Description</label>
+                    <p className="text-sm bg-gray-50 p-3 rounded">{selectedWorkOrder.description}</p>
+                  </div>
+                )}
+                
+                {selectedWorkOrder.specialInstructions && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Special Instructions</label>
+                    <p className="text-sm bg-blue-50 p-3 rounded border border-blue-200">{selectedWorkOrder.specialInstructions}</p>
+                  </div>
+                )}
+
+                {selectedWorkOrder.workSummary && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Work Summary (Technician Report)</label>
+                    <p className="text-sm bg-green-50 p-3 rounded border border-green-200">{selectedWorkOrder.workSummary}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Labor & Financial Details */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="text-sm font-medium text-gray-700 mb-3">Labor & Financial Details</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {selectedWorkOrder.totalHours && (
+                    <div>
+                      <label className="text-xs text-gray-500">Total Hours</label>
+                      <p className="text-sm font-medium">{selectedWorkOrder.totalHours} hrs</p>
+                    </div>
+                  )}
+                  {selectedWorkOrder.totalPartsCost && (
+                    <div>
+                      <label className="text-xs text-gray-500">Parts Cost</label>
+                      <p className="text-sm font-medium">{formatCurrency(selectedWorkOrder.totalPartsCost)}</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs text-gray-500">Total Amount</label>
+                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedWorkOrder.totalAmount || '0')}</p>
+                  </div>
+                  {selectedWorkOrder.totalItems !== null && (
+                    <div>
+                      <label className="text-xs text-gray-500">Parts Used</label>
+                      <p className="text-sm font-medium">{selectedWorkOrder.totalItems || 0} items</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Notes Section */}
+              <div className="space-y-4">
+                {selectedWorkOrder.notes && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Internal Notes</label>
+                    <p className="text-sm bg-yellow-50 p-3 rounded border border-yellow-200">{selectedWorkOrder.notes}</p>
+                  </div>
+                )}
+                
+                {selectedWorkOrder.customerNotes && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Customer Notes</label>
+                    <p className="text-sm bg-blue-50 p-3 rounded border border-blue-200">{selectedWorkOrder.customerNotes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Photos Section */}
+              {selectedWorkOrder.photos && selectedWorkOrder.photos.length > 0 && (
                 <div>
-                  <label className="text-sm font-medium text-gray-600">Work Description</label>
-                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedWorkOrder.description}</p>
+                  <label className="text-sm font-medium text-gray-600 mb-2 block">Photos ({selectedWorkOrder.photos.length})</label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {selectedWorkOrder.photos.map((photo, index) => (
+                      <div key={index} className="relative">
+                        <img 
+                          src={photo} 
+                          alt={`Work photo ${index + 1}`}
+                          className="w-full h-24 object-cover rounded border hover:scale-105 transition-transform cursor-pointer"
+                          onClick={() => window.open(photo, '_blank')}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-              
-              {selectedWorkOrder.projectAddress && (
+
+              {/* Attachments Section */}
+              {selectedWorkOrder.attachments && selectedWorkOrder.attachments.length > 0 && (
                 <div>
-                  <label className="text-sm font-medium text-gray-600">Location</label>
-                  <p className="text-sm">{selectedWorkOrder.projectAddress}</p>
+                  <label className="text-sm font-medium text-gray-600 mb-2 block">Attachments ({selectedWorkOrder.attachments.length})</label>
+                  <div className="space-y-1">
+                    {selectedWorkOrder.attachments.map((attachment, index) => (
+                      <div key={index} className="flex items-center gap-2 text-sm">
+                        <FileText className="w-4 h-4 text-gray-500" />
+                        <a href={attachment} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                          Attachment {index + 1}
+                        </a>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
