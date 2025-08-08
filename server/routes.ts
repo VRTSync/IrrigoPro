@@ -645,14 +645,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const billingPace = monthlyAverage > 0 ? currentMonthBilling / monthlyAverage : 1;
           
-          // Get most recent activity date across all sources
-          const allDates = [
-            ...completedWorkOrders.filter(wo => wo.completedAt).map(wo => wo.completedAt!),
-            ...approvedEstimates.filter(est => est.approvedAt).map(est => est.approvedAt!),
-            ...completedBillingSheets.filter(bs => bs.createdAt).map(bs => bs.createdAt!)
-          ].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-          
-          const lastInvoiceDate = allDates.length > 0 ? new Date(allDates[0]) : null;
+          // Get most recent invoice date for this customer
+          const customerInvoices = await storage.getInvoicesByCustomer(customer.id);
+          const lastInvoiceDate = customerInvoices.length > 0 
+            ? customerInvoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0].createdAt
+            : null;
           
           // Count pending items across all sources
           const pendingCount = 

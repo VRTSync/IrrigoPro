@@ -1519,6 +1519,12 @@ export class DatabaseStorage implements IStorage {
     return { ...invoice, items };
   }
 
+  async getInvoicesByCustomer(customerId: number): Promise<Invoice[]> {
+    return await db.select().from(invoices)
+      .where(eq(invoices.customerId, customerId))
+      .orderBy(desc(invoices.createdAt));
+  }
+
   async getInvoices(): Promise<Invoice[]> {
     return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
   }
