@@ -537,12 +537,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const customers = await storage.getCustomers();
       console.log(`Found ${customers.length} customers`);
       
+      // Get filter parameters from query
+      const dateFilter = req.query.dateFilter as string || "last_30_days";
+      const selectedMonth = req.query.selectedMonth as string;
+      
       const currentDate = new Date();
       const currentMonth = currentDate.getMonth();
       const currentYear = currentDate.getFullYear();
+      
+      // Calculate date range based on filter
+      let startDate: Date;
+      let endDate: Date = currentDate;
+      
+      switch (dateFilter) {
+        case "all":
+          startDate = new Date(2020, 0, 1); // Far past date
+          break;
+        case "current_month":
+          startDate = new Date(currentYear, currentMonth, 1);
+          break;
+        case "last_30_days":
+          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
+          break;
+        case "last_90_days":
+          startDate = new Date(currentDate.getTime() - (90 * 24 * 60 * 60 * 1000));
+          break;
+        case "custom_month":
+          if (selectedMonth) {
+            const [year, month] = selectedMonth.split('-').map(Number);
+            startDate = new Date(year, month - 1, 1);
+            endDate = new Date(year, month, 0); // Last day of the month
+          } else {
+            startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
+          }
+          break;
+        default:
+          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
+      }
+      
+      console.log(`Filtering data from ${startDate.toISOString()} to ${endDate.toISOString()}`);
       const currentMonthStart = new Date(currentYear, currentMonth, 1);
-      // Also get last 30 days for broader billing view
-      const last30Days = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
       
       // Get billing previews for all customers including work orders, estimates, and billing sheets
       const customerPreviews = await Promise.all(customers.map(async (customer) => {
@@ -558,24 +592,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
           const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed');
           
-          // Calculate recent billing from all sources (last 30 days for broader view)
-          const recentWorkOrders = completedWorkOrders.filter(wo => 
-            wo.completedAt && new Date(wo.completedAt) >= last30Days
+          // Calculate billing from all sources based on selected date range
+          const filteredWorkOrders = completedWorkOrders.filter(wo => 
+            wo.completedAt && new Date(wo.completedAt) >= startDate && new Date(wo.completedAt) <= endDate
           );
-          const recentEstimates = approvedEstimates.filter(est => 
-            est.approvedAt && new Date(est.approvedAt) >= last30Days
+          const filteredEstimates = approvedEstimates.filter(est => 
+            est.approvedAt && new Date(est.approvedAt) >= startDate && new Date(est.approvedAt) <= endDate
           );
-          const recentBillingSheets = completedBillingSheets.filter(bs => 
-            bs.createdAt && new Date(bs.createdAt) >= last30Days
+          const filteredBillingSheets = completedBillingSheets.filter(bs => 
+            bs.createdAt && new Date(bs.createdAt) >= startDate && new Date(bs.createdAt) <= endDate
           );
           
-          const workOrdersBilling = recentWorkOrders.reduce((sum, wo) => 
+          const workOrdersBilling = filteredWorkOrders.reduce((sum, wo) => 
             sum + parseFloat(wo.totalAmount || '0'), 0
           );
-          const estimatesBilling = recentEstimates.reduce((sum, est) => 
+          const estimatesBilling = filteredEstimates.reduce((sum, est) => 
             sum + parseFloat(est.totalAmount || '0'), 0
           );
-          const billingSheetsBilling = recentBillingSheets.reduce((sum, bs) => 
+          const billingSheetsBilling = filteredBillingSheets.reduce((sum, bs) => 
             sum + parseFloat(bs.totalAmount || '0'), 0
           );
           
@@ -634,7 +668,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unbilledAmount: Math.round(currentMonthBilling * 100) / 100, // Assume current month is unbilled
             lastInvoiceDate,
             pendingWorkOrders: pendingCount,
-            totalWorkOrders: recentWorkOrders.length + recentEstimates.length + recentBillingSheets.length
+            totalWorkOrders: filteredWorkOrders.length + filteredEstimates.length + filteredBillingSheets.length
           };
         } catch (customerError) {
           console.error(`Error processing customer ${customer.id}:`, customerError);

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Search, 
   FileText, 
@@ -20,7 +21,9 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
-  ChevronDown
+  ChevronDown,
+  Filter,
+  X
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -55,6 +58,13 @@ export default function CustomerBilling() {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
   const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingSheet | null>(null);
   const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
+  
+  // Filter states
+  const [dateFilter, setDateFilter] = useState<string>("last_30_days"); // Default to last 30 days
+  const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const [amountFilter, setAmountFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -65,7 +75,15 @@ export default function CustomerBilling() {
 
   // Get comprehensive customer billing data including work orders, estimates, and billing sheets
   const { data: customerPreviews = [], isLoading: loadingPreviews } = useQuery<any[]>({
-    queryKey: ["/api/customers/billing-preview"],
+    queryKey: ["/api/customers/billing-preview", dateFilter, selectedMonth],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.append('dateFilter', dateFilter);
+      if (selectedMonth) {
+        params.append('selectedMonth', selectedMonth);
+      }
+      return fetch(`/api/customers/billing-preview?${params.toString()}`).then(res => res.json());
+    }
   });
 
   // Create a map for easy lookup of preview data by customer ID
@@ -86,6 +104,84 @@ export default function CustomerBilling() {
       totalWorkOrders: 0
     };
   };
+
+  // Generate month options for the dropdown
+  const generateMonthOptions = () => {
+    const months = [];
+    const currentDate = new Date();
+    
+    // Add current and previous 11 months
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      months.push({ value: monthKey, label: monthLabel });
+    }
+    
+    return months;
+  };
+
+  // Filter customers based on current filter settings
+  const filterCustomers = (customers: Customer[]) => {
+    return customers.filter(customer => {
+      const preview = getCustomerPreview(customer);
+      
+      // Search term filter
+      if (searchTerm && !customer.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+          !customer.email.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return false;
+      }
+      
+      // Amount filter
+      if (amountFilter !== "all") {
+        const amount = preview.currentMonthBilling || 0;
+        switch (amountFilter) {
+          case "under_500":
+            if (amount >= 500) return false;
+            break;
+          case "500_to_2000":
+            if (amount < 500 || amount > 2000) return false;
+            break;
+          case "over_2000":
+            if (amount <= 2000) return false;
+            break;
+        }
+      }
+      
+      // Status filter
+      if (statusFilter !== "all") {
+        switch (statusFilter) {
+          case "has_unbilled":
+            if (!preview.unbilledAmount || preview.unbilledAmount <= 0) return false;
+            break;
+          case "no_activity":
+            if (preview.totalWorkOrders > 0) return false;
+            break;
+        }
+      }
+      
+      // Date filter (this will be handled by backend API calls later)
+      return true;
+    });
+  };
+
+  // Reset all filters
+  const resetFilters = () => {
+    setDateFilter("last_30_days");
+    setSelectedMonth("");
+    setAmountFilter("all");
+    setStatusFilter("all");
+    setSearchTerm("");
+  };
+
+  // Count active filters
+  const activeFilterCount = [
+    dateFilter !== "last_30_days" ? 1 : 0,
+    selectedMonth ? 1 : 0,
+    amountFilter !== "all" ? 1 : 0,
+    statusFilter !== "all" ? 1 : 0,
+    searchTerm ? 1 : 0
+  ].reduce((sum, count) => sum + count, 0);
 
   // Get detailed billing data for selected customer
   const { data: customerBillingData, isLoading: loadingCustomerData } = useQuery<CustomerBillingData>({
@@ -114,10 +210,7 @@ export default function CustomerBilling() {
     },
   });
 
-  const filteredCustomers = customers.filter(customer =>
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredCustomers = filterCustomers(customers);
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
@@ -181,7 +274,8 @@ export default function CustomerBilling() {
             </div>
           )}
 
-          <div className="relative">
+          {/* Search Bar */}
+          <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
               placeholder="Search customers..."
@@ -189,6 +283,104 @@ export default function CustomerBilling() {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
             />
+          </div>
+
+          {/* Filter Controls */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                <Filter className="w-4 h-4" />
+                Filters
+                {activeFilterCount > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-xs">
+                    {activeFilterCount}
+                  </Badge>
+                )}
+              </h3>
+              {activeFilterCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetFilters}
+                  className="text-xs h-6 px-2"
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            {/* Date Range Filter */}
+            <div>
+              <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
+              <Select value={dateFilter} onValueChange={setDateFilter}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+                  <SelectItem value="current_month">Current Month</SelectItem>
+                  <SelectItem value="last_90_days">Last 90 Days</SelectItem>
+                  <SelectItem value="custom_month">Specific Month</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Month Selector (shown when custom_month is selected) */}
+            {dateFilter === "custom_month" && (
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
+                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Choose month..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {generateMonthOptions().map(month => (
+                      <SelectItem key={month.value} value={month.value}>
+                        {month.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Amount Filter */}
+            <div>
+              <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
+              <Select value={amountFilter} onValueChange={setAmountFilter}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Amounts</SelectItem>
+                  <SelectItem value="under_500">Under $500</SelectItem>
+                  <SelectItem value="500_to_2000">$500 - $2,000</SelectItem>
+                  <SelectItem value="over_2000">Over $2,000</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <label className="text-xs text-gray-600 mb-1 block">Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Customers</SelectItem>
+                  <SelectItem value="has_unbilled">Has Unbilled Work</SelectItem>
+                  <SelectItem value="no_activity">No Recent Activity</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Results Summary */}
+            <div className="text-xs text-gray-500 pt-2 border-t">
+              Showing {filteredCustomers.length} of {customers.length} customers
+            </div>
           </div>
         </div>
         
