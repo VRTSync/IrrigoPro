@@ -16,7 +16,7 @@ import { Calendar, User, AlertCircle, FileText, Target, MapPin } from "lucide-re
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertWorkOrderSchema } from "@shared/schema";
-import type { Customer, Estimate } from "@shared/schema";
+import type { Customer } from "@shared/schema";
 
 const workOrderFormSchema = insertWorkOrderSchema.extend({
   scheduledDate: z.string().optional(),
@@ -38,10 +38,6 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-
-  const { data: estimates } = useQuery<Estimate[]>({
-    queryKey: ["/api/estimates"],
-  });
 
   const form = useForm<WorkOrderFormData>({
     resolver: zodResolver(workOrderFormSchema),
@@ -68,46 +64,6 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
       notes: "",
     },
   });
-
-  const watchedEstimateId = form.watch("estimateId");
-
-  // Auto-fill estimate info when estimate is selected
-  const selectedEstimate = estimates?.find(e => e.id === watchedEstimateId);
-  if (selectedEstimate && form.getValues("projectName") !== selectedEstimate.projectName) {
-    // Find the customer for this estimate and set it
-    if (selectedEstimate.customerId) {
-      // We'll need to fetch the customer details based on the estimate
-      const estimateCustomer: Customer = {
-        id: selectedEstimate.customerId,
-        companyId: 1,
-        name: selectedEstimate.customerName,
-        email: selectedEstimate.customerEmail,
-        phone: selectedEstimate.customerPhone || "",
-        address: selectedEstimate.projectAddress || "",
-        totalControllers: 1,
-        contractType: "standard",
-        laborRate: "45.00",
-        markupPercent: "20.00",
-        taxPercent: "8.25",
-        discountPercent: "0.00",
-        contractStartDate: null,
-        contractEndDate: null,
-        paymentTerms: "net_30",
-        notes: null,
-        propertyNotes: null,
-      };
-      setSelectedCustomer(estimateCustomer);
-    }
-    
-    form.setValue("customerId", selectedEstimate.customerId || 0);
-    form.setValue("customerName", selectedEstimate.customerName);
-    form.setValue("customerEmail", selectedEstimate.customerEmail);
-    form.setValue("customerPhone", selectedEstimate.customerPhone || "");
-    form.setValue("projectName", selectedEstimate.projectName || "Work Order");
-    form.setValue("projectAddress", selectedEstimate.projectAddress || "");
-    form.setValue("locationNotes", selectedEstimate.locationNotes || "");
-    form.setValue("workType", "estimate_based");
-  }
 
   const handleCustomerSelect = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -207,46 +163,16 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 2: Source Estimate (Optional) */}
+            {/* Step 2: Priority Level */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Target className="w-5 h-5 text-blue-600" />
-                  Step 2: Source Estimate (Optional)
+                  Step 2: Priority Level
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="estimateId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Link to Approved Estimate</FormLabel>
-                        <Select onValueChange={(value) => {
-                          const estimateId = value ? parseInt(value) : null;
-                          field.onChange(estimateId);
-                          // Auto-set work type based on whether estimate is selected
-                          form.setValue("workType", estimateId ? "estimate_based" : "direct_billing");
-                        }}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select estimate (leave blank for direct work order)" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {estimates?.filter(est => est.status === 'approved').map((estimate) => (
-                              <SelectItem key={estimate.id} value={estimate.id.toString()}>
-                                {estimate.estimateNumber} - {estimate.projectName}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
                   <FormField
                     control={form.control}
                     name="priority"
@@ -271,13 +197,6 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
                     )}
                   />
                 </div>
-
-                {watchedEstimateId && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-                    <p><strong>Linked to Estimate:</strong> {selectedEstimate?.estimateNumber} - {selectedEstimate?.projectName}</p>
-                    <p className="text-xs text-blue-600 mt-1">Customer and project details will be auto-filled from the estimate</p>
-                  </div>
-                )}
               </CardContent>
             </Card>
 
