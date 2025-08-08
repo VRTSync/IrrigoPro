@@ -82,10 +82,14 @@ export function LocationPicker({
 
       // Try to geocode the default address
       if (defaultAddress && defaultAddress.trim()) {
+        console.log('LocationPicker: Geocoding default address:', defaultAddress);
         const coords = await geocodeAddress(defaultAddress);
         if (coords) {
+          console.log('LocationPicker: Found coordinates:', coords);
           initialCenter = [coords.lat, coords.lng];
           initialZoom = 18; // Higher zoom for better detail
+        } else {
+          console.log('LocationPicker: Geocoding failed for address:', defaultAddress);
         }
       }
 
