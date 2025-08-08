@@ -171,7 +171,14 @@ export function StandaloneBillingSheet({
       
       console.log('API payload:', payload);
       
-      return apiRequest("/api/billing-sheets", "POST", payload);
+      try {
+        const result = await apiRequest("/api/billing-sheets", "POST", payload);
+        console.log('API success:', result);
+        return result;
+      } catch (error) {
+        console.error('API request failed:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
       console.log('Billing sheet created successfully');
