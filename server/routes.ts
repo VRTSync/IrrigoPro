@@ -2291,6 +2291,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const workOrderData = insertWorkOrderSchema.parse(req.body);
       const workOrder = await storage.createWorkOrder(workOrderData);
+      
+      // Send notification if technician is assigned during creation
+      if (workOrder.assignedTechnicianId) {
+        await storage.createNotification({
+          userId: workOrder.assignedTechnicianId,
+          type: "work_order_assigned",
+          title: "New Work Order Assigned",
+          message: `You have been assigned work order ${workOrder.workOrderNumber} for ${workOrder.projectName || 'irrigation project'}.`,
+          relatedEntityType: "work_order",
+          relatedEntityId: workOrder.id
+        });
+      }
+      
       res.status(201).json(workOrder);
     } catch (error) {
       if (error instanceof z.ZodError) {
