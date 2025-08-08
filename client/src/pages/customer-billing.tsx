@@ -372,6 +372,12 @@ export default function CustomerBilling() {
                         <span className="text-gray-600">Estimates:</span>
                         <span className="font-medium">{customerBillingData.estimates.length}</span>
                       </div>
+                      <div className="flex justify-between text-xs text-orange-600 border-t pt-1 mt-1">
+                        <span className="font-medium">Unbilled Items:</span>
+                        <span className="font-medium">
+                          {customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length}
+                        </span>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -641,17 +647,17 @@ export default function CustomerBilling() {
                 </div>
               </div>
               
-              {selectedWorkOrder.workDescription && (
+              {selectedWorkOrder.description && (
                 <div>
                   <label className="text-sm font-medium text-gray-600">Work Description</label>
-                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedWorkOrder.workDescription}</p>
+                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedWorkOrder.description}</p>
                 </div>
               )}
               
-              {selectedWorkOrder.location && (
+              {selectedWorkOrder.projectAddress && (
                 <div>
                   <label className="text-sm font-medium text-gray-600">Location</label>
-                  <p className="text-sm">{selectedWorkOrder.location}</p>
+                  <p className="text-sm">{selectedWorkOrder.projectAddress}</p>
                 </div>
               )}
             </div>
@@ -698,10 +704,10 @@ export default function CustomerBilling() {
                     <label className="text-sm font-medium text-gray-600">Created Date</label>
                     <p className="text-sm">{formatDate(selectedBillingSheet.createdAt)}</p>
                   </div>
-                  {selectedBillingSheet.hours && (
+                  {selectedBillingSheet.totalHours && (
                     <div>
                       <label className="text-sm font-medium text-gray-600">Hours Worked</label>
-                      <p className="text-sm">{selectedBillingSheet.hours}</p>
+                      <p className="text-sm">{selectedBillingSheet.totalHours}</p>
                     </div>
                   )}
                 </div>
@@ -714,10 +720,10 @@ export default function CustomerBilling() {
                 </div>
               )}
               
-              {selectedBillingSheet.location && (
+              {selectedBillingSheet.workLocation && (
                 <div>
                   <label className="text-sm font-medium text-gray-600">Location</label>
-                  <p className="text-sm">{selectedBillingSheet.location}</p>
+                  <p className="text-sm">{selectedBillingSheet.workLocation}</p>
                 </div>
               )}
             </div>
@@ -752,7 +758,7 @@ export default function CustomerBilling() {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-600">Valid Until</label>
-                    <p className="text-sm">{selectedEstimate.validUntil ? formatDate(selectedEstimate.validUntil) : 'No expiration'}</p>
+                    <p className="text-sm">No expiration set</p>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -767,23 +773,23 @@ export default function CustomerBilling() {
                     </div>
                   )}
                   <div>
-                    <label className="text-sm font-medium text-gray-600">Priority</label>
-                    <p className="text-sm capitalize">{selectedEstimate.priority || 'Normal'}</p>
+                    <label className="text-sm font-medium text-gray-600">Status</label>
+                    <p className="text-sm capitalize">{selectedEstimate.status}</p>
                   </div>
                 </div>
               </div>
               
-              {selectedEstimate.projectDescription && (
+              {selectedEstimate.description && (
                 <div>
                   <label className="text-sm font-medium text-gray-600">Project Description</label>
-                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedEstimate.projectDescription}</p>
+                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedEstimate.description}</p>
                 </div>
               )}
               
-              {selectedEstimate.location && (
+              {selectedEstimate.projectAddress && (
                 <div>
                   <label className="text-sm font-medium text-gray-600">Location</label>
-                  <p className="text-sm">{selectedEstimate.location}</p>
+                  <p className="text-sm">{selectedEstimate.projectAddress}</p>
                 </div>
               )}
             </div>
