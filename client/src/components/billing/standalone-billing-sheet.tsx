@@ -383,8 +383,7 @@ export function StandaloneBillingSheet({
 
       console.log('Submitting data:', submissionData);
 
-      // Test direct fetch call to see if the endpoint is reachable
-      console.log('Testing direct fetch...');
+      // Use direct fetch since mutation system has issues
       fetch("/api/billing-sheets", {
         method: "POST",
         headers: {
@@ -394,33 +393,30 @@ export function StandaloneBillingSheet({
         body: JSON.stringify(submissionData),
       })
       .then(response => {
-        console.log('Direct fetch response status:', response.status);
+        if (!response.ok) {
+          throw new Error(`${response.status}: ${response.statusText}`);
+        }
         return response.json();
       })
       .then(data => {
-        console.log('Direct fetch success:', data);
+        console.log('Billing sheet created:', data);
         toast({
           title: "Success",
-          description: "Billing sheet submitted successfully via direct fetch",
+          description: isFieldTech 
+            ? "Billing sheet submitted successfully"
+            : "Billing sheet saved successfully",
         });
         queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
         handleClose();
       })
       .catch(error => {
-        console.error('Direct fetch error:', error);
+        console.error('Submission error:', error);
         toast({
           title: "Error",
-          description: "Direct fetch failed: " + error.message,
+          description: error.message || "Failed to save billing sheet",
           variant: "destructive",
         });
       });
-
-      // Still call the mutation for comparison
-      if (draftData) {
-        updateBillingSheet.mutate(submissionData);
-      } else {
-        createBillingSheet.mutate(submissionData);
-      }
     } else {
       // Go to review screen
       console.log('Going to review screen');
