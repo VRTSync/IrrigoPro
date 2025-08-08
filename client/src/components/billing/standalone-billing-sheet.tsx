@@ -407,7 +407,11 @@ export function StandaloneBillingSheet({
             ? "Billing sheet submitted successfully"
             : "Billing sheet saved successfully",
         });
+        // Invalidate both general and technician-specific queries
         queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+        if (currentUser?.role === 'field_tech' && currentUser?.id) {
+          queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
+        }
         handleClose();
       })
       .catch(error => {
