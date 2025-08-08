@@ -106,6 +106,8 @@ export default function BillingSheets() {
     sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+
+
   // Billing sheet approval mutation
   const approveBillingSheet = useMutation({
     mutationFn: async (id: number) => {
