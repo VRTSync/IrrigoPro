@@ -17,19 +17,12 @@
     <meta name="theme-color" content="#2563eb" />
     <meta name="msapplication-TileColor" content="#2563eb" />
     
-    <!-- Notification permission request -->
+    <!-- Service Worker registration -->
     <script>
-      // Request notification permission on load
-      if ('Notification' in window && 'serviceWorker' in navigator) {
+      // Register service worker if supported
+      if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').then(function(registration) {
           console.log('Service Worker registered:', registration);
-          
-          // Request notification permission
-          if (Notification.permission === 'default') {
-            Notification.requestPermission().then(function(permission) {
-              console.log('Notification permission:', permission);
-            });
-          }
         }).catch(function(error) {
           console.log('Service Worker registration failed:', error);
         });

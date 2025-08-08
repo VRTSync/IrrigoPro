@@ -79,9 +79,11 @@ export function usePushNotifications(userId: number | undefined) {
 
   // Request permission on first use
   useEffect(() => {
-    if (userId) {
+    if (userId && notificationService.isSupported()) {
       notificationService.requestPermission().then(permission => {
         console.log('Push notification permission:', permission);
+      }).catch(error => {
+        console.log('Failed to request notification permission:', error);
       });
     }
   }, [userId]);

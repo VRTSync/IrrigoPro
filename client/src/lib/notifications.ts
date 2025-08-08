@@ -35,16 +35,21 @@ export class NotificationService {
       return 'denied';
     }
 
-    if (Notification.permission === 'granted') {
-      return 'granted';
-    }
+    try {
+      if (Notification.permission === 'granted') {
+        return 'granted';
+      }
 
-    if (Notification.permission === 'denied') {
+      if (Notification.permission === 'denied') {
+        return 'denied';
+      }
+
+      const permission = await Notification.requestPermission();
+      return permission;
+    } catch (error) {
+      console.log('Notification permission request failed:', error);
       return 'denied';
     }
-
-    const permission = await Notification.requestPermission();
-    return permission;
   }
 
   // Show a local notification
@@ -162,7 +167,15 @@ export class NotificationService {
 
   // Get current permission status
   getPermissionStatus(): NotificationPermission {
-    return Notification.permission;
+    if (!('Notification' in window)) {
+      return 'denied';
+    }
+    
+    try {
+      return Notification.permission;
+    } catch (error) {
+      return 'denied';
+    }
   }
 }
 

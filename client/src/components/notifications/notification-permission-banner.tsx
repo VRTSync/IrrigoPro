@@ -11,12 +11,17 @@ export function NotificationPermissionBanner() {
   useEffect(() => {
     // Check if we should show the banner
     const checkPermission = () => {
+      if (!notificationService.isSupported()) {
+        setShow(false);
+        return;
+      }
+
       const currentPermission = notificationService.getPermissionStatus();
       setPermission(currentPermission);
       
       // Show banner if permission is default and we haven't asked before
       const hasAskedBefore = localStorage.getItem('notification-permission-asked');
-      if (currentPermission === 'default' && !hasAskedBefore && notificationService.isSupported()) {
+      if (currentPermission === 'default' && !hasAskedBefore) {
         setShow(true);
       }
     };
