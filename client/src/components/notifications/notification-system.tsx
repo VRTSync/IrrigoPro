@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from "@/co
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest } from "@/lib/queryClient";
 import { formatDistanceToNow } from "date-fns";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
 
 interface Notification {
   id: number;
@@ -28,6 +29,9 @@ interface NotificationSystemProps {
 export function NotificationSystem({ userId }: NotificationSystemProps) {
   const [isOpen, setIsOpen] = useState(false);
   const queryClient = useQueryClient();
+  
+  // Initialize push notifications
+  const { notificationCount, isSupported, permission } = usePushNotifications(userId);
 
   // Fetch notifications
   const { data: notifications = [] } = useQuery<Notification[]>({

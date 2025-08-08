@@ -3,6 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- iOS PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Irrigation App" />
+    <link rel="apple-touch-icon" href="/LOGO - SPREAD-05_1752764989944.png" />
+    
+    <!-- Theme colors -->
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="msapplication-TileColor" content="#2563eb" />
+    
+    <!-- Notification permission request -->
+    <script>
+      // Request notification permission on load
+      if ('Notification' in window && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then(function(registration) {
+          console.log('Service Worker registered:', registration);
+          
+          // Request notification permission
+          if (Notification.permission === 'default') {
+            Notification.requestPermission().then(function(permission) {
+              console.log('Notification permission:', permission);
+            });
+          }
+        }).catch(function(error) {
+          console.log('Service Worker registration failed:', error);
+        });
+      }
+    </script>
+    
+    <title>Irrigation Management</title>
   </head>
   <body>
     <div id="root"></div>

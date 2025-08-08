@@ -26,6 +26,7 @@ import SystemUserManagement from "@/pages/system-user-management";
 import { UserSelector } from "@/components/user-selector";
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
+import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 
 
 interface User {
@@ -284,6 +285,7 @@ function Router() {
             </Switch>
           </div>
         </div>
+        <NotificationPermissionBanner />
         <Toaster />
       </QueryClientProvider>
     </TooltipProvider>

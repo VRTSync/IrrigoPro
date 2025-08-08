@@ -1,0 +1,53 @@
+{
+  "name": "Irrigation Management System",
+  "short_name": "Irrigation App",
+  "description": "Professional irrigation business management platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/LOGO - SPREAD-05_1752764989944.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/LOGO - SPREAD-05_1752764989944.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "View your dashboard",
+      "url": "/dashboard",
+      "icons": [
+        {
+          "src": "/LOGO - SPREAD-05_1752764989944.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Work Orders",
+      "short_name": "Work Orders",
+      "description": "Manage work orders",
+      "url": "/work-orders",
+      "icons": [
+        {
+          "src": "/LOGO - SPREAD-05_1752764989944.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

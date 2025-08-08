@@ -38,6 +38,7 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 - **Site Maps & Controller Management System**: KML file import for visualizing irrigation controllers and zones on an interactive map using Leaflet. Includes role-based permissions for viewing and editing.
 - **Customer Email Approval System**: Integrates with Postmark for secure, token-based customer estimate approvals via email.
 - **Notification System**: Database-driven notifications with real-time updates for work order assignments, completions, and estimate approvals.
+- **iOS PWA Push Notifications**: Complete Progressive Web App implementation with service worker, push notifications, badge counts, and iOS-specific optimizations for deployment as a native-like app experience.
 - **Location Management Enhancement**: Comprehensive location fields (address, notes, access instructions) for estimates and work orders, with an optional interactive map-based location picker.
 
 ### Project Structure
@@ -55,6 +56,7 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 - **Icons**: Lucide React
 - **Carousel**: Embla Carousel
 - **Mapping**: Leaflet, OpenStreetMap, Esri satellite tiles
+- **PWA & Notifications**: Service Worker API, Notification API, Badge API for iOS PWA deployment
 
 ### Backend Dependencies
 - **Database**: Neon Database (PostgreSQL)
