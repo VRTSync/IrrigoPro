@@ -382,11 +382,14 @@ export function StandaloneBillingSheet({
         technicianId: currentUser?.id, // Add technician ID for proper filtering
       };
 
-      console.log('Submitting data:', submissionData);
+      // Determine if this is an update or create operation
+      const isUpdating = !!draftData?.id;
+      const url = isUpdating ? `/api/billing-sheets/${draftData.id}` : "/api/billing-sheets";
+      const method = isUpdating ? "PATCH" : "POST";
 
       // Use direct fetch since mutation system has issues
-      fetch("/api/billing-sheets", {
-        method: "POST",
+      fetch(url, {
+        method: method,
         headers: {
           "Content-Type": "application/json",
           "X-User-Role": currentUser?.role || ""
@@ -400,7 +403,7 @@ export function StandaloneBillingSheet({
         return response.json();
       })
       .then(data => {
-        console.log('Billing sheet created:', data);
+        console.log(`Billing sheet ${isUpdating ? 'updated' : 'created'}:`, data);
         toast({
           title: "Success",
           description: isFieldTech 
