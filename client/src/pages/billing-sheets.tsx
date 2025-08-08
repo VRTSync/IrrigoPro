@@ -55,17 +55,10 @@ export default function BillingSheets() {
 
   // Separate drafts and submitted sheets
   // Drafts are always user-specific, submitted sheets are visible to all with role-based access
-  const draftSheets = billingSheets?.filter(sheet => {
-    const isDraft = sheet.status === 'draft' && sheet.technicianId === currentUser?.id;
-    if (sheet.billingNumber?.includes('BS-2025-001')) {
-      console.log(`DEBUG ${sheet.billingNumber}: status="${sheet.status}", technicianId=${sheet.technicianId}, currentUserId=${currentUser?.id}, isDraft=${isDraft}`);
-    }
-    return isDraft;
-  }) || [];
+  const draftSheets = billingSheets?.filter(sheet => 
+    sheet.status === 'draft' && sheet.technicianId === currentUser?.id
+  ) || [];
   const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
-  
-  console.log('Current billing sheets:', billingSheets?.map(s => `${s.billingNumber}(${s.status})`));
-  console.log('Draft count:', draftSheets.length, 'Submitted count:', submittedSheets.length);
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;

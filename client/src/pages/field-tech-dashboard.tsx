@@ -110,8 +110,8 @@ export default function FieldTechDashboard() {
                   <span className="font-medium">{billingSheets?.length || 0}</span>
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
-                  <span className="text-gray-600">Pending:</span>
-                  <span className="font-medium">{billingSheets?.filter((bs: any) => bs.status === 'draft' || bs.status === 'submitted').length || 0}</span>
+                  <span className="text-gray-600">Drafts:</span>
+                  <span className="font-medium">{billingSheets?.filter((bs: any) => bs.status === 'draft').length || 0}</span>
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
                   <span className="text-gray-600">Approved:</span>
