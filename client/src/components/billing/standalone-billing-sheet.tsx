@@ -36,6 +36,7 @@ import {
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
+import { LocationPicker } from "@/components/ui/location-picker";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Customer, Part } from "@shared/schema";
@@ -54,6 +55,9 @@ const billingSheetSchema = z.object({
   customerId: z.number().min(1, "Customer is required"),
   customerName: z.string().min(1, "Customer name is required"),
   propertyAddress: z.string().optional(),
+  workLocationLat: z.number().optional(),
+  workLocationLng: z.number().optional(),
+  workLocationAddress: z.string().optional(),
   workDate: z.string().min(1, "Work date is required"),
   technicianName: z.string().min(1, "Technician name is required"),
   workDescription: z.string().min(1, "Work description is required"),
@@ -98,6 +102,8 @@ export function StandaloneBillingSheet({
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const [isFrequentPartsExpanded, setIsFrequentPartsExpanded] = useState(true);
   const [isAllPartsExpanded, setIsAllPartsExpanded] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -600,19 +606,72 @@ export function StandaloneBillingSheet({
                           )}
                         />
                         
-                        <FormField
-                          control={form.control}
-                          name="propertyAddress"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Property Address</FormLabel>
-                              <FormControl>
-                                <Input {...field} placeholder="Job site address (optional)" />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
+                        <div className="sm:col-span-2">
+                          <FormField
+                            control={form.control}
+                            name="propertyAddress"
+                            render={({ field }) => (
+                              <FormItem>
+                                <div className="flex items-center justify-between">
+                                  <FormLabel>Repair Location</FormLabel>
+                                  {selectedCustomer && (
+                                    <Button
+                                      type="button"
+                                      variant={showLocationPicker ? "default" : "outline"}
+                                      size="sm"
+                                      onClick={() => setShowLocationPicker(!showLocationPicker)}
+                                    >
+                                      {showLocationPicker ? "Hide Map" : "Select Location on Map"}
+                                    </Button>
+                                  )}
+                                </div>
+                                <FormControl>
+                                  <Input {...field} placeholder="Repair site address (optional)" />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          {!selectedCustomer && (
+                            <div className="text-sm text-gray-500 mt-2">
+                              <p>Please select a customer first to set repair location.</p>
+                            </div>
                           )}
-                        />
+
+                          {selectedCustomer && !showLocationPicker && (
+                            <div className="text-sm text-gray-600 mt-2">
+                              <p><strong>Default Location:</strong> {selectedCustomer.address || "No address on file"}</p>
+                              <p className="mt-1">Click "Select Location on Map" to choose a specific repair location different from the customer's address.</p>
+                            </div>
+                          )}
+                          
+                          {selectedCustomer && showLocationPicker && (
+                            <div className="mt-4">
+                              <LocationPicker
+                                key={selectedCustomer.id}
+                                defaultAddress={selectedCustomer.address || ""}
+                                onLocationSelect={(location) => {
+                                  setSelectedLocation(location);
+                                  form.setValue("workLocationLat", location.lat);
+                                  form.setValue("workLocationLng", location.lng);
+                                  form.setValue("workLocationAddress", location.address || "");
+                                  form.setValue("propertyAddress", location.address || "");
+                                }}
+                                selectedLocation={selectedLocation}
+                              />
+                            </div>
+                          )}
+
+                          {selectedLocation && (
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mt-4">
+                              <p className="text-sm font-medium text-green-900">Custom Location Selected:</p>
+                              <p className="text-sm text-green-800 mt-1">
+                                {selectedLocation.address || `${selectedLocation.lat.toFixed(6)}, ${selectedLocation.lng.toFixed(6)}`}
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
