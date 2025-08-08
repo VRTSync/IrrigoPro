@@ -454,7 +454,12 @@ export function StandaloneBillingSheet({
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-600">Hours Worked</p>
-                        <p className="text-gray-900">{form.watch('totalHours')} hours @ {formatCurrency(form.watch('laborRate'))}/hour</p>
+                        <p className="text-gray-900">
+                          {form.watch('totalHours')} hours
+                          {!isFieldTech && (
+                            <> @ {formatCurrency(form.watch('laborRate'))}/hour</>
+                          )}
+                        </p>
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-600">Work Description</p>
