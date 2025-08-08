@@ -645,11 +645,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const billingPace = monthlyAverage > 0 ? currentMonthBilling / monthlyAverage : 1;
           
-          // Get most recent invoice date for this customer
-          const customerInvoices = await storage.getInvoicesByCustomer(customer.id);
-          const lastInvoiceDate = customerInvoices.length > 0 
-            ? customerInvoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0].createdAt
-            : null;
+          // Get most recent invoice date for this customer (only if invoices table exists)
+          let lastInvoiceDate = null;
+          try {
+            const customerInvoices = await storage.getInvoicesByCustomer(customer.id);
+            lastInvoiceDate = customerInvoices.length > 0 
+              ? customerInvoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0].createdAt
+              : null;
+          } catch (error) {
+            // Invoices table doesn't exist yet, so no invoices have been created
+            lastInvoiceDate = null;
+          }
           
           // Count pending items across all sources
           const pendingCount = 

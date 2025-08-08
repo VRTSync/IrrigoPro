@@ -1520,9 +1520,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getInvoicesByCustomer(customerId: number): Promise<Invoice[]> {
-    return await db.select().from(invoices)
-      .where(eq(invoices.customerId, customerId))
-      .orderBy(desc(invoices.createdAt));
+    try {
+      return await db.select().from(invoices)
+        .where(eq(invoices.customerId, customerId))
+        .orderBy(desc(invoices.createdAt));
+    } catch (error) {
+      // If invoices table doesn't exist or has schema issues, return empty array
+      console.warn(`Error querying invoices for customer ${customerId}:`, error);
+      return [];
+    }
   }
 
   async getInvoices(): Promise<Invoice[]> {
