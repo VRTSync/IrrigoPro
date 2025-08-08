@@ -489,12 +489,17 @@ export function StandaloneBillingSheet({
                                     <p className="text-sm text-gray-600">{item.partDescription}</p>
                                   )}
                                   <p className="text-sm text-gray-500">
-                                    Qty: {item.quantity} × {formatCurrency(item.unitPrice)}
+                                    Qty: {item.quantity}
+                                    {!isFieldTech && (
+                                      <> × {formatCurrency(item.unitPrice)}</>
+                                    )}
                                   </p>
                                 </div>
-                                <div className="text-right">
-                                  <p className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</p>
-                                </div>
+                                {!isFieldTech && (
+                                  <div className="text-right">
+                                    <p className="font-medium">{formatCurrency(item.quantity * item.unitPrice)}</p>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -528,47 +533,49 @@ export function StandaloneBillingSheet({
                     </Card>
                   )}
 
-                  {/* Totals Review */}
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                        <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                        Financial Summary
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="flex justify-between">
-                        <span>Labor ({totalHours} hrs)</span>
-                        <span>{formatCurrency(totals.laborSubtotal)}</span>
-                      </div>
-                      {totals.partsSubtotal > 0 && (
-                        <>
-                          <div className="flex justify-between">
-                            <span>Parts Subtotal</span>
-                            <span>{formatCurrency(totals.partsSubtotal)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Markup ({markupPercent}%)</span>
-                            <span>{formatCurrency(totals.markupAmount)}</span>
-                          </div>
-                        </>
-                      )}
-                      <Separator />
-                      <div className="flex justify-between">
-                        <span>Subtotal</span>
-                        <span>{formatCurrency(totals.subtotal)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Tax ({taxPercent}%)</span>
-                        <span>{formatCurrency(totals.taxAmount)}</span>
-                      </div>
-                      <Separator />
-                      <div className="flex justify-between font-bold text-lg">
-                        <span>Total</span>
-                        <span>{formatCurrency(totals.totalAmount)}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {/* Totals Review - Hidden from Field Techs */}
+                  {!isFieldTech && (
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                          <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                          Financial Summary
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex justify-between">
+                          <span>Labor ({totalHours} hrs)</span>
+                          <span>{formatCurrency(totals.laborSubtotal)}</span>
+                        </div>
+                        {totals.partsSubtotal > 0 && (
+                          <>
+                            <div className="flex justify-between">
+                              <span>Parts Subtotal</span>
+                              <span>{formatCurrency(totals.partsSubtotal)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Markup ({markupPercent}%)</span>
+                              <span>{formatCurrency(totals.markupAmount)}</span>
+                            </div>
+                          </>
+                        )}
+                        <Separator />
+                        <div className="flex justify-between">
+                          <span>Subtotal</span>
+                          <span>{formatCurrency(totals.subtotal)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Tax ({taxPercent}%)</span>
+                          <span>{formatCurrency(totals.taxAmount)}</span>
+                        </div>
+                        <Separator />
+                        <div className="flex justify-between font-bold text-lg">
+                          <span>Total</span>
+                          <span>{formatCurrency(totals.totalAmount)}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
               ) : (
                 // Edit Mode
@@ -763,33 +770,37 @@ export function StandaloneBillingSheet({
                             )}
                           />
 
-                          <FormField
-                            control={form.control}
-                            name="laborRate"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Labor Rate ($/hour) *</FormLabel>
-                                <FormControl>
-                                  <Input 
-                                    {...field} 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0" 
-                                    placeholder="45.00"
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
+                          {!isFieldTech && (
+                            <FormField
+                              control={form.control}
+                              name="laborRate"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Labor Rate ($/hour) *</FormLabel>
+                                  <FormControl>
+                                    <Input 
+                                      {...field} 
+                                      type="number" 
+                                      step="0.01" 
+                                      min="0" 
+                                      placeholder="45.00"
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          )}
                         </div>
 
-                        <div className="bg-white p-3 rounded border">
-                          <p className="text-sm text-gray-600">Labor Cost</p>
-                          <p className="text-lg font-semibold text-gray-900">
-                            {formatCurrency(totals.laborSubtotal)}
-                          </p>
-                        </div>
+                        {!isFieldTech && (
+                          <div className="bg-white p-3 rounded border">
+                            <p className="text-sm text-gray-600">Labor Cost</p>
+                            <p className="text-lg font-semibold text-gray-900">
+                              {formatCurrency(totals.laborSubtotal)}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
