@@ -177,6 +177,12 @@ export function ColorCodedMapViewer({
     project.controllers.forEach((controller) => {
       if (!visibleControllers.has(controller.id)) return;
 
+      // Validate coordinates before adding
+      if (isNaN(controller.latitude) || isNaN(controller.longitude)) {
+        console.error(`Invalid controller coordinates for ${controller.name}: lat=${controller.latitude}, lng=${controller.longitude}`);
+        return;
+      }
+
       allCoordinates.push([controller.latitude, controller.longitude]);
 
       // Skip controller markers for heatmap mode
@@ -274,11 +280,20 @@ export function ColorCodedMapViewer({
         if (!visibleControllers.has(zone.controllerId)) return;
 
         if (zone.boundaries && zone.boundaries.length > 0) {
-          const lats = zone.boundaries.map(coord => coord[0]);
-          const lngs = zone.boundaries.map(coord => coord[1]);
+          const lats = zone.boundaries.map(coord => coord[0]).filter(lat => !isNaN(lat));
+          const lngs = zone.boundaries.map(coord => coord[1]).filter(lng => !isNaN(lng));
+          
+          if (lats.length === 0 || lngs.length === 0) {
+            console.error(`Invalid zone boundaries for ${zone.name}`);
+            return;
+          }
+          
           const zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
           const zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
-          allCoordinates.push([zoneLat, zoneLng]);
+          
+          if (!isNaN(zoneLat) && !isNaN(zoneLng)) {
+            allCoordinates.push([zoneLat, zoneLng]);
+          }
 
           L.circle([zoneLat, zoneLng], {
             color: zone.color,
@@ -311,11 +326,20 @@ export function ColorCodedMapViewer({
       clusterGroups.forEach((zones, controllerId) => {
         zones.forEach((zone, index) => {
           if (zone.boundaries && zone.boundaries.length > 0) {
-            const lats = zone.boundaries.map(coord => coord[0]);
-            const lngs = zone.boundaries.map(coord => coord[1]);
+            const lats = zone.boundaries.map(coord => coord[0]).filter(lat => !isNaN(lat));
+            const lngs = zone.boundaries.map(coord => coord[1]).filter(lng => !isNaN(lng));
+            
+            if (lats.length === 0 || lngs.length === 0) {
+              console.error(`Invalid zone boundaries for ${zone.name} in cluster mode`);
+              return;
+            }
+            
             const zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
             const zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
-            allCoordinates.push([zoneLat, zoneLng]);
+            
+            if (!isNaN(zoneLat) && !isNaN(zoneLng)) {
+              allCoordinates.push([zoneLat, zoneLng]);
+            }
 
             // Create cluster marker showing zone count
             const clusterIcon = L.divIcon({
@@ -349,11 +373,23 @@ export function ColorCodedMapViewer({
         let zoneLat: number, zoneLng: number;
         
         if (zone.boundaries && zone.boundaries.length > 0) {
-          const lats = zone.boundaries.map(coord => coord[0]);
-          const lngs = zone.boundaries.map(coord => coord[1]);
+          const lats = zone.boundaries.map(coord => coord[0]).filter(lat => !isNaN(lat));
+          const lngs = zone.boundaries.map(coord => coord[1]).filter(lng => !isNaN(lng));
+          
+          if (lats.length === 0 || lngs.length === 0) {
+            console.error(`Invalid zone boundaries for ${zone.name} in regular mode`);
+            return;
+          }
+          
           zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
           zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
-          allCoordinates.push([zoneLat, zoneLng]);
+          
+          if (!isNaN(zoneLat) && !isNaN(zoneLng)) {
+            allCoordinates.push([zoneLat, zoneLng]);
+          } else {
+            console.error(`Calculated invalid coordinates for ${zone.name}: lat=${zoneLat}, lng=${zoneLng}`);
+            return;
+          }
         } else {
           return; // Skip zones without boundaries
         }

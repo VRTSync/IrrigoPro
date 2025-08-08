@@ -172,18 +172,25 @@ export function SiteMapsPage() {
       
       const zones = await zonesResponse.json();
       
-      // Convert database format to project format
-      const coloredControllers: ColoredController[] = controllers.map((controller: any, index: number) => ({
-        id: `controller-${controller.id}`,
-        name: controller.name,
-        latitude: parseFloat(controller.latitude),
-        longitude: parseFloat(controller.longitude),
-        model: controller.model || '',
-        serialNumber: controller.serialNumber || '',
-        stationCount: controller.stationCount || 8,
-        description: controller.description || '',
-        color: controllerColors[index % controllerColors.length]
-      }));
+      // Convert database format to project format with robust coordinate parsing
+      const coloredControllers: ColoredController[] = controllers.map((controller: any, index: number) => {
+        const lat = typeof controller.latitude === 'string' ? parseFloat(controller.latitude) : controller.latitude;
+        const lng = typeof controller.longitude === 'string' ? parseFloat(controller.longitude) : controller.longitude;
+        
+        console.log(`Controller ${controller.name}: lat=${lat}, lng=${lng} (original: ${controller.latitude}, ${controller.longitude})`);
+        
+        return {
+          id: `controller-${controller.id}`,
+          name: controller.name,
+          latitude: lat,
+          longitude: lng,
+          model: controller.model || '',
+          serialNumber: controller.serialNumber || '',
+          stationCount: controller.stationCount || 8,
+          description: controller.description || '',
+          color: controllerColors[index % controllerColors.length]
+        };
+      });
       
       // Group zones by controller
       const zonesByController: { [controllerId: string]: ColoredZone[] } = {};
@@ -192,11 +199,30 @@ export function SiteMapsPage() {
       zones.forEach((zone: any) => {
         const controller = coloredControllers.find(c => c.id === `controller-${zone.controllerId}`);
         if (controller) {
+          // Parse zone coordinates more robustly
+          let zoneLat: number, zoneLng: number;
+          
+          if (zone.latitude && zone.longitude) {
+            zoneLat = typeof zone.latitude === 'string' ? parseFloat(zone.latitude) : zone.latitude;
+            zoneLng = typeof zone.longitude === 'string' ? parseFloat(zone.longitude) : zone.longitude;
+          } else if (zone.boundaries && Array.isArray(zone.boundaries) && zone.boundaries.length > 0) {
+            // Try parsing from boundaries array
+            const coords = Array.isArray(zone.boundaries[0]) ? zone.boundaries[0] : zone.boundaries;
+            zoneLat = parseFloat(coords[0]);
+            zoneLng = parseFloat(coords[1]);
+          } else {
+            // Fallback to controller coordinates with small offset
+            zoneLat = controller.latitude + (Math.random() - 0.5) * 0.001;
+            zoneLng = controller.longitude + (Math.random() - 0.5) * 0.001;
+          }
+          
+          console.log(`Zone ${zone.name}: lat=${zoneLat}, lng=${zoneLng}`);
+          
           const coloredZone: ColoredZone = {
             name: zone.name,
-            stationNumber: zone.zoneNumber,
+            stationNumber: zone.zoneNumber || zone.stationNumber,
             zoneType: zone.zoneType || 'unknown',
-            boundaries: [[parseFloat(zone.latitude), parseFloat(zone.longitude)]],
+            boundaries: [[zoneLat, zoneLng]],
             coverage: zone.coverage || '',
             description: zone.description || '',
             controllerId: controller.id,
