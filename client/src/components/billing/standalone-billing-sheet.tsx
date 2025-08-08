@@ -582,7 +582,6 @@ export function StandaloneBillingSheet({
                           name="customerId"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Customer *</FormLabel>
                               <FormControl>
                                 <CustomerSelector
                                   selectedCustomer={selectedCustomer}
@@ -593,6 +592,7 @@ export function StandaloneBillingSheet({
                                   disabled={isFieldTech}
                                   placeholder={isFieldTech ? "Customer will be set by office" : "Select customer"}
                                   className={isFieldTech ? "bg-gray-50" : ""}
+                                  hideLabel={true}
                                 />
                               </FormControl>
                               <FormMessage />

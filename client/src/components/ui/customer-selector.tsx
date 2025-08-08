@@ -34,6 +34,7 @@ interface CustomerSelectorProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  hideLabel?: boolean;
 }
 
 export function CustomerSelector({ 
@@ -41,7 +42,8 @@ export function CustomerSelector({
   onSelectCustomer, 
   placeholder = "Search and select a customer...",
   className = "",
-  disabled = false
+  disabled = false,
+  hideLabel = false
 }: CustomerSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewCustomerDialog, setShowNewCustomerDialog] = useState(false);
@@ -111,8 +113,8 @@ export function CustomerSelector({
 
   if (isLoading) {
     return (
-      <div className={`space-y-2 ${className}`}>
-        <Label>Customer</Label>
+      <div className={`${hideLabel ? '' : 'space-y-2'} ${className}`}>
+        {!hideLabel && <Label>Customer</Label>}
         <Skeleton className="h-10 w-full" />
       </div>
     );
@@ -120,8 +122,8 @@ export function CustomerSelector({
 
   return (
     <>
-      <div className={`space-y-2 ${className}`}>
-        <Label>Customer *</Label>
+      <div className={`${hideLabel ? '' : 'space-y-2'} ${className}`}>
+        {!hideLabel && <Label>Customer *</Label>}
         
         {selectedCustomer ? (
           <Card className="border-2 border-blue-200 bg-blue-50/30 w-full">
