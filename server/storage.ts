@@ -212,6 +212,7 @@ export interface IStorage {
   updateBillingSheet(id: number, billingSheet: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined>;
   deleteBillingSheet(id: number): Promise<boolean>;
   addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem>;
+  deleteBillingSheetItems(billingSheetId: number): Promise<boolean>;
   updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined>;
   deleteBillingSheetItem(itemId: number): Promise<boolean>;
 
@@ -1283,6 +1284,11 @@ export class DatabaseStorage implements IStorage {
   async deleteBillingSheetItem(itemId: number): Promise<boolean> {
     const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.id, itemId));
     return (result.rowCount || 0) > 0;
+  }
+
+  async deleteBillingSheetItems(billingSheetId: number): Promise<boolean> {
+    const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
+    return result.rowCount !== null;
   }
 
   async getBillingSheetItems(billingSheetId: number): Promise<BillingSheetItem[]> {

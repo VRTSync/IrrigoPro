@@ -2168,14 +2168,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/billing-sheets/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updates = req.body;
-      const billingSheet = await storage.updateBillingSheet(id, updates);
+      const { items, ...billingSheetData } = req.body;
+      
+      console.log('Updating billing sheet:', id, 'with data:', billingSheetData);
+      
+      // Update the billing sheet
+      const billingSheet = await storage.updateBillingSheet(id, billingSheetData);
       if (!billingSheet) {
         return res.status(404).json({ message: "Billing sheet not found" });
       }
+      
+      // Handle items if provided
+      if (items && Array.isArray(items)) {
+        console.log('Updating billing sheet items:', items.length);
+        // For simplicity, we'll delete existing items and create new ones
+        // In production, you might want more sophisticated update logic
+        await storage.deleteBillingSheetItems(id);
+        
+        for (const item of items) {
+          await storage.addBillingSheetItem(id, {
+            partId: item.partId || null,
+            partName: item.partName,
+            partDescription: item.partDescription || "",
+            quantity: item.quantity,
+            unitPrice: item.unitPrice.toString(),
+            laborHours: item.laborHours.toString(),
+            totalPrice: (item.quantity * item.unitPrice).toString(),
+            notes: item.notes || "",
+          });
+        }
+      }
+      
       res.json(billingSheet);
     } catch (error) {
-      res.status(500).json({ message: "Failed to update billing sheet" });
+      console.error('Error updating billing sheet:', error);
+      res.status(500).json({ message: "Failed to update billing sheet", error: error instanceof Error ? error.message : String(error) });
     }
   });
 
