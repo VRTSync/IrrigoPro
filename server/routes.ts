@@ -2172,6 +2172,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log('Updating billing sheet:', id, 'with data:', billingSheetData);
       
+      // Convert date string to Date object if present
+      if (billingSheetData.workDate && typeof billingSheetData.workDate === 'string') {
+        billingSheetData.workDate = new Date(billingSheetData.workDate + 'T00:00:00.000Z');
+      }
+      
       // Update the billing sheet
       const billingSheet = await storage.updateBillingSheet(id, billingSheetData);
       if (!billingSheet) {
