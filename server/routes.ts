@@ -590,7 +590,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
-          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed');
+          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'approved' || bs.status === 'billed');
           
           // Calculate billing from all sources based on selected date range
           const filteredWorkOrders = completedWorkOrders.filter(wo => 
@@ -627,7 +627,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const monthEstimates = approvedEstimates.filter(est => 
               est.approvedAt && new Date(est.approvedAt) >= monthStart && new Date(est.approvedAt) <= monthEnd
             );
-            const monthBillingSheets = completedBillingSheets.filter(bs => 
+            const monthBillingSheets = billingSheets.filter(bs => 
+              (bs.status === 'approved' || bs.status === 'billed') &&
               bs.createdAt && new Date(bs.createdAt) >= monthStart && new Date(bs.createdAt) <= monthEnd
             );
             
