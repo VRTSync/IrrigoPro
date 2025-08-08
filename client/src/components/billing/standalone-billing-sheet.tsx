@@ -379,6 +379,7 @@ export function StandaloneBillingSheet({
         totalAmount: totals.totalAmount,
         markupPercent,
         taxPercent,
+        technicianId: currentUser?.id, // Add technician ID for proper filtering
       };
 
       console.log('Submitting data:', submissionData);
