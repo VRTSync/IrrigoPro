@@ -585,12 +585,14 @@ export function StandaloneBillingSheet({
                               <FormLabel>Customer *</FormLabel>
                               <FormControl>
                                 <CustomerSelector
-                                  value={field.value}
-                                  onValueChange={field.onChange}
+                                  selectedCustomer={selectedCustomer}
+                                  onSelectCustomer={(customer) => {
+                                    field.onChange(customer.id);
+                                    setSelectedCustomer(customer);
+                                  }}
                                   disabled={isFieldTech}
                                   placeholder={isFieldTech ? "Customer will be set by office" : "Select customer"}
                                   className={isFieldTech ? "bg-gray-50" : ""}
-                                  onSelectionChange={setSelectedCustomer}
                                 />
                               </FormControl>
                               <FormMessage />

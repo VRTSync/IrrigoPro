@@ -33,13 +33,15 @@ interface CustomerSelectorProps {
   onSelectCustomer: (customer: Customer) => void;
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
 }
 
 export function CustomerSelector({ 
   selectedCustomer, 
   onSelectCustomer, 
   placeholder = "Search and select a customer...",
-  className = ""
+  className = "",
+  disabled = false
 }: CustomerSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewCustomerDialog, setShowNewCustomerDialog] = useState(false);
@@ -155,6 +157,7 @@ export function CustomerSelector({
                   variant="outline"
                   size="sm"
                   onClick={() => setIsOpen(true)}
+                  disabled={disabled}
                   className="flex-shrink-0 w-full sm:w-auto"
                 >
                   Change
@@ -166,6 +169,7 @@ export function CustomerSelector({
           <Button
             variant="outline"
             onClick={() => setIsOpen(true)}
+            disabled={disabled}
             className="w-full justify-start text-gray-500 h-10 min-w-0"
           >
             <Search className="w-4 h-4 mr-2 flex-shrink-0" />
