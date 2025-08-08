@@ -354,10 +354,16 @@ export function StandaloneBillingSheet({
   };
 
   const onSubmit = (data: BillingSheetData) => {
+    console.log('Form submission triggered, showReview:', showReview);
+    console.log('Form data:', data);
+    console.log('Form errors:', form.formState.errors);
+    
     if (showReview) {
       // Submit the billing sheet
       const submissionData = {
         ...data,
+        // Ensure laborRate is set for field techs (use default if hidden)
+        laborRate: isFieldTech ? 45 : data.laborRate,
         laborSubtotal: totals.laborSubtotal,
         partsSubtotal: totals.partsSubtotal,
         markupAmount: totals.markupAmount,
@@ -367,6 +373,8 @@ export function StandaloneBillingSheet({
         taxPercent,
       };
 
+      console.log('Submitting data:', submissionData);
+
       if (draftData) {
         updateBillingSheet.mutate(submissionData);
       } else {
@@ -374,6 +382,7 @@ export function StandaloneBillingSheet({
       }
     } else {
       // Go to review screen
+      console.log('Going to review screen');
       setShowReview(true);
     }
   };
