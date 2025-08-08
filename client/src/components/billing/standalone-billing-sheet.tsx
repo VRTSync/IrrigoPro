@@ -379,7 +379,7 @@ export function StandaloneBillingSheet({
     });
   };
 
-  const onSubmit = (data: BillingSheetData) => {
+  const onSubmit = async (data: BillingSheetData) => {
     console.log('Form submission triggered, showReview:', showReview);
     console.log('Form data:', data);
     console.log('Form errors:', form.formState.errors);
@@ -401,10 +401,14 @@ export function StandaloneBillingSheet({
 
       console.log('Submitting data:', submissionData);
 
-      if (draftData) {
-        updateBillingSheet.mutate(submissionData);
-      } else {
-        createBillingSheet.mutate(submissionData);
+      try {
+        if (draftData) {
+          await updateBillingSheet.mutateAsync(submissionData);
+        } else {
+          await createBillingSheet.mutateAsync(submissionData);
+        }
+      } catch (error) {
+        console.error('Submission error caught:', error);
       }
     } else {
       // Go to review screen
