@@ -1598,6 +1598,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Site Maps methods
+  async getAllSiteMaps(): Promise<SiteMap[]> {
+    return await db.select().from(siteMaps)
+      .where(eq(siteMaps.isActive, true))
+      .orderBy(desc(siteMaps.updatedAt));
+  }
+
   async getCustomerSiteMaps(customerId: number): Promise<SiteMap[]> {
     return await db.select().from(siteMaps)
       .where(eq(siteMaps.customerId, customerId))

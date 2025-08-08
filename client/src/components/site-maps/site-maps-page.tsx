@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +65,8 @@ export function SiteMapsPage() {
   const [uploadingZonesFor, setUploadingZonesFor] = useState<string | null>(null);
   const [editingSiteMap, setEditingSiteMap] = useState<any>(null);
   const [customerSiteMaps, setCustomerSiteMaps] = useState<any[]>([]);
+  const [allSiteMaps, setAllSiteMaps] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Color palette for controllers
   const controllerColors = [
@@ -221,6 +224,49 @@ export function SiteMapsPage() {
       alert(`Failed to load site map: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
+
+  // Load all site maps when component mounts
+  const loadAllSiteMaps = async () => {
+    try {
+      const response = await fetch('/api/site-maps', {
+        headers: {
+          'x-user-role': user?.role || ''
+        }
+      });
+      
+      if (response.ok) {
+        const siteMaps = await response.json();
+        setAllSiteMaps(siteMaps);
+        
+        // If Lake Isle exists and no customer is selected, auto-select it
+        const lakeIsleSiteMap = siteMaps.find((sm: any) => sm.name.toLowerCase().includes('lake isle'));
+        if (lakeIsleSiteMap && !selectedCustomer) {
+          // Get customer info for Lake Isle
+          const customerResponse = await fetch(`/api/customers/${lakeIsleSiteMap.customerId}`);
+          if (customerResponse.ok) {
+            const customer = await customerResponse.json();
+            setSelectedCustomer(customer);
+            setCustomerSiteMaps([lakeIsleSiteMap]);
+            // Auto-load the Lake Isle map for viewing
+            await loadSiteMapForEditing(lakeIsleSiteMap);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error loading all site maps:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Initialize on mount
+  React.useEffect(() => {
+    if (user && canView) {
+      loadAllSiteMaps();
+    } else {
+      setIsLoading(false);
+    }
+  }, [user, canView]);
 
   // Handle customer selection and load their site maps
   const handleCustomerSelection = (customer: any) => {
@@ -416,8 +462,73 @@ export function SiteMapsPage() {
     );
   }
 
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading site maps...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* All Site Maps Overview */}
+      {allSiteMaps.length > 0 && (
+        <div className="mb-8">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MapIcon className="w-5 h-5 text-blue-600" />
+                Available Site Maps
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {allSiteMaps.map((siteMap) => (
+                  <div
+                    key={siteMap.id}
+                    className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 ${
+                      editingSiteMap?.id === siteMap.id
+                        ? 'border-blue-500 bg-blue-50 shadow-md'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                    onClick={async () => {
+                      // Load customer for this site map
+                      const customerResponse = await fetch(`/api/customers/${siteMap.customerId}`);
+                      if (customerResponse.ok) {
+                        const customer = await customerResponse.json();
+                        setSelectedCustomer(customer);
+                        await loadSiteMapForEditing(siteMap);
+                      }
+                    }}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900 mb-1">{siteMap.name}</h4>
+                        <p className="text-sm text-gray-600 mb-2">{siteMap.description}</p>
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <MapIcon className="w-3 h-3" />
+                          <span>Customer ID: {siteMap.customerId}</span>
+                        </div>
+                      </div>
+                      {editingSiteMap?.id === siteMap.id && (
+                        <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+                          Active
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      
       {/* Header */}
       <div className="mb-8">
         <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-xl border shadow-lg p-8">

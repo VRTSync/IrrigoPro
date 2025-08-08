@@ -256,6 +256,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Customer site maps routes
+  // Get all site maps (for overview display)
+  app.get("/api/site-maps", requireViewAccess, async (req, res) => {
+    try {
+      const siteMaps = await storage.getAllSiteMaps();
+      res.json(siteMaps);
+    } catch (error) {
+      console.error("Error fetching all site maps:", error);
+      res.status(500).json({ message: "Failed to fetch site maps" });
+    }
+  });
+
   app.get("/api/customers/:customerId/site-maps", requireViewAccess, async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
