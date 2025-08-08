@@ -230,20 +230,34 @@ export function StandaloneBillingSheet({
         totalHours: draftData.totalHours || 1,
         laborRate: draftData.laborRate || 45,
         notes: draftData.notes || "",
-        items: draftData.items || [],
+        items: Array.isArray(draftData.items) ? draftData.items : [],
       };
       
       form.reset(formData);
-      setUploadedPhotos(draftData.photos?.map((url: string) => ({ url, name: url.split('/').pop() || 'photo' })) || []);
+      
+      // Handle photos array safely
+      const photosArray = Array.isArray(draftData.photos) ? draftData.photos : [];
+      setUploadedPhotos(photosArray.map((url: string) => ({ 
+        url, 
+        name: url.split('/').pop() || 'photo' 
+      })));
+      
+      // Set selected customer if available
+      if (customers && draftData.customerId) {
+        const customer = customers.find(c => c.id === draftData.customerId);
+        if (customer) {
+          setSelectedCustomer(customer);
+        }
+      }
     }
-  }, [draftData, open, form, today]);
+  }, [draftData, open, form, today, customers]);
 
   // Calculate totals
-  const items = form.watch("items");
-  const totalHours = form.watch("totalHours");
-  const laborRate = form.watch("laborRate");
+  const items = form.watch("items") || [];
+  const totalHours = form.watch("totalHours") || 0;
+  const laborRate = form.watch("laborRate") || 0;
 
-  const partsSubtotal = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+  const partsSubtotal = Array.isArray(items) ? items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0) : 0;
   const laborSubtotal = totalHours * laborRate;
   const markupPercent = selectedCustomer?.markupPercent ? parseFloat(selectedCustomer.markupPercent) : 20;
   const taxPercent = selectedCustomer?.taxPercent ? parseFloat(selectedCustomer.taxPercent) : 8.25;
