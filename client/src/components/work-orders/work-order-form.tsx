@@ -39,6 +39,11 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Get field technicians for assignment
+  const { data: fieldTechs } = useQuery<any[]>({
+    queryKey: ["/api/users/field-techs"],
+  });
+
   const form = useForm<WorkOrderFormData>({
     resolver: zodResolver(workOrderFormSchema),
     defaultValues: {
@@ -163,44 +168,9 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 2: Priority Level */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Target className="w-5 h-5 text-blue-600" />
-                  Step 2: Priority Level
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="priority"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Priority Level</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select priority" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="low">Low Priority</SelectItem>
-                            <SelectItem value="medium">Standard</SelectItem>
-                            <SelectItem value="high">High Priority</SelectItem>
-                            <SelectItem value="urgent">Emergency</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* Step 3: Work Location (Optional) */}
+
+            {/* Step 2: Work Location (Optional) */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center justify-between">
@@ -275,7 +245,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 4: Work Description */}
+            {/* Step 3: Work Description */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -324,7 +294,7 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
               </CardContent>
             </Card>
 
-            {/* Step 5: Scheduling and Assignment */}
+            {/* Step 4: Scheduling and Assignment */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
@@ -374,17 +344,37 @@ export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
 
                   <FormField
                     control={form.control}
-                    name="assignedTechnicianName"
+                    name="assignedTechnicianId"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Assigned Technician</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="Technician name" 
-                            {...field} 
-                            value={field.value || ""}
-                          />
-                        </FormControl>
+                        <Select 
+                          onValueChange={(value) => {
+                            const techId = value ? parseInt(value) : null;
+                            field.onChange(techId);
+                            // Auto-fill technician name
+                            const selectedTech = fieldTechs?.find(tech => tech.id === techId);
+                            if (selectedTech) {
+                              form.setValue("assignedTechnicianName", selectedTech.name);
+                            } else {
+                              form.setValue("assignedTechnicianName", "");
+                            }
+                          }}
+                          value={field.value?.toString() || ""}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select technician (optional)" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {fieldTechs?.map((tech) => (
+                              <SelectItem key={tech.id} value={tech.id.toString()}>
+                                {tech.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
