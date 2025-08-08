@@ -380,6 +380,7 @@ export function StandaloneBillingSheet({
         markupPercent,
         taxPercent,
         technicianId: currentUser?.id, // Add technician ID for proper filtering
+        status: isFieldTech ? 'submitted' : 'draft', // Field techs submit, others save as draft
       };
 
       // Determine if this is an update or create operation
