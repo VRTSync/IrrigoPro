@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ interface CustomerPreview {
 export default function CustomerBilling() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
-  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
   const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingSheet | null>(null);
   const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
@@ -69,6 +69,19 @@ export default function CustomerBilling() {
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowCustomerDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Get all customers
   const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
@@ -276,15 +289,71 @@ export default function CustomerBilling() {
             </div>
           )}
 
-          {/* Search Bar - More compact on mobile */}
-          <div className="relative mb-3 md:mb-4">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              placeholder="Search customers..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 h-8 md:h-10 text-sm"
-            />
+          {/* Customer Search/Selector - Dropdown Style */}
+          <div className="relative mb-3 md:mb-4" ref={dropdownRef}>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder={selectedCustomerId 
+                  ? customers.find(c => c.id === selectedCustomerId)?.name || "Search customers..."
+                  : "Search customers..."
+                }
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setShowCustomerDropdown(true);
+                }}
+                onFocus={() => setShowCustomerDropdown(true)}
+                className="pl-10 h-8 md:h-10 text-sm"
+              />
+              <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            </div>
+            
+            {/* Customer Dropdown */}
+            {showCustomerDropdown && (
+              <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-80 overflow-y-auto">
+                {filteredCustomers.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500 text-sm">No customers found</div>
+                ) : (
+                  filteredCustomers.map((customer) => {
+                    const preview = getCustomerPreview(customer);
+                    return (
+                      <div
+                        key={customer.id}
+                        onClick={() => {
+                          setSelectedCustomerId(customer.id);
+                          setSearchTerm("");
+                          setShowCustomerDropdown(false);
+                        }}
+                        className={`p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                          selectedCustomerId === customer.id ? 'bg-blue-50' : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-medium text-sm text-gray-900">{customer.name}</div>
+                          {preview.billingPace >= 1.3 ? (
+                            <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
+                          ) : preview.billingPace <= 0.7 ? (
+                            <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
+                          ) : (
+                            <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-600 mb-1">{customer.email}</div>
+                        {preview.unbilledAmount > 0 && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-orange-700">Unbilled:</span>
+                            <Badge className="bg-orange-100 text-orange-800 text-xs">
+                              {formatCurrency(preview.unbilledAmount)}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
           {/* Filter Controls - Collapsible */}
@@ -401,92 +470,42 @@ export default function CustomerBilling() {
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto">
-          {(loadingCustomers || loadingPreviews) ? (
-            <div className="p-4 text-center text-gray-500">Loading customer billing data...</div>
-          ) : (
-            <div className="divide-y divide-gray-200">
-              {filteredCustomers.map((customer) => {
-                const preview = getCustomerPreview(customer);
-                const daysSinceInvoice = preview.lastInvoiceDate 
-                  ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate).getTime()) / (1000 * 60 * 60 * 24))
-                  : null;
-                
-                return (
-                  <div
-                    key={customer.id}
-                    onClick={() => setSelectedCustomerId(customer.id)}
-                    className={`p-3 md:p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
-                      selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
-                    }`}
-                  >
-                    {/* Customer Name and Billing Pace Badge - Mobile optimized */}
-                    <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                      <div className="font-medium text-gray-900 text-sm md:text-base truncate pr-2">{customer.name}</div>
-                      {preview.billingPace >= 1.3 ? (
-                        <Badge className="bg-green-100 text-green-800 text-xs flex-shrink-0">
-                          ABOVE AVG
-                        </Badge>
-                      ) : preview.billingPace <= 0.7 ? (
-                        <Badge className="bg-red-100 text-red-800 text-xs flex-shrink-0">
-                          BELOW AVG
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-blue-100 text-blue-800 text-xs flex-shrink-0">
-                          ON PACE
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* Contact Info - More compact on mobile */}
-                    <div className="text-xs text-gray-600 mb-1.5 md:mb-2 truncate">{customer.email}</div>
-                    
-                    {/* Billing Summary - Mobile optimized */}
-                    <div className="space-y-1">
-                      {/* Monthly Billing Pace */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500">This month:</span>
-                        <span className="text-xs font-medium">
-                          {formatCurrency(preview.currentMonthBilling)} 
-                          <span className="text-gray-400 ml-1">
-                            (avg: {formatCurrency(preview.monthlyAverage)})
-                          </span>
-                        </span>
-                      </div>
-
-                      {/* Unbilled Amount */}
-                      {preview.unbilledAmount > 0 && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-orange-700 font-medium">Unbilled:</span>
-                          <Badge className="bg-orange-100 text-orange-800 text-xs">
-                            {formatCurrency(preview.unbilledAmount)}
-                          </Badge>
-                        </div>
-                      )}
-
-                      {/* Last Invoice Date */}
-                      {preview.lastInvoiceDate && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-500">Last invoiced:</span>
-                          <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
-                            {new Date(preview.lastInvoiceDate).toLocaleDateString('en-US', { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            })}
-                          </span>
-                        </div>
-                      )}
-
-
-
-
-                    </div>
-                  </div>
-                );
-              })}
+        {/* Selected Customer Summary - Only show when customer is selected */}
+        {selectedCustomerId && (
+          <div className="border-t border-gray-200 p-3 md:p-4 bg-gray-50">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-medium text-sm text-gray-900">
+                {customers.find(c => c.id === selectedCustomerId)?.name}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedCustomerId(null)}
+                className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </Button>
             </div>
-          )}
-        </div>
+            {(() => {
+              const preview = getCustomerPreview(customers.find(c => c.id === selectedCustomerId)!);
+              return (
+                <div className="space-y-1">
+                  <div className="text-xs text-gray-600">
+                    {customers.find(c => c.id === selectedCustomerId)?.email}
+                  </div>
+                  {preview.unbilledAmount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-orange-700">Unbilled:</span>
+                      <Badge className="bg-orange-100 text-orange-800 text-xs">
+                        {formatCurrency(preview.unbilledAmount)}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Right Content Area - Mobile optimized */}
