@@ -435,7 +435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currentDate = new Date();
       const invoiceNumber = `INV-${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${customerId.toString().padStart(4, '0')}`;
       
-      // Calculate totals
+      // Calculate totals - no markup on parts, tax only on labor
       const laborSubtotal = 
         unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
         unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
@@ -444,17 +444,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
         unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
-      const markupAmount = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.markupAmount || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.markupAmount || '0'), 0);
+      // No markup on parts for invoices
+      const markupAmount = 0;
       
-      const taxAmount = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.taxAmount || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.taxAmount || '0'), 0);
+      // Tax only on labor, not parts (business rule)
+      const taxRate = 0.0825; // 8.25%
+      const taxAmount = laborSubtotal * taxRate;
       
-      const totalAmount = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+      // Total = Labor + Parts + Tax (on labor only)
+      const totalAmount = laborSubtotal + partsSubtotal + taxAmount;
 
       // Create the invoice
       const invoice = await storage.createInvoice({
@@ -467,11 +465,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoiceYear: currentDate.getFullYear(),
         periodStart: new Date(currentDate.getFullYear(), currentDate.getMonth(), 1),
         periodEnd: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0),
-        laborSubtotal: laborSubtotal.toString(),
-        partsSubtotal: partsSubtotal.toString(),
-        markupAmount: markupAmount.toString(),
-        taxAmount: taxAmount.toString(),
-        totalAmount: totalAmount.toString(),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        markupAmount: markupAmount.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
         status: 'generated',
         createdAt: currentDate,
         updatedAt: currentDate
@@ -495,9 +493,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborAmount: parseFloat(workOrder.laborSubtotal || '0'),
           laborTotal: parseFloat(workOrder.laborSubtotal || '0'),
           partsAmount: parseFloat(workOrder.partsSubtotal || '0'),
-          markupAmount: parseFloat(workOrder.markupAmount || '0'),
-          taxAmount: parseFloat(workOrder.taxAmount || '0'),
-          totalAmount: parseFloat(workOrder.totalAmount || '0')
+          markupAmount: 0, // No markup on invoices
+          taxAmount: parseFloat(workOrder.laborSubtotal || '0') * 0.0825, // Tax only on labor
+          totalAmount: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0') + (parseFloat(workOrder.laborSubtotal || '0') * 0.0825)
         });
 
         // Update work order billing status
@@ -518,9 +516,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborAmount: parseFloat(billingSheet.laborSubtotal || '0'),
           laborTotal: parseFloat(billingSheet.laborSubtotal || '0'),
           partsAmount: parseFloat(billingSheet.partsSubtotal || '0'),
-          markupAmount: parseFloat(billingSheet.markupAmount || '0'),
-          taxAmount: parseFloat(billingSheet.taxAmount || '0'),
-          totalAmount: parseFloat(billingSheet.totalAmount || '0')
+          markupAmount: 0, // No markup on invoices
+          taxAmount: parseFloat(billingSheet.laborSubtotal || '0') * 0.0825, // Tax only on labor
+          totalAmount: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0') + (parseFloat(billingSheet.laborSubtotal || '0') * 0.0825)
         });
 
         // Update billing sheet billing status
