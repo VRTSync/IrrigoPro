@@ -70,3 +70,15 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 - **Vite**
 - **ESBuild**
 - **Tailwind CSS**
+
+## Recent System Enhancements (January 2025)
+
+### Work Order Completion Tracking
+- **Enhanced User Context**: API client now sends user ID, name, and role headers with all requests for proper audit trails
+- **Completion Tracking**: Added database fields (completed_by_user_id, completed_by_user_name) to track who actually completed work orders vs who was originally assigned
+- **Notification Updates**: Work order completion notifications now display the actual completing user for better accountability
+
+### Interface Improvements
+- **Counter Accuracy**: Fixed work order status counter mismatch where "Pending" counter now correctly counts "assigned" status work orders (aligned with database schema)
+- **Status Badge Consistency**: Updated status badge display to show both "assigned" and "pending" statuses as "Pending" for user clarity
+- **Filter Alignment**: Synchronized filter buttons to work with actual database status values
