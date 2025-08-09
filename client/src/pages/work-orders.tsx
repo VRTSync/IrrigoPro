@@ -194,7 +194,7 @@ export default function WorkOrders() {
   };
 
   const getStatusCount = (status: string) => {
-    return workOrders?.filter(wo => wo.status === status).length || 0;
+    return filteredWorkOrders?.filter(wo => wo.status === status).length || 0;
   };
 
 
