@@ -342,7 +342,9 @@ export const workOrders = pgTable("work_orders", {
   description: text("description"), // For direct work orders without estimates
   specialInstructions: text("special_instructions"),
   notes: text("notes"),
-  // Completion fields
+  // Completion fields - who actually completed the work
+  completedByUserId: integer("completed_by_user_id").references(() => users.id),
+  completedByUserName: text("completed_by_user_name"),
   workSummary: text("work_summary"), // Summary of work completed
   customerNotes: text("customer_notes"), // Notes to share with customer
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }), // Hours worked

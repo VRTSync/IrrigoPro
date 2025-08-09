@@ -21,9 +21,11 @@ export async function apiRequest(
   const user = getCurrentUser();
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
   
-  // Add user role header if user is logged in
+  // Add user headers if user is logged in
   if (user?.role) {
     headers["X-User-Role"] = user.role;
+    headers["X-User-ID"] = user.id?.toString() || "";
+    headers["X-User-Name"] = user.name || "";
   }
 
   const res = await fetch(url, {

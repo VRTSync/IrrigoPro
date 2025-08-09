@@ -1990,6 +1990,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalPartsCost
       } = req.body;
 
+      // Get current user from headers
+      const completedByUserId = req.headers['x-user-id'];
+      const completedByUserName = req.headers['x-user-name'];
+
       // Calculate totals
       const laborRate = 45; // Default labor rate per hour
       const markupRate = 0.15; // 15% markup on parts
@@ -2009,6 +2013,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrder = await storage.updateWorkOrder(workOrderId, {
         status: 'completed',
         completedAt: new Date(completedAt),
+        completedByUserId: completedByUserId ? parseInt(completedByUserId as string) : undefined,
+        completedByUserName: completedByUserName as string,
         workSummary,
         customerNotes,
         totalHours: laborHours,
@@ -2047,7 +2053,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId: manager.id,
           type: "work_order_completed",
           title: "Work Order Completed",
-          message: `Work order ${workOrder.workOrderNumber} has been completed by ${workOrder.technicianName}.`,
+          message: `Work order ${workOrder.workOrderNumber} has been completed by ${completedByUserName || workOrder.assignedTechnicianName}.`,
           relatedEntityType: "work_order",
           relatedEntityId: workOrderId
         });
@@ -2063,9 +2069,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/work-orders/:id/complete", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Get current user from headers
+      const completedByUserId = req.headers['x-user-id'];
+      const completedByUserName = req.headers['x-user-name'];
+      
       const workOrder = await storage.updateWorkOrder(id, { 
         status: "completed", 
-        completedAt: new Date() 
+        completedAt: new Date(),
+        completedByUserId: completedByUserId ? parseInt(completedByUserId as string) : undefined,
+        completedByUserName: completedByUserName as string
       });
       if (!workOrder) {
         return res.status(404).json({ message: "Work order not found" });
@@ -2080,7 +2093,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId: manager.id,
           type: "work_order_completed",
           title: "Work Order Completed",
-          message: `Work order ${workOrder.workOrderNumber} has been completed by ${workOrder.technicianName}.`,
+          message: `Work order ${workOrder.workOrderNumber} has been completed by ${completedByUserName || workOrder.assignedTechnicianName}.`,
           relatedEntityType: "work_order",
           relatedEntityId: id
         });
