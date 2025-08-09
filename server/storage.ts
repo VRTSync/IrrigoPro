@@ -233,6 +233,10 @@ export interface IStorage {
   deleteSiteMap(siteMapId: number): Promise<boolean>;
   saveControllers(siteMapId: number, controllers: InsertController[]): Promise<Controller[]>;
   saveZones(siteMapId: number, zones: InsertIrrigationZone[]): Promise<IrrigationZone[]>;
+
+  // Company Profile Management
+  getCompanyProfile(companyId: number): Promise<Company | undefined>;
+  updateCompanyProfile(companyId: number, updates: Partial<InsertCompany>): Promise<Company>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -264,6 +268,21 @@ export class DatabaseStorage implements IStorage {
   async deleteCompany(id: number): Promise<boolean> {
     await db.delete(companies).where(eq(companies.id, id));
     return true;
+  }
+
+  // Company Profile Management for authenticated company admins
+  async getCompanyProfile(companyId: number): Promise<Company | undefined> {
+    const result = await db.select().from(companies).where(eq(companies.id, companyId));
+    return result[0];
+  }
+
+  async updateCompanyProfile(companyId: number, updates: Partial<InsertCompany>): Promise<Company> {
+    const result = await db
+      .update(companies)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(companies.id, companyId))
+      .returning();
+    return result[0];
   }
 
   // Initialize default users and company

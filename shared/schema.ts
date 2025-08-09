@@ -441,6 +441,7 @@ export const notifications = pgTable("notifications", {
 });
 
 // Drizzle insert schemas
+// Zod schemas for validation
 export const insertCompanySchema = createInsertSchema(companies).omit({
   id: true,
   createdAt: true,

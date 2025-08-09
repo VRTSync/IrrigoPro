@@ -16,7 +16,8 @@ import {
   insertWorkOrderSchema,
   insertWorkOrderItemSchema,
   insertNotificationSchema,
-  insertSiteMapSchema
+  insertSiteMapSchema,
+  insertCompanySchema
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -98,6 +99,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(company);
     } catch (error) {
       res.status(500).json({ message: "Failed to create company" });
+    }
+  });
+
+  // Company Profile Management (Company Admin only)
+  app.get("/api/company/:companyId/profile", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const userRole = req.headers['x-user-role'];
+      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+
+      // Only company admins can access their own company profile
+      if (userRole !== 'company_admin' || userCompanyId !== companyId) {
+        return res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+      }
+
+      const company = await storage.getCompanyProfile(companyId);
+      if (!company) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+      res.json(company);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch company profile" });
+    }
+  });
+
+  app.put("/api/company/:companyId/profile", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const userRole = req.headers['x-user-role'];
+      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+
+      // Only company admins can update their own company profile
+      if (userRole !== 'company_admin' || userCompanyId !== companyId) {
+        return res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+      }
+
+      const updates = insertCompanySchema.partial().parse(req.body);
+      const updatedCompany = await storage.updateCompanyProfile(companyId, updates);
+      res.json(updatedCompany);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid company data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update company profile" });
     }
   });
 

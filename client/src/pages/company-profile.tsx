@@ -1,0 +1,338 @@
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { Loader2, Building, Mail, Phone, Globe, MapPin } from "lucide-react";
+import type { Company, InsertCompany } from "@shared/schema";
+import { apiRequest } from "@/lib/queryClient";
+
+const companyProfileSchema = z.object({
+  name: z.string().min(1, "Company name is required"),
+  address: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email("Invalid email").optional().or(z.literal("")),
+  website: z.string().url("Invalid website URL").optional().or(z.literal("")),
+  logo: z.string().optional(),
+  subscription: z.enum(["basic", "pro", "enterprise"]).optional(),
+});
+
+type CompanyProfileFormData = z.infer<typeof companyProfileSchema>;
+
+export default function CompanyProfile() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+
+  // Get current user info from session/localStorage
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const companyId = currentUser.companyId;
+
+  // Fetch company profile
+  const { data: company, isLoading } = useQuery({
+    queryKey: [`/api/company/${companyId}/profile`],
+    enabled: !!companyId
+  });
+
+  // Set up form with current company data
+  const form = useForm<CompanyProfileFormData>({
+    resolver: zodResolver(companyProfileSchema),
+    defaultValues: {
+      name: company?.name || "",
+      address: company?.address || "",
+      phone: company?.phone || "",
+      email: company?.email || "",
+      website: company?.website || "",
+      logo: company?.logo || "",
+      subscription: company?.subscription || "basic",
+    },
+  });
+
+  // Reset form when company data changes
+  useEffect(() => {
+    if (company) {
+      form.reset({
+        name: company.name,
+        address: company.address || "",
+        phone: company.phone || "",
+        email: company.email || "",
+        website: company.website || "",
+        logo: company.logo || "",
+        subscription: company.subscription as "basic" | "pro" | "enterprise",
+      });
+    }
+  }, [company, form]);
+
+  // Update company profile mutation
+  const updateCompanyMutation = useMutation({
+    mutationFn: async (data: CompanyProfileFormData) => {
+      return apiRequest(`/api/company/${companyId}/profile`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+      setIsEditing(false);
+      toast({
+        title: "Success",
+        description: "Company profile updated successfully",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update company profile",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSubmit = (data: CompanyProfileFormData) => {
+    updateCompanyMutation.mutate(data);
+  };
+
+  const handleCancel = () => {
+    form.reset();
+    setIsEditing(false);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!company) {
+    return (
+      <div className="p-8">
+        <Card>
+          <CardContent className="p-6">
+            <div className="text-center text-muted-foreground">
+              Company profile not found
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Building className="h-6 w-6" />
+              Company Profile
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Manage your company information and settings
+            </p>
+          </div>
+          {!isEditing && (
+            <Button onClick={() => setIsEditing(true)}>
+              Edit Profile
+            </Button>
+          )}
+        </div>
+
+        <div className="grid gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Company Information</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Company Name */}
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Company Name *</Label>
+                    <Input
+                      id="name"
+                      {...form.register("name")}
+                      disabled={!isEditing}
+                      className={!isEditing ? "bg-muted" : ""}
+                    />
+                    {form.formState.errors.name && (
+                      <p className="text-sm text-destructive">
+                        {form.formState.errors.name.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Phone */}
+                  <div className="space-y-2">
+                    <Label htmlFor="phone" className="flex items-center gap-2">
+                      <Phone className="h-4 w-4" />
+                      Phone Number
+                    </Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      {...form.register("phone")}
+                      disabled={!isEditing}
+                      className={!isEditing ? "bg-muted" : ""}
+                      placeholder="(555) 123-4567"
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div className="space-y-2">
+                    <Label htmlFor="email" className="flex items-center gap-2">
+                      <Mail className="h-4 w-4" />
+                      Email Address
+                    </Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      {...form.register("email")}
+                      disabled={!isEditing}
+                      className={!isEditing ? "bg-muted" : ""}
+                      placeholder="contact@company.com"
+                    />
+                    {form.formState.errors.email && (
+                      <p className="text-sm text-destructive">
+                        {form.formState.errors.email.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Website */}
+                  <div className="space-y-2">
+                    <Label htmlFor="website" className="flex items-center gap-2">
+                      <Globe className="h-4 w-4" />
+                      Website
+                    </Label>
+                    <Input
+                      id="website"
+                      type="url"
+                      {...form.register("website")}
+                      disabled={!isEditing}
+                      className={!isEditing ? "bg-muted" : ""}
+                      placeholder="https://www.company.com"
+                    />
+                    {form.formState.errors.website && (
+                      <p className="text-sm text-destructive">
+                        {form.formState.errors.website.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Address */}
+                <div className="space-y-2">
+                  <Label htmlFor="address" className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4" />
+                    Business Address
+                  </Label>
+                  <Textarea
+                    id="address"
+                    {...form.register("address")}
+                    disabled={!isEditing}
+                    className={!isEditing ? "bg-muted" : ""}
+                    placeholder="123 Main Street, City, State, ZIP"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Subscription Plan */}
+                <div className="space-y-2">
+                  <Label htmlFor="subscription">Subscription Plan</Label>
+                  <select
+                    id="subscription"
+                    {...form.register("subscription")}
+                    disabled={!isEditing}
+                    className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${!isEditing ? "bg-muted" : ""}`}
+                  >
+                    <option value="basic">Basic</option>
+                    <option value="pro">Professional</option>
+                    <option value="enterprise">Enterprise</option>
+                  </select>
+                </div>
+
+                {/* Logo URL */}
+                <div className="space-y-2">
+                  <Label htmlFor="logo">Company Logo (URL)</Label>
+                  <Input
+                    id="logo"
+                    type="url"
+                    {...form.register("logo")}
+                    disabled={!isEditing}
+                    className={!isEditing ? "bg-muted" : ""}
+                    placeholder="https://www.company.com/logo.png"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Enter a URL to your company logo image
+                  </p>
+                </div>
+
+                {isEditing && (
+                  <div className="flex gap-4 pt-4">
+                    <Button
+                      type="submit"
+                      disabled={updateCompanyMutation.isPending}
+                      className="flex-1 sm:flex-initial"
+                    >
+                      {updateCompanyMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Updating...
+                        </>
+                      ) : (
+                        "Save Changes"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleCancel}
+                      disabled={updateCompanyMutation.isPending}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Company Stats */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Company Information</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-2xl font-bold text-primary">
+                    {company.subscription?.charAt(0).toUpperCase() + company.subscription?.slice(1)}
+                  </div>
+                  <div className="text-sm text-muted-foreground">Current Plan</div>
+                </div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-2xl font-bold text-green-600">Active</div>
+                  <div className="text-sm text-muted-foreground">Account Status</div>
+                </div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-2xl font-bold text-blue-600">
+                    {new Date(company.createdAt).getFullYear()}
+                  </div>
+                  <div className="text-sm text-muted-foreground">Member Since</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
