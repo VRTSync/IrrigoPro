@@ -120,6 +120,36 @@ export default function CustomerBilling() {
     };
   };
 
+  // Create Invoice Mutation
+  const createInvoiceMutation = useMutation({
+    mutationFn: async (customerId: number) => {
+      const response = await apiRequest("POST", "/api/invoices/monthly", {
+        customerId
+      });
+      return response.json();
+    },
+    onSuccess: (data, customerId) => {
+      toast({
+        title: "Invoice Created Successfully",
+        description: `Monthly invoice ${data.invoiceNumber} has been created and synced to QuickBooks.`,
+      });
+      // Refresh customer billing data and previews
+      queryClient.invalidateQueries({ queryKey: ['customer-billing', customerId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to Create Invoice",
+        description: error.message || "An error occurred while creating the invoice.",
+        variant: "destructive",
+      });
+    }
+  });
+
+  const handleCreateInvoice = (customerId: number) => {
+    createInvoiceMutation.mutate(customerId);
+  };
+
   // Generate month options for the dropdown
   const generateMonthOptions = () => {
     const months = [];
@@ -1047,12 +1077,21 @@ export default function CustomerBilling() {
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
                       </div>
                       <Button
-                        onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
-                        disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
+                        onClick={() => handleCreateInvoice(selectedCustomerId!)}
+                        disabled={createInvoiceMutation.isPending || customerBillingData.totalUnbilledAmount === 0}
                         className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
                       >
-                        <Receipt className="w-3 h-3 mr-1" />
-                        {createMonthlyInvoice.isPending ? "Creating..." : "Create Invoice"}
+                        {createInvoiceMutation.isPending ? (
+                          <>
+                            <Clock className="w-3 h-3 mr-1 animate-spin" />
+                            Creating...
+                          </>
+                        ) : (
+                          <>
+                            <Receipt className="w-3 h-3 mr-1" />
+                            Create Invoice
+                          </>
+                        )}
                       </Button>
                     </div>
                   </CardContent>
