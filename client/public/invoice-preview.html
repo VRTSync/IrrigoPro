@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickBooks Invoice Preview - Fallbrook Filing II</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .invoice { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 800px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 40px; border-bottom: 3px solid #0077C5; padding-bottom: 20px; }
+        .company-info { color: #0077C5; }
+        .company-info h1 { margin: 0; font-size: 28px; }
+        .invoice-info { text-align: right; }
+        .invoice-info h2 { color: #0077C5; margin: 0 0 10px 0; font-size: 24px; }
+        .customer-info { margin-bottom: 30px; }
+        .customer-info h3 { color: #333; margin-bottom: 10px; }
+        .line-items { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        .line-items th { background: #0077C5; color: white; padding: 12px; text-align: left; }
+        .line-items td { padding: 12px; border-bottom: 1px solid #ddd; }
+        .line-items tr:nth-child(even) { background: #f9f9f9; }
+        .totals { float: right; width: 300px; }
+        .totals table { width: 100%; border-collapse: collapse; }
+        .totals td { padding: 8px; border-bottom: 1px solid #ddd; }
+        .totals .total-row { font-weight: bold; background: #f0f8ff; border-top: 2px solid #0077C5; }
+        .payment-terms { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; }
+        .qb-logo { color: #0077C5; font-weight: bold; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="invoice">
+        <div class="qb-logo">🧾 QuickBooks Online - Invoice Preview</div>
+        
+        <div class="header">
+            <div class="company-info">
+                <h1>Mountain Sprinkler & Irrigation</h1>
+                <p>11002 Benton St<br>
+                Westminster, CO 80020<br>
+                (720) 974-4164</p>
+            </div>
+            <div class="invoice-info">
+                <h2>INVOICE</h2>
+                <p><strong>Invoice #:</strong> INV-202508-0013<br>
+                <strong>Date:</strong> August 9, 2025<br>
+                <strong>Due Date:</strong> September 8, 2025<br>
+                <strong>Terms:</strong> Net 30</p>
+            </div>
+        </div>
+        
+        <div class="customer-info">
+            <h3>Bill To:</h3>
+            <p><strong>Fallbrook Filing II</strong><br>
+            c/o Dept 834 - Hammersmith Management inc<br>
+            PO Box 4579<br>
+            Houston, TX 77210-4579<br>
+            Email: invoices@ehammersmith.com<br>
+            Phone: (303) 376-3211</p>
+        </div>
+        
+        <p><strong>Invoice Period:</strong> August 1, 2025 - August 31, 2025</p>
+        
+        <table class="line-items">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Work Date</th>
+                    <th>Technician</th>
+                    <th>Hours</th>
+                    <th>Parts Cost</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Work Order WO-1754771783905-61</strong><br>
+                        Pump Not working - check wiring and clock connections<br>
+                        <em>Status: Completed - Pump Checked - all connections look good - Recommend replacing pump</em></td>
+                    <td>Aug 9, 2025</td>
+                    <td>JoJo Durrill</td>
+                    <td>1.00</td>
+                    <td>$794.49</td>
+                    <td>$1,035.36</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <div class="totals">
+            <table>
+                <tr>
+                    <td>Subtotal (Labor):</td>
+                    <td style="text-align: right;">$45.00</td>
+                </tr>
+                <tr>
+                    <td>Subtotal (Parts):</td>
+                    <td style="text-align: right;">$794.49</td>
+                </tr>
+                <tr>
+                    <td>Markup (20%):</td>
+                    <td style="text-align: right;">$158.90</td>
+                </tr>
+                <tr>
+                    <td>Tax (8.25%):</td>
+                    <td style="text-align: right;">$36.97</td>
+                </tr>
+                <tr class="total-row">
+                    <td><strong>Total Amount:</strong></td>
+                    <td style="text-align: right;"><strong>$1,035.36</strong></td>
+                </tr>
+            </table>
+        </div>
+        
+        <div style="clear: both;"></div>
+        
+        <div class="payment-terms">
+            <p><strong>Payment Instructions:</strong><br>
+            Please remit payment within 30 days of invoice date. Make checks payable to Mountain Sprinkler & Irrigation.<br>
+            <strong>Questions?</strong> Contact us at (720) 974-4164 or email us for any billing inquiries.</p>
+            
+            <p style="margin-top: 20px; font-size: 12px; color: #888;">
+            <em>This invoice consolidates all work completed during the specified billing period. 
+            Individual work orders and billing sheets are itemized above for your records.</em>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
