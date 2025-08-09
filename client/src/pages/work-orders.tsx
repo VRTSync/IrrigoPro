@@ -194,7 +194,14 @@ export default function WorkOrders() {
   };
 
   const getStatusCount = (status: string) => {
-    return filteredWorkOrders?.filter(wo => wo.status === status).length || 0;
+    const count = filteredWorkOrders?.filter(wo => wo.status === status).length || 0;
+    console.log(`Status ${status}: filtered=${count}, total in workOrders=${workOrders?.filter(wo => wo.status === status).length || 0}`, {
+      filteredWorkOrdersLength: filteredWorkOrders?.length || 0,
+      totalWorkOrdersLength: workOrders?.length || 0,
+      statusFilter,
+      searchQuery
+    });
+    return count;
   };
 
 
