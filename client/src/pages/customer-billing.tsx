@@ -22,6 +22,7 @@ import {
   Clock,
   AlertTriangle,
   ChevronDown,
+  ChevronUp,
   Filter,
   X
 } from "lucide-react";
@@ -64,6 +65,7 @@ export default function CustomerBilling() {
   const [selectedMonth, setSelectedMonth] = useState<string>("");
   const [amountFilter, setAmountFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -285,10 +287,15 @@ export default function CustomerBilling() {
             />
           </div>
 
-          {/* Filter Controls */}
+          {/* Filter Controls - Collapsible */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
+                className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 p-0 h-auto"
+              >
                 <Filter className="w-4 h-4" />
                 Filters
                 {activeFilterCount > 0 && (
@@ -296,7 +303,12 @@ export default function CustomerBilling() {
                     {activeFilterCount}
                   </Badge>
                 )}
-              </h3>
+                {isFiltersExpanded ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </Button>
               {activeFilterCount > 0 && (
                 <Button
                   variant="ghost"
@@ -310,77 +322,82 @@ export default function CustomerBilling() {
               )}
             </div>
 
-            {/* Date Range Filter */}
-            <div>
-              <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
-              <Select value={dateFilter} onValueChange={setDateFilter}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Time</SelectItem>
-                  <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                  <SelectItem value="current_month">Current Month</SelectItem>
-                  <SelectItem value="last_90_days">Last 90 Days</SelectItem>
-                  <SelectItem value="custom_month">Specific Month</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Collapsible Filter Content */}
+            {isFiltersExpanded && (
+              <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
+                {/* Date Range Filter */}
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
+                  <Select value={dateFilter} onValueChange={setDateFilter}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+                      <SelectItem value="current_month">Current Month</SelectItem>
+                      <SelectItem value="last_90_days">Last 90 Days</SelectItem>
+                      <SelectItem value="custom_month">Specific Month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            {/* Month Selector (shown when custom_month is selected) */}
-            {dateFilter === "custom_month" && (
-              <div>
-                <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
-                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder="Choose month..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {generateMonthOptions().map(month => (
-                      <SelectItem key={month.value} value={month.value}>
-                        {month.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Month Selector (shown when custom_month is selected) */}
+                {dateFilter === "custom_month" && (
+                  <div>
+                    <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
+                    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="Choose month..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {generateMonthOptions().map(month => (
+                          <SelectItem key={month.value} value={month.value}>
+                            {month.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Amount Filter */}
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
+                  <Select value={amountFilter} onValueChange={setAmountFilter}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Amounts</SelectItem>
+                      <SelectItem value="under_500">Under $500</SelectItem>
+                      <SelectItem value="500_to_2000">$500 - $2,000</SelectItem>
+                      <SelectItem value="over_2000">Over $2,000</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Status Filter */}
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Status</label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Customers</SelectItem>
+                      <SelectItem value="has_unbilled">Has Unbilled Work</SelectItem>
+                      <SelectItem value="no_activity">No Recent Activity</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Results Summary */}
+                <div className="text-xs text-gray-500 pt-2 border-t">
+                  Showing {filteredCustomers.length} of {customers.length} customers
+                </div>
               </div>
             )}
-
-            {/* Amount Filter */}
-            <div>
-              <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
-              <Select value={amountFilter} onValueChange={setAmountFilter}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Amounts</SelectItem>
-                  <SelectItem value="under_500">Under $500</SelectItem>
-                  <SelectItem value="500_to_2000">$500 - $2,000</SelectItem>
-                  <SelectItem value="over_2000">Over $2,000</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Status Filter */}
-            <div>
-              <label className="text-xs text-gray-600 mb-1 block">Status</label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Customers</SelectItem>
-                  <SelectItem value="has_unbilled">Has Unbilled Work</SelectItem>
-                  <SelectItem value="no_activity">No Recent Activity</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Results Summary */}
-            <div className="text-xs text-gray-500 pt-2 border-t">
-              Showing {filteredCustomers.length} of {customers.length} customers
-            </div>
           </div>
         </div>
         
