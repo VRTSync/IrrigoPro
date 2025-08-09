@@ -769,252 +769,6 @@ export default function CustomerBilling() {
         </div>
       </div>
 
-      {/* Mobile: Searchable Customer Selector */}
-      <div className="lg:hidden w-full bg-white border-b border-gray-200 flex flex-col max-h-[50vh]">
-        <div className="p-3 border-b border-gray-200">
-          <h1 className="text-lg font-bold text-gray-900 mb-3">Customer Billing</h1>
-          
-          {/* Mobile Summary Stats */}
-          {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <div className="bg-orange-50 p-2 rounded-lg text-center">
-                <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                <div className="text-xs font-bold text-orange-800">
-                  {formatCurrency(
-                    customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
-                  )}
-                </div>
-              </div>
-              <div className="bg-blue-50 p-2 rounded-lg text-center">
-                <div className="text-xs text-blue-700 font-medium">Active Customers</div>
-                <div className="text-xs font-bold text-blue-800">
-                  {customerPreviews.filter(preview => 
-                    (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
-                  ).length}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Mobile Customer Search/Selector - Dropdown Style */}
-          <div className="relative mb-3" ref={dropdownRef}>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder={selectedCustomerId 
-                  ? customers.find(c => c.id === selectedCustomerId)?.name || "Search customers..."
-                  : "Search customers..."
-                }
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setShowCustomerDropdown(true);
-                }}
-                onFocus={() => setShowCustomerDropdown(true)}
-                className="pl-10 h-8 text-sm"
-              />
-              <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            </div>
-            
-            {/* Customer Dropdown */}
-            {showCustomerDropdown && (
-              <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-80 overflow-y-auto">
-                {filteredCustomers.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500 text-sm">No customers found</div>
-                ) : (
-                  filteredCustomers.map((customer) => {
-                    const preview = getCustomerPreview(customer);
-                    return (
-                      <div
-                        key={customer.id}
-                        onClick={() => {
-                          setSelectedCustomerId(customer.id);
-                          setSearchTerm("");
-                          setShowCustomerDropdown(false);
-                        }}
-                        className={`p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                          selectedCustomerId === customer.id ? 'bg-blue-50' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="font-medium text-sm text-gray-900">{customer.name}</div>
-                          {preview.billingPace >= 1.3 ? (
-                            <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
-                          ) : preview.billingPace <= 0.7 ? (
-                            <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
-                          ) : (
-                            <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-600 mb-1">{customer.email}</div>
-                        {preview.unbilledAmount > 0 && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-orange-700">Unbilled:</span>
-                            <Badge className="bg-orange-100 text-orange-800 text-xs">
-                              {formatCurrency(preview.unbilledAmount)}
-                            </Badge>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Filter Controls - Collapsible */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
-                className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 p-0 h-auto"
-              >
-                <Filter className="w-4 h-4" />
-                Filters
-                {activeFilterCount > 0 && (
-                  <Badge variant="secondary" className="ml-1 text-xs">
-                    {activeFilterCount}
-                  </Badge>
-                )}
-                {isFiltersExpanded ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </Button>
-              {activeFilterCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={resetFilters}
-                  className="text-xs h-6 px-2"
-                >
-                  <X className="w-3 h-3 mr-1" />
-                  Clear
-                </Button>
-              )}
-            </div>
-
-            {/* Collapsible Filter Content */}
-            {isFiltersExpanded && (
-              <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
-                {/* Date Range Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Time</SelectItem>
-                      <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                      <SelectItem value="current_month">Current Month</SelectItem>
-                      <SelectItem value="last_90_days">Last 90 Days</SelectItem>
-                      <SelectItem value="custom_month">Specific Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Month Selector (shown when custom_month is selected) */}
-                {dateFilter === "custom_month" && (
-                  <div>
-                    <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
-                    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Choose month..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {generateMonthOptions().map(month => (
-                          <SelectItem key={month.value} value={month.value}>
-                            {month.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {/* Amount Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
-                  <Select value={amountFilter} onValueChange={setAmountFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Amounts</SelectItem>
-                      <SelectItem value="under_500">Under $500</SelectItem>
-                      <SelectItem value="500_to_2000">$500 - $2,000</SelectItem>
-                      <SelectItem value="over_2000">Over $2,000</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Status Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Status</label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Customers</SelectItem>
-                      <SelectItem value="has_unbilled">Has Unbilled Work</SelectItem>
-                      <SelectItem value="no_activity">No Recent Activity</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Results Summary */}
-                <div className="text-xs text-gray-500 pt-2 border-t">
-                  Showing {filteredCustomers.length} of {customers.length} customers
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        
-        {/* Selected Customer Summary - Only show when customer is selected */}
-        {selectedCustomerId && (
-          <div className="border-t border-gray-200 p-3 md:p-4 bg-gray-50">
-            <div className="flex items-center justify-between mb-2">
-              <div className="font-medium text-sm text-gray-900">
-                {customers.find(c => c.id === selectedCustomerId)?.name}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedCustomerId(null)}
-                className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            {(() => {
-              const preview = getCustomerPreview(customers.find(c => c.id === selectedCustomerId)!);
-              return (
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-600">
-                    {customers.find(c => c.id === selectedCustomerId)?.email}
-                  </div>
-                  {preview.unbilledAmount > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-orange-700">Unbilled:</span>
-                      <Badge className="bg-orange-100 text-orange-800 text-xs">
-                        {formatCurrency(preview.unbilledAmount)}
-                      </Badge>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-
       {/* Right Content Area - Always full width on mobile, shared with desktop */}
       <div className="flex-1 overflow-y-auto">
         <div className="p-2 lg:p-4">
@@ -1125,542 +879,529 @@ export default function CustomerBilling() {
                     </div>
                   </CardContent>
                 </Card>
-
-                {/* Total Revenue - Mobile optimized */}
-                <Card>
-                  <CardHeader className="pb-2 p-3">
-                    <CardTitle className="text-xs text-gray-700">Revenue Overview</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-0 px-3 pb-3">
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-600">Completed Work:</span>
-                        <span className="font-medium">
-                          {formatCurrency(
-                            customerBillingData.workOrders
-                              .filter(wo => wo.status === 'completed')
-                              .reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-                            customerBillingData.billingSheets
-                              .reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0)
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-xs text-orange-600">
-                        <span>Unbilled:</span>
-                        <span className="font-medium">
-                          {formatCurrency(customerBillingData.totalUnbilledAmount)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
 
-              {/* Work Details Tabs - Mobile responsive */}
-              <Tabs defaultValue="work-orders" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 h-8 md:h-10">
-                  <TabsTrigger value="work-orders" className="text-xs md:text-sm px-2">
-                    <span className="hidden md:inline">Work Orders</span>
-                    <span className="md:hidden">WO</span>
-                    <span className="ml-1">({customerBillingData.workOrders.length})</span>
+              {/* Work Orders and Billing Data Tabs - Mobile optimized */}
+              <Tabs defaultValue="unbilled" className="w-full">
+                <TabsList className="grid w-full grid-cols-4 h-8">
+                  <TabsTrigger value="unbilled" className="text-xs px-2">
+                    Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length})
                   </TabsTrigger>
-                  <TabsTrigger value="billing-sheets" className="text-xs md:text-sm px-2">
-                    <span className="hidden md:inline">Billing Sheets</span>
-                    <span className="md:hidden">BS</span>
-                    <span className="ml-1">({customerBillingData.billingSheets.length})</span>
+                  <TabsTrigger value="work_orders" className="text-xs px-2">
+                    Work Orders ({customerBillingData.workOrders.length})
                   </TabsTrigger>
-                  <TabsTrigger value="estimates" className="text-xs md:text-sm px-2">
-                    <span className="hidden md:inline">Estimates</span>
-                    <span className="md:hidden">EST</span>
-                    <span className="ml-1">({customerBillingData.estimates.length})</span>
+                  <TabsTrigger value="billing_sheets" className="text-xs px-2">
+                    Billing ({customerBillingData.billingSheets.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="estimates" className="text-xs px-2">
+                    Estimates ({customerBillingData.estimates.length})
                   </TabsTrigger>
                 </TabsList>
 
-                {/* Work Orders Tab - Mobile optimized */}
-                <TabsContent value="work-orders" className="space-y-2 mt-2">
-                  <Card>
-                    <CardHeader className="pb-2 p-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <FileText className="w-4 h-4" />
-                          Work Orders
-                        </CardTitle>
-                        <div className="text-xs text-gray-600">
-                          {customerBillingData.workOrders.filter(wo => wo.status === 'completed').length} completed
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-0 px-3 pb-3">
-                      {customerBillingData.workOrders.length === 0 ? (
-                        <div className="text-center text-gray-500 py-4 md:py-6 text-sm">No work orders found</div>
-                      ) : (
-                        <div className="space-y-1 max-h-80 md:max-h-96 overflow-y-auto">
-                          {customerBillingData.workOrders.map((workOrder) => (
-                            <div 
-                              key={workOrder.id} 
-                              onClick={() => setSelectedWorkOrder(workOrder)}
-                              className={`border rounded-md p-2 md:p-3 transition-all cursor-pointer hover:shadow-md ${
-                                workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
-                                  ? 'border-orange-200 bg-orange-50 hover:bg-orange-100' 
-                                  : 'border-gray-200 hover:bg-gray-50'
-                              }`}>
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex-1 min-w-0">
+                {/* Unbilled Items Tab */}
+                <TabsContent value="unbilled">
+                  <div className="space-y-2">
+                    {customerBillingData.unbilledWorkOrders.length === 0 && customerBillingData.unbilledBillingSheets.length === 0 ? (
+                      <Card>
+                        <CardContent className="p-6 text-center text-gray-500">
+                          <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500" />
+                          <div className="font-medium mb-1">All caught up!</div>
+                          <div className="text-sm">No unbilled work for this customer.</div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <>
+                        {/* Unbilled Work Orders */}
+                        {customerBillingData.unbilledWorkOrders.map((wo) => (
+                          <Card key={`wo-${wo.id}`} className="border-orange-200">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-medium text-xs truncate">{workOrder.workOrderNumber}</span>
-                                    {getStatusBadge(workOrder.status)}
-                                    {workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0 && (
-                                      <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 px-1 py-0">
-                                        Ready
-                                      </Badge>
-                                    )}
+                                    <FileText className="w-4 h-4 text-gray-400" />
+                                    <span className="font-medium text-sm">WO #{wo.id}</span>
+                                    {getStatusBadge(wo.status)}
                                   </div>
-                                  <div className="text-xs text-gray-600 truncate">{workOrder.projectName}</div>
-                                  <div className="text-xs text-gray-500 truncate">
-                                    {workOrder.assignedTechnicianName || "Unassigned"} • {formatDate(workOrder.createdAt)}
+                                  <div className="text-xs text-gray-600 mb-2">
+                                    {wo.description}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {new Date(wo.scheduledDate).toLocaleDateString()}
+                                    </div>
+                                    {wo.assignedTo && (
+                                      <div className="flex items-center gap-1">
+                                        <User className="w-3 h-3" />
+                                        {wo.assignedTo}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                <div className="text-right">
-                                  <Badge variant="outline" className={`text-xs ${
-                                    parseFloat(workOrder.totalAmount || '0') === 0 
-                                      ? 'border-red-200 text-red-600 bg-red-50' 
-                                      : 'border-gray-200'
-                                  }`}>
-                                    {formatCurrency(workOrder.totalAmount || '0')}
-                                    {parseFloat(workOrder.totalAmount || '0') === 0 && (
-                                      <span className="ml-1 text-red-500">⚠</span>
-                                    )}
-                                  </Badge>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium text-orange-700">
+                                    {formatCurrency(wo.laborCost + wo.partsCost)}
+                                  </div>
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setSelectedWorkOrder(wo)}
+                                        className="h-6 px-2 text-xs hover:bg-orange-50"
+                                      >
+                                        View
+                                      </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                                      <DialogHeader>
+                                        <DialogTitle className="flex items-center gap-2">
+                                          <FileText className="w-4 h-4" />
+                                          Work Order #{wo.id}
+                                          {getStatusBadge(wo.status)}
+                                        </DialogTitle>
+                                      </DialogHeader>
+                                      {/* Work order details content would go here */}
+                                      <div className="space-y-4">
+                                        <div>
+                                          <h4 className="font-medium mb-2">Description</h4>
+                                          <p className="text-sm text-gray-600">{wo.description}</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <div>
+                                            <h4 className="font-medium mb-1">Scheduled Date</h4>
+                                            <p className="text-sm text-gray-600">{new Date(wo.scheduledDate).toLocaleDateString()}</p>
+                                          </div>
+                                          <div>
+                                            <h4 className="font-medium mb-1">Status</h4>
+                                            <p className="text-sm text-gray-600">{wo.status.replace('_', ' ')}</p>
+                                          </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <div>
+                                            <h4 className="font-medium mb-1">Labor Cost</h4>
+                                            <p className="text-sm text-gray-600">{formatCurrency(wo.laborCost)}</p>
+                                          </div>
+                                          <div>
+                                            <h4 className="font-medium mb-1">Parts Cost</h4>
+                                            <p className="text-sm text-gray-600">{formatCurrency(wo.partsCost)}</p>
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Total Cost</h4>
+                                          <p className="text-lg font-bold text-orange-700">{formatCurrency(wo.laborCost + wo.partsCost)}</p>
+                                        </div>
+                                      </div>
+                                    </DialogContent>
+                                  </Dialog>
                                 </div>
                               </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+
+                        {/* Unbilled Billing Sheets */}
+                        {customerBillingData.unbilledBillingSheets.map((bs) => (
+                          <Card key={`bs-${bs.id}`} className="border-orange-200">
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Receipt className="w-4 h-4 text-gray-400" />
+                                    <span className="font-medium text-sm">BS #{bs.id}</span>
+                                    {getStatusBadge(bs.status)}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">
+                                    {bs.description || 'Billing Sheet'}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {new Date(bs.createdAt).toLocaleDateString()}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium text-orange-700">
+                                    {formatCurrency(bs.laborCost + bs.partsCost)}
+                                  </div>
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setSelectedBillingSheet(bs)}
+                                        className="h-6 px-2 text-xs hover:bg-orange-50"
+                                      >
+                                        View
+                                      </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                                      <DialogHeader>
+                                        <DialogTitle className="flex items-center gap-2">
+                                          <Receipt className="w-4 h-4" />
+                                          Billing Sheet #{bs.id}
+                                          {getStatusBadge(bs.status)}
+                                        </DialogTitle>
+                                      </DialogHeader>
+                                      {/* Billing sheet details content would go here */}
+                                      <div className="space-y-4">
+                                        <div>
+                                          <h4 className="font-medium mb-2">Description</h4>
+                                          <p className="text-sm text-gray-600">{bs.description || 'No description provided'}</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <div>
+                                            <h4 className="font-medium mb-1">Created Date</h4>
+                                            <p className="text-sm text-gray-600">{new Date(bs.createdAt).toLocaleDateString()}</p>
+                                          </div>
+                                          <div>
+                                            <h4 className="font-medium mb-1">Status</h4>
+                                            <p className="text-sm text-gray-600">{bs.status.replace('_', ' ')}</p>
+                                          </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <div>
+                                            <h4 className="font-medium mb-1">Labor Cost</h4>
+                                            <p className="text-sm text-gray-600">{formatCurrency(bs.laborCost)}</p>
+                                          </div>
+                                          <div>
+                                            <h4 className="font-medium mb-1">Parts Cost</h4>
+                                            <p className="text-sm text-gray-600">{formatCurrency(bs.partsCost)}</p>
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Total Cost</h4>
+                                          <p className="text-lg font-bold text-orange-700">{formatCurrency(bs.laborCost + bs.partsCost)}</p>
+                                        </div>
+                                      </div>
+                                    </DialogContent>
+                                  </Dialog>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </TabsContent>
+
+                {/* All Work Orders Tab */}
+                <TabsContent value="work_orders">
+                  <div className="space-y-2">
+                    {customerBillingData.workOrders.length === 0 ? (
+                      <Card>
+                        <CardContent className="p-6 text-center text-gray-500">
+                          <FileText className="w-8 h-8 mx-auto mb-2" />
+                          <div className="font-medium mb-1">No work orders</div>
+                          <div className="text-sm">No work orders found for this customer.</div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      customerBillingData.workOrders.map((wo) => (
+                        <Card key={wo.id}>
+                          <CardContent className="p-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <FileText className="w-4 h-4 text-gray-400" />
+                                  <span className="font-medium text-sm">WO #{wo.id}</span>
+                                  {getStatusBadge(wo.status)}
+                                </div>
+                                <div className="text-xs text-gray-600 mb-2">
+                                  {wo.description}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-3 h-3" />
+                                    {new Date(wo.scheduledDate).toLocaleDateString()}
+                                  </div>
+                                  {wo.assignedTo && (
+                                    <div className="flex items-center gap-1">
+                                      <User className="w-3 h-3" />
+                                      {wo.assignedTo}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium">
+                                  {formatCurrency(wo.laborCost + wo.partsCost)}
+                                </div>
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setSelectedWorkOrder(wo)}
+                                      className="h-6 px-2 text-xs"
+                                    >
+                                      View
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                                    <DialogHeader>
+                                      <DialogTitle className="flex items-center gap-2">
+                                        <FileText className="w-4 h-4" />
+                                        Work Order #{wo.id}
+                                        {getStatusBadge(wo.status)}
+                                      </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <h4 className="font-medium mb-2">Description</h4>
+                                        <p className="text-sm text-gray-600">{wo.description}</p>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="font-medium mb-1">Scheduled Date</h4>
+                                          <p className="text-sm text-gray-600">{new Date(wo.scheduledDate).toLocaleDateString()}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Status</h4>
+                                          <p className="text-sm text-gray-600">{wo.status.replace('_', ' ')}</p>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="font-medium mb-1">Labor Cost</h4>
+                                          <p className="text-sm text-gray-600">{formatCurrency(wo.laborCost)}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Parts Cost</h4>
+                                          <p className="text-sm text-gray-600">{formatCurrency(wo.partsCost)}</p>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium mb-1">Total Cost</h4>
+                                        <p className="text-lg font-bold">{formatCurrency(wo.laborCost + wo.partsCost)}</p>
+                                      </div>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </div>
                 </TabsContent>
 
                 {/* Billing Sheets Tab */}
-                <TabsContent value="billing-sheets" className="space-y-2 mt-2">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-sm">
-                        <Receipt className="w-4 h-4" />
-                        Billing Sheets
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      {customerBillingData.billingSheets.length === 0 ? (
-                        <div className="text-center text-gray-500 py-6 text-sm">No billing sheets found</div>
-                      ) : (
-                        <div className="space-y-1 max-h-96 overflow-y-auto">
-                          {customerBillingData.billingSheets.map((billingSheet) => (
-                            <div 
-                              key={billingSheet.id} 
-                              onClick={() => setSelectedBillingSheet(billingSheet)}
-                              className="border rounded-md p-2 cursor-pointer hover:shadow-md hover:bg-gray-50 transition-all">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-medium text-xs truncate">{billingSheet.billingNumber}</span>
-                                    {getStatusBadge(billingSheet.status)}
-                                  </div>
-                                  <div className="text-xs text-gray-600 truncate">{billingSheet.workDescription}</div>
-                                  <div className="text-xs text-gray-500 truncate">
-                                    {billingSheet.technicianName} • {formatDate(billingSheet.workDate)}
-                                  </div>
+                <TabsContent value="billing_sheets">
+                  <div className="space-y-2">
+                    {customerBillingData.billingSheets.length === 0 ? (
+                      <Card>
+                        <CardContent className="p-6 text-center text-gray-500">
+                          <Receipt className="w-8 h-8 mx-auto mb-2" />
+                          <div className="font-medium mb-1">No billing sheets</div>
+                          <div className="text-sm">No billing sheets found for this customer.</div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      customerBillingData.billingSheets.map((bs) => (
+                        <Card key={bs.id}>
+                          <CardContent className="p-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Receipt className="w-4 h-4 text-gray-400" />
+                                  <span className="font-medium text-sm">BS #{bs.id}</span>
+                                  {getStatusBadge(bs.status)}
                                 </div>
-                                <div className="text-right">
-                                  <Badge variant="outline" className="text-xs">
-                                    {formatCurrency(billingSheet.totalAmount)}
-                                  </Badge>
+                                <div className="text-xs text-gray-600 mb-2">
+                                  {bs.description || 'Billing Sheet'}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-3 h-3" />
+                                    {new Date(bs.createdAt).toLocaleDateString()}
+                                  </div>
                                 </div>
                               </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium">
+                                  {formatCurrency(bs.laborCost + bs.partsCost)}
+                                </div>
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setSelectedBillingSheet(bs)}
+                                      className="h-6 px-2 text-xs"
+                                    >
+                                      View
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                                    <DialogHeader>
+                                      <DialogTitle className="flex items-center gap-2">
+                                        <Receipt className="w-4 h-4" />
+                                        Billing Sheet #{bs.id}
+                                        {getStatusBadge(bs.status)}
+                                      </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <h4 className="font-medium mb-2">Description</h4>
+                                        <p className="text-sm text-gray-600">{bs.description || 'No description provided'}</p>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="font-medium mb-1">Created Date</h4>
+                                          <p className="text-sm text-gray-600">{new Date(bs.createdAt).toLocaleDateString()}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Status</h4>
+                                          <p className="text-sm text-gray-600">{bs.status.replace('_', ' ')}</p>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="font-medium mb-1">Labor Cost</h4>
+                                          <p className="text-sm text-gray-600">{formatCurrency(bs.laborCost)}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Parts Cost</h4>
+                                          <p className="text-sm text-gray-600">{formatCurrency(bs.partsCost)}</p>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium mb-1">Total Cost</h4>
+                                        <p className="text-lg font-bold">{formatCurrency(bs.laborCost + bs.partsCost)}</p>
+                                      </div>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </div>
                 </TabsContent>
 
                 {/* Estimates Tab */}
-                <TabsContent value="estimates" className="space-y-2 mt-2">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-sm">
-                        <DollarSign className="w-4 h-4" />
-                        Estimates
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      {customerBillingData.estimates.length === 0 ? (
-                        <div className="text-center text-gray-500 py-6 text-sm">No estimates found</div>
-                      ) : (
-                        <div className="space-y-1 max-h-96 overflow-y-auto">
-                          {customerBillingData.estimates.map((estimate) => (
-                            <div 
-                              key={estimate.id} 
-                              onClick={() => setSelectedEstimate(estimate)}
-                              className="border rounded-md p-2 cursor-pointer hover:shadow-md hover:bg-gray-50 transition-all">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-medium text-xs truncate">{estimate.estimateNumber}</span>
-                                    {getStatusBadge(estimate.status)}
-                                  </div>
-                                  <div className="text-xs text-gray-600 truncate">{estimate.projectName}</div>
-                                  <div className="text-xs text-gray-500 truncate">
-                                    {formatDate(estimate.createdAt)}
-                                  </div>
+                <TabsContent value="estimates">
+                  <div className="space-y-2">
+                    {customerBillingData.estimates.length === 0 ? (
+                      <Card>
+                        <CardContent className="p-6 text-center text-gray-500">
+                          <DollarSign className="w-8 h-8 mx-auto mb-2" />
+                          <div className="font-medium mb-1">No estimates</div>
+                          <div className="text-sm">No estimates found for this customer.</div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      customerBillingData.estimates.map((estimate) => (
+                        <Card key={estimate.id}>
+                          <CardContent className="p-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <DollarSign className="w-4 h-4 text-gray-400" />
+                                  <span className="font-medium text-sm">EST #{estimate.id}</span>
+                                  {getStatusBadge(estimate.status)}
                                 </div>
-                                <div className="text-right">
-                                  <Badge variant="outline" className="text-xs">
-                                    {formatCurrency(estimate.totalAmount)}
-                                  </Badge>
+                                <div className="text-xs text-gray-600 mb-2">
+                                  {estimate.description}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-3 h-3" />
+                                    {new Date(estimate.createdAt).toLocaleDateString()}
+                                  </div>
                                 </div>
                               </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium">
+                                  {formatCurrency(estimate.laborCost + estimate.partsCost)}
+                                </div>
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setSelectedEstimate(estimate)}
+                                      className="h-6 px-2 text-xs"
+                                    >
+                                      View
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                                    <DialogHeader>
+                                      <DialogTitle className="flex items-center gap-2">
+                                        <DollarSign className="w-4 h-4" />
+                                        Estimate #{estimate.id}
+                                        {getStatusBadge(estimate.status)}
+                                      </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <h4 className="font-medium mb-2">Description</h4>
+                                        <p className="text-sm text-gray-600">{estimate.description}</p>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="font-medium mb-1">Created Date</h4>
+                                          <p className="text-sm text-gray-600">{new Date(estimate.createdAt).toLocaleDateString()}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Status</h4>
+                                          <p className="text-sm text-gray-600">{estimate.status.replace('_', ' ')}</p>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="font-medium mb-1">Labor Cost</h4>
+                                          <p className="text-sm text-gray-600">{formatCurrency(estimate.laborCost)}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="font-medium mb-1">Parts Cost</h4>
+                                          <p className="text-sm text-gray-600">{formatCurrency(estimate.partsCost)}</p>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium mb-1">Total Cost</h4>
+                                        <p className="text-lg font-bold">{formatCurrency(estimate.laborCost + estimate.partsCost)}</p>
+                                      </div>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </div>
                 </TabsContent>
               </Tabs>
-            </div>
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <div className="text-gray-500">No billing data found for this customer.</div>
+                </CardContent>
+              </Card>
+            )
           ) : (
             <Card>
               <CardContent className="p-8 text-center">
-                <div className="text-gray-500">No data found for this customer</div>
+                <div className="text-gray-500">
+                  <User className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <div className="font-medium mb-2">Select a customer</div>
+                  <div className="text-sm">Choose a customer from the list to view their billing information.</div>
+                </div>
               </CardContent>
             </Card>
-          )
-        ) : (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Select a Customer</h3>
-              <p className="text-gray-600">Choose a customer from the list to view their billing information and create invoices.</p>
-            </CardContent>
-          </Card>
-        )}
+          )}
         </div>
       </div>
-
-      {/* Work Order Details Modal */}
-      <Dialog open={!!selectedWorkOrder} onOpenChange={() => setSelectedWorkOrder(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5" />
-              Work Order Details - {selectedWorkOrder?.workOrderNumber}
-            </DialogTitle>
-          </DialogHeader>
-          {selectedWorkOrder && (
-            <div className="space-y-6">
-              {/* Header Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Project Name</label>
-                    <p className="text-sm">{selectedWorkOrder.projectName}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Status</label>
-                    <div className="mt-1">{getStatusBadge(selectedWorkOrder.status)}</div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Assigned Technician</label>
-                    <p className="text-sm">{selectedWorkOrder.assignedTechnicianName || "Unassigned"}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Work Type</label>
-                    <p className="text-sm capitalize">{selectedWorkOrder.workType?.replace('_', ' ') || 'Standard'}</p>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Created Date</label>
-                    <p className="text-sm">{formatDate(selectedWorkOrder.createdAt)}</p>
-                  </div>
-                  {selectedWorkOrder.startedAt && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Started Date</label>
-                      <p className="text-sm">{formatDate(selectedWorkOrder.startedAt)}</p>
-                    </div>
-                  )}
-                  {selectedWorkOrder.completedAt && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Completed Date</label>
-                      <p className="text-sm">{formatDate(selectedWorkOrder.completedAt)}</p>
-                    </div>
-                  )}
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Priority</label>
-                    <p className="text-sm capitalize">{selectedWorkOrder.priority || 'Normal'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Location & Instructions */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {selectedWorkOrder.projectAddress && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Project Address</label>
-                    <p className="text-sm bg-gray-50 p-2 rounded">{selectedWorkOrder.projectAddress}</p>
-                  </div>
-                )}
-                {selectedWorkOrder.locationNotes && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Location Notes</label>
-                    <p className="text-sm bg-gray-50 p-2 rounded">{selectedWorkOrder.locationNotes}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Work Details */}
-              <div className="space-y-4">
-                {selectedWorkOrder.description && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Work Description</label>
-                    <p className="text-sm bg-gray-50 p-3 rounded">{selectedWorkOrder.description}</p>
-                  </div>
-                )}
-                
-                {selectedWorkOrder.specialInstructions && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Special Instructions</label>
-                    <p className="text-sm bg-blue-50 p-3 rounded border border-blue-200">{selectedWorkOrder.specialInstructions}</p>
-                  </div>
-                )}
-
-                {selectedWorkOrder.workSummary && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Work Summary (Technician Report)</label>
-                    <p className="text-sm bg-green-50 p-3 rounded border border-green-200">{selectedWorkOrder.workSummary}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Labor & Financial Details */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="text-sm font-medium text-gray-700 mb-3">Labor & Financial Details</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {selectedWorkOrder.totalHours && (
-                    <div>
-                      <label className="text-xs text-gray-500">Total Hours</label>
-                      <p className="text-sm font-medium">{selectedWorkOrder.totalHours} hrs</p>
-                    </div>
-                  )}
-                  {selectedWorkOrder.totalPartsCost && (
-                    <div>
-                      <label className="text-xs text-gray-500">Parts Cost</label>
-                      <p className="text-sm font-medium">{formatCurrency(selectedWorkOrder.totalPartsCost)}</p>
-                    </div>
-                  )}
-                  <div>
-                    <label className="text-xs text-gray-500">Total Amount</label>
-                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedWorkOrder.totalAmount || '0')}</p>
-                  </div>
-                  {selectedWorkOrder.totalItems !== null && (
-                    <div>
-                      <label className="text-xs text-gray-500">Parts Used</label>
-                      <p className="text-sm font-medium">{selectedWorkOrder.totalItems || 0} items</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Notes Section */}
-              <div className="space-y-4">
-                {selectedWorkOrder.notes && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Internal Notes</label>
-                    <p className="text-sm bg-yellow-50 p-3 rounded border border-yellow-200">{selectedWorkOrder.notes}</p>
-                  </div>
-                )}
-                
-                {selectedWorkOrder.customerNotes && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Customer Notes</label>
-                    <p className="text-sm bg-blue-50 p-3 rounded border border-blue-200">{selectedWorkOrder.customerNotes}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Photos Section */}
-              {selectedWorkOrder.photos && selectedWorkOrder.photos.length > 0 && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600 mb-2 block">Photos ({selectedWorkOrder.photos.length})</label>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {selectedWorkOrder.photos.map((photo, index) => (
-                      <div key={index} className="relative">
-                        <img 
-                          src={photo} 
-                          alt={`Work photo ${index + 1}`}
-                          className="w-full h-24 object-cover rounded border hover:scale-105 transition-transform cursor-pointer"
-                          onClick={() => window.open(photo, '_blank')}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Attachments Section */}
-              {selectedWorkOrder.attachments && selectedWorkOrder.attachments.length > 0 && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600 mb-2 block">Attachments ({selectedWorkOrder.attachments.length})</label>
-                  <div className="space-y-1">
-                    {selectedWorkOrder.attachments.map((attachment, index) => (
-                      <div key={index} className="flex items-center gap-2 text-sm">
-                        <FileText className="w-4 h-4 text-gray-500" />
-                        <a href={attachment} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                          Attachment {index + 1}
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Billing Sheet Details Modal */}
-      <Dialog open={!!selectedBillingSheet} onOpenChange={() => setSelectedBillingSheet(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Receipt className="w-5 h-5" />
-              Billing Sheet Details - {selectedBillingSheet?.billingNumber}
-            </DialogTitle>
-          </DialogHeader>
-          {selectedBillingSheet && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Work Description</label>
-                    <p className="text-sm">{selectedBillingSheet.workDescription}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Status</label>
-                    <div className="mt-1">{getStatusBadge(selectedBillingSheet.status)}</div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Technician</label>
-                    <p className="text-sm">{selectedBillingSheet.technicianName}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Total Amount</label>
-                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedBillingSheet.totalAmount)}</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Work Date</label>
-                    <p className="text-sm">{formatDate(selectedBillingSheet.workDate)}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Created Date</label>
-                    <p className="text-sm">{formatDate(selectedBillingSheet.createdAt)}</p>
-                  </div>
-                  {selectedBillingSheet.totalHours && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Hours Worked</label>
-                      <p className="text-sm">{selectedBillingSheet.totalHours}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {selectedBillingSheet.notes && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Notes</label>
-                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedBillingSheet.notes}</p>
-                </div>
-              )}
-              
-              {selectedBillingSheet.workLocation && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Location</label>
-                  <p className="text-sm">{selectedBillingSheet.workLocation}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Estimate Details Modal */}
-      <Dialog open={!!selectedEstimate} onOpenChange={() => setSelectedEstimate(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <DollarSign className="w-5 h-5" />
-              Estimate Details - {selectedEstimate?.estimateNumber}
-            </DialogTitle>
-          </DialogHeader>
-          {selectedEstimate && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Project Name</label>
-                    <p className="text-sm">{selectedEstimate.projectName}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Status</label>
-                    <div className="mt-1">{getStatusBadge(selectedEstimate.status)}</div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Total Amount</label>
-                    <p className="text-lg font-semibold text-green-600">{formatCurrency(selectedEstimate.totalAmount)}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Valid Until</label>
-                    <p className="text-sm">No expiration set</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Created Date</label>
-                    <p className="text-sm">{formatDate(selectedEstimate.createdAt)}</p>
-                  </div>
-                  {selectedEstimate.approvedAt && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-600">Approved Date</label>
-                      <p className="text-sm">{formatDate(selectedEstimate.approvedAt)}</p>
-                    </div>
-                  )}
-                  <div>
-                    <label className="text-sm font-medium text-gray-600">Status</label>
-                    <p className="text-sm capitalize">{selectedEstimate.status}</p>
-                  </div>
-                </div>
-              </div>
-              
-              {selectedEstimate.description && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Project Description</label>
-                  <p className="text-sm bg-gray-50 p-3 rounded mt-1">{selectedEstimate.description}</p>
-                </div>
-              )}
-              
-              {selectedEstimate.projectAddress && (
-                <div>
-                  <label className="text-sm font-medium text-gray-600">Location</label>
-                  <p className="text-sm">{selectedEstimate.projectAddress}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
