@@ -447,12 +447,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // No markup on parts for invoices
       const markupAmount = 0;
       
-      // Tax only on labor, not parts (business rule)
-      const taxRate = 0.0825; // 8.25%
-      const taxAmount = laborSubtotal * taxRate;
+      // No tax at all (business rule)
+      const taxAmount = 0;
       
-      // Total = Labor + Parts + Tax (on labor only)
-      const totalAmount = laborSubtotal + partsSubtotal + taxAmount;
+      // Total = Labor + Parts (no tax)
+      const totalAmount = laborSubtotal + partsSubtotal;
 
       // Create the invoice
       const invoice = await storage.createInvoice({
@@ -494,8 +493,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborTotal: parseFloat(workOrder.laborSubtotal || '0'),
           partsAmount: parseFloat(workOrder.partsSubtotal || '0'),
           markupAmount: 0, // No markup on invoices
-          taxAmount: parseFloat(workOrder.laborSubtotal || '0') * 0.0825, // Tax only on labor
-          totalAmount: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0') + (parseFloat(workOrder.laborSubtotal || '0') * 0.0825)
+          taxAmount: 0, // No tax
+          totalAmount: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0'),
+          quantity: 1, // Default quantity
+          unitPrice: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0'),
+          totalPrice: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')
         });
 
         // Update work order billing status
@@ -517,8 +519,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborTotal: parseFloat(billingSheet.laborSubtotal || '0'),
           partsAmount: parseFloat(billingSheet.partsSubtotal || '0'),
           markupAmount: 0, // No markup on invoices
-          taxAmount: parseFloat(billingSheet.laborSubtotal || '0') * 0.0825, // Tax only on labor
-          totalAmount: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0') + (parseFloat(billingSheet.laborSubtotal || '0') * 0.0825)
+          taxAmount: 0, // No tax
+          totalAmount: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0'),
+          quantity: 1, // Default quantity  
+          unitPrice: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0'),
+          totalPrice: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')
         });
 
         // Update billing sheet billing status
