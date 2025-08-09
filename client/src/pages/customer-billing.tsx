@@ -246,18 +246,18 @@ export default function CustomerBilling() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Left Sidebar - Customer List */}
-      <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col">
-        <div className="p-4 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
+    <div className="flex flex-col lg:flex-row h-screen bg-gray-50">
+      {/* Mobile/Tablet: Full-width Customer List, Desktop: Left Sidebar */}
+      <div className="w-full lg:w-1/3 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col max-h-[40vh] lg:max-h-none">
+        <div className="p-3 md:p-4 border-b border-gray-200">
+          <h1 className="text-lg md:text-xl font-bold text-gray-900 mb-3 md:mb-4">Customer Billing</h1>
           
-          {/* Summary Stats */}
+          {/* Summary Stats - More compact on mobile */}
           {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 mb-4">
+            <div className="grid grid-cols-2 gap-2 mb-3 md:mb-4">
               <div className="bg-orange-50 p-2 rounded-lg text-center">
                 <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                <div className="text-sm font-bold text-orange-800">
+                <div className="text-xs md:text-sm font-bold text-orange-800">
                   {formatCurrency(
                     customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
                   )}
@@ -265,7 +265,7 @@ export default function CustomerBilling() {
               </div>
               <div className="bg-blue-50 p-2 rounded-lg text-center">
                 <div className="text-xs text-blue-700 font-medium">Active Customers</div>
-                <div className="text-sm font-bold text-blue-800">
+                <div className="text-xs md:text-sm font-bold text-blue-800">
                   {customerPreviews.filter(preview => 
                     (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
                   ).length}
@@ -274,14 +274,14 @@ export default function CustomerBilling() {
             </div>
           )}
 
-          {/* Search Bar */}
-          <div className="relative mb-4">
+          {/* Search Bar - More compact on mobile */}
+          <div className="relative mb-3 md:mb-4">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
               placeholder="Search customers..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
+              className="pl-10 h-8 md:h-10 text-sm"
             />
           </div>
 
@@ -399,32 +399,32 @@ export default function CustomerBilling() {
                   <div
                     key={customer.id}
                     onClick={() => setSelectedCustomerId(customer.id)}
-                    className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                    className={`p-3 md:p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
                       selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
                     }`}
                   >
-                    {/* Customer Name and Billing Pace Badge */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium text-gray-900 truncate">{customer.name}</div>
+                    {/* Customer Name and Billing Pace Badge - Mobile optimized */}
+                    <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                      <div className="font-medium text-gray-900 text-sm md:text-base truncate pr-2">{customer.name}</div>
                       {preview.billingPace >= 1.3 ? (
-                        <Badge className="bg-green-100 text-green-800 text-xs">
+                        <Badge className="bg-green-100 text-green-800 text-xs flex-shrink-0">
                           ABOVE AVG
                         </Badge>
                       ) : preview.billingPace <= 0.7 ? (
-                        <Badge className="bg-red-100 text-red-800 text-xs">
+                        <Badge className="bg-red-100 text-red-800 text-xs flex-shrink-0">
                           BELOW AVG
                         </Badge>
                       ) : (
-                        <Badge className="bg-blue-100 text-blue-800 text-xs">
+                        <Badge className="bg-blue-100 text-blue-800 text-xs flex-shrink-0">
                           ON PACE
                         </Badge>
                       )}
                     </div>
 
-                    {/* Contact Info */}
-                    <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
+                    {/* Contact Info - More compact on mobile */}
+                    <div className="text-xs text-gray-600 mb-1.5 md:mb-2 truncate">{customer.email}</div>
                     
-                    {/* Billing Summary */}
+                    {/* Billing Summary - Mobile optimized */}
                     <div className="space-y-1">
                       {/* Monthly Billing Pace */}
                       <div className="flex items-center justify-between">
@@ -472,9 +472,9 @@ export default function CustomerBilling() {
         </div>
       </div>
 
-      {/* Right Content Area */}
+      {/* Right Content Area - Mobile optimized */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4">
+        <div className="p-2 md:p-4">
           {selectedCustomerId ? (
             loadingCustomerData ? (
               <Card>
@@ -483,17 +483,17 @@ export default function CustomerBilling() {
                 </CardContent>
               </Card>
             ) : customerBillingData ? (
-              <div className="space-y-4">
-              {/* Customer Header - Compact */}
+              <div className="space-y-2 md:space-y-4">
+              {/* Customer Header - Mobile optimized */}
               <Card>
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-2 p-3 md:p-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div>
-                      <CardTitle className="text-lg">{customerBillingData.customer.name}</CardTitle>
-                      <div className="space-y-1 text-xs text-gray-600">
+                      <CardTitle className="text-base md:text-lg">{customerBillingData.customer.name}</CardTitle>
+                      <div className="space-y-1 text-xs text-gray-600 mt-1">
                         <div className="flex items-center gap-2">
                           <Mail className="w-3 h-3" />
-                          {customerBillingData.customer.email}
+                          <span className="truncate">{customerBillingData.customer.email}</span>
                         </div>
                         {customerBillingData.customer.phone && (
                           <div className="flex items-center gap-2">
@@ -504,7 +504,7 @@ export default function CustomerBilling() {
                         {customerBillingData.customer.address && (
                           <div className="flex items-center gap-2">
                             <MapPin className="w-3 h-3" />
-                            {customerBillingData.customer.address}
+                            <span className="truncate">{customerBillingData.customer.address}</span>
                           </div>
                         )}
                       </div>
@@ -513,11 +513,11 @@ export default function CustomerBilling() {
                 </CardHeader>
               </Card>
 
-              {/* Billing Summary Card - Compact */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                {/* Unbilled Work Summary - Compact */}
+              {/* Billing Summary Card - Mobile responsive */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-3">
+                {/* Unbilled Work Summary - Mobile optimized */}
                 <Card className="border-orange-200 bg-orange-50">
-                  <CardHeader className="pb-2">
+                  <CardHeader className="pb-2 p-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="flex items-center gap-1 text-orange-800 text-xs">
                         <AlertTriangle className="w-3 h-3" />
@@ -528,7 +528,7 @@ export default function CustomerBilling() {
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="pt-0">
+                  <CardContent className="pt-0 px-3 pb-3">
                     <div className="space-y-2">
                       <div className="text-xs text-orange-700">
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
@@ -536,7 +536,7 @@ export default function CustomerBilling() {
                       <Button
                         onClick={() => createMonthlyInvoice.mutate(selectedCustomerId)}
                         disabled={createMonthlyInvoice.isPending || customerBillingData.totalUnbilledAmount === 0}
-                        className="bg-orange-600 hover:bg-orange-700 text-white w-full h-7 text-xs"
+                        className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
                       >
                         <Receipt className="w-3 h-3 mr-1" />
                         {createMonthlyInvoice.isPending ? "Creating..." : "Create Invoice"}
@@ -545,12 +545,12 @@ export default function CustomerBilling() {
                   </CardContent>
                 </Card>
 
-                {/* Quick Stats - Compact */}
+                {/* Quick Stats - Mobile optimized */}
                 <Card>
-                  <CardHeader className="pb-2">
+                  <CardHeader className="pb-2 p-3">
                     <CardTitle className="text-xs text-gray-700">Total Work</CardTitle>
                   </CardHeader>
-                  <CardContent className="pt-0">
+                  <CardContent className="pt-0 px-3 pb-3">
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span className="text-gray-600">Work Orders:</span>
@@ -574,12 +574,12 @@ export default function CustomerBilling() {
                   </CardContent>
                 </Card>
 
-                {/* Total Revenue - Compact */}
+                {/* Total Revenue - Mobile optimized */}
                 <Card>
-                  <CardHeader className="pb-2">
+                  <CardHeader className="pb-2 p-3">
                     <CardTitle className="text-xs text-gray-700">Revenue Overview</CardTitle>
                   </CardHeader>
-                  <CardContent className="pt-0">
+                  <CardContent className="pt-0 px-3 pb-3">
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span className="text-gray-600">Completed Work:</span>
@@ -604,24 +604,30 @@ export default function CustomerBilling() {
                 </Card>
               </div>
 
-              {/* Work Details Tabs - Compact */}
+              {/* Work Details Tabs - Mobile responsive */}
               <Tabs defaultValue="work-orders" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 h-8">
-                  <TabsTrigger value="work-orders" className="text-xs">
-                    Work Orders ({customerBillingData.workOrders.length})
+                <TabsList className="grid w-full grid-cols-3 h-8 md:h-10">
+                  <TabsTrigger value="work-orders" className="text-xs md:text-sm px-2">
+                    <span className="hidden md:inline">Work Orders</span>
+                    <span className="md:hidden">WO</span>
+                    <span className="ml-1">({customerBillingData.workOrders.length})</span>
                   </TabsTrigger>
-                  <TabsTrigger value="billing-sheets" className="text-xs">
-                    Billing Sheets ({customerBillingData.billingSheets.length})
+                  <TabsTrigger value="billing-sheets" className="text-xs md:text-sm px-2">
+                    <span className="hidden md:inline">Billing Sheets</span>
+                    <span className="md:hidden">BS</span>
+                    <span className="ml-1">({customerBillingData.billingSheets.length})</span>
                   </TabsTrigger>
-                  <TabsTrigger value="estimates" className="text-xs">
-                    Estimates ({customerBillingData.estimates.length})
+                  <TabsTrigger value="estimates" className="text-xs md:text-sm px-2">
+                    <span className="hidden md:inline">Estimates</span>
+                    <span className="md:hidden">EST</span>
+                    <span className="ml-1">({customerBillingData.estimates.length})</span>
                   </TabsTrigger>
                 </TabsList>
 
-                {/* Work Orders Tab */}
+                {/* Work Orders Tab - Mobile optimized */}
                 <TabsContent value="work-orders" className="space-y-2 mt-2">
                   <Card>
-                    <CardHeader className="pb-2">
+                    <CardHeader className="pb-2 p-3">
                       <div className="flex items-center justify-between">
                         <CardTitle className="flex items-center gap-2 text-sm">
                           <FileText className="w-4 h-4" />
@@ -632,16 +638,16 @@ export default function CustomerBilling() {
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent className="pt-0">
+                    <CardContent className="pt-0 px-3 pb-3">
                       {customerBillingData.workOrders.length === 0 ? (
-                        <div className="text-center text-gray-500 py-6 text-sm">No work orders found</div>
+                        <div className="text-center text-gray-500 py-4 md:py-6 text-sm">No work orders found</div>
                       ) : (
-                        <div className="space-y-1 max-h-96 overflow-y-auto">
+                        <div className="space-y-1 max-h-80 md:max-h-96 overflow-y-auto">
                           {customerBillingData.workOrders.map((workOrder) => (
                             <div 
                               key={workOrder.id} 
                               onClick={() => setSelectedWorkOrder(workOrder)}
-                              className={`border rounded-md p-2 transition-all cursor-pointer hover:shadow-md ${
+                              className={`border rounded-md p-2 md:p-3 transition-all cursor-pointer hover:shadow-md ${
                                 workOrder.status === 'completed' && parseFloat(workOrder.totalAmount || '0') > 0
                                   ? 'border-orange-200 bg-orange-50 hover:bg-orange-100' 
                                   : 'border-gray-200 hover:bg-gray-50'
