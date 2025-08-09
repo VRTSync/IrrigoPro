@@ -157,6 +157,7 @@ export default function WorkOrders() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
+      case 'assigned':
         return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Pending</Badge>;
       case 'in_progress':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">In Progress</Badge>;
@@ -194,14 +195,7 @@ export default function WorkOrders() {
   };
 
   const getStatusCount = (status: string) => {
-    const count = filteredWorkOrders?.filter(wo => wo.status === status).length || 0;
-    console.log(`Status ${status}: filtered=${count}, total in workOrders=${workOrders?.filter(wo => wo.status === status).length || 0}`, {
-      filteredWorkOrdersLength: filteredWorkOrders?.length || 0,
-      totalWorkOrdersLength: workOrders?.length || 0,
-      statusFilter,
-      searchQuery
-    });
-    return count;
+    return filteredWorkOrders?.filter(wo => wo.status === status).length || 0;
   };
 
 
@@ -331,7 +325,7 @@ export default function WorkOrders() {
                 </div>
                 <div>
                   <p className="text-xs font-medium text-gray-600">Pending</p>
-                  <p className="text-lg font-bold text-gray-900">{getStatusCount('pending')}</p>
+                  <p className="text-lg font-bold text-gray-900">{getStatusCount('assigned')}</p>
                 </div>
               </div>
             </CardContent>
@@ -388,8 +382,8 @@ export default function WorkOrders() {
               All
             </Button>
             <Button 
-              variant={statusFilter === "pending" ? "default" : "outline"}
-              onClick={() => setStatusFilter("pending")}
+              variant={statusFilter === "assigned" ? "default" : "outline"}
+              onClick={() => setStatusFilter("assigned")}
               className="px-4 py-2"
             >
               Pending
