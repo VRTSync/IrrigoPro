@@ -23,6 +23,7 @@ import AdminDashboard from "@/pages/admin-dashboard";
 import Operations from "@/pages/operations";
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
 import SystemUserManagement from "@/pages/system-user-management";
+import CompanyUserManagement from "@/pages/company-user-management";
 import { UserSelector } from "@/components/user-selector";
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -236,6 +237,7 @@ function Router() {
                 <Route path="/" component={AdminDashboard} />
                 <Route path="/admin" component={AdminDashboard} />
                 <Route path="/operations" component={Operations} />
+                <Route path="/users" component={CompanyUserManagement} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/site-maps" component={SiteMapsPage} />

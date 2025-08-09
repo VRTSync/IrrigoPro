@@ -266,50 +266,79 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  // Initialize default users
+  // Initialize default users and company
   private async initializeUsers() {
     try {
+      // Check if companies already exist
+      const existingCompanies = await db.select().from(companies);
+      if (existingCompanies.length === 0) {
+        // Create default company
+        await db.insert(companies).values([
+          {
+            name: "Green Valley Irrigation",
+            address: "123 Main St, Springfield, ST 12345",
+            phone: "(555) 123-4567",
+            email: "contact@greenvalley.com",
+            subscription: "pro",
+            isActive: true,
+          },
+        ]);
+      }
+
       // Check if users already exist
       const existingUsers = await db.select().from(users);
       if (existingUsers.length === 0) {
         // Create default users
         await db.insert(users).values([
           {
-            username: "admin",
-            password: "admin123", // In production, this should be hashed
-            name: "Admin User",
-            email: "admin@irrigation.com",
-            role: "admin",
+            username: "superadmin",
+            password: "superadmin123", // In production, this should be hashed
+            name: "Super Admin",
+            email: "super@system.com",
+            role: "super_admin",
+            companyId: null, // System level user
+            isActive: true,
+          },
+          {
+            username: "companyadmin",
+            password: "admin123",
+            name: "Company Admin",
+            email: "admin@greenvalley.com",
+            role: "company_admin",
+            companyId: 1, // Belongs to the company
             isActive: true,
           },
           {
             username: "manager",
             password: "manager123",
             name: "Brian Krisher",
-            email: "manager@irrigation.com",
+            email: "manager@greenvalley.com",
             role: "irrigation_manager",
+            companyId: 1,
             isActive: true,
           },
           {
             username: "tech",
             password: "tech123",
             name: "JoJo Durrill",
-            email: "tech@irrigation.com",
+            email: "tech@greenvalley.com",
             role: "field_tech",
+            companyId: 1,
             isActive: true,
           },
           {
             username: "billing",
             password: "billing123",
             name: "Sarah Martinez",
-            email: "sarah@irrigation.com",
+            email: "sarah@greenvalley.com",
             role: "billing_manager",
+            companyId: 1,
             isActive: true,
           },
         ]);
       }
     } catch (error) {
-      console.error("Error initializing users:", error);
+      console.error("Error initializing users and companies:", error);
     }
   }
 

@@ -37,7 +37,7 @@ export default function Navigation() {
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/site-maps", label: "Site Maps", icon: MapIcon },
           { path: "/parts", label: "Parts", icon: Package },
-          { path: "/admin", label: "Users", icon: Settings },
+          { path: "/users", label: "Users", icon: Settings },
         ];
       case "irrigation_manager":
         return [
