@@ -89,4 +89,4 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 - **User Statistics Dashboard**: Added real-time statistics showing total users, active users, and breakdowns by role (field techs, managers, etc.)
 - **Company-Scoped API Routes**: Implemented secure API endpoints that automatically scope user operations to the authenticated admin's company
 - **Navigation Integration**: Added "Users" menu option in company admin navigation for easy access to user management
-- **Default Users**: Created default company admin user (companyadmin/admin123) with proper company association for testing and initial setup
+- **Default Users**: Randy Mangel established as company admin user (randymangel/admin123) with proper company association for testing and initial setup

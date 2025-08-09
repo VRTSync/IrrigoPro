@@ -300,10 +300,10 @@ export class DatabaseStorage implements IStorage {
             isActive: true,
           },
           {
-            username: "companyadmin",
+            username: "randymangel",
             password: "admin123",
-            name: "Company Admin",
-            email: "admin@greenvalley.com",
+            name: "Randy Mangel",
+            email: "randy@greenvalley.com",
             role: "company_admin",
             companyId: 1, // Belongs to the company
             isActive: true,
