@@ -62,73 +62,53 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     throwOnError: false
   });
 
-  // Connect to QuickBooks
-  const connectMutation = useMutation({
-    mutationFn: async () => {
-      console.log("Starting QuickBooks connection...");
+  // Simple QuickBooks connection handler
+  const handleQuickBooksConnect = async () => {
+    console.log("🔵 QuickBooks connection started");
+    setIsConnecting(true);
+    
+    try {
+      console.log("🔵 Fetching auth URL...");
       
-      try {
-        console.log("Making request to /api/quickbooks/auth...");
-        
-        // Use direct fetch instead of apiRequest to avoid potential issues
-        const response = await fetch("/api/quickbooks/auth", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-        });
-        
-        console.log("Response status:", response.status);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log("Received auth data:", data);
-        
-        if (!data || !data.authUrl) {
-          throw new Error("No authorization URL received from server");
-        }
-        
-        // Direct redirect approach - simpler and more reliable
-        toast({
-          title: "Redirecting to QuickBooks",
-          description: "You will be redirected to QuickBooks for authorization...",
-          variant: "default"
-        });
-        
-        // Use direct window redirect which is more reliable than popup
-        setTimeout(() => {
-          console.log("Redirecting to:", data.authUrl);
-          window.location.href = data.authUrl;
-        }, 1500);
-        
-        return { success: true };
-      } catch (error) {
-        console.error("Error in mutationFn:", error);
-        throw error;
+      const response = await fetch("/api/quickbooks/auth", {
+        method: "GET",
+        credentials: "include"
+      });
+      
+      console.log("🔵 Response status:", response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server error: ${response.status} ${errorText}`);
       }
-    },
-    onError: (error: any) => {
-      console.error("🔴 Connection mutation error:", error);
-      console.error("🔴 Error type:", typeof error);
-      console.error("🔴 Error message:", error?.message);
-      console.error("🔴 Error stack:", error?.stack);
+      
+      const data = await response.json();
+      console.log("🟢 Auth data received:", data);
+      
+      if (!data?.authUrl) {
+        throw new Error("No authorization URL received");
+      }
+      
+      toast({
+        title: "Redirecting to QuickBooks",
+        description: "Opening QuickBooks authorization...",
+        variant: "default"
+      });
+      
+      console.log("🟢 Redirecting to QuickBooks...");
+      // Direct redirect - immediate and reliable
+      window.location.href = data.authUrl;
+      
+    } catch (error) {
+      console.error("🔴 Connection error:", error);
       setIsConnecting(false);
       toast({
         title: "Connection Failed",
-        description: error?.message || "Failed to connect to QuickBooks. Please try again.",
+        description: error instanceof Error ? error.message : "Unable to connect to QuickBooks",
         variant: "destructive"
       });
-    },
-    onSuccess: (data) => {
-      setIsConnecting(true);
-      console.log("🟢 QuickBooks connection initiated successfully:", data);
-    },
-    throwOnError: false
-  });
+    }
+  };
 
   // Sync estimate to QuickBooks
   const syncEstimateMutation = useMutation({
@@ -219,24 +199,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
                 </p>
                 <Button 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    console.log("🔵 QuickBooks button clicked");
-                    console.log("🔵 Mutation state:", {
-                      isPending: connectMutation.isPending,
-                      isError: connectMutation.isError,
-                      error: connectMutation.error
-                    });
-                    
-                    try {
-                      console.log("🔵 Starting mutation...");
-                      connectMutation.mutate();
-                      console.log("🔵 Mutation called successfully");
-                    } catch (error) {
-                      console.error("🔴 Error in button click handler:", error);
-                    }
-                  }}
-                  disabled={isConnecting || connectMutation.isPending}
+                  onClick={handleQuickBooksConnect}
+                  disabled={isConnecting}
                   className="w-full"
                 >
                   {isConnecting ? (

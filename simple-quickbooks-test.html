@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QuickBooks Simple Test</title>
+</head>
+<body>
+    <h2>QuickBooks Connection Test</h2>
+    <button id="testBtn" style="padding: 10px 20px; font-size: 16px;">Test QuickBooks Connection</button>
+    <div id="result" style="margin-top: 20px; padding: 10px; background: #f0f0f0;"></div>
+
+    <script>
+        console.log("Simple test page loaded");
+        
+        document.getElementById('testBtn').onclick = async function() {
+            console.log("Test button clicked");
+            const resultDiv = document.getElementById('result');
+            
+            try {
+                resultDiv.innerHTML = "Testing connection...";
+                
+                const response = await fetch('/api/quickbooks/auth', {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                
+                console.log("Response status:", response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log("Response data:", data);
+                
+                resultDiv.innerHTML = `
+                    <h3>SUCCESS!</h3>
+                    <p>Status: ${response.status}</p>
+                    <p>Auth URL: ${data.authUrl}</p>
+                    <p>State: ${data.state}</p>
+                `;
+                
+            } catch (error) {
+                console.error("Error:", error);
+                resultDiv.innerHTML = `
+                    <h3 style="color: red;">ERROR!</h3>
+                    <p>${error.message}</p>
+                `;
+            }
+        };
+    </script>
+</body>
+</html>
