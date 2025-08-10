@@ -83,25 +83,33 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     queryKey: [`/api/customers/${customer.id}/site-maps`],
   });
 
-  // Auto-select site map when coming from Maps page
+  // Auto-select site map when coming from Maps page or if there's only one
   useEffect(() => {
+    if (!siteMaps || siteMaps.length === 0) return;
+    
     const selectedSiteMapId = localStorage.getItem('selectedSiteMapId');
-    if (selectedSiteMapId && siteMaps) {
-      const siteMap = siteMaps.find(sm => sm.id.toString() === selectedSiteMapId);
-      if (siteMap) {
-        // Convert to Project format and select it
-        const projectFromSiteMap: Project = {
-          id: siteMap.id,
-          name: siteMap.name,
-          controllers: [],
-          zones: [],
-          zonesByController: {}
-        };
-        setSelectedProject(projectFromSiteMap);
-        setActiveTab("viewer");
-        // Clear the stored value after using it
-        localStorage.removeItem('selectedSiteMapId');
-      }
+    let siteMapToSelect: SiteMap | null = null;
+    
+    if (selectedSiteMapId) {
+      // Find specific site map from Maps page
+      siteMapToSelect = siteMaps.find(sm => sm.id.toString() === selectedSiteMapId) || null;
+      localStorage.removeItem('selectedSiteMapId');
+    } else if (siteMaps.length === 1) {
+      // Auto-select if there's only one site map
+      siteMapToSelect = siteMaps[0];
+    }
+    
+    if (siteMapToSelect) {
+      // Convert to Project format and select it
+      const projectFromSiteMap: Project = {
+        id: siteMapToSelect.id,
+        name: siteMapToSelect.name,
+        controllers: [],
+        zones: [],
+        zonesByController: {}
+      };
+      setSelectedProject(projectFromSiteMap);
+      setActiveTab("viewer");
     }
   }, [siteMaps]);
 
