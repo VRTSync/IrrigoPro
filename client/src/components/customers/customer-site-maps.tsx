@@ -386,7 +386,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   if (selectedProject && project) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
           {/* Header */}
           <div className="mb-6">
             <Button
@@ -413,12 +413,12 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className={`grid w-full ${canEdit ? 'grid-cols-3' : 'grid-cols-2'}`}>
               {canEdit && (
-                <TabsTrigger value="upload">Upload KML</TabsTrigger>
+                <TabsTrigger value="upload" className="text-xs sm:text-sm">Upload KML</TabsTrigger>
               )}
-              <TabsTrigger value="maps">Map View</TabsTrigger>
-              <TabsTrigger value="data">Data Review</TabsTrigger>
+              <TabsTrigger value="maps" className="text-xs sm:text-sm">Map View</TabsTrigger>
+              <TabsTrigger value="data" className="text-xs sm:text-sm">Data Review</TabsTrigger>
             </TabsList>
 
             {canEdit && (
@@ -440,6 +440,9 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       controllers={project?.controllers?.map(c => ({
                         ...c,
                         id: c.id.toString(),
+                        model: c.model || undefined,
+                        serialNumber: c.serialNumber || undefined,
+                        stationCount: c.stationCount || undefined,
                         color: `hsl(${(c.id * 137.5) % 360}, 70%, 50%)`
                       })) || []}
                       onZoneKMLParsed={handleZoneKMLParsed}
@@ -448,7 +451,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       zonesByController={Object.fromEntries(
                         Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
                           controllerId,
-                          zones.length
+                          zones
                         ])
                       )}
                     />
@@ -458,70 +461,76 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             )}
 
             <TabsContent value="maps" className="space-y-6 mt-6">
-              <ColorCodedMapViewer 
-                project={{
-                  controllers: (project?.controllers || []).map(c => ({
-                    id: c.id.toString(),
-                    name: c.name || 'Unknown Controller',
-                    latitude: typeof c.latitude === 'string' ? parseFloat(c.latitude) : (c.latitude || 0),
-                    longitude: typeof c.longitude === 'string' ? parseFloat(c.longitude) : (c.longitude || 0),
-                    color: `hsl(${(c.id * 137.5) % 360}, 70%, 50%)`,
-                    model: c.model || undefined,
-                    serialNumber: c.serialNumber || undefined,
-                    stationCount: c.stationCount || undefined,
-                    description: c.notes || undefined
-                  })),
-                  zonesByController: Object.fromEntries(
-                    Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
-                      controllerId,
-                      zones.map(zone => ({
-                        name: zone.name || 'Unknown Zone',
-                        controllerId: controllerId,
-                        color: `hsl(${(parseInt(controllerId) * 137.5) % 360}, 70%, 50%)`,
-                        boundaries: zone.boundaries ? parseBoundariesFromDB(zone.boundaries) : undefined,
-                        stationNumber: zone.stationNumber || undefined,
-                        zoneType: zone.zoneType || undefined,
-                        coverage: zone.coverage || undefined,
-                        description: zone.notes || undefined
-                      }))
-                    ])
-                  ),
-                  allZones: (project?.zones || []).map(zone => ({
-                    name: zone.name || 'Unknown Zone',
-                    controllerId: zone.controllerId?.toString() || 'unassigned',
-                    color: `hsl(${((zone.controllerId || 0) * 137.5) % 360}, 70%, 50%)`,
-                    boundaries: zone.boundaries ? parseBoundariesFromDB(zone.boundaries) : undefined,
-                    stationNumber: zone.stationNumber || undefined,
-                    zoneType: zone.zoneType || undefined,
-                    coverage: zone.coverage || undefined,
-                    description: zone.notes || undefined
-                  }))
-                }}
-                showEditControls={canEdit}
-              />
+              <div className="w-full h-[60vh] min-h-[400px] lg:h-[70vh] rounded-lg overflow-hidden border border-gray-200">
+                <ColorCodedMapViewer 
+                  project={{
+                    controllers: (project?.controllers || []).map(c => ({
+                      id: c.id.toString(),
+                      name: c.name || 'Unknown Controller',
+                      latitude: typeof c.latitude === 'string' ? parseFloat(c.latitude) : (c.latitude || 0),
+                      longitude: typeof c.longitude === 'string' ? parseFloat(c.longitude) : (c.longitude || 0),
+                      color: `hsl(${(c.id * 137.5) % 360}, 70%, 50%)`,
+                      model: c.model || undefined,
+                      serialNumber: c.serialNumber || undefined,
+                      stationCount: c.stationCount || undefined,
+                      description: c.notes || undefined
+                    })),
+                    zonesByController: Object.fromEntries(
+                      Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
+                        controllerId,
+                        zones.map(zone => ({
+                          name: zone.name || 'Unknown Zone',
+                          controllerId: controllerId,
+                          color: `hsl(${(parseInt(controllerId) * 137.5) % 360}, 70%, 50%)`,
+                          boundaries: zone.boundaries ? parseBoundariesFromDB(zone.boundaries) : undefined,
+                          stationNumber: zone.stationNumber || undefined,
+                          zoneType: zone.zoneType || undefined,
+                          coverage: zone.coverage || undefined,
+                          description: zone.notes || undefined
+                        }))
+                      ])
+                    ),
+                    allZones: (project?.zones || []).map(zone => ({
+                      name: zone.name || 'Unknown Zone',
+                      controllerId: zone.controllerId?.toString() || 'unassigned',
+                      color: `hsl(${((zone.controllerId || 0) * 137.5) % 360}, 70%, 50%)`,
+                      boundaries: zone.boundaries ? parseBoundariesFromDB(zone.boundaries) : undefined,
+                      stationNumber: zone.stationNumber || undefined,
+                      zoneType: zone.zoneType || undefined,
+                      coverage: zone.coverage || undefined,
+                      description: zone.notes || undefined
+                    }))
+                  }}
+                />
+              </div>
             </TabsContent>
 
             <TabsContent value="data" className="space-y-6 mt-6">
-              <ZonesDataView 
-                controllers={(project?.controllers || []).map(controller => {
-                  const transformedController = {
-                    ...controller,
-                    // Ensure coordinates are numbers
-                    latitude: typeof controller.latitude === 'string' ? parseFloat(controller.latitude) : (controller.latitude || 0),
-                    longitude: typeof controller.longitude === 'string' ? parseFloat(controller.longitude) : (controller.longitude || 0),
-                    zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
-                      ...zone,
-                      boundaries: zone.boundaries 
-                        ? parseBoundariesFromDB(zone.boundaries)
-                        : []
-                    }))
-                  };
-                  console.log('Transformed controller for ZonesDataView:', transformedController);
-                  return transformedController;
-                })}
-                onControllerClick={(controller) => console.log('Controller clicked:', controller)}
-                onZoneClick={(zone) => console.log('Zone clicked:', zone)}
-              />
+              <div className="overflow-x-auto">
+                <ZonesDataView 
+                  controllers={(project?.controllers || []).map(controller => {
+                    const transformedController = {
+                      ...controller,
+                      // Ensure coordinates are numbers
+                      latitude: typeof controller.latitude === 'string' ? parseFloat(controller.latitude) : (controller.latitude || 0),
+                      longitude: typeof controller.longitude === 'string' ? parseFloat(controller.longitude) : (controller.longitude || 0),
+                      model: controller.model || undefined,
+                      serialNumber: controller.serialNumber || undefined,
+                      stationCount: controller.stationCount || 0,
+                      zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
+                        ...zone,
+                        boundaries: zone.boundaries 
+                          ? parseBoundariesFromDB(zone.boundaries)
+                          : []
+                      }))
+                    };
+                    console.log('Transformed controller for ZonesDataView:', transformedController);
+                    return transformedController;
+                  })}
+                  onControllerClick={(controller) => console.log('Controller clicked:', controller)}
+                  onZoneClick={(zone) => console.log('Zone clicked:', zone)}
+                />
+              </div>
             </TabsContent>
           </Tabs>
         </div>
