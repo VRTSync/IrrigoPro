@@ -109,9 +109,9 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <Switch>
             <Route path="/login" component={Login} />
-            <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-            <Route path="/" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-            <Route component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
+            <Route path="/user-selector" component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
+            <Route path="/" component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
+            <Route component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
           </Switch>
           <Toaster />
         </QueryClientProvider>

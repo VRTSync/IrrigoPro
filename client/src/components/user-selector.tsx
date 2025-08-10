@@ -9,7 +9,8 @@ interface UserProfile {
   username: string;
   name: string;
   email: string;
-  role: string;
+  role: "super_admin" | "company_admin" | "irrigation_manager" | "field_tech" | "billing_manager";
+  companyId?: number | null;
   isActive: boolean;
 }
 
@@ -40,11 +41,13 @@ export function UserSelector({ onUserSelect, currentUser }: UserSelectorProps) {
     fetchUsers();
   }, []);
 
-  const getRoleIcon = (role: string) => {
+  const getRoleIcon = (role: UserProfile['role']) => {
     switch (role) {
-      case 'admin':
+      case 'super_admin':
+      case 'company_admin':
         return <Crown className="w-5 h-5 text-purple-600" />;
       case 'irrigation_manager':
+      case 'billing_manager':
         return <Shield className="w-5 h-5 text-blue-600" />;
       case 'field_tech':
         return <Wrench className="w-5 h-5 text-green-600" />;
@@ -53,16 +56,20 @@ export function UserSelector({ onUserSelect, currentUser }: UserSelectorProps) {
     }
   };
 
-  const getRoleBadge = (role: string) => {
+  const getRoleBadge = (role: UserProfile['role']) => {
     switch (role) {
-      case 'admin':
-        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Admin</Badge>;
+      case 'super_admin':
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Super Admin</Badge>;
+      case 'company_admin':
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Company Admin</Badge>;
       case 'irrigation_manager':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Manager</Badge>;
+      case 'billing_manager':
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Billing Manager</Badge>;
       case 'field_tech':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Field Tech</Badge>;
       default:
-        return <Badge variant="outline">{role}</Badge>;
+        return <Badge variant="outline">{String(role).replace('_', ' ')}</Badge>;
     }
   };
 
@@ -128,8 +135,8 @@ export function UserSelector({ onUserSelect, currentUser }: UserSelectorProps) {
                   </p>
                   <p className="text-sm text-gray-700">
                     <span className="font-medium">Access Level:</span> {
-                      user.role === 'admin' ? 'Full System Access' :
-                      user.role === 'irrigation_manager' ? 'Management Dashboard' :
+                      user.role === 'super_admin' || user.role === 'company_admin' ? 'Full System Access' :
+                      user.role === 'irrigation_manager' || user.role === 'billing_manager' ? 'Management Dashboard' :
                       'Field Operations'
                     }
                   </p>
