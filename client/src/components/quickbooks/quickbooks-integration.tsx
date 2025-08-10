@@ -56,8 +56,24 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
       console.log("Starting QuickBooks connection...");
       
       try {
-        // apiRequest returns already parsed JSON data, not a Response object
-        const data = await apiRequest("/api/quickbooks/auth", "GET");
+        console.log("Making request to /api/quickbooks/auth...");
+        
+        // Use direct fetch instead of apiRequest to avoid potential issues
+        const response = await fetch("/api/quickbooks/auth", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+        });
+        
+        console.log("Response status:", response.status);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
         console.log("Received auth data:", data);
         
         if (!data || !data.authUrl) {
