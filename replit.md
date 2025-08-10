@@ -92,3 +92,9 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 - **Company-Scoped API Routes**: Implemented secure API endpoints that automatically scope user operations to the authenticated admin's company
 - **Navigation Integration**: Added "Users" menu option in company admin navigation for easy access to user management
 - **Default Users**: Randy Mangel established as company admin user (randymangel/admin123) with proper company association for testing and initial setup
+
+### QuickBooks Integration Consolidation (January 2025)
+- **Centralized Location**: QuickBooks integration component consolidated to Customer Billing page only for focused user experience
+- **Simplified Access**: Removed QuickBooks integration from multiple page locations to prevent confusion and ensure consistent functionality
+- **Working Implementation**: Fixed QuickBooks OAuth connection using direct fetch API calls instead of complex React Query mutations
+- **Component Cleanup**: Removed debug logging and simplified component initialization for production-ready implementation

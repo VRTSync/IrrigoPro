@@ -28,41 +28,10 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
-  // Force console logging on every render
-  console.log("🔵 QUICKBOOKS COMPONENT RENDER - isConnecting:", isConnecting);
-  console.log("🔵 Component mounted in customer billing page");
-  
-  // Component loaded successfully
-  React.useEffect(() => {
-    console.log("🔵 QuickBooks component useEffect fired");
-    console.log("🔵 QuickBooks Integration component loaded successfully!");
-  }, []);
-  
-  // Component mount logging
+  // Component initialization
   useEffect(() => {
-    console.log("🔵 QuickBooks Integration component mounted");
-    console.log("🔵 Component props:", { className });
-    console.log("🔵 isConnecting state:", isConnecting);
-    
-    // Test basic functionality with XHR
-    console.log("🔵 Testing basic XHR...");
-    const testXhr = new XMLHttpRequest();
-    testXhr.open('GET', '/api/quickbooks/auth');
-    testXhr.onload = () => console.log("🟢 Basic XHR test success:", testXhr.status, testXhr.responseText);
-    testXhr.onerror = (err) => console.error("🔴 Basic XHR test failed:", err);
-    testXhr.send();
-    
-    // Check if the component is actually rendering
-    console.log("🔵 Checking if button exists in DOM...");
-    setTimeout(() => {
-      const button = document.querySelector('[data-testid="quickbooks-connect-btn"]');
-      console.log("🔵 QuickBooks button found:", !!button);
-      if (button) {
-        console.log("🔵 Button element:", button);
-        console.log("🔵 Button disabled:", button.disabled);
-      }
-    }, 1000);
-  }, [className]);
+    console.log("QuickBooks Integration component loaded");
+  }, []);
 
   // Fetch QuickBooks connection status
   const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<{
