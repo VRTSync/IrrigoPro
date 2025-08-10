@@ -77,6 +77,7 @@ export default function Navigation() {
         return [
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
         ];
       default:
         return [];

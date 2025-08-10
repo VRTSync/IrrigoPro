@@ -19,6 +19,7 @@ import ManagerDashboard from "@/pages/manager-dashboard";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import BillingSheets from "@/pages/billing-sheets";
 import CustomerBilling from "@/pages/customer-billing";
+import QuickBooksPage from "@/pages/quickbooks";
 import AdminDashboard from "@/pages/admin-dashboard";
 import Operations from "@/pages/operations";
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
@@ -202,6 +203,7 @@ function Router() {
               <Switch>
                 <Route path="/" component={CustomerBilling} />
                 <Route path="/customers" component={CustomerBilling} />
+                <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />

@@ -500,10 +500,7 @@ export default function CustomerBilling() {
             )}
           </div>
 
-          {/* Mobile QuickBooks Integration - After filters */}
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <QuickBooksIntegration />
-          </div>
+
 
           {/* Selected Customer Summary - Only show when customer is selected */}
           {selectedCustomerId && (
@@ -549,10 +546,7 @@ export default function CustomerBilling() {
         <div className="p-4 border-b border-gray-200">
           <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
           
-          {/* QuickBooks Integration */}
-          <div className="mb-4">
-            <QuickBooksIntegration />
-          </div>
+
           
           {/* Summary Stats */}
           {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
