@@ -50,71 +50,60 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const connectMutation = useMutation({
     mutationFn: async () => {
       try {
+        console.log("Starting QuickBooks connection...");
         const response = await apiRequest("GET", "/api/quickbooks/auth", {});
+        console.log("API response status:", response.status);
         
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || "Failed to get authorization URL");
+          const errorText = await response.text();
+          console.error("API error:", errorText);
+          try {
+            const errorData = JSON.parse(errorText);
+            throw new Error(errorData.message || "Failed to get authorization URL");
+          } catch (jsonError) {
+            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+          }
         }
         
         const data = await response.json();
+        console.log("Received auth data:", data);
         
         if (!data.authUrl) {
-          throw new Error("No authorization URL received");
+          throw new Error("No authorization URL received from server");
         }
         
-        // Try to open QuickBooks OAuth flow in a new window
-        console.log("Opening QuickBooks OAuth URL:", data.authUrl);
+        // Direct redirect approach - simpler and more reliable
+        toast({
+          title: "Redirecting to QuickBooks",
+          description: "You will be redirected to QuickBooks for authorization...",
+          variant: "default"
+        });
         
-        const popup = window.open(
-          data.authUrl, 
-          "quickbooks-oauth", 
-          "width=600,height=700,scrollbars=yes,resizable=yes"
-        );
-        
-        if (!popup || popup.closed) {
-          // Fallback: open in same window if popup is blocked
-          toast({
-            title: "Popup Blocked",
-            description: "Opening QuickBooks authorization in the same window...",
-            variant: "default"
-          });
+        // Use direct window redirect which is more reliable than popup
+        setTimeout(() => {
           window.location.href = data.authUrl;
-          return { success: true };
-        }
-        
-        setIsConnecting(true);
-        
-        // Listen for the popup to close (indicating OAuth completion)
-        const checkClosed = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(checkClosed);
-            setIsConnecting(false);
-            
-            // Check connection status after popup closes
-            setTimeout(() => {
-              queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
-              toast({
-                title: "QuickBooks Integration",
-                description: "Please check if the connection was successful."
-              });
-            }, 1000);
-          }
-        }, 1000);
+        }, 1500);
         
         return { success: true };
-      } catch (fetchError) {
+        
+      } catch (fetchError: any) {
+        console.error("QuickBooks connection error:", fetchError);
         setIsConnecting(false);
         throw fetchError;
       }
     },
     onError: (error: any) => {
+      console.error("Connection mutation error:", error);
       setIsConnecting(false);
       toast({
         title: "Connection Failed",
         description: error.message || "Failed to connect to QuickBooks. Please try again.",
         variant: "destructive"
       });
+    },
+    onSuccess: () => {
+      setIsConnecting(true);
+      console.log("QuickBooks connection initiated successfully");
     }
   });
 
