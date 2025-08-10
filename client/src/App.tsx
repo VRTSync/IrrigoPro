@@ -58,20 +58,33 @@ function Router() {
           
           // Force refresh user data from API
           try {
-            const response = await fetch('/api/users');
+            const response = await fetch('/api/users', {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include'
+            });
+            
             if (response.ok) {
-              const users = await response.json();
-              const updatedUser = users.find((u: any) => u.username === userData.username);
-              if (updatedUser) {
-                localStorage.setItem("user", JSON.stringify(updatedUser));
-                setUser(updatedUser);
-                console.log("Updated user session:", updatedUser);
-              } else {
-                // If user not found with current username, clear session
-                localStorage.removeItem("user");
-                setUser(null);
+              try {
+                const users = await response.json();
+                const updatedUser = users.find((u: any) => u.username === userData.username);
+                if (updatedUser) {
+                  localStorage.setItem("user", JSON.stringify(updatedUser));
+                  setUser(updatedUser);
+                  console.log("Updated user session:", updatedUser);
+                } else {
+                  // If user not found with current username, clear session
+                  localStorage.removeItem("user");
+                  setUser(null);
+                }
+              } catch (jsonError) {
+                console.error("Error parsing user JSON response:", jsonError);
+                setUser(userData);
               }
             } else {
+              console.warn(`User fetch failed with status: ${response.status}`);
               setUser(userData);
             }
           } catch (apiError) {

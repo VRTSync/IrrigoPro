@@ -29,7 +29,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const { toast } = useToast();
 
   // Fetch QuickBooks connection status
-  const { data: connectionStatus, isLoading: loadingConnection } = useQuery<{
+  const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<{
     companyId: string | null;
     companyName: string | null;
     isConnected: boolean;
@@ -38,12 +38,16 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   }>({
     queryKey: ["/api/quickbooks/connection"],
     enabled: true,
+    retry: false,
+    throwOnError: false
   });
 
   // Fetch estimates for sync status
-  const { data: estimates = [] } = useQuery<any[]>({
+  const { data: estimates = [], error: estimatesError } = useQuery<any[]>({
     queryKey: ["/api/estimates"],
     enabled: true,
+    retry: false,
+    throwOnError: false
   });
 
   // Connect to QuickBooks
