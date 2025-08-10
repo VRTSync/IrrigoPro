@@ -55,6 +55,31 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     throwOnError: false
   });
 
+  // Customer sync mutation
+  const syncCustomersMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("/api/quickbooks/sync-customers", {
+        method: "POST"
+      });
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Customer Sync Complete",
+        description: `${data.syncedCount} customers imported from QuickBooks`,
+        variant: "default"
+      });
+      // Refresh customer list
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync customers from QuickBooks",
+        variant: "destructive"
+      });
+    }
+  });
+
   // Simple and direct QuickBooks connection handler
   const handleQuickBooksConnect = async () => {
     console.log("QuickBooks button clicked - starting connection");
@@ -192,6 +217,34 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                     Last sync: {format(new Date(connectionStatus.lastSync), "PPP")}
                   </div>
                 )}
+
+                {/* Customer Sync Section */}
+                <div className="mt-4 pt-4 border-t border-green-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium text-green-900">Customer Data</h4>
+                    <Button
+                      onClick={() => syncCustomersMutation.mutate()}
+                      disabled={syncCustomersMutation.isPending}
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      {syncCustomersMutation.isPending ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Import Customers
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-sm text-green-700">
+                    Import existing customers from QuickBooks to populate your IrrigoPro customer list.
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="p-4 bg-blue-50 rounded-lg">

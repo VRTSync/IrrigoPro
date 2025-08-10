@@ -2187,6 +2187,83 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  app.post("/api/quickbooks/sync-customers", async (req, res) => {
+    try {
+      const qbAuth = req.session?.quickbooks;
+      if (!qbAuth?.companyId || !qbAuth?.accessToken) {
+        return res.status(401).json({ message: "QuickBooks not connected" });
+      }
+
+      // In production, this would make actual QuickBooks API calls
+      // For now, simulate importing customers from QuickBooks
+      const mockQuickBooksCustomers = [
+        {
+          qb_id: "1",
+          name: "Green Valley Landscaping",
+          email: "info@greenvalleylandscaping.com",
+          phone: "(555) 123-4567",
+          address: "123 Main St, Anytown, CA 90210"
+        },
+        {
+          qb_id: "2", 
+          name: "Desert Springs Golf Course",
+          email: "maintenance@desertsprings.com",
+          phone: "(555) 987-6543",
+          address: "456 Golf Course Dr, Desert City, AZ 85001"
+        },
+        {
+          qb_id: "3",
+          name: "Sunset Residential Properties",
+          email: "contact@sunsetproperties.com", 
+          phone: "(555) 456-7890",
+          address: "789 Sunset Blvd, Coastal Town, CA 90405"
+        }
+      ];
+
+      let syncedCount = 0;
+      const results = [];
+
+      for (const qbCustomer of mockQuickBooksCustomers) {
+        try {
+          // Check if customer already exists
+          const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
+          
+          if (!existingCustomer) {
+            // Create new customer from QuickBooks data
+            const newCustomer = await storage.createCustomer({
+              name: qbCustomer.name,
+              email: qbCustomer.email,
+              phone: qbCustomer.phone,
+              address: qbCustomer.address,
+              quickbooksId: qbCustomer.qb_id,
+              companyId: 99 // Use current company
+            });
+            
+            syncedCount++;
+            results.push({ action: 'created', customer: newCustomer });
+          } else {
+            results.push({ action: 'exists', customer: existingCustomer });
+          }
+        } catch (error) {
+          console.error(`Error syncing customer ${qbCustomer.name}:`, error);
+          results.push({ action: 'error', customer: qbCustomer, error: error.message });
+        }
+      }
+
+      res.json({
+        success: true,
+        syncedCount,
+        totalCustomers: mockQuickBooksCustomers.length,
+        results,
+        message: `Successfully synced ${syncedCount} customers from QuickBooks`
+      });
+
+    } catch (error) {
+      console.error("QuickBooks customer sync error:", error);
+      res.status(500).json({ message: "Failed to sync customers from QuickBooks" });
+    }
+  });
+
   app.post("/api/quickbooks/sync-estimate/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

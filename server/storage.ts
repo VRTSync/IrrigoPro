@@ -227,6 +227,7 @@ export interface IStorage {
   deleteInvoice(id: number): Promise<boolean>;
   createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem>;
   getCustomerById(id: number): Promise<Customer | undefined>;
+  getCustomerByQuickBooksId(quickbooksId: string): Promise<Customer | undefined>;
 
   // Site Maps for customers
   getCustomerSiteMaps(customerId: number): Promise<SiteMap[]>;
@@ -420,6 +421,11 @@ export class DatabaseStorage implements IStorage {
 
   async getCustomerById(id: number): Promise<Customer | undefined> {
     const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+    return customer || undefined;
+  }
+
+  async getCustomerByQuickBooksId(quickbooksId: string): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers).where(eq(customers.quickbooksId, quickbooksId));
     return customer || undefined;
   }
 

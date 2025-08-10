@@ -61,6 +61,7 @@ export const customers = pgTable("customers", {
   paymentTerms: text("payment_terms").default("net_30"), // net_30, net_15, due_on_receipt
   notes: text("notes"),
   propertyNotes: text("property_notes"), // Property-specific notes for technicians
+  quickbooksId: text("quickbooks_id"), // QuickBooks customer ID for integration
 });
 
 // Site maps and controller management
