@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { User, Lock, LogIn } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
+import irrigoProLogo from "@assets/irrigopro - logo-01_1754798633907.png";
 
 interface LoginCredentials {
   username: string;
@@ -68,13 +68,13 @@ export default function Login() {
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
             <img 
-              src={companyLogo} 
-              alt="Company Logo" 
+              src={irrigoProLogo} 
+              alt="IrrigoPro Logo" 
               className="h-16 w-auto"
             />
           </div>
-          <CardTitle className="text-2xl font-bold">Irrigation Management System</CardTitle>
-          <p className="text-gray-600">Please sign in to continue</p>
+          <CardTitle className="text-2xl font-bold">IrrigoPro</CardTitle>
+          <p className="text-gray-600">Professional irrigation management platform</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">

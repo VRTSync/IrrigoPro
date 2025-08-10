@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import companyLogo from "@assets/LOGO - SPREAD-05_1752764989944.png";
+import irrigoProLogo from "@assets/irrigopro - logo-01_1754798633907.png";
 import { useState } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
@@ -88,8 +88,8 @@ export default function Navigation() {
               <Link href="/">
                 <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
-                    src={companyLogo} 
-                    alt="Company Logo" 
+                    src={irrigoProLogo} 
+                    alt="IrrigoPro Logo" 
                     className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
                   />
                 </div>
@@ -213,8 +213,8 @@ export default function Navigation() {
             {/* Logo */}
             <div className="flex items-center">
               <img 
-                src={companyLogo} 
-                alt="Company Logo" 
+                src={irrigoProLogo} 
+                alt="IrrigoPro Logo" 
                 className="h-10 w-auto"
               />
             </div>
