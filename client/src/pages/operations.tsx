@@ -31,6 +31,12 @@ interface WorkOrder {
   totalAmount: number;
   createdAt: string;
   propertyAddress?: string;
+  assignedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  completionSummary?: string;
+  laborHours?: number;
+  customerNotes?: string;
 }
 
 interface BillingSheet {
@@ -43,6 +49,13 @@ interface BillingSheet {
   totalAmount: number;
   createdAt: string;
   workDate: string;
+  propertyAddress?: string;
+  laborHours?: number;
+  partsTotal?: number;
+  laborTotal?: number;
+  taxAmount?: number;
+  submittedAt?: string;
+  approvedAt?: string;
 }
 
 export default function Operations() {
@@ -98,44 +111,7 @@ export default function Operations() {
     setEstimateModalOpen(true);
   };
 
-  const CreateWorkModal = () => (
-    <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create New Work Item</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <Button 
-            className="w-full h-16 flex flex-col items-center justify-center space-y-2"
-            onClick={handleCreateEstimate}
-          >
-            <FileText className="h-6 w-6" />
-            <span>Create Estimate</span>
-          </Button>
-          <Link href="/work-orders?create=true">
-            <Button
-              className="w-full h-16 flex flex-col items-center justify-center space-y-2"
-              variant="outline"
-              onClick={() => setCreateModalOpen(false)}
-            >
-              <Wrench className="h-6 w-6" />
-              <span>Create Work Order</span>
-            </Button>
-          </Link>
-          <Link href="/billing-sheets?create=true">
-            <Button
-              className="w-full h-16 flex flex-col items-center justify-center space-y-2"
-              variant="outline"
-              onClick={() => setCreateModalOpen(false)}
-            >
-              <ClipboardList className="h-6 w-6" />
-              <span>Create Billing Sheet</span>
-            </Button>
-          </Link>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+
 
   if (estimatesLoading || workOrdersLoading || billingSheetsLoading) {
     return (
@@ -180,7 +156,6 @@ export default function Operations() {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Operations</h1>
           <p className="text-gray-600 mt-1">Manage all estimates, work orders, and billing sheets</p>
         </div>
-        <CreateWorkModal />
         <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
           <DialogTrigger asChild>
             <Button className="mt-4 sm:mt-0">
@@ -188,6 +163,40 @@ export default function Operations() {
               Create New
             </Button>
           </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create New Work Item</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <Button 
+                className="w-full h-16 flex flex-col items-center justify-center space-y-2"
+                onClick={handleCreateEstimate}
+              >
+                <FileText className="h-6 w-6" />
+                <span>Create Estimate</span>
+              </Button>
+              <Link href="/work-orders?create=true">
+                <Button
+                  className="w-full h-16 flex flex-col items-center justify-center space-y-2"
+                  variant="outline"
+                  onClick={() => setCreateModalOpen(false)}
+                >
+                  <Wrench className="h-6 w-6" />
+                  <span>Create Work Order</span>
+                </Button>
+              </Link>
+              <Link href="/billing-sheets?create=true">
+                <Button
+                  className="w-full h-16 flex flex-col items-center justify-center space-y-2"
+                  variant="outline"
+                  onClick={() => setCreateModalOpen(false)}
+                >
+                  <ClipboardList className="h-6 w-6" />
+                  <span>Create Billing Sheet</span>
+                </Button>
+              </Link>
+            </div>
+          </DialogContent>
         </Dialog>
       </div>
 
