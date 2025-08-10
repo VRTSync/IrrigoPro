@@ -1970,6 +1970,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     `);
   });
 
+  // Serve QuickBooks debug page
+  app.get("/quickbooks-debug", (req, res) => {
+    res.sendFile('quickbooks-debug.html', { root: '.' });
+  });
+
+  // Serve simple QuickBooks test page
+  app.get("/quickbooks-test", (req, res) => {
+    res.sendFile('simple-quickbooks-test.html', { root: '.' });
+  });
+
   // QuickBooks integration routes
   app.get("/api/quickbooks/auth", async (req, res) => {
     try {

@@ -1,51 +1,214 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>QuickBooks Simple Test</title>
+    <title>Simple QuickBooks Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: #f5f5f5;
+        }
+        .test-box {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #0077c0;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #005a8b; }
+        .result { 
+            background: #f8f9fa; 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-left: 4px solid #007bff;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .error { border-left-color: #dc3545; background: #fff5f5; color: #721c24; }
+        .success { border-left-color: #28a745; background: #f8fff8; color: #155724; }
+        .warning { border-left-color: #ffc107; background: #fffdf5; color: #856404; }
+    </style>
 </head>
 <body>
-    <h2>QuickBooks Connection Test</h2>
-    <button id="testBtn" style="padding: 10px 20px; font-size: 16px;">Test QuickBooks Connection</button>
-    <div id="result" style="margin-top: 20px; padding: 10px; background: #f0f0f0;"></div>
+    <h1>🔧 QuickBooks Connection Diagnostic</h1>
+    
+    <div class="test-box">
+        <h3>Environment Information</h3>
+        <div id="env-info"></div>
+    </div>
+
+    <div class="test-box">
+        <h3>QuickBooks Connection Tests</h3>
+        <button onclick="testOurAuthUrl()">1. Test Our Auth URL</button>
+        <button onclick="testDirectQuickBooksUrl()">2. Test Direct QuickBooks URL</button>
+        <button onclick="openQuickBooksInNewTab()">3. Open QuickBooks (New Tab)</button>
+        <button onclick="validateRedirectURI()">4. Validate Redirect URI</button>
+    </div>
+
+    <div class="test-box">
+        <h3>Manual Test URLs</h3>
+        <button onclick="generateManualUrls()">Generate Manual Test URLs</button>
+        <div id="manual-urls"></div>
+    </div>
+
+    <div class="test-box">
+        <h3>Test Results</h3>
+        <div id="results"></div>
+    </div>
 
     <script>
-        console.log("Simple test page loaded");
-        
-        document.getElementById('testBtn').onclick = async function() {
-            console.log("Test button clicked");
-            const resultDiv = document.getElementById('result');
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}`;
+            document.getElementById('results').appendChild(div);
+            console.log(`[QB-TEST] ${message}`);
+        }
+
+        function showEnvInfo() {
+            const info = {
+                'Current Domain': window.location.host,
+                'Protocol': window.location.protocol,
+                'Full URL': window.location.href,
+                'User Agent': navigator.userAgent.substring(0, 100) + '...',
+                'Expected Redirect URI': `${window.location.protocol}//${window.location.host}/api/quickbooks/callback`
+            };
             
+            let html = '';
+            for (const [key, value] of Object.entries(info)) {
+                html += `<strong>${key}:</strong> ${value}<br>`;
+            }
+            document.getElementById('env-info').innerHTML = html;
+        }
+
+        async function testOurAuthUrl() {
+            log('🔍 Testing our auth URL generation...', 'info');
             try {
-                resultDiv.innerHTML = "Testing connection...";
-                
-                const response = await fetch('/api/quickbooks/auth', {
-                    method: 'GET',
-                    credentials: 'include'
-                });
-                
-                console.log("Response status:", response.status);
-                
+                const response = await fetch('/api/quickbooks/auth');
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                
                 const data = await response.json();
-                console.log("Response data:", data);
+                log(`✅ Auth URL generated successfully`, 'success');
+                log(`URL: ${data.authUrl}`, 'info');
                 
-                resultDiv.innerHTML = `
-                    <h3>SUCCESS!</h3>
-                    <p>Status: ${response.status}</p>
-                    <p>Auth URL: ${data.authUrl}</p>
-                    <p>State: ${data.state}</p>
-                `;
+                // Parse components
+                const url = new URL(data.authUrl);
+                const params = new URLSearchParams(url.search);
+                log(`Client ID: ${params.get('client_id')}`, 'info');
+                log(`Redirect URI: ${decodeURIComponent(params.get('redirect_uri'))}`, 'info');
+                log(`Scope: ${params.get('scope')}`, 'info');
                 
+                return data.authUrl;
             } catch (error) {
-                console.error("Error:", error);
-                resultDiv.innerHTML = `
-                    <h3 style="color: red;">ERROR!</h3>
-                    <p>${error.message}</p>
-                `;
+                log(`❌ Auth URL test failed: ${error.message}`, 'error');
+                return null;
             }
+        }
+
+        async function testDirectQuickBooksUrl() {
+            log('🔗 Testing direct QuickBooks URL access...', 'info');
+            
+            // Test with a minimal QuickBooks URL
+            const testClientId = 'ABYzg2dYpmUlNblvzAAgHjWIcgfxHeGyHJxdrrCkKRYIkGgKPS';
+            const testRedirectUri = encodeURIComponent(`${window.location.protocol}//${window.location.host}/api/quickbooks/callback`);
+            
+            const directUrl = `https://appcenter.intuit.com/connect/oauth2?client_id=${testClientId}&scope=com.intuit.quickbooks.accounting&redirect_uri=${testRedirectUri}&response_type=code&access_type=offline&state=test123`;
+            
+            log(`Direct URL: ${directUrl}`, 'info');
+            
+            try {
+                // Try to fetch just the QuickBooks domain to test connectivity
+                const testResponse = await fetch('https://appcenter.intuit.com/', { mode: 'no-cors' });
+                log('✅ QuickBooks domain is accessible', 'success');
+                return directUrl;
+            } catch (error) {
+                log(`⚠️ Network connectivity test: ${error.message}`, 'warning');
+                return directUrl;
+            }
+        }
+
+        async function openQuickBooksInNewTab() {
+            log('🚀 Opening QuickBooks in new tab for manual testing...', 'info');
+            
+            const authUrl = await testOurAuthUrl();
+            if (authUrl) {
+                const newWindow = window.open(authUrl, '_blank', 'width=800,height=600');
+                if (newWindow) {
+                    log('✅ QuickBooks opened in new tab - check for errors there', 'success');
+                    setTimeout(() => {
+                        if (newWindow.closed) {
+                            log('🔄 Tab was closed - connection may have failed', 'warning');
+                        } else {
+                            log('📝 Tab still open - check for QuickBooks error messages', 'info');
+                        }
+                    }, 5000);
+                } else {
+                    log('❌ Failed to open new tab - popup may be blocked', 'error');
+                }
+            }
+        }
+
+        async function validateRedirectURI() {
+            log('🔍 Validating redirect URI configuration...', 'info');
+            
+            const expectedUri = `${window.location.protocol}//${window.location.host}/api/quickbooks/callback`;
+            log(`Expected URI: ${expectedUri}`, 'info');
+            
+            // Check if our callback endpoint exists
+            try {
+                const response = await fetch('/api/quickbooks/callback', { method: 'GET' });
+                log(`Callback endpoint status: ${response.status}`, response.status === 405 ? 'success' : 'warning');
+                log('Note: 405 (Method Not Allowed) is expected for GET on callback endpoint', 'info');
+            } catch (error) {
+                log(`❌ Callback endpoint test failed: ${error.message}`, 'error');
+            }
+        }
+
+        function generateManualUrls() {
+            log('📋 Generating manual test URLs...', 'info');
+            
+            const clientId = 'ABYzg2dYpmUlNblvzAAgHjWIcgfxHeGyHJxdrrCkKRYIkGgKPS';
+            const baseUrl = 'https://appcenter.intuit.com/connect/oauth2';
+            const scope = 'com.intuit.quickbooks.accounting';
+            
+            const redirectUris = [
+                `${window.location.protocol}//${window.location.host}/api/quickbooks/callback`,
+                `https://${window.location.host}/api/quickbooks/callback`,
+                `http://localhost:3000/callback`,
+                `https://developer.intuit.com/`
+            ];
+            
+            let html = '<h4>Manual Test URLs (try these in browser address bar):</h4>';
+            
+            redirectUris.forEach((uri, index) => {
+                const encodedUri = encodeURIComponent(uri);
+                const testUrl = `${baseUrl}?client_id=${clientId}&scope=${scope}&redirect_uri=${encodedUri}&response_type=code&access_type=offline&state=manual_test_${index}`;
+                
+                html += `<div style="margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px;">`;
+                html += `<strong>Test ${index + 1}:</strong> ${uri}<br>`;
+                html += `<a href="${testUrl}" target="_blank" style="color: #0077c0; text-decoration: underline;">Click to test this URL</a><br>`;
+                html += `<small style="color: #666; word-break: break-all;">${testUrl}</small>`;
+                html += `</div>`;
+            });
+            
+            document.getElementById('manual-urls').innerHTML = html;
+        }
+
+        // Initialize on load
+        window.onload = function() {
+            showEnvInfo();
+            log('🔧 QuickBooks Diagnostic Tool Ready', 'success');
+            log('Click buttons above to run tests', 'info');
         };
     </script>
 </body>
