@@ -33,9 +33,17 @@ export default function Navigation() {
       case "company_admin":
         return [
           { path: "/operations", label: "Operations", icon: FileText },
-          { path: "/customers", label: "Customers", icon: Users },
+          { 
+            path: "/customers", 
+            label: "Customers", 
+            icon: Users, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/customers", label: "Customer List", icon: Users },
+              { path: "/site-maps", label: "Maps", icon: MapIcon },
+            ]
+          },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-          { path: "/site-maps", label: "Maps", icon: MapIcon },
           { 
             path: "/admin", 
             label: "Admin", 
