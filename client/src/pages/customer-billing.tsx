@@ -387,6 +387,11 @@ export default function CustomerBilling() {
             )}
           </div>
 
+          {/* Mobile QuickBooks Integration */}
+          <div className="mb-4">
+            <QuickBooksIntegration />
+          </div>
+
           {/* Mobile Filter Controls - Collapsible */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
