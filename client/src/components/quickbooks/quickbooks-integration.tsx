@@ -38,7 +38,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     // Temporarily add an alert to confirm component is loading
     setTimeout(() => {
       alert("QuickBooks Integration component loaded successfully!");
-    }, 1000);
+    }, 2000);
   }, []);
   
   // Component mount logging

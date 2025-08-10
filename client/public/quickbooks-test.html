@@ -1,52 +1,49 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>QuickBooks Simple Test</title>
+    <title>QuickBooks Direct Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        button { padding: 15px 30px; font-size: 16px; cursor: pointer; margin: 10px; }
+        .success { background: green; color: white; }
+    </style>
 </head>
 <body>
-    <h2>QuickBooks Connection Test</h2>
-    <button id="testBtn" style="padding: 10px 20px; font-size: 16px;">Test QuickBooks Connection</button>
-    <div id="result" style="margin-top: 20px; padding: 10px; background: #f0f0f0;"></div>
-
+    <h1>QuickBooks Direct Connection Test</h1>
+    <p>This page directly tests the QuickBooks connection without React.</p>
+    
+    <button onclick="testConnection()">Connect to QuickBooks (Direct)</button>
+    <div id="result"></div>
+    
     <script>
-        console.log("Simple test page loaded");
-        
-        document.getElementById('testBtn').onclick = async function() {
-            console.log("Test button clicked");
-            const resultDiv = document.getElementById('result');
+        function testConnection() {
+            console.log("Direct connection test started...");
+            document.getElementById('result').innerHTML = "Testing connection...";
             
-            try {
-                resultDiv.innerHTML = "Testing connection...";
-                
-                const response = await fetch('/api/quickbooks/auth', {
-                    method: 'GET',
-                    credentials: 'include'
+            fetch('/api/quickbooks/auth')
+                .then(response => {
+                    console.log('Response received:', response.status);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Auth data:', data);
+                    document.getElementById('result').innerHTML = 
+                        '<div class="success">✓ Success! Redirecting to QuickBooks...</div>';
+                    
+                    // Redirect after showing success message
+                    setTimeout(() => {
+                        window.location.href = data.authUrl;
+                    }, 1000);
+                })
+                .catch(error => {
+                    console.error('Connection failed:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<div style="color: red;">✗ Error: ' + error.message + '</div>';
                 });
-                
-                console.log("Response status:", response.status);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                console.log("Response data:", data);
-                
-                resultDiv.innerHTML = `
-                    <h3>SUCCESS!</h3>
-                    <p>Status: ${response.status}</p>
-                    <p>Auth URL: ${data.authUrl}</p>
-                    <p>State: ${data.state}</p>
-                `;
-                
-            } catch (error) {
-                console.error("Error:", error);
-                resultDiv.innerHTML = `
-                    <h3 style="color: red;">ERROR!</h3>
-                    <p>${error.message}</p>
-                `;
-            }
-        };
+        }
     </script>
 </body>
 </html>
