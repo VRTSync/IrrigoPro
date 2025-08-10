@@ -8,7 +8,7 @@ import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Estimate } from "@shared/schema";
 
 export default function Estimates() {
@@ -19,6 +19,16 @@ export default function Estimates() {
   const [refreshing, setRefreshing] = useState(false);
 
   const queryClient = useQueryClient();
+
+  // Check for create parameter in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('create') === 'true') {
+      setShowEstimateModal(true);
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const { data: estimates, isLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
