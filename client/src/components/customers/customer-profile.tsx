@@ -230,7 +230,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
 
         {/* Tabs for different data */}
         <Tabs defaultValue="estimates" className="w-full">
-          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3 bg-white shadow-sm border border-gray-200 p-1 rounded-xl gap-1 sm:gap-0">
+          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3 bg-white shadow-sm border border-gray-200 p-1 rounded-xl gap-1 sm:gap-0 relative z-10">
             <TabsTrigger 
               value="estimates" 
               className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
@@ -263,7 +263,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="estimates" className="space-y-4 mt-6">
+          <TabsContent value="estimates" className="space-y-4 mt-8 relative z-0">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Estimates</h2>
               <div className="text-sm text-gray-600">
@@ -326,7 +326,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             )}
           </TabsContent>
 
-          <TabsContent value="work-orders" className="space-y-4 mt-6">
+          <TabsContent value="work-orders" className="space-y-4 mt-8 relative z-0">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Work Orders</h2>
             </div>
@@ -388,7 +388,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             )}
           </TabsContent>
 
-          <TabsContent value="billing-sheets" className="space-y-4 mt-6">
+          <TabsContent value="billing-sheets" className="space-y-4 mt-8 relative z-0">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Billing Sheets</h2>
               <div className="text-sm text-gray-600">
