@@ -30,6 +30,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   
   // Force console logging on every render
   console.log("🔵 QUICKBOOKS COMPONENT RENDER - isConnecting:", isConnecting);
+  console.log("🔵 Component mounted in customer billing page");
   
   // Component mount logging
   useEffect(() => {
@@ -81,7 +82,10 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
 
   // Simple and direct QuickBooks connection handler
   const handleQuickBooksConnect = () => {
-    console.log("🔵 Button clicked - QuickBooks connection started");
+    console.log("🔵 ==========================================================");
+    console.log("🔵 BUTTON CLICKED - QuickBooks connection started");
+    console.log("🔵 Current isConnecting state:", isConnecting);
+    console.log("🔵 ==========================================================");
     
     // Prevent double clicks
     if (isConnecting) {
