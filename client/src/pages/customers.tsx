@@ -85,7 +85,7 @@ export default function Customers() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
       {/* Header */}
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
@@ -110,11 +110,12 @@ export default function Customers() {
 
       <Tabs defaultValue="customers" className="w-full">
         <TabsList className={userRole === 'field_tech' ? "grid w-full grid-cols-1" : "grid w-full grid-cols-2"}>
-          <TabsTrigger value="customers">Customer List</TabsTrigger>
+          <TabsTrigger value="customers" className="text-sm">Customer List</TabsTrigger>
           {userRole !== 'field_tech' && (
-            <TabsTrigger value="integrations">
-              <Settings className="w-4 h-4 mr-2" />
-              Integrations
+            <TabsTrigger value="integrations" className="text-sm">
+              <Settings className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">Integrations</span>
+              <span className="sm:hidden">Setup</span>
             </TabsTrigger>
           )}
         </TabsList>
@@ -132,6 +133,68 @@ export default function Customers() {
           </div>
 
           {/* Customers List - Responsive Design */}
+          {/* Mobile Card View */}
+          <div className="lg:hidden space-y-3">
+            {isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <Card key={i} className="p-4">
+                  <div className="flex items-center space-x-3">
+                    <Skeleton className="h-10 w-10 rounded-lg" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                  </div>
+                </Card>
+              ))
+            ) : (
+              filteredCustomers?.map((customer) => (
+                <Card key={customer.id} className="p-4 hover:shadow-md transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3 flex-1 min-w-0">
+                      <div className="bg-blue-50 p-2 rounded-lg flex-shrink-0">
+                        <Users className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate">{customer.name}</div>
+                        {userRole !== 'field_tech' && (
+                          <div className="text-xs text-gray-500 truncate">{customer.email}</div>
+                        )}
+                        {customer.phone && (
+                          <div className="text-xs text-gray-500">{customer.phone}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0">
+                      {userRole === 'field_tech' ? (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-blue-600 hover:text-blue-900"
+                          onClick={() => setShowSiteMaps(customer)}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                      ) : (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-blue-600 hover:text-blue-900"
+                          onClick={() => setSelectedCustomer(customer)}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {customer.address && (
+                    <div className="mt-2 text-xs text-gray-600 truncate">{customer.address}</div>
+                  )}
+                </Card>
+              ))
+            )}
+          </div>
+
           {/* Desktop Table View */}
           <div className="hidden lg:block">
             <Card className="bg-white shadow-sm border border-gray-200">

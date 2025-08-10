@@ -114,7 +114,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
 
   return (
     <>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
@@ -124,71 +124,71 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             </Button>
           </div>
           
-          <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border shadow-lg p-8">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-6">
-                <div className="relative">
-                  <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-2xl shadow-lg">
-                    <User className="w-10 h-10 text-white" />
+          <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border shadow-lg p-4 sm:p-6 lg:p-8">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
+                <div className="relative flex-shrink-0">
+                  <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-3 sm:p-4 rounded-2xl shadow-lg">
+                    <User className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
                   </div>
-                  <div className="absolute -bottom-2 -right-2 bg-green-500 w-6 h-6 rounded-full border-4 border-white flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full"></div>
+                  <div className="absolute -bottom-2 -right-2 bg-green-500 w-5 h-5 sm:w-6 sm:h-6 rounded-full border-4 border-white flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-white rounded-full"></div>
                   </div>
                 </div>
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-900 mb-3">{customer.name}</h1>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2 sm:mb-3 truncate">{customer.name}</h1>
                   <div className="space-y-2">
-                    <div className="flex items-center gap-3 text-gray-700">
-                      <div className="bg-white p-1.5 rounded-lg shadow-sm">
-                        <Mail className="w-4 h-4 text-blue-600" />
+                    <div className="flex items-center gap-2 sm:gap-3 text-gray-700">
+                      <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                        <Mail className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
                       </div>
-                      <span className="font-medium">{customer.email}</span>
+                      <span className="font-medium text-sm sm:text-base truncate">{customer.email}</span>
                     </div>
                     {customer.phone && (
-                      <div className="flex items-center gap-3 text-gray-700">
-                        <div className="bg-white p-1.5 rounded-lg shadow-sm">
-                          <Phone className="w-4 h-4 text-green-600" />
+                      <div className="flex items-center gap-2 sm:gap-3 text-gray-700">
+                        <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                          <Phone className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
                         </div>
-                        <span className="font-medium">{customer.phone}</span>
+                        <span className="font-medium text-sm sm:text-base">{customer.phone}</span>
                       </div>
                     )}
                     {customer.address && (
-                      <div className="flex items-center gap-3 text-gray-700">
-                        <div className="bg-white p-1.5 rounded-lg shadow-sm">
-                          <MapPin className="w-4 h-4 text-purple-600" />
+                      <div className="flex items-start gap-2 sm:gap-3 text-gray-700">
+                        <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                          <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600" />
                         </div>
-                        <span className="font-medium">{customer.address}</span>
+                        <span className="font-medium text-sm sm:text-base break-words">{customer.address}</span>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
               
-              {/* Enhanced Summary Stats */}
-              <div className="grid grid-cols-3 gap-6">
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-100 hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between mb-2">
-                    <FileText className="w-6 h-6 text-blue-600" />
-                    <div className="text-2xl font-bold text-blue-700">{estimates.length}</div>
+              {/* Enhanced Summary Stats - Mobile Responsive */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-4 lg:gap-6 w-full lg:w-auto">
+                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-blue-100 hover:shadow-md transition-shadow">
+                  <div className="flex flex-col items-center lg:flex-row lg:items-center lg:justify-between mb-1 lg:mb-2">
+                    <FileText className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-blue-600 mb-1 lg:mb-0" />
+                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-700">{estimates.length}</div>
                   </div>
-                  <div className="text-sm font-medium text-gray-700">Estimates</div>
-                  <div className="text-xs text-blue-600 font-medium mt-1">{formatCurrency(totalEstimateValue)}</div>
+                  <div className="text-xs sm:text-sm font-medium text-gray-700 text-center lg:text-left">Estimates</div>
+                  <div className="text-xs text-blue-600 font-medium mt-1 text-center lg:text-left">{formatCurrency(totalEstimateValue)}</div>
                 </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-green-100 hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between mb-2">
-                    <Wrench className="w-6 h-6 text-green-600" />
-                    <div className="text-2xl font-bold text-green-700">{workOrders.length}</div>
+                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-green-100 hover:shadow-md transition-shadow">
+                  <div className="flex flex-col items-center lg:flex-row lg:items-center lg:justify-between mb-1 lg:mb-2">
+                    <Wrench className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-green-600 mb-1 lg:mb-0" />
+                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-700">{workOrders.length}</div>
                   </div>
-                  <div className="text-sm font-medium text-gray-700">Work Orders</div>
-                  <div className="text-xs text-green-600 font-medium mt-1">Active Projects</div>
+                  <div className="text-xs sm:text-sm font-medium text-gray-700 text-center lg:text-left">Work Orders</div>
+                  <div className="text-xs text-green-600 font-medium mt-1 text-center lg:text-left">Active Projects</div>
                 </div>
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-orange-100 hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between mb-2">
-                    <Receipt className="w-6 h-6 text-orange-600" />
-                    <div className="text-2xl font-bold text-orange-700">{billingSheets.length}</div>
+                <div className="bg-white rounded-lg lg:rounded-xl p-2 sm:p-3 lg:p-4 shadow-sm border border-orange-100 hover:shadow-md transition-shadow">
+                  <div className="flex flex-col items-center lg:flex-row lg:items-center lg:justify-between mb-1 lg:mb-2">
+                    <Receipt className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-orange-600 mb-1 lg:mb-0" />
+                    <div className="text-lg sm:text-xl lg:text-2xl font-bold text-orange-700">{billingSheets.length}</div>
                   </div>
-                  <div className="text-sm font-medium text-gray-700">Billing Sheets</div>
-                  <div className="text-xs text-orange-600 font-medium mt-1">{formatCurrency(totalBillingValue)}</div>
+                  <div className="text-xs sm:text-sm font-medium text-gray-700 text-center lg:text-left">Billing Sheets</div>
+                  <div className="text-xs text-orange-600 font-medium mt-1 text-center lg:text-left">{formatCurrency(totalBillingValue)}</div>
                 </div>
               </div>
             </div>
@@ -202,21 +202,21 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
               <CardTitle className="text-lg font-semibold text-gray-800">Quick Actions</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex gap-4">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <Button 
                   onClick={() => setShowSiteMaps(true)}
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3"
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 w-full sm:w-auto"
                 >
-                  <Map className="w-5 h-5" />
-                  View Site Maps
+                  <Map className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <span className="text-sm sm:text-base">View Site Maps</span>
                 </Button>
                 <Button 
                   onClick={() => setShowBillingView(true)}
                   variant="outline"
-                  className="flex items-center gap-2 border-gray-300 hover:bg-gray-50 px-6 py-3"
+                  className="flex items-center justify-center gap-2 border-gray-300 hover:bg-gray-50 px-4 py-3 w-full sm:w-auto"
                 >
-                  <CreditCard className="w-5 h-5" />
-                  View Billing
+                  <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <span className="text-sm sm:text-base">View Billing</span>
                 </Button>
               </div>
             </CardContent>
@@ -230,34 +230,34 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
 
         {/* Tabs for different data */}
         <Tabs defaultValue="estimates" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 bg-white shadow-sm border border-gray-200 p-1 rounded-xl">
+          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3 bg-white shadow-sm border border-gray-200 p-1 rounded-xl gap-1 sm:gap-0">
             <TabsTrigger 
               value="estimates" 
-              className="flex items-center gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
+              className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
             >
-              <FileText className="w-4 h-4" />
+              <FileText className="w-3 h-3 sm:w-4 sm:h-4" />
               <span className="font-medium">Estimates</span>
-              <div className="bg-blue-100 text-blue-800 data-[state=active]:bg-blue-400 data-[state=active]:text-white px-2 py-0.5 rounded-full text-xs font-bold">
+              <div className="bg-blue-100 text-blue-800 data-[state=active]:bg-blue-400 data-[state=active]:text-white px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-bold">
                 {estimates.length}
               </div>
             </TabsTrigger>
             <TabsTrigger 
               value="work-orders" 
-              className="flex items-center gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
+              className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
             >
-              <Wrench className="w-4 h-4" />
+              <Wrench className="w-3 h-3 sm:w-4 sm:h-4" />
               <span className="font-medium">Work Orders</span>
-              <div className="bg-green-100 text-green-800 data-[state=active]:bg-green-400 data-[state=active]:text-white px-2 py-0.5 rounded-full text-xs font-bold">
+              <div className="bg-green-100 text-green-800 data-[state=active]:bg-green-400 data-[state=active]:text-white px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-bold">
                 {workOrders.length}
               </div>
             </TabsTrigger>
             <TabsTrigger 
               value="billing-sheets" 
-              className="flex items-center gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200"
+              className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
             >
-              <Receipt className="w-4 h-4" />
+              <Receipt className="w-3 h-3 sm:w-4 sm:h-4" />
               <span className="font-medium">Billing Sheets</span>
-              <div className="bg-orange-100 text-orange-800 data-[state=active]:bg-orange-400 data-[state=active]:text-white px-2 py-0.5 rounded-full text-xs font-bold">
+              <div className="bg-orange-100 text-orange-800 data-[state=active]:bg-orange-400 data-[state=active]:text-white px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-bold">
                 {billingSheets.length}
               </div>
             </TabsTrigger>
