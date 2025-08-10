@@ -51,6 +51,7 @@ export default function Customers() {
         // Clear the stored values after using them
         localStorage.removeItem('selectedCustomerId');
         localStorage.removeItem('showSiteMaps');
+        localStorage.removeItem('selectedSiteMapId');
       }
     }
   }, [customers]);

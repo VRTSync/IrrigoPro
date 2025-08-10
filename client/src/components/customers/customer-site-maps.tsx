@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,6 +82,28 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   const { data: siteMaps, isLoading } = useQuery<SiteMap[]>({
     queryKey: [`/api/customers/${customer.id}/site-maps`],
   });
+
+  // Auto-select site map when coming from Maps page
+  useEffect(() => {
+    const selectedSiteMapId = localStorage.getItem('selectedSiteMapId');
+    if (selectedSiteMapId && siteMaps) {
+      const siteMap = siteMaps.find(sm => sm.id.toString() === selectedSiteMapId);
+      if (siteMap) {
+        // Convert to Project format and select it
+        const projectFromSiteMap: Project = {
+          id: siteMap.id,
+          name: siteMap.name,
+          controllers: [],
+          zones: [],
+          zonesByController: {}
+        };
+        setSelectedProject(projectFromSiteMap);
+        setActiveTab("viewer");
+        // Clear the stored value after using it
+        localStorage.removeItem('selectedSiteMapId');
+      }
+    }
+  }, [siteMaps]);
 
   // Fetch controllers and zones for selected project
   const { data: controllers } = useQuery<Controller[]>({

@@ -148,13 +148,14 @@ export default function SiteMaps() {
                 <div className="flex gap-2 pt-2">
                   <Link href="/customers">
                     <Button 
-                      variant="outline" 
+                      variant="default" 
                       size="sm" 
                       className="flex-1"
                       onClick={() => {
-                        // Store the customer to auto-select when navigating to customers page
+                        // Store the customer and map to auto-select when navigating to customers page
                         if (siteMap.customerId) {
                           localStorage.setItem('selectedCustomerId', siteMap.customerId.toString());
+                          localStorage.setItem('selectedSiteMapId', siteMap.id.toString());
                           localStorage.setItem('showSiteMaps', 'true');
                         }
                       }}
