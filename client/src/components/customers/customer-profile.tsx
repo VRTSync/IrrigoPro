@@ -264,7 +264,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
           </TabsList>
 
           <TabsContent value="estimates" className="space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Estimates</h2>
               <div className="text-sm text-gray-600">
                 Total Value: <span className="font-semibold text-green-600">{formatCurrency(totalEstimateValue)}</span>
@@ -291,30 +291,30 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                           setSelectedEstimateId(estimate.id);
                           setEstimateModalOpen(true);
                         }}>
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3 mb-3">
-                            <div className="bg-blue-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow">
+                            <div className="bg-blue-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
                               <FileText className="w-4 h-4 text-white" />
                             </div>
-                            <div>
-                              <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">{estimate.estimateNumber}</h3>
-                              <p className="text-gray-600 font-medium">{estimate.projectName}</p>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="font-bold text-gray-900 text-base sm:text-lg group-hover:text-blue-700 transition-colors truncate">{estimate.estimateNumber}</h3>
+                              <p className="text-gray-600 font-medium text-sm sm:text-base truncate">{estimate.projectName}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4 text-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm">
                             <div className="flex items-center gap-1.5 text-gray-500">
-                              <Calendar className="w-4 h-4" />
+                              <Calendar className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                               <span>Created {formatDate(estimate.createdAt)}</span>
                             </div>
                             <div className="flex items-center gap-1.5 text-gray-500">
-                              <DollarSign className="w-4 h-4" />
+                              <DollarSign className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                               <span className="font-semibold">{formatCurrency(Number(estimate.totalAmount || 0))}</span>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right flex-shrink-0">
                           {getStatusBadge(estimate.status, 'estimate')}
                         </div>
                       </div>
@@ -326,7 +326,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
           </TabsContent>
 
           <TabsContent value="work-orders" className="space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Work Orders</h2>
             </div>
             
@@ -350,32 +350,32 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                           setSelectedWorkOrder(workOrder);
                           setWorkOrderModalOpen(true);
                         }}>
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3 mb-3">
-                            <div className="bg-green-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow">
+                            <div className="bg-green-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
                               <Wrench className="w-4 h-4 text-white" />
                             </div>
-                            <div>
-                              <h3 className="font-bold text-gray-900 text-lg group-hover:text-green-700 transition-colors">{workOrder.workOrderNumber}</h3>
-                              <p className="text-gray-600 font-medium">{workOrder.projectName}</p>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="font-bold text-gray-900 text-base sm:text-lg group-hover:text-green-700 transition-colors truncate">{workOrder.workOrderNumber}</h3>
+                              <p className="text-gray-600 font-medium text-sm sm:text-base truncate">{workOrder.projectName}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4 text-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm">
                             <div className="flex items-center gap-1.5 text-gray-500">
-                              <Calendar className="w-4 h-4" />
+                              <Calendar className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                               <span>Created {formatDate(workOrder.createdAt)}</span>
                             </div>
                             {workOrder.assignedTechnicianName && (
                               <div className="flex items-center gap-1.5 text-gray-500">
-                                <User className="w-4 h-4" />
-                                <span className="font-medium">{workOrder.assignedTechnicianName}</span>
+                                <User className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
+                                <span className="font-medium truncate">{workOrder.assignedTechnicianName}</span>
                               </div>
                             )}
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right flex-shrink-0">
                           {getStatusBadge(workOrder.status, 'workorder')}
                         </div>
                       </div>
@@ -387,7 +387,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
           </TabsContent>
 
           <TabsContent value="billing-sheets" className="space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Billing Sheets</h2>
               <div className="text-sm text-gray-600">
                 Total Value: <span className="font-semibold text-green-600">{formatCurrency(totalBillingValue)}</span>
@@ -410,38 +410,38 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
               <div className="grid gap-4">
                 {billingSheets.map((billingSheet) => (
                   <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3 mb-3">
-                            <div className="bg-orange-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow">
+                            <div className="bg-orange-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
                               <Receipt className="w-4 h-4 text-white" />
                             </div>
-                            <div>
-                              <h3 className="font-bold text-gray-900 text-lg group-hover:text-orange-700 transition-colors">{billingSheet.billingNumber}</h3>
-                              <p className="text-gray-600 font-medium">{billingSheet.notes || 'Billing sheet'}</p>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="font-bold text-gray-900 text-base sm:text-lg group-hover:text-orange-700 transition-colors truncate">{billingSheet.billingNumber}</h3>
+                              <p className="text-gray-600 font-medium text-sm sm:text-base truncate">{billingSheet.notes || 'Billing sheet'}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4 text-sm">
+                          <div className="flex flex-col gap-2 text-xs sm:text-sm">
                             <div className="flex items-center gap-1.5 text-gray-500">
-                              <Calendar className="w-4 h-4" />
+                              <Calendar className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                               <span>Created {formatDate(billingSheet.createdAt)}</span>
                             </div>
                             <div className="flex items-center gap-1.5 text-gray-500">
-                              <User className="w-4 h-4" />
-                              <span className="font-medium">{billingSheet.technicianName}</span>
+                              <User className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
+                              <span className="font-medium truncate">{billingSheet.technicianName}</span>
                             </div>
                             <div className="flex items-center gap-1.5 text-gray-500">
-                              <Package className="w-4 h-4" />
+                              <Package className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                               <span>{billingSheet.items.length} items</span>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-left sm:text-right flex-shrink-0">
                           <div className="mb-2">
                             {getStatusBadge('billed', 'billing')}
                           </div>
-                          <div className="text-lg font-bold text-orange-600">
+                          <div className="text-base sm:text-lg font-bold text-orange-600">
                             {formatCurrency(Number(billingSheet.totalAmount || 0))}
                           </div>
                         </div>
