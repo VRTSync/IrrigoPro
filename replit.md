@@ -5,7 +5,7 @@ IrrigoPro is a comprehensive full-stack irrigation business management system. I
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
-App Branding: Updated to "IrrigoPro" with professional blue-teal color scheme matching the water droplet logo (hsl(187, 85%, 45%)).
+App Branding: Updated to "IrrigoPro" with professional blue color scheme and water droplet logo.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request).
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching.
 Business Rules: No markup on parts (bill at cost), no tax calculations on any charges. Labor hours are per-part, not multiplied by quantity. Monthly invoice consolidation combines all customer work into single QuickBooks invoices with tax-free totals. Estimates automatically create work orders when approved - manual work order creation is only for direct billing (non-estimate) work.
