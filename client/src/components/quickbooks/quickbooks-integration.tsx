@@ -33,11 +33,13 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     console.log("🔵 QuickBooks Integration component mounted");
     console.log("🔵 Component props:", { className });
     
-    // Test basic functionality
-    console.log("🔵 Testing basic fetch...");
-    fetch('/api/quickbooks/auth')
-      .then(res => console.log("🟢 Basic fetch test success:", res.status))
-      .catch(err => console.error("🔴 Basic fetch test failed:", err));
+    // Test basic functionality with XHR
+    console.log("🔵 Testing basic XHR...");
+    const testXhr = new XMLHttpRequest();
+    testXhr.open('GET', '/api/quickbooks/auth');
+    testXhr.onload = () => console.log("🟢 Basic XHR test success:", testXhr.status);
+    testXhr.onerror = (err) => console.error("🔴 Basic XHR test failed:", err);
+    testXhr.send();
   }, [className]);
 
   // Fetch QuickBooks connection status
