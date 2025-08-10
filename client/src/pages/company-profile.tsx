@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Building, Mail, Phone, Globe, MapPin } from "lucide-react";
 import type { Company, InsertCompany } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+import CompanySetup from "@/components/company/company-setup";
 
 const companyProfileSchema = z.object({
   name: z.string().min(1, "Company name is required"),
@@ -29,16 +30,36 @@ export default function CompanyProfile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
+  const [requiresSetup, setRequiresSetup] = useState(false);
 
   // Get current user info from session/localStorage
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const companyId = currentUser.companyId;
 
   // Fetch company profile
-  const { data: company, isLoading } = useQuery({
+  const { data: company, isLoading, error } = useQuery({
     queryKey: [`/api/company/${companyId}/profile`],
-    enabled: !!companyId
+    enabled: !!companyId,
+    retry: false,
   });
+
+  // Check if setup is required based on error response
+  useEffect(() => {
+    if (error && error.message.includes('404')) {
+      setRequiresSetup(true);
+    }
+  }, [error]);
+
+  // Handle setup completion
+  const handleSetupComplete = () => {
+    setRequiresSetup(false);
+    queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+  };
+
+  // If setup is required, show setup component
+  if (requiresSetup) {
+    return <CompanySetup companyId={companyId} onComplete={handleSetupComplete} />;
+  }
 
   // Set up form with current company data
   const form = useForm<CompanyProfileFormData>({

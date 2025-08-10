@@ -285,24 +285,23 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async createCompanyProfile(companyData: InsertCompany): Promise<Company> {
+    const result = await db
+      .insert(companies)
+      .values(companyData)
+      .returning();
+    return result[0];
+  }
+
+  async checkCompanyProfileExists(companyId: number): Promise<boolean> {
+    const result = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId));
+    return result.length > 0;
+  }
+
   // Initialize default users and company
   private async initializeUsers() {
     try {
-      // Check if companies already exist
-      const existingCompanies = await db.select().from(companies);
-      if (existingCompanies.length === 0) {
-        // Create default company
-        await db.insert(companies).values([
-          {
-            name: "Green Valley Irrigation",
-            address: "123 Main St, Springfield, ST 12345",
-            phone: "(555) 123-4567",
-            email: "contact@greenvalley.com",
-            subscription: "pro",
-            isActive: true,
-          },
-        ]);
-      }
+      // Note: Companies will be created through the setup flow when admins first log in
 
       // Check if users already exist
       const existingUsers = await db.select().from(users);
@@ -324,7 +323,7 @@ export class DatabaseStorage implements IStorage {
             name: "Randy Mangel",
             email: "randy@greenvalley.com",
             role: "company_admin",
-            companyId: 1, // Belongs to the company
+            companyId: 1, // Will be set up during onboarding
             isActive: true,
           },
           {

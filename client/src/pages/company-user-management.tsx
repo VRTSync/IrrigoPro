@@ -61,15 +61,50 @@ export default function CompanyUserManagement() {
   }, []);
 
   // Fetch company users
-  const { data: users = [], isLoading, refetch } = useQuery({
+  const { data: users = [], isLoading, error, refetch } = useQuery<User[]>({
     queryKey: [`/api/company/${currentUser?.companyId}/users`],
     enabled: !!currentUser?.companyId,
-    queryFn: async () => {
-      const response = await fetch(`/api/company/${currentUser?.companyId}/users`);
-      if (!response.ok) throw new Error("Failed to fetch users");
-      return response.json();
-    },
+    retry: false,
   });
+
+  // Check if company setup is required
+  const requiresSetup = error && (error as any).message?.includes('423');
+
+  // If setup is required, show message to complete setup first
+  if (requiresSetup) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <User className="h-5 w-5" />
+              User Management
+            </CardTitle>
+            <CardDescription>
+              Company profile setup required before managing users
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center py-8">
+              <div className="mb-4">
+                <User className="h-12 w-12 text-gray-400 mx-auto" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">Complete Company Setup First</h3>
+              <p className="text-gray-600 mb-4">
+                You need to set up your company profile before you can manage users.
+              </p>
+              <Button 
+                onClick={() => window.location.href = '/company-profile'}
+                className="min-w-[140px]"
+              >
+                Go to Company Setup
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const createForm = useForm<UserFormData>({
     resolver: zodResolver(userFormSchema),

@@ -116,11 +116,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const company = await storage.getCompanyProfile(companyId);
       if (!company) {
-        return res.status(404).json({ message: "Company not found" });
+        return res.status(404).json({ message: "Company profile not found", requiresSetup: true });
       }
       res.json(company);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch company profile" });
+    }
+  });
+
+  // Create company profile (for first-time setup)
+  app.post("/api/company/:companyId/profile", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const userRole = req.headers['x-user-role'];
+      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+
+      // Only company admins can create their own company profile
+      if (userRole !== 'company_admin' || userCompanyId !== companyId) {
+        return res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+      }
+
+      // Check if company profile already exists
+      const existingCompany = await storage.getCompanyProfile(companyId);
+      if (existingCompany) {
+        return res.status(409).json({ message: "Company profile already exists" });
+      }
+
+      const companyData = insertCompanySchema.parse({ ...req.body, id: companyId });
+      const company = await storage.createCompanyProfile(companyData);
+      res.status(201).json(company);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid company data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create company profile" });
+    }
+  });
+
+  // Check if company profile setup is required
+  app.get("/api/company/:companyId/setup-status", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const userRole = req.headers['x-user-role'];
+      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+
+      // Only company admins can check their own company setup status
+      if (userRole !== 'company_admin' || userCompanyId !== companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const exists = await storage.checkCompanyProfileExists(companyId);
+      res.json({ requiresSetup: !exists, companyId });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check setup status" });
     }
   });
 
@@ -145,6 +193,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to update company profile" });
     }
   });
+
+  // Middleware to check if company profile setup is complete
+  const requireCompanySetup = async (req: any, res: any, next: any) => {
+    try {
+      const userRole = req.headers['x-user-role'];
+      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+
+      if (userRole === 'company_admin' && userCompanyId) {
+        const companyExists = await storage.checkCompanyProfileExists(userCompanyId);
+        if (!companyExists) {
+          return res.status(423).json({ 
+            message: "Company profile setup required", 
+            requiresSetup: true,
+            companyId: userCompanyId 
+          });
+        }
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check company setup status" });
+    }
+  };
 
   app.get("/api/admin/system-stats", async (req, res) => {
     try {
@@ -233,7 +303,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company-scoped user management routes (for company admins)
-  app.get("/api/company/:companyId/users", async (req, res) => {
+  app.get("/api/company/:companyId/users", requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const users = await storage.getUsers(companyId);
@@ -245,7 +315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/company/:companyId/users", async (req, res) => {
+  app.post("/api/company/:companyId/users", requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userData = insertUserSchema.parse({
@@ -264,7 +334,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/company/:companyId/users/:userId", async (req, res) => {
+  app.put("/api/company/:companyId/users/:userId", requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
@@ -291,7 +361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/company/:companyId/users/:userId/deactivate", async (req, res) => {
+  app.post("/api/company/:companyId/users/:userId/deactivate", requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
