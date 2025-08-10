@@ -247,31 +247,19 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 <p className="text-blue-900 mb-3">
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
                 </p>
-                <Button 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    console.log("🔵 BUTTON CLICK EVENT FIRED");
-                    alert("Button clicked! Check console for detailed logs.");
-                    handleQuickBooksConnect();
+                <button 
+                  onClick={() => {
+                    alert("Direct button clicked!");
+                    console.log("🔵 DIRECT BUTTON CLICKED");
+                    window.location.href = "/api/quickbooks/auth";
                   }}
                   disabled={isConnecting}
-                  className="w-full"
+                  className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
                   data-testid="quickbooks-connect-btn"
                   type="button"
                 >
-                  {isConnecting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <ExternalLink className="w-4 h-4 mr-2" />
-                      Connect to QuickBooks
-                    </>
-                  )}
-                </Button>
+                  {isConnecting ? "Connecting..." : "Connect to QuickBooks"}
+                </button>
                 
                 {/* Debug button for testing */}
                 <button
