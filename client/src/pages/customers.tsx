@@ -8,6 +8,7 @@ import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "l
 import { useState, useEffect } from "react";
 import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
+import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";
 import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
@@ -383,8 +384,15 @@ export default function Customers() {
         </TabsContent>
 
         {userRole !== 'field_tech' && (
-          <TabsContent value="integrations">
-            <CustomerIntegration />
+          <TabsContent value="integrations" className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
+              <div>
+                <CustomerIntegration />
+              </div>
+              <div>
+                <QuickBooksIntegration />
+              </div>
+            </div>
           </TabsContent>
         )}
       </Tabs>
