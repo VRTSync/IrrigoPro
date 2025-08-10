@@ -387,11 +387,6 @@ export default function CustomerBilling() {
             )}
           </div>
 
-          {/* Mobile QuickBooks Integration */}
-          <div className="mb-4">
-            <QuickBooksIntegration />
-          </div>
-
           {/* Mobile Filter Controls - Collapsible */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -503,6 +498,11 @@ export default function CustomerBilling() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Mobile QuickBooks Integration - After filters */}
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <QuickBooksIntegration />
           </div>
 
           {/* Selected Customer Summary - Only show when customer is selected */}
