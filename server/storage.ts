@@ -298,15 +298,23 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
-  // Initialize default users and company
+  // Initialize fresh system with minimal data for onboarding demo
   private async initializeUsers() {
     try {
-      // Note: Companies will be created through the setup flow when admins first log in
-
       // Check if users already exist
       const existingUsers = await db.select().from(users);
       if (existingUsers.length === 0) {
-        // Create default users
+        // Create a placeholder company first for the demo user
+        const demoCompany = await db.insert(companies).values({
+          id: 99,
+          name: "Demo Company (Setup Required)",
+          subscription: "basic",
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }).returning();
+
+        // Create only essential users for fresh onboarding experience
         await db.insert(users).values([
           {
             username: "superadmin",
@@ -323,34 +331,7 @@ export class DatabaseStorage implements IStorage {
             name: "Randy Mangel",
             email: "randy@greenvalley.com",
             role: "company_admin",
-            companyId: 1, // Will be set up during onboarding
-            isActive: true,
-          },
-          {
-            username: "manager",
-            password: "manager123",
-            name: "Brian Krisher",
-            email: "manager@greenvalley.com",
-            role: "irrigation_manager",
-            companyId: 1,
-            isActive: true,
-          },
-          {
-            username: "tech",
-            password: "tech123",
-            name: "JoJo Durrill",
-            email: "tech@greenvalley.com",
-            role: "field_tech",
-            companyId: 1,
-            isActive: true,
-          },
-          {
-            username: "billing",
-            password: "billing123",
-            name: "Sarah Martinez",
-            email: "sarah@greenvalley.com",
-            role: "billing_manager",
-            companyId: 1,
+            companyId: 99, // Demo company that needs setup
             isActive: true,
           },
         ]);
