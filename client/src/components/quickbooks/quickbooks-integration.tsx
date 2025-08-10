@@ -70,9 +70,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     try {
       console.log("🔵 Fetching auth URL...");
       
-      const response = await fetch("/api/quickbooks/auth", {
-        credentials: "include"
-      });
+      const response = await fetch("/api/quickbooks/auth");
       
       console.log("🔵 Response status:", response.status);
       
