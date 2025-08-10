@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
+import { WorkOrderForm } from "@/components/work-orders/work-order-form";
 
 interface Estimate {
   id: number;
@@ -62,6 +63,17 @@ export default function Operations() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'estimates' | 'workorders' | 'billingsheets'>('all');
+  const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
+  
+  const queryClient = useQueryClient();
+  
+  // Get current user to check role
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+  
+  const currentUser = getCurrentUser();
   
   // State for detail modals
   const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
@@ -109,6 +121,23 @@ export default function Operations() {
   const handleCreateEstimate = () => {
     setCreateModalOpen(false);
     setEstimateModalOpen(true);
+  };
+
+  const handleCreateWorkOrder = () => {
+    setCreateModalOpen(false);
+    // For company admin users, open inline form instead of redirecting
+    if (currentUser?.role === 'company_admin') {
+      setShowWorkOrderForm(true);
+    }
+  };
+
+  const handleWorkOrderFormClose = () => {
+    setShowWorkOrderForm(false);
+  };
+
+  const handleWorkOrderFormSuccess = () => {
+    setShowWorkOrderForm(false);
+    queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
   };
 
 
@@ -175,16 +204,27 @@ export default function Operations() {
                 <FileText className="h-6 w-6" />
                 <span>Create Estimate</span>
               </Button>
-              <Link href="/work-orders?create=true">
+              {currentUser?.role === 'company_admin' ? (
                 <Button
                   className="w-full h-16 flex flex-col items-center justify-center space-y-2"
                   variant="outline"
-                  onClick={() => setCreateModalOpen(false)}
+                  onClick={handleCreateWorkOrder}
                 >
                   <Wrench className="h-6 w-6" />
                   <span>Create Work Order</span>
                 </Button>
-              </Link>
+              ) : (
+                <Link href="/work-orders?create=true">
+                  <Button
+                    className="w-full h-16 flex flex-col items-center justify-center space-y-2"
+                    variant="outline"
+                    onClick={() => setCreateModalOpen(false)}
+                  >
+                    <Wrench className="h-6 w-6" />
+                    <span>Create Work Order</span>
+                  </Button>
+                </Link>
+              )}
               <Link href="/billing-sheets?create=true">
                 <Button
                   className="w-full h-16 flex flex-col items-center justify-center space-y-2"
@@ -805,6 +845,18 @@ export default function Operations() {
                 Close
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Work Order Form for Company Admin Users */}
+      {showWorkOrderForm && (
+        <Dialog open={showWorkOrderForm} onOpenChange={setShowWorkOrderForm}>
+          <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto">
+            <WorkOrderForm 
+              onClose={handleWorkOrderFormClose}
+              onSuccess={handleWorkOrderFormSuccess}
+            />
           </DialogContent>
         </Dialog>
       )}
