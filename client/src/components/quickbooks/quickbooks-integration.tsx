@@ -40,6 +40,13 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     testXhr.onload = () => console.log("🟢 Basic XHR test success:", testXhr.status);
     testXhr.onerror = (err) => console.error("🔴 Basic XHR test failed:", err);
     testXhr.send();
+    
+    // Also test if the component is actually rendering by checking DOM
+    console.log("🔵 Checking if button exists in DOM...");
+    setTimeout(() => {
+      const button = document.querySelector('[data-testid="quickbooks-connect-btn"]');
+      console.log("🔵 QuickBooks button found:", !!button);
+    }, 1000);
   }, [className]);
 
   // Fetch QuickBooks connection status
@@ -217,6 +224,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   onClick={handleQuickBooksConnect}
                   disabled={isConnecting}
                   className="w-full"
+                  data-testid="quickbooks-connect-btn"
                 >
                   {isConnecting ? (
                     <>
