@@ -254,6 +254,39 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 >
                   DEBUG: Test Connection
                 </button>
+                
+                {/* Advanced Debug button */}
+                <button
+                  onClick={() => {
+                    // Load and run the debug script
+                    const script = document.createElement('script');
+                    script.src = '/quickbooks-temp-fix.js';
+                    document.head.appendChild(script);
+                  }}
+                  className="mt-2 ml-2 px-4 py-2 bg-purple-500 text-white text-sm rounded"
+                >
+                  Advanced Debug
+                </button>
+                
+                {/* Manual redirect URI info */}
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                  <p className="font-medium text-yellow-800">Configuration Required:</p>
+                  <p className="text-yellow-700 mt-1">Add this redirect URI to your QuickBooks app:</p>
+                  <code className="block mt-1 p-2 bg-yellow-100 text-xs break-all">
+                    {`${window.location.protocol}//${window.location.host}/api/quickbooks/callback`}
+                  </code>
+                  <button
+                    onClick={() => {
+                      const uri = `${window.location.protocol}//${window.location.host}/api/quickbooks/callback`;
+                      navigator.clipboard.writeText(uri).then(() => {
+                        toast({ title: "Copied!", description: "Redirect URI copied to clipboard" });
+                      });
+                    }}
+                    className="mt-2 px-3 py-1 bg-yellow-600 text-white text-xs rounded"
+                  >
+                    Copy URI
+                  </button>
+                </div>
               </div>
             )}
           </div>
