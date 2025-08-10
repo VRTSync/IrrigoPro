@@ -56,73 +56,50 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   });
 
   // Simple and direct QuickBooks connection handler
-  const handleQuickBooksConnect = () => {
-    console.log("🔵 ==========================================================");
-    console.log("🔵 BUTTON CLICKED - QuickBooks connection started");
-    console.log("🔵 Current isConnecting state:", isConnecting);
-    console.log("🔵 ==========================================================");
+  const handleQuickBooksConnect = async () => {
+    console.log("QuickBooks button clicked - starting connection");
     
     // Prevent double clicks
     if (isConnecting) {
-      console.log("🔵 Already connecting, ignoring click");
+      console.log("Already connecting, ignoring click");
       return;
     }
     
     setIsConnecting(true);
     
-    console.log("🔵 Creating XHR request...");
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', '/api/quickbooks/auth');
-    
-    xhr.onreadystatechange = function() {
-      console.log("🔵 XHR State changed:", xhr.readyState, xhr.status);
+    try {
+      const response = await fetch('/api/quickbooks/auth');
+      console.log("QuickBooks auth response:", response.status);
       
-      if (xhr.readyState === 4) {
-        if (xhr.status === 200) {
-          try {
-            const data = JSON.parse(xhr.responseText);
-            console.log("🟢 Success! Auth data:", data);
-            
-            if (data?.authUrl) {
-              console.log("🟢 Redirecting to:", data.authUrl);
-              // Direct redirect without delay
-              window.location.href = data.authUrl;
-            } else {
-              throw new Error("No authUrl in response");
-            }
-          } catch (error) {
-            console.error("🔴 Parse error:", error);
-            setIsConnecting(false);
-            toast({
-              title: "Error",
-              description: "Failed to parse server response",
-              variant: "destructive"
-            });
-          }
+      if (response.ok) {
+        const data = await response.json();
+        console.log("QuickBooks auth success:", data);
+        
+        if (data?.authUrl) {
+          // Open QuickBooks auth in a new window
+          window.open(data.authUrl, 'quickbooks-auth', 'width=600,height=700');
         } else {
-          console.error("🔴 HTTP error:", xhr.status, xhr.responseText);
-          setIsConnecting(false);
-          toast({
-            title: "Connection Failed", 
-            description: `HTTP ${xhr.status}: ${xhr.statusText}`,
-            variant: "destructive"
-          });
+          throw new Error("No authUrl in response");
         }
+      } else {
+        const errorData = await response.text();
+        console.error("QuickBooks auth error:", response.status, errorData);
+        toast({
+          title: "Connection Failed",
+          description: "Failed to initiate QuickBooks connection",
+          variant: "destructive"
+        });
       }
-    };
-    
-    xhr.onerror = function() {
-      console.error("🔴 Network error occurred");
-      setIsConnecting(false);
+    } catch (error) {
+      console.error("QuickBooks connection error:", error);
       toast({
-        title: "Network Error",
-        description: "Could not connect to server",
+        title: "Error",
+        description: "Failed to connect to QuickBooks",
         variant: "destructive"
       });
-    };
-    
-    console.log("🔵 Sending XHR request...");
-    xhr.send();
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   // Sync estimate to QuickBooks
