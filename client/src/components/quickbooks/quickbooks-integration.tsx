@@ -32,13 +32,10 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   console.log("🔵 QUICKBOOKS COMPONENT RENDER - isConnecting:", isConnecting);
   console.log("🔵 Component mounted in customer billing page");
   
-  // Also try alert for debugging
+  // Component loaded successfully
   React.useEffect(() => {
     console.log("🔵 QuickBooks component useEffect fired");
-    // Temporarily add an alert to confirm component is loading
-    setTimeout(() => {
-      alert("QuickBooks Integration component loaded successfully!");
-    }, 2000);
+    console.log("🔵 QuickBooks Integration component loaded successfully!");
   }, []);
   
   // Component mount logging
@@ -249,9 +246,30 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 </p>
                 <button 
                   onClick={() => {
-                    alert("Direct button clicked!");
-                    console.log("🔵 DIRECT BUTTON CLICKED");
-                    window.location.href = "/api/quickbooks/auth";
+                    console.log("QuickBooks button clicked - starting connection");
+                    setIsConnecting(true);
+                    
+                    fetch('/api/quickbooks/auth')
+                      .then(response => {
+                        console.log('QuickBooks auth response:', response.status);
+                        if (!response.ok) {
+                          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.json();
+                      })
+                      .then(data => {
+                        console.log('QuickBooks auth success:', data);
+                        window.location.href = data.authUrl;
+                      })
+                      .catch(error => {
+                        console.error('QuickBooks connection failed:', error);
+                        toast({
+                          title: "Connection Failed",
+                          description: "Unable to connect to QuickBooks. Please try again.",
+                          variant: "destructive"
+                        });
+                        setIsConnecting(false);
+                      });
                   }}
                   disabled={isConnecting}
                   className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
