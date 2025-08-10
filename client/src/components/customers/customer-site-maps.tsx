@@ -109,7 +109,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
         zonesByController: {}
       };
       setSelectedProject(projectFromSiteMap);
-      setActiveTab("viewer");
+      setActiveTab("maps");
     }
   }, [siteMaps]);
 
