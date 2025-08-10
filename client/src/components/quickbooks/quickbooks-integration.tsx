@@ -29,13 +29,19 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const { toast } = useToast();
 
   // Fetch QuickBooks connection status
-  const { data: connectionStatus, isLoading: loadingConnection } = useQuery({
+  const { data: connectionStatus, isLoading: loadingConnection } = useQuery<{
+    companyId: string | null;
+    companyName: string | null;
+    isConnected: boolean;
+    lastSync: string | null;
+    error?: string;
+  }>({
     queryKey: ["/api/quickbooks/connection"],
     enabled: true,
   });
 
   // Fetch estimates for sync status
-  const { data: estimates = [] } = useQuery({
+  const { data: estimates = [] } = useQuery<any[]>({
     queryKey: ["/api/estimates"],
     enabled: true,
   });
@@ -43,40 +49,64 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   // Connect to QuickBooks
   const connectMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("GET", "/api/quickbooks/auth", {});
-      const data = await response.json();
-      
-      if (!data.authUrl) {
-        throw new Error("No authorization URL received");
-      }
-      
-      // Open QuickBooks OAuth flow in a new window
-      const popup = window.open(
-        data.authUrl, 
-        "quickbooks-oauth", 
-        "width=600,height=700,scrollbars=yes,resizable=yes"
-      );
-      
-      if (!popup) {
-        throw new Error("Popup blocked. Please allow popups for this site.");
-      }
-      
-      setIsConnecting(true);
-      
-      // Listen for the popup to close (indicating OAuth completion)
-      const checkClosed = setInterval(() => {
-        if (popup.closed) {
-          clearInterval(checkClosed);
-          setIsConnecting(false);
-          
-          // Check connection status after popup closes
-          setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
-          }, 1000);
+      try {
+        const response = await apiRequest("GET", "/api/quickbooks/auth", {});
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Failed to get authorization URL");
         }
-      }, 1000);
-      
-      return { success: true };
+        
+        const data = await response.json();
+        
+        if (!data.authUrl) {
+          throw new Error("No authorization URL received");
+        }
+        
+        // Try to open QuickBooks OAuth flow in a new window
+        console.log("Opening QuickBooks OAuth URL:", data.authUrl);
+        
+        const popup = window.open(
+          data.authUrl, 
+          "quickbooks-oauth", 
+          "width=600,height=700,scrollbars=yes,resizable=yes"
+        );
+        
+        if (!popup || popup.closed) {
+          // Fallback: open in same window if popup is blocked
+          toast({
+            title: "Popup Blocked",
+            description: "Opening QuickBooks authorization in the same window...",
+            variant: "default"
+          });
+          window.location.href = data.authUrl;
+          return { success: true };
+        }
+        
+        setIsConnecting(true);
+        
+        // Listen for the popup to close (indicating OAuth completion)
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkClosed);
+            setIsConnecting(false);
+            
+            // Check connection status after popup closes
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
+              toast({
+                title: "QuickBooks Integration",
+                description: "Please check if the connection was successful."
+              });
+            }, 1000);
+          }
+        }, 1000);
+        
+        return { success: true };
+      } catch (fetchError) {
+        setIsConnecting(false);
+        throw fetchError;
+      }
     },
     onError: (error: any) => {
       setIsConnecting(false);
