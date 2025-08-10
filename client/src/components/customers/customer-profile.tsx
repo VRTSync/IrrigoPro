@@ -228,64 +228,30 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
           <PropertyNotes customer={customer} />
         </div>
 
-        {/* Tabs for different data */}
-        <Tabs defaultValue="estimates" className="w-full">
-          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3 bg-white shadow-sm border border-gray-200 p-1 rounded-xl gap-1 sm:gap-0 mb-8">
-            <TabsTrigger 
-              value="estimates" 
-              className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
-            >
-              <FileText className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="font-medium">Estimates</span>
-              <div className="bg-blue-100 text-blue-800 data-[state=active]:bg-blue-400 data-[state=active]:text-white px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-bold">
-                {estimates.length}
-              </div>
-            </TabsTrigger>
-            <TabsTrigger 
-              value="work-orders" 
-              className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
-            >
-              <Wrench className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="font-medium">Work Orders</span>
-              <div className="bg-green-100 text-green-800 data-[state=active]:bg-green-400 data-[state=active]:text-white px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-bold">
-                {workOrders.length}
-              </div>
-            </TabsTrigger>
-            <TabsTrigger 
-              value="billing-sheets" 
-              className="flex items-center justify-center gap-1 sm:gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md rounded-lg transition-all duration-200 text-xs sm:text-sm py-2"
-            >
-              <Receipt className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="font-medium">Billing Sheets</span>
-              <div className="bg-orange-100 text-orange-800 data-[state=active]:bg-orange-400 data-[state=active]:text-white px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-bold">
-                {billingSheets.length}
-              </div>
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="estimates" className="space-y-4 mt-16">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
-              <h2 className="text-lg font-semibold">Customer Estimates</h2>
-              <div className="text-sm text-gray-600">
-                Total Value: <span className="font-semibold text-green-600">{formatCurrency(totalEstimateValue)}</span>
-              </div>
+        {/* Estimates Section */}
+        <div className="mb-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
+            <h2 className="text-lg font-semibold">Customer Estimates</h2>
+            <div className="text-sm text-gray-600">
+              Total Value: <span className="font-semibold text-green-600">{formatCurrency(totalEstimateValue)}</span>
             </div>
-            
-            {estimates.length === 0 ? (
-              <Card className="border-2 border-dashed border-gray-200">
-                <CardContent className="flex items-center justify-center py-16">
-                  <div className="text-center">
-                    <div className="bg-blue-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                      <FileText className="w-10 h-10 text-blue-500" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No Estimates Yet</h3>
-                    <p className="text-gray-600">This customer doesn't have any estimates created</p>
+          </div>
+          
+          {estimates.length === 0 ? (
+            <Card className="border-2 border-dashed border-gray-200">
+              <CardContent className="flex items-center justify-center py-16">
+                <div className="text-center">
+                  <div className="bg-blue-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+                    <FileText className="w-10 h-10 text-blue-500" />
                   </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {estimates.map((estimate) => (
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Estimates Yet</h3>
+                  <p className="text-gray-600">This customer doesn't have any estimates created</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4">
+              {estimates.map((estimate) => (
                   <Card key={estimate.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600 bg-gradient-to-r from-blue-50/30 to-transparent" 
                         onClick={() => {
                           setSelectedEstimateId(estimate.id);
@@ -324,28 +290,29 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 ))}
               </div>
             )}
-          </TabsContent>
+        </div>
 
-          <TabsContent value="work-orders" className="space-y-4 mt-16">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
-              <h2 className="text-lg font-semibold">Customer Work Orders</h2>
-            </div>
-            
-            {workOrders.length === 0 ? (
-              <Card className="border-2 border-dashed border-gray-200">
-                <CardContent className="flex items-center justify-center py-16">
-                  <div className="text-center">
-                    <div className="bg-green-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                      <Wrench className="w-10 h-10 text-green-500" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No Work Orders</h3>
-                    <p className="text-gray-600">This customer doesn't have any work orders yet</p>
+        {/* Work Orders Section */}
+        <div className="mb-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
+            <h2 className="text-lg font-semibold">Customer Work Orders</h2>
+          </div>
+          
+          {workOrders.length === 0 ? (
+            <Card className="border-2 border-dashed border-gray-200">
+              <CardContent className="flex items-center justify-center py-16">
+                <div className="text-center">
+                  <div className="bg-green-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+                    <Wrench className="w-10 h-10 text-green-500" />
                   </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {workOrders.map((workOrder) => (
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Work Orders</h3>
+                  <p className="text-gray-600">This customer doesn't have any work orders yet</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4">
+              {workOrders.map((workOrder) => (
                   <Card key={workOrder.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600 bg-gradient-to-r from-green-50/30 to-transparent"
                         onClick={() => {
                           setSelectedWorkOrder(workOrder);
@@ -386,31 +353,32 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 ))}
               </div>
             )}
-          </TabsContent>
+        </div>
 
-          <TabsContent value="billing-sheets" className="space-y-4 mt-16">
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
-              <h2 className="text-lg font-semibold">Customer Billing Sheets</h2>
-              <div className="text-sm text-gray-600">
-                Total Value: <span className="font-semibold text-green-600">{formatCurrency(totalBillingValue)}</span>
-              </div>
+        {/* Billing Sheets Section */}
+        <div className="mb-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
+            <h2 className="text-lg font-semibold">Customer Billing Sheets</h2>
+            <div className="text-sm text-gray-600">
+              Total Value: <span className="font-semibold text-green-600">{formatCurrency(totalBillingValue)}</span>
             </div>
-            
-            {billingSheets.length === 0 ? (
-              <Card className="border-2 border-dashed border-gray-200">
-                <CardContent className="flex items-center justify-center py-16">
-                  <div className="text-center">
-                    <div className="bg-orange-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                      <Receipt className="w-10 h-10 text-orange-500" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No Billing Sheets</h3>
-                    <p className="text-gray-600">This customer doesn't have any billing sheets created</p>
+          </div>
+          
+          {billingSheets.length === 0 ? (
+            <Card className="border-2 border-dashed border-gray-200">
+              <CardContent className="flex items-center justify-center py-16">
+                <div className="text-center">
+                  <div className="bg-orange-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+                    <Receipt className="w-10 h-10 text-orange-500" />
                   </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {billingSheets.map((billingSheet) => (
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Billing Sheets</h3>
+                  <p className="text-gray-600">This customer doesn't have any billing sheets created</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4">
+              {billingSheets.map((billingSheet) => (
                   <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent">
                     <CardContent className="p-4 sm:p-6">
                       <div className="space-y-4">
@@ -454,8 +422,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 ))}
               </div>
             )}
-          </TabsContent>
-        </Tabs>
+        </div>
       </div>
 
       {/* Modals */}
