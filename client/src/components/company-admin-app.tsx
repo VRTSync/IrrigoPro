@@ -14,6 +14,7 @@ import CustomerBilling from "@/pages/customer-billing";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import { UserSelector } from "@/components/user-selector";
+import UserProfile from "@/pages/user-profile";
 import Login from "@/pages/login";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
@@ -110,6 +111,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/customer-billing" component={CustomerBilling} />
           <Route path="/field-tech" component={FieldTech} />
           <Route path="/billing-sheets" component={BillingSheets} />
+          <Route path="/user-profile" component={UserProfile} />
           <Route path="/user-selector" component={() => <UserSelector onUserSelect={() => {}} currentUser={user} />} />
           <Route path="/login" component={Login} />
           <Route path="/field-portal" component={FieldPortal} />

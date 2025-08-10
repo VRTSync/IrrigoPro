@@ -200,6 +200,12 @@ export default function Navigation() {
                     <p className="text-xs text-muted-foreground">{user.email}</p>
                   </div>
                   <DropdownMenuSeparator />
+                  <Link href="/user-profile">
+                    <DropdownMenuItem>
+                      <User className="mr-2 h-4 w-4" />
+                      My Account
+                    </DropdownMenuItem>
+                  </Link>
                   <Link href="/user-selector">
                     <DropdownMenuItem>
                       <User className="mr-2 h-4 w-4" />
@@ -256,6 +262,12 @@ export default function Navigation() {
                     <p className="text-xs text-muted-foreground">{user.email}</p>
                   </div>
                   <DropdownMenuSeparator />
+                  <Link href="/user-profile">
+                    <DropdownMenuItem>
+                      <User className="mr-2 h-4 w-4" />
+                      My Account
+                    </DropdownMenuItem>
+                  </Link>
                   <Link href="/user-selector">
                     <DropdownMenuItem>
                       <User className="mr-2 h-4 w-4" />
