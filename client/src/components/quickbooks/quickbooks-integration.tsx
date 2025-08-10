@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,15 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   // Force console logging on every render
   console.log("🔵 QUICKBOOKS COMPONENT RENDER - isConnecting:", isConnecting);
   console.log("🔵 Component mounted in customer billing page");
+  
+  // Also try alert for debugging
+  React.useEffect(() => {
+    console.log("🔵 QuickBooks component useEffect fired");
+    // Temporarily add an alert to confirm component is loading
+    setTimeout(() => {
+      alert("QuickBooks Integration component loaded successfully!");
+    }, 1000);
+  }, []);
   
   // Component mount logging
   useEffect(() => {
@@ -243,6 +252,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                     e.preventDefault();
                     e.stopPropagation();
                     console.log("🔵 BUTTON CLICK EVENT FIRED");
+                    alert("Button clicked! Check console for detailed logs.");
                     handleQuickBooksConnect();
                   }}
                   disabled={isConnecting}

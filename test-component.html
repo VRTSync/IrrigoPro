@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Component Test</title>
+</head>
+<body>
+    <h1>Direct Component Test</h1>
+    <p>Testing if QuickBooks button exists on customer billing page:</p>
+    
+    <script>
+        // Wait for page to load then test
+        setTimeout(() => {
+            // Look for the QuickBooks button
+            const qbButton = document.querySelector('[data-testid="quickbooks-connect-btn"]');
+            const allButtons = document.querySelectorAll('button');
+            
+            console.log('QuickBooks button found:', !!qbButton);
+            console.log('Total buttons on page:', allButtons.length);
+            console.log('All button text content:', Array.from(allButtons).map(b => b.textContent?.trim()));
+            
+            if (qbButton) {
+                console.log('QuickBooks button text:', qbButton.textContent);
+                console.log('QuickBooks button disabled:', qbButton.disabled);
+                
+                // Try to click it
+                console.log('Attempting to click QuickBooks button...');
+                qbButton.click();
+            } else {
+                console.log('QuickBooks button NOT found on page');
+            }
+        }, 3000); // Wait 3 seconds for page to fully load
+    </script>
+</body>
+</html>
