@@ -62,49 +62,65 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     throwOnError: false
   });
 
-  // Simple QuickBooks connection handler
-  const handleQuickBooksConnect = async () => {
+  // QuickBooks connection handler using XMLHttpRequest to avoid fetch issues
+  const handleQuickBooksConnect = () => {
     console.log("🔵 QuickBooks connection started");
     setIsConnecting(true);
     
-    try {
-      console.log("🔵 Fetching auth URL...");
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/quickbooks/auth');
+    
+    xhr.onload = function() {
+      console.log("🔵 XHR Response status:", xhr.status);
       
-      const response = await fetch("/api/quickbooks/auth");
-      
-      console.log("🔵 Response status:", response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Server error: ${response.status} ${errorText}`);
+      if (xhr.status === 200) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          console.log("🟢 Auth data received:", data);
+          
+          if (data?.authUrl) {
+            toast({
+              title: "Redirecting to QuickBooks",
+              description: "Opening QuickBooks authorization...",
+              variant: "default"
+            });
+            
+            console.log("🟢 Redirecting to QuickBooks...");
+            window.location.href = data.authUrl;
+          } else {
+            throw new Error("No authorization URL received");
+          }
+        } catch (parseError) {
+          console.error("🔴 JSON parse error:", parseError);
+          setIsConnecting(false);
+          toast({
+            title: "Connection Failed",
+            description: "Invalid response from server",
+            variant: "destructive"
+          });
+        }
+      } else {
+        console.error("🔴 XHR error:", xhr.status, xhr.statusText);
+        setIsConnecting(false);
+        toast({
+          title: "Connection Failed",
+          description: `Server error: ${xhr.status} ${xhr.statusText}`,
+          variant: "destructive"
+        });
       }
-      
-      const data = await response.json();
-      console.log("🟢 Auth data received:", data);
-      
-      if (!data?.authUrl) {
-        throw new Error("No authorization URL received");
-      }
-      
-      toast({
-        title: "Redirecting to QuickBooks",
-        description: "Opening QuickBooks authorization...",
-        variant: "default"
-      });
-      
-      console.log("🟢 Redirecting to QuickBooks...");
-      // Direct redirect - immediate and reliable
-      window.location.href = data.authUrl;
-      
-    } catch (error) {
-      console.error("🔴 Connection error:", error);
+    };
+    
+    xhr.onerror = function() {
+      console.error("🔴 XHR network error");
       setIsConnecting(false);
       toast({
         title: "Connection Failed",
-        description: error instanceof Error ? error.message : "Unable to connect to QuickBooks",
+        description: "Network error occurred",
         variant: "destructive"
       });
-    }
+    };
+    
+    xhr.send();
   };
 
   // Sync estimate to QuickBooks
