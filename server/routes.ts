@@ -82,6 +82,14 @@ const requireViewAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
+import { db } from "./db";
+import { 
+  customers, estimates, workOrders, estimateItems, estimateZones, parts, billingSheets, billingSheetItems, 
+  users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
+  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones
+} from "@shared/schema";
+import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Company routes
   app.get("/api/companies", async (req, res) => {
@@ -318,6 +326,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "User deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
+
+  // Dashboard statistics endpoint
+  app.get("/api/dashboard/stats", async (req, res) => {
+    try {
+      console.log("Fetching dashboard statistics...");
+      
+      // Use storage methods instead of direct DB queries
+      const allUsers = await storage.getUsers();
+      const activeUsers = allUsers.filter(user => user.isActive).length;
+      console.log("Active users:", activeUsers);
+      
+      const allWorkOrders = await storage.getWorkOrders();
+      const openWorkOrders = allWorkOrders.filter(wo => wo.status === "assigned").length;
+      console.log("Open work orders:", openWorkOrders);
+      
+      const allCustomers = await storage.getCustomers();
+      const activeCustomers = allCustomers.length;
+      console.log("Active customers:", activeCustomers);
+
+      const stats = {
+        activeUsers,
+        openWorkOrders, 
+        activeCustomers
+      };
+      
+      console.log("Final stats:", stats);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching dashboard stats:", error);
+      res.status(500).json({ message: "Failed to fetch dashboard statistics", error: error.message });
     }
   });
 

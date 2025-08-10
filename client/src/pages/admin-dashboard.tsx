@@ -2,9 +2,38 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Shield, FileText, UserCheck } from "lucide-react";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+interface User {
+  id: number;
+  companyId?: number;
+  name: string;
+  role: string;
+}
+
+interface DashboardStats {
+  activeUsers: number;
+  openWorkOrders: number;
+  activeCustomers: number;
+}
 
 export default function AdminDashboard() {
-  // Simplified admin dashboard - user management moved to Users page (updated)
+  // Get user from localStorage (consistent with other components)
+  const [user, setUser] = useState<User | null>(null);
+  
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+  }, []);
+  
+  // Fetch real dashboard statistics
+  const { data: stats, isLoading } = useQuery<DashboardStats>({
+    queryKey: ["/api/dashboard/stats"],
+    enabled: !!user?.companyId,
+  });
+
   return (
     <div className="max-w-7xl mx-auto pt-4 pb-6">
       {/* Header */}
@@ -48,19 +77,25 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600">4</div>
+            <div className="text-2xl font-bold text-blue-600">
+              {isLoading ? "..." : (stats?.activeUsers || 0)}
+            </div>
             <div className="text-sm text-gray-600">Active Users</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">12</div>
+            <div className="text-2xl font-bold text-green-600">
+              {isLoading ? "..." : (stats?.openWorkOrders || 0)}
+            </div>
             <div className="text-sm text-gray-600">Open Work Orders</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-purple-600">8</div>
+            <div className="text-2xl font-bold text-purple-600">
+              {isLoading ? "..." : (stats?.activeCustomers || 0)}
+            </div>
             <div className="text-sm text-gray-600">Active Customers</div>
           </CardContent>
         </Card>
