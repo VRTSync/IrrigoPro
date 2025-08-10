@@ -35,6 +35,26 @@ export default function Customers() {
     queryKey: ["/api/customers"],
   });
 
+  // Check for auto-selection from site maps page
+  useEffect(() => {
+    const selectedCustomerId = localStorage.getItem('selectedCustomerId');
+    const shouldShowSiteMaps = localStorage.getItem('showSiteMaps') === 'true';
+    
+    if (selectedCustomerId && customers) {
+      const customer = customers.find(c => c.id.toString() === selectedCustomerId);
+      if (customer) {
+        if (shouldShowSiteMaps) {
+          setShowSiteMaps(customer);
+        } else {
+          setSelectedCustomer(customer);
+        }
+        // Clear the stored values after using them
+        localStorage.removeItem('selectedCustomerId');
+        localStorage.removeItem('showSiteMaps');
+      }
+    }
+  }, [customers]);
+
   const filteredCustomers = customers?.filter(customer =>
     customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||

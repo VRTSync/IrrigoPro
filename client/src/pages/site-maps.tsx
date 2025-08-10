@@ -146,14 +146,36 @@ export default function SiteMaps() {
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-2">
-                  <Link href={`/customers/${siteMap.customerId}`}>
-                    <Button variant="outline" size="sm" className="flex-1">
+                  <Link href="/customers">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={() => {
+                        // Store the customer to auto-select when navigating to customers page
+                        if (siteMap.customerId) {
+                          localStorage.setItem('selectedCustomerId', siteMap.customerId.toString());
+                          localStorage.setItem('showSiteMaps', 'true');
+                        }
+                      }}
+                    >
                       <Eye className="h-4 w-4 mr-1" />
                       View Map
                     </Button>
                   </Link>
-                  <Link href={`/customers/${siteMap.customerId}`}>
-                    <Button variant="outline" size="sm" className="flex-1">
+                  <Link href="/customers">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={() => {
+                        // Store the customer to auto-select when navigating to customers page
+                        if (siteMap.customerId) {
+                          localStorage.setItem('selectedCustomerId', siteMap.customerId.toString());
+                          localStorage.setItem('showSiteMaps', 'false');
+                        }
+                      }}
+                    >
                       <Users className="h-4 w-4 mr-1" />
                       Customer
                     </Button>
