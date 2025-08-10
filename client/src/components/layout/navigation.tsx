@@ -35,9 +35,17 @@ export default function Navigation() {
           { path: "/operations", label: "Operations", icon: FileText },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
-          { path: "/users", label: "Users", icon: Users },
-          { path: "/company-profile", label: "Company", icon: Settings },
+          { path: "/site-maps", label: "Maps", icon: MapIcon },
+          { 
+            path: "/admin", 
+            label: "Admin", 
+            icon: Settings, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/users", label: "Team", icon: Users },
+              { path: "/company-profile", label: "Company", icon: Settings },
+            ]
+          },
         ];
       case "irrigation_manager":
         return [
