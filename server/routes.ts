@@ -2149,13 +2149,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
       
-      // Simulate connection status - in reality you'd check stored tokens
-      res.json({ 
-        companyId: "demo-company-123",
-        companyName: "IrrigoPro Demo Company",
-        isConnected: false, // Set to true when actually connected
-        lastSync: null
-      });
+      // Check if we have valid QuickBooks tokens in session
+      const qbAuth = req.session?.quickbooks;
+      if (qbAuth?.companyId && qbAuth?.accessToken) {
+        res.json({
+          isConnected: true,
+          companyId: qbAuth.companyId,
+          companyName: qbAuth.companyName || `QuickBooks Company ${qbAuth.companyId}`,
+          lastSync: qbAuth.lastSync || new Date().toISOString()
+        });
+      } else {
+        res.json({
+          isConnected: false,
+          companyId: null,
+          companyName: null,
+          lastSync: null
+        });
+      }
     } catch (error) {
       console.error("QuickBooks connection check error:", error);
       res.status(500).json({ message: "Failed to get QuickBooks connection status" });
