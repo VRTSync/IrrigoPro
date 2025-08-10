@@ -263,7 +263,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="estimates" className="space-y-4">
+          <TabsContent value="estimates" className="space-y-4 mt-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Estimates</h2>
               <div className="text-sm text-gray-600">
@@ -326,7 +326,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             )}
           </TabsContent>
 
-          <TabsContent value="work-orders" className="space-y-4">
+          <TabsContent value="work-orders" className="space-y-4 mt-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Work Orders</h2>
             </div>
@@ -388,7 +388,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
             )}
           </TabsContent>
 
-          <TabsContent value="billing-sheets" className="space-y-4">
+          <TabsContent value="billing-sheets" className="space-y-4 mt-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-0">
               <h2 className="text-lg font-semibold">Customer Billing Sheets</h2>
               <div className="text-sm text-gray-600">
