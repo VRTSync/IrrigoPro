@@ -279,10 +279,10 @@ export default function Navigation() {
         </div>
 
         {/* Bottom Navigation Bar */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-          <div className="relative py-2 px-2">
+        <div className="fixed bottom-0 left-0 right-0 mobile-nav-gradient border-t border-gray-100/50 shadow-xl z-50 pb-safe">
+          <div className="relative py-3 px-4 pb-4">
             {/* 5-Column Grid Layout with Dashboard in center */}
-            <div className="grid grid-cols-5 gap-1 items-center">
+            <div className="grid grid-cols-5 gap-2 items-center max-w-sm mx-auto">
               {(() => {
                 // Create 5 slots with dashboard always in position 3 (center)
                 const slots = Array(5).fill(null);
@@ -337,8 +337,8 @@ export default function Navigation() {
                 
                 return slots.map((item, slotIndex) => {
                   if (!item) {
-                    // Empty slot
-                    return <div key={`empty-${slotIndex}`} className="flex justify-center"></div>;
+                    // Empty slot with minimal spacing
+                    return <div key={`empty-${slotIndex}`} className="flex justify-center h-14"></div>;
                   }
                   
                   const Icon = item.icon;
@@ -350,17 +350,22 @@ export default function Navigation() {
                       <div key={item.path} className="flex justify-center">
                         <Link href={item.path}>
                           <div className="relative">
-                            {/* Enhanced Dashboard Button with Gradient and Glow */}
+                            {/* Enhanced Dashboard Button with Modern Design */}
                             <div className={`
-                              flex flex-col items-center justify-center w-16 h-16 rounded-full -mt-8
+                              flex flex-col items-center justify-center w-16 h-16 rounded-2xl -mt-6
                               bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 
-                              text-white shadow-lg border-4 border-white
-                              transform transition-transform duration-150 ease-out
-                              hover:scale-105 active:scale-95
-                              ${active ? 'shadow-xl scale-105' : 'shadow-lg'}
+                              text-white shadow-2xl border-3 border-white
+                              transform transition-all duration-200 ease-out
+                              hover:scale-110 active:scale-95 hover:shadow-2xl
+                              ${active 
+                                ? 'shadow-2xl scale-105 ring-4 ring-blue-100' 
+                                : 'shadow-lg hover:shadow-blue-500/30'
+                              }
                             `}>
-                              <Icon className="h-6 w-6" />
-                              <span className="text-xs font-bold mt-0.5 leading-none">Home</span>
+                              <Icon className="h-6 w-6 mb-0.5" />
+                              <span className="text-xs font-bold leading-none tracking-wide">Home</span>
+                              {/* Subtle glow effect */}
+                              <div className="absolute inset-0 bg-gradient-to-br from-blue-400/20 to-transparent rounded-2xl pointer-events-none"></div>
                             </div>
                           </div>
                         </Link>
@@ -373,24 +378,24 @@ export default function Navigation() {
                       <Link href={item.path}>
                         <div className={`
                           flex flex-col items-center justify-center w-14 h-14 rounded-xl 
-                          transition-all duration-150 ease-out transform
+                          transition-all duration-200 ease-out transform hover:scale-105
                           ${active
-                            ? "text-blue-600 bg-blue-50 shadow-sm scale-105"
-                            : "text-gray-600 hover:text-blue-600 hover:bg-gray-50 hover:scale-105"
+                            ? "text-blue-600 bg-gradient-to-br from-blue-50 to-blue-100 shadow-md scale-105 ring-2 ring-blue-200"
+                            : "text-gray-600 hover:text-blue-600 hover:bg-gradient-to-br hover:from-gray-50 hover:to-gray-100 hover:shadow-md"
                           }
                         `}>
-                          <Icon className="h-5 w-5 mb-1" />
+                          <Icon className={`h-5 w-5 mb-1 transition-transform duration-200 ${active ? 'scale-110' : ''}`} />
                           {item.label === "Work Orders" ? (
-                            <div className="text-xs font-medium text-center leading-none">
+                            <div className="text-xs font-semibold text-center leading-tight">
                               <div>Work</div>
                               <div>Orders</div>
                             </div>
                           ) : item.label === "Onsite" ? (
-                            <span className="text-xs font-medium">Onsite</span>
+                            <span className="text-xs font-semibold">Onsite</span>
                           ) : item.label === "Maps" ? (
-                            <span className="text-xs font-medium">Maps</span>
+                            <span className="text-xs font-semibold">Maps</span>
                           ) : (
-                            <span className="text-xs font-medium">{item.label}</span>
+                            <span className="text-xs font-semibold">{item.label}</span>
                           )}
                         </div>
                       </Link>
