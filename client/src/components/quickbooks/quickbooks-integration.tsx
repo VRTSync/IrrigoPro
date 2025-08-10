@@ -235,13 +235,24 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 
                 {/* Debug button for testing */}
                 <button
-                  onClick={() => {
-                    console.log("🔵 DEBUG: Direct button clicked");
-                    window.location.href = 'https://appcenter.intuit.com/connect/oauth2?client_id=ABYzg2dYpmUlNblvzAAgHjWIcgfxHeGyHJxdrrCkKRYIkGgKPS&scope=com.intuit.quickbooks.accounting&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fapi%2Fquickbooks%2Fcallback&response_type=code&access_type=offline&state=debug123';
+                  onClick={async () => {
+                    console.log("🔵 DEBUG: Direct button clicked - fetching auth URL");
+                    try {
+                      const response = await fetch('/api/quickbooks/auth');
+                      const data = await response.json();
+                      console.log("🔵 DEBUG: Got auth URL:", data.authUrl);
+                      if (data.authUrl) {
+                        window.location.href = data.authUrl;
+                      } else {
+                        console.error("🔴 DEBUG: No authUrl in response:", data);
+                      }
+                    } catch (error) {
+                      console.error("🔴 DEBUG: Failed to get auth URL:", error);
+                    }
                   }}
                   className="mt-2 px-4 py-2 bg-red-500 text-white text-sm rounded"
                 >
-                  DEBUG: Direct Link Test
+                  DEBUG: Test Connection
                 </button>
               </div>
             )}

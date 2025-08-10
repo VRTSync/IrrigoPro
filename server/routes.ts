@@ -1970,7 +1970,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const state = Math.random().toString(36).substring(2, 15);
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/quickbooks/callback`;
+      // Use the actual domain from the request instead of localhost
+      const host = req.get('host');
+      const protocol = host?.includes('localhost') ? 'http' : 'https';
+      const redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
       
       const authUrl = `https://appcenter.intuit.com/connect/oauth2?` +
         `client_id=${process.env.QUICKBOOKS_CLIENT_ID}&` +
