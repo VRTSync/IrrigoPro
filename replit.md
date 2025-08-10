@@ -93,6 +93,12 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 - **Navigation Integration**: Added "Users" menu option in company admin navigation for easy access to user management
 - **Default Users**: Randy Mangel established as company admin user (randymangel/admin123) with proper company association for testing and initial setup
 
+### Site Maps Architecture Restructure (January 2025)
+- **Maps Page Simplification**: Converted main Maps page to display a clean list of available site maps with search functionality and customer information
+- **Navigation Organization**: Updated company admin navigation to make "Customers" a dropdown with "Customer List" and "Maps" options for better feature grouping
+- **Map Builder Access**: Site map builder tool is now exclusively accessible through individual customer profiles, providing better context and organization
+- **Enhanced User Experience**: Maps page shows grid view of existing maps with customer details, creation dates, and direct links to customer profiles for map viewing/editing
+
 ### QuickBooks Integration Consolidation (January 2025)
 - **Centralized Location**: QuickBooks integration component consolidated to Customer Billing page only for focused user experience
 - **Simplified Access**: Removed QuickBooks integration from multiple page locations to prevent confusion and ensure consistent functionality
