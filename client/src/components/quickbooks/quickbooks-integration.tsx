@@ -28,6 +28,9 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
+  // Force console logging on every render
+  console.log("🔵 QUICKBOOKS COMPONENT RENDER - isConnecting:", isConnecting);
+  
   // Component mount logging
   useEffect(() => {
     console.log("🔵 QuickBooks Integration component mounted");

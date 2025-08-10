@@ -29,6 +29,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@shared/schema";
+import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 
 interface CustomerBillingData {
   customer: Customer;
@@ -542,6 +543,11 @@ export default function CustomerBilling() {
       <div className="hidden lg:flex lg:w-1/3 bg-white border-r border-gray-200 flex-col">
         <div className="p-4 border-b border-gray-200">
           <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
+          
+          {/* QuickBooks Integration */}
+          <div className="mb-4">
+            <QuickBooksIntegration />
+          </div>
           
           {/* Summary Stats */}
           {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
