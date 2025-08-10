@@ -30,6 +30,7 @@ import { UserSelector } from "@/components/user-selector";
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
+import CompanyAdminApp from "@/components/company-admin-app";
 
 
 interface User {
@@ -246,32 +247,7 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen pb-20 lg:pb-0">
-            <Navigation />
-            <div className="px-4 bg-gray-50">
-              <Switch>
-                <Route path="/" component={AdminDashboard} />
-                <Route path="/admin" component={AdminDashboard} />
-                <Route path="/operations" component={Operations} />
-                <Route path="/users" component={CompanyUserManagement} />
-                <Route path="/company-profile" component={CompanyProfile} />
-                <Route path="/quickbooks" component={QuickBooksPage} />
-                <Route path="/parts" component={PartsCatalog} />
-                <Route path="/customers" component={Customers} />
-                <Route path="/site-maps" component={SiteMapsPage} />
-                <Route path="/customer-billing" component={CustomerBilling} />
-                <Route path="/field-tech" component={FieldTech} />
-                <Route path="/billing-sheets" component={BillingSheets} />
-                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
-                <Route path="/login" component={Login} />
-                <Route path="/field-portal" component={FieldPortal} />
-                {/* Redirect estimates and work-orders to operations page */}
-                <Route path="/estimates" component={Operations} />
-                <Route path="/work-orders" component={Operations} />
-                <Route component={NotFound} />
-              </Switch>
-            </div>
-          </div>
+          <CompanyAdminApp user={user} />
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>
