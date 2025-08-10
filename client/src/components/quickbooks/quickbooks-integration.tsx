@@ -100,17 +100,20 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
       }
     },
     onError: (error: any) => {
-      console.error("Connection mutation error:", error);
+      console.error("🔴 Connection mutation error:", error);
+      console.error("🔴 Error type:", typeof error);
+      console.error("🔴 Error message:", error?.message);
+      console.error("🔴 Error stack:", error?.stack);
       setIsConnecting(false);
       toast({
         title: "Connection Failed",
-        description: error.message || "Failed to connect to QuickBooks. Please try again.",
+        description: error?.message || "Failed to connect to QuickBooks. Please try again.",
         variant: "destructive"
       });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setIsConnecting(true);
-      console.log("QuickBooks connection initiated successfully");
+      console.log("🟢 QuickBooks connection initiated successfully:", data);
     },
     throwOnError: false
   });
@@ -206,14 +209,22 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 <Button 
                   onClick={(e) => {
                     e.preventDefault();
+                    console.log("🔵 QuickBooks button clicked");
+                    console.log("🔵 Mutation state:", {
+                      isPending: connectMutation.isPending,
+                      isError: connectMutation.isError,
+                      error: connectMutation.error
+                    });
+                    
                     try {
-                      console.log("Button clicked, starting mutation...");
+                      console.log("🔵 Starting mutation...");
                       connectMutation.mutate();
+                      console.log("🔵 Mutation called successfully");
                     } catch (error) {
-                      console.error("Error in button click handler:", error);
+                      console.error("🔴 Error in button click handler:", error);
                     }
                   }}
-                  disabled={isConnecting}
+                  disabled={isConnecting || connectMutation.isPending}
                   className="w-full"
                 >
                   {isConnecting ? (
