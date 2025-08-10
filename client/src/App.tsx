@@ -255,6 +255,7 @@ function Router() {
                 <Route path="/operations" component={Operations} />
                 <Route path="/users" component={CompanyUserManagement} />
                 <Route path="/company-profile" component={CompanyProfile} />
+                <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/site-maps" component={SiteMapsPage} />

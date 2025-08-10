@@ -44,6 +44,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/users", label: "Team", icon: Users },
               { path: "/company-profile", label: "Company", icon: Settings },
+              { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
             ]
           },
         ];
