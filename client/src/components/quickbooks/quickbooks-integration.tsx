@@ -76,8 +76,16 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
         console.log("QuickBooks auth success:", data);
         
         if (data?.authUrl) {
-          // Open QuickBooks auth in a new window
-          window.open(data.authUrl, 'quickbooks-auth', 'width=600,height=700');
+          // Show user-friendly message and redirect to avoid popup blocking
+          toast({
+            title: "Connecting to QuickBooks",
+            description: "You'll be redirected to QuickBooks to authorize the connection.",
+          });
+          
+          // Small delay to let user see the message, then redirect
+          setTimeout(() => {
+            window.location.href = data.authUrl;
+          }, 1500);
         } else {
           throw new Error("No authUrl in response");
         }
