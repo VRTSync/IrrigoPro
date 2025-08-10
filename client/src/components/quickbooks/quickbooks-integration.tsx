@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,18 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const [isConnecting, setIsConnecting] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  
+  // Component mount logging
+  useEffect(() => {
+    console.log("🔵 QuickBooks Integration component mounted");
+    console.log("🔵 Component props:", { className });
+    
+    // Test basic functionality
+    console.log("🔵 Testing basic fetch...");
+    fetch('/api/quickbooks/auth')
+      .then(res => console.log("🟢 Basic fetch test success:", res.status))
+      .catch(err => console.error("🔴 Basic fetch test failed:", err));
+  }, [className]);
 
   // Fetch QuickBooks connection status
   const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<{
