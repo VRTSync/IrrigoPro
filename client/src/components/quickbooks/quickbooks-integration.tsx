@@ -32,20 +32,25 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   useEffect(() => {
     console.log("🔵 QuickBooks Integration component mounted");
     console.log("🔵 Component props:", { className });
+    console.log("🔵 isConnecting state:", isConnecting);
     
     // Test basic functionality with XHR
     console.log("🔵 Testing basic XHR...");
     const testXhr = new XMLHttpRequest();
     testXhr.open('GET', '/api/quickbooks/auth');
-    testXhr.onload = () => console.log("🟢 Basic XHR test success:", testXhr.status);
+    testXhr.onload = () => console.log("🟢 Basic XHR test success:", testXhr.status, testXhr.responseText);
     testXhr.onerror = (err) => console.error("🔴 Basic XHR test failed:", err);
     testXhr.send();
     
-    // Also test if the component is actually rendering by checking DOM
+    // Check if the component is actually rendering
     console.log("🔵 Checking if button exists in DOM...");
     setTimeout(() => {
       const button = document.querySelector('[data-testid="quickbooks-connect-btn"]');
       console.log("🔵 QuickBooks button found:", !!button);
+      if (button) {
+        console.log("🔵 Button element:", button);
+        console.log("🔵 Button disabled:", button.disabled);
+      }
     }, 1000);
   }, [className]);
 
@@ -227,10 +232,16 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
                 </p>
                 <Button 
-                  onClick={handleQuickBooksConnect}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log("🔵 BUTTON CLICK EVENT FIRED");
+                    handleQuickBooksConnect();
+                  }}
                   disabled={isConnecting}
                   className="w-full"
                   data-testid="quickbooks-connect-btn"
+                  type="button"
                 >
                   {isConnecting ? (
                     <>
@@ -244,6 +255,17 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                     </>
                   )}
                 </Button>
+                
+                {/* Debug button for testing */}
+                <button
+                  onClick={() => {
+                    console.log("🔵 DEBUG: Direct button clicked");
+                    window.location.href = 'https://appcenter.intuit.com/connect/oauth2?client_id=ABYzg2dYpmUlNblvzAAgHjWIcgfxHeGyHJxdrrCkKRYIkGgKPS&scope=com.intuit.quickbooks.accounting&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fapi%2Fquickbooks%2Fcallback&response_type=code&access_type=offline&state=debug123';
+                  }}
+                  className="mt-2 px-4 py-2 bg-red-500 text-white text-sm rounded"
+                >
+                  DEBUG: Direct Link Test
+                </button>
               </div>
             )}
           </div>
