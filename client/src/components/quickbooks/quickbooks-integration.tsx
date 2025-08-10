@@ -49,48 +49,29 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   // Connect to QuickBooks
   const connectMutation = useMutation({
     mutationFn: async () => {
-      try {
-        console.log("Starting QuickBooks connection...");
-        const response = await apiRequest("GET", "/api/quickbooks/auth", {});
-        console.log("API response status:", response.status);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error("API error:", errorText);
-          try {
-            const errorData = JSON.parse(errorText);
-            throw new Error(errorData.message || "Failed to get authorization URL");
-          } catch (jsonError) {
-            throw new Error(`Server error: ${response.status} ${response.statusText}`);
-          }
-        }
-        
-        const data = await response.json();
-        console.log("Received auth data:", data);
-        
-        if (!data.authUrl) {
-          throw new Error("No authorization URL received from server");
-        }
-        
-        // Direct redirect approach - simpler and more reliable
-        toast({
-          title: "Redirecting to QuickBooks",
-          description: "You will be redirected to QuickBooks for authorization...",
-          variant: "default"
-        });
-        
-        // Use direct window redirect which is more reliable than popup
-        setTimeout(() => {
-          window.location.href = data.authUrl;
-        }, 1500);
-        
-        return { success: true };
-        
-      } catch (fetchError: any) {
-        console.error("QuickBooks connection error:", fetchError);
-        setIsConnecting(false);
-        throw fetchError;
+      console.log("Starting QuickBooks connection...");
+      
+      // apiRequest returns already parsed JSON data, not a Response object
+      const data = await apiRequest("/api/quickbooks/auth", "GET");
+      console.log("Received auth data:", data);
+      
+      if (!data.authUrl) {
+        throw new Error("No authorization URL received from server");
       }
+      
+      // Direct redirect approach - simpler and more reliable
+      toast({
+        title: "Redirecting to QuickBooks",
+        description: "You will be redirected to QuickBooks for authorization...",
+        variant: "default"
+      });
+      
+      // Use direct window redirect which is more reliable than popup
+      setTimeout(() => {
+        window.location.href = data.authUrl;
+      }, 1500);
+      
+      return { success: true };
     },
     onError: (error: any) => {
       console.error("Connection mutation error:", error);
@@ -110,8 +91,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   // Sync estimate to QuickBooks
   const syncEstimateMutation = useMutation({
     mutationFn: async (estimateId: number) => {
-      const response = await apiRequest("POST", `/api/quickbooks/sync-estimate/${estimateId}`, {});
-      return response.json();
+      const data = await apiRequest(`/api/quickbooks/sync-estimate/${estimateId}`, "POST");
+      return data;
     },
     onSuccess: (data) => {
       toast({
@@ -196,7 +177,15 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
                 </p>
                 <Button 
-                  onClick={() => connectMutation.mutate()}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    try {
+                      console.log("Button clicked, starting mutation...");
+                      connectMutation.mutate();
+                    } catch (error) {
+                      console.error("Error in button click handler:", error);
+                    }
+                  }}
                   disabled={isConnecting}
                   className="w-full"
                 >
