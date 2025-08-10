@@ -39,7 +39,7 @@ export default function Navigation() {
             icon: Users, 
             isDropdown: true,
             dropdownItems: [
-              { path: "/customers", label: "Customer List", icon: Users },
+              { path: "/customers", label: "Customers", icon: Users },
               { path: "/site-maps", label: "Maps", icon: MapIcon },
             ]
           },
