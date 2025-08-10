@@ -420,18 +420,30 @@ export default function Customers() {
                         </Button>
                       ) : (
                         <>
-                          <CustomerForm
-                            customer={customer}
-                            trigger={
-                              <Button variant="outline" size="sm" className="flex-1">
-                                <Edit className="w-4 h-4 mr-2" />
-                                Edit
-                              </Button>
-                            }
-                          />
-                          <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                            <Trash2 className="w-4 h-4" />
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="flex-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            onClick={() => setSelectedCustomer(customer)}
+                          >
+                            <Eye className="w-4 h-4 mr-2" />
+                            View
                           </Button>
+                          {userRole === 'company_admin' && (
+                            <>
+                              <CustomerForm
+                                customer={customer}
+                                trigger={
+                                  <Button variant="outline" size="sm">
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                }
+                              />
+                              <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -455,7 +467,7 @@ export default function Customers() {
                       : "Get started by adding your first customer."
                   }
                 </p>
-                {userRole !== 'field_tech' && (
+                {userRole === 'company_admin' && (
                   <CustomerForm
                     trigger={
                       <Button className="bg-primary text-white hover:bg-blue-700">
@@ -470,7 +482,7 @@ export default function Customers() {
           )}
         </TabsContent>
 
-        {userRole !== 'field_tech' && (
+        {userRole === 'company_admin' && (
           <TabsContent value="integrations">
             <CustomerIntegration />
           </TabsContent>
