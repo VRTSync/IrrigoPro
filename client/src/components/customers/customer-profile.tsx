@@ -226,7 +226,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
 
         {/* Property Notes Section */}
         <div className="mb-8">
-          <PropertyNotes customer={customer} />
+          <PropertyNotes customer={customer} userRole={userRole} />
         </div>
 
         {/* Customer Data Viewer with Selector */}

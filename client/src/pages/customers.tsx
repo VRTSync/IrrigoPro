@@ -93,7 +93,7 @@ export default function Customers() {
             <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
             <p className="text-gray-600 mt-1">Manage your customer database</p>
           </div>
-          {userRole !== 'field_tech' && (
+          {userRole === 'company_admin' && (
             <div className="mt-4 sm:mt-0">
               <CustomerForm
                 trigger={
@@ -109,9 +109,9 @@ export default function Customers() {
       </div>
 
       <Tabs defaultValue="customers" className="w-full">
-        <TabsList className={userRole === 'field_tech' ? "grid w-full grid-cols-1" : "grid w-full grid-cols-2"}>
+        <TabsList className={userRole === 'company_admin' ? "grid w-full grid-cols-2" : "grid w-full grid-cols-1"}>
           <TabsTrigger value="customers" className="text-sm">Customer List</TabsTrigger>
-          {userRole !== 'field_tech' && (
+          {userRole === 'company_admin' && (
             <TabsTrigger value="integrations" className="text-sm">
               <Settings className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
               <span className="hidden sm:inline">Integrations</span>
@@ -304,17 +304,21 @@ export default function Customers() {
                                 >
                                   <Eye className="w-4 h-4" />
                                 </Button>
-                                <CustomerForm
-                                  customer={customer}
-                                  trigger={
-                                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}>
-                                      <Edit className="w-4 h-4" />
+                                {userRole === 'company_admin' && (
+                                  <>
+                                    <CustomerForm
+                                      customer={customer}
+                                      trigger={
+                                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}>
+                                          <Edit className="w-4 h-4" />
+                                        </Button>
+                                      }
+                                    />
+                                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
+                                      <Trash2 className="w-4 h-4" />
                                     </Button>
-                                  }
-                                />
-                                <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                  </>
+                                )}
                               </>
                             )}
                           </div>

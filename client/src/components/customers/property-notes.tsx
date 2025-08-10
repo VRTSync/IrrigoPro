@@ -10,9 +10,10 @@ import type { Customer } from "@shared/schema";
 
 interface PropertyNotesProps {
   customer: Customer;
+  userRole?: string;
 }
 
-export function PropertyNotes({ customer }: PropertyNotesProps) {
+export function PropertyNotes({ customer, userRole = "company_admin" }: PropertyNotesProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [notes, setNotes] = useState(customer.propertyNotes || "");
   const { toast } = useToast();
@@ -59,7 +60,7 @@ export function PropertyNotes({ customer }: PropertyNotesProps) {
             <StickyNoteIcon className="w-5 h-5 text-orange-600" />
             <span>Property Notes</span>
           </div>
-          {!isEditing && (
+          {!isEditing && userRole === 'company_admin' && (
             <Button
               variant="outline"
               size="sm"

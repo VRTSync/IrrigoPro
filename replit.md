@@ -12,6 +12,7 @@ Business Rules: No markup on parts (bill at cost), no tax calculations on any ch
 Admin Access Restriction: Company admin users should not have direct access to estimates and work orders pages - only view through modal previews in operations page. Removed navigation paths to /estimates and /work-orders for admin role.
 Navigation Improvements: Company admin navigation streamlined to 5 items with improved wording and Admin dropdown containing Team and Company management options for better alignment and organization.
 Site Map Access Control: Site map creation is restricted to admin and super admin roles only. Managers and field techs can view existing site maps but cannot create new ones. Backend API creation routes protected with role-based middleware.
+Customer Management Permissions: Irrigation managers and field technicians have view-only access to customer information. Only company admin users can create new customers, edit existing customer details, delete customers, access customer integrations, and edit property notes. This ensures proper data integrity and prevents unauthorized modifications.
 
 ## System Architecture
 
