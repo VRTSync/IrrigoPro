@@ -26,6 +26,7 @@ export async function apiRequest(
     headers["X-User-Role"] = user.role;
     headers["X-User-ID"] = user.id?.toString() || "";
     headers["X-User-Name"] = user.name || "";
+    headers["X-User-Company-Id"] = user.companyId?.toString() || "";
   }
 
   const res = await fetch(url, {
@@ -45,8 +46,26 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    // Get current user role from localStorage for access control
+    const getCurrentUser = () => {
+      const savedUser = localStorage.getItem("user");
+      return savedUser ? JSON.parse(savedUser) : null;
+    };
+    
+    const user = getCurrentUser();
+    const headers: Record<string, string> = {};
+    
+    // Add user headers if user is logged in
+    if (user?.role) {
+      headers["X-User-Role"] = user.role;
+      headers["X-User-ID"] = user.id?.toString() || "";
+      headers["X-User-Name"] = user.name || "";
+      headers["X-User-Company-Id"] = user.companyId?.toString() || "";
+    }
+
     const res = await fetch(queryKey.join("/") as string, {
       credentials: "include",
+      headers,
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

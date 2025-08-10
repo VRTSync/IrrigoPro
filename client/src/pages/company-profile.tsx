@@ -44,13 +44,13 @@ export default function CompanyProfile() {
   const form = useForm<CompanyProfileFormData>({
     resolver: zodResolver(companyProfileSchema),
     defaultValues: {
-      name: company?.name || "",
-      address: company?.address || "",
-      phone: company?.phone || "",
-      email: company?.email || "",
-      website: company?.website || "",
-      logo: company?.logo || "",
-      subscription: company?.subscription || "basic",
+      name: "",
+      address: "",
+      phone: "",
+      email: "",
+      website: "",
+      logo: "",
+      subscription: "basic",
     },
   });
 
@@ -72,10 +72,7 @@ export default function CompanyProfile() {
   // Update company profile mutation
   const updateCompanyMutation = useMutation({
     mutationFn: async (data: CompanyProfileFormData) => {
-      return apiRequest(`/api/company/${companyId}/profile`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
+      return apiRequest(`/api/company/${companyId}/profile`, "PUT", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
@@ -314,7 +311,7 @@ export default function CompanyProfile() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="text-center p-4 border rounded-lg">
                   <div className="text-2xl font-bold text-primary">
-                    {company.subscription?.charAt(0).toUpperCase() + company.subscription?.slice(1)}
+                    {(company as any)?.subscription?.charAt(0).toUpperCase() + (company as any)?.subscription?.slice(1) || "Basic"}
                   </div>
                   <div className="text-sm text-muted-foreground">Current Plan</div>
                 </div>
@@ -324,7 +321,7 @@ export default function CompanyProfile() {
                 </div>
                 <div className="text-center p-4 border rounded-lg">
                   <div className="text-2xl font-bold text-blue-600">
-                    {new Date(company.createdAt).getFullYear()}
+                    {(company as any)?.createdAt ? new Date((company as any).createdAt).getFullYear() : new Date().getFullYear()}
                   </div>
                   <div className="text-sm text-muted-foreground">Member Since</div>
                 </div>
