@@ -67,9 +67,7 @@ export class NotificationService {
     const defaultOptions: NotificationOptions = {
       icon: '/LOGO - SPREAD-05_1752764989944.png',
       badge: '/LOGO - SPREAD-05_1752764989944.png',
-      vibrate: [200, 100, 200],
       tag: 'irrigation-notification',
-      renotify: true,
       requireInteraction: false,
       ...options
     };
@@ -103,14 +101,7 @@ export class NotificationService {
         type: 'work_order',
         workOrderNumber,
         action: type
-      },
-      actions: [
-        {
-          action: 'view',
-          title: 'View Details',
-          icon: '/LOGO - SPREAD-05_1752764989944.png'
-        }
-      ]
+      }
     });
   }
 
