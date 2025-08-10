@@ -55,27 +55,33 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     mutationFn: async () => {
       console.log("Starting QuickBooks connection...");
       
-      // apiRequest returns already parsed JSON data, not a Response object
-      const data = await apiRequest("/api/quickbooks/auth", "GET");
-      console.log("Received auth data:", data);
-      
-      if (!data.authUrl) {
-        throw new Error("No authorization URL received from server");
+      try {
+        // apiRequest returns already parsed JSON data, not a Response object
+        const data = await apiRequest("/api/quickbooks/auth", "GET");
+        console.log("Received auth data:", data);
+        
+        if (!data || !data.authUrl) {
+          throw new Error("No authorization URL received from server");
+        }
+        
+        // Direct redirect approach - simpler and more reliable
+        toast({
+          title: "Redirecting to QuickBooks",
+          description: "You will be redirected to QuickBooks for authorization...",
+          variant: "default"
+        });
+        
+        // Use direct window redirect which is more reliable than popup
+        setTimeout(() => {
+          console.log("Redirecting to:", data.authUrl);
+          window.location.href = data.authUrl;
+        }, 1500);
+        
+        return { success: true };
+      } catch (error) {
+        console.error("Error in mutationFn:", error);
+        throw error;
       }
-      
-      // Direct redirect approach - simpler and more reliable
-      toast({
-        title: "Redirecting to QuickBooks",
-        description: "You will be redirected to QuickBooks for authorization...",
-        variant: "default"
-      });
-      
-      // Use direct window redirect which is more reliable than popup
-      setTimeout(() => {
-        window.location.href = data.authUrl;
-      }, 1500);
-      
-      return { success: true };
     },
     onError: (error: any) => {
       console.error("Connection mutation error:", error);
@@ -89,7 +95,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     onSuccess: () => {
       setIsConnecting(true);
       console.log("QuickBooks connection initiated successfully");
-    }
+    },
+    throwOnError: false
   });
 
   // Sync estimate to QuickBooks
