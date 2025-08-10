@@ -259,4 +259,179 @@ Your Irrigation Team
       throw error;
     }
   }
+
+  // Email verification functionality
+  static async sendEmailVerification(email: string, verificationToken: string, userName: string): Promise<void> {
+    if (!process.env.POSTMARK_API_KEY) {
+      console.error('POSTMARK_API_KEY not configured');
+      return;
+    }
+
+    const verifyUrl = `${this.baseUrl}/api/auth/verify-email/${verificationToken}`;
+
+    try {
+      await client.sendEmail({
+        From: process.env.FROM_EMAIL || 'noreply@irrigopro.com',
+        To: email,
+        Subject: 'Verify Your IrrigoPro Account',
+        HtmlBody: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Verify Your Account</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="margin: 0; font-size: 28px;">Welcome to IrrigoPro</h1>
+              <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">Verify Your Account</p>
+            </div>
+            
+            <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 30px;">
+              <h2 style="color: #1f2937; margin-top: 0;">Hello ${userName},</h2>
+              
+              <p style="font-size: 16px; color: #4b5563;">
+                Thank you for creating your IrrigoPro account! To complete your registration and ensure account security, please verify your email address by clicking the button below.
+              </p>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${verifyUrl}" style="display: inline-block; background: #10b981; color: white; padding: 15px 40px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 18px;">
+                  Verify Email Address
+                </a>
+              </div>
+
+              <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                  <strong>Security Notice:</strong> This verification link will expire in 24 hours for your security. If you didn't create this account, please ignore this email.
+                </p>
+              </div>
+
+              <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px; text-align: center;">
+                <p style="color: #6b7280; font-size: 14px; margin: 0;">
+                  If the button doesn't work, copy and paste this link into your browser:
+                </p>
+                <p style="color: #3b82f6; font-size: 12px; word-break: break-all; margin: 8px 0;">
+                  ${verifyUrl}
+                </p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        TextBody: `
+Welcome to IrrigoPro - Verify Your Account
+
+Hello ${userName},
+
+Thank you for creating your IrrigoPro account! To complete your registration and ensure account security, please verify your email address.
+
+Click this link to verify: ${verifyUrl}
+
+This verification link will expire in 24 hours for your security.
+
+If you didn't create this account, please ignore this email.
+
+Best regards,
+The IrrigoPro Team
+        `,
+        Tag: 'email-verification'
+      });
+
+      console.log(`Email verification sent to ${email}`);
+    } catch (error) {
+      console.error('Failed to send verification email:', error);
+      throw error;
+    }
+  }
+
+  // Password reset functionality
+  static async sendPasswordReset(email: string, resetToken: string, userName: string): Promise<void> {
+    if (!process.env.POSTMARK_API_KEY) {
+      console.error('POSTMARK_API_KEY not configured');
+      return;
+    }
+
+    const resetUrl = `${this.baseUrl}/reset-password?token=${resetToken}`;
+
+    try {
+      await client.sendEmail({
+        From: process.env.FROM_EMAIL || 'noreply@irrigopro.com',
+        To: email,
+        Subject: 'Reset Your IrrigoPro Password',
+        HtmlBody: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Reset Your Password</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="margin: 0; font-size: 28px;">Password Reset</h1>
+              <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">IrrigoPro Account Security</p>
+            </div>
+            
+            <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 30px;">
+              <h2 style="color: #1f2937; margin-top: 0;">Hello ${userName},</h2>
+              
+              <p style="font-size: 16px; color: #4b5563;">
+                We received a request to reset your IrrigoPro account password. If you made this request, click the button below to set a new password.
+              </p>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${resetUrl}" style="display: inline-block; background: #ef4444; color: white; padding: 15px 40px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 18px;">
+                  Reset Password
+                </a>
+              </div>
+
+              <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <p style="margin: 0; color: #7f1d1d; font-size: 14px;">
+                  <strong>Security Notice:</strong> This reset link will expire in 1 hour. If you didn't request this password reset, please ignore this email - your password will remain unchanged.
+                </p>
+              </div>
+
+              <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px; text-align: center;">
+                <p style="color: #6b7280; font-size: 14px; margin: 0;">
+                  If the button doesn't work, copy and paste this link into your browser:
+                </p>
+                <p style="color: #3b82f6; font-size: 12px; word-break: break-all; margin: 8px 0;">
+                  ${resetUrl}
+                </p>
+                <p style="color: #6b7280; font-size: 12px; margin-top: 16px;">
+                  For security reasons, we recommend using a strong, unique password.
+                </p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        TextBody: `
+Reset Your IrrigoPro Password
+
+Hello ${userName},
+
+We received a request to reset your IrrigoPro account password. If you made this request, use the link below to set a new password:
+
+${resetUrl}
+
+This reset link will expire in 1 hour for your security.
+
+If you didn't request this password reset, please ignore this email - your password will remain unchanged.
+
+For security reasons, we recommend using a strong, unique password.
+
+Best regards,
+The IrrigoPro Team
+        `,
+        Tag: 'password-reset'
+      });
+
+      console.log(`Password reset email sent to ${email}`);
+    } catch (error) {
+      console.error('Failed to send password reset email:', error);
+      throw error;
+    }
+  }
 }

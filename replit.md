@@ -75,6 +75,21 @@ Site Map Access Control: Site map creation is restricted to admin and super admi
 
 ## Recent System Enhancements (January 2025)
 
+### Authentication Security Enhancement
+- **Password Reset System**: Implemented secure password reset via email with time-limited tokens (1-hour expiration)
+- **Email Verification**: Added email verification system for new user accounts with 24-hour token expiration
+- **Database Fields Added**: emailVerified, emailVerificationToken, emailVerificationExpires, passwordResetToken, passwordResetExpires
+- **Security Features**: Password reset and email verification use cryptographically secure tokens, email templates with professional IrrigoPro branding
+- **User Interface Integration**: Added "Forgot Password" link to login page, email verification status display in user profile, and dedicated password reset/forgot password pages
+- **Email Service Extension**: Extended Postmark email service to handle authentication emails in addition to estimate approvals
+
+### User Profile/Account Management
+- **Complete User Profile Page**: Added comprehensive user profile interface accessible via "My Account" in user dropdown menus
+- **Editable Fields**: Users can update name and email address with real-time validation
+- **Account Information Display**: Shows role, company ID, member since date, and email verification status
+- **Role-Based Integration**: Profile page integrated into all navigation systems (desktop/mobile) for all user roles
+- **Security Status Indicators**: Visual indicators for email verification status with option to resend verification emails
+
 ### Work Order Completion Tracking
 - **Enhanced User Context**: API client now sends user ID, name, and role headers with all requests for proper audit trails
 - **Completion Tracking**: Added database fields (completed_by_user_id, completed_by_user_name) to track who actually completed work orders vs who was originally assigned

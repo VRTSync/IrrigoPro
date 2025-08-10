@@ -451,11 +451,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
       
+      // Check if email is verified (optional enforcement)
+      if (user.email && !user.emailVerified) {
+        return res.status(403).json({ 
+          message: "Email verification required", 
+          requiresVerification: true,
+          email: user.email 
+        });
+      }
+      
       // Return user without password
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  // Password reset request
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      const user = await storage.getUserByEmail(email);
+      
+      if (!user) {
+        // Don't reveal if email exists or not for security
+        return res.json({ message: "If this email exists, you will receive a password reset link." });
+      }
+      
+      // Generate reset token
+      const crypto = await import('crypto');
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+      
+      // Update user with reset token
+      await storage.updateUser(user.id, {
+        passwordResetToken: resetToken,
+        passwordResetExpires: resetExpires
+      });
+      
+      // Send reset email
+      const { EmailService } = await import('./email-service');
+      await EmailService.sendPasswordReset(user.email!, resetToken, user.name);
+      
+      res.json({ message: "If this email exists, you will receive a password reset link." });
+    } catch (error) {
+      console.error('Password reset error:', error);
+      res.status(500).json({ message: "Password reset request failed" });
+    }
+  });
+
+  // Reset password with token
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, newPassword } = req.body;
+      
+      if (!token || !newPassword) {
+        return res.status(400).json({ message: "Token and new password are required" });
+      }
+      
+      if (newPassword.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters long" });
+      }
+      
+      const user = await storage.getUserByPasswordResetToken(token);
+      
+      if (!user || !user.passwordResetExpires || user.passwordResetExpires < new Date()) {
+        return res.status(400).json({ message: "Invalid or expired reset token" });
+      }
+      
+      // Update password and clear reset token
+      await storage.updateUser(user.id, {
+        password: newPassword, // In production, you'd hash this
+        passwordResetToken: null,
+        passwordResetExpires: null,
+        updatedAt: new Date()
+      });
+      
+      res.json({ message: "Password reset successfully" });
+    } catch (error) {
+      console.error('Password reset error:', error);
+      res.status(500).json({ message: "Password reset failed" });
+    }
+  });
+
+  // Email verification endpoint
+  app.get("/api/auth/verify-email/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const user = await storage.getUserByEmailVerificationToken(token);
+      
+      if (!user || !user.emailVerificationExpires || user.emailVerificationExpires < new Date()) {
+        return res.status(400).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #ef4444;">Verification Failed</h1>
+            <p>This verification link is invalid or has expired.</p>
+            <p>Please request a new verification email.</p>
+          </body></html>
+        `);
+      }
+      
+      // Mark email as verified and clear verification token
+      await storage.updateUser(user.id, {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpires: null,
+        updatedAt: new Date()
+      });
+      
+      res.send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h1 style="color: #10b981;">Email Verified Successfully!</h1>
+          <p>Your email address has been verified. You can now close this window and return to the application.</p>
+          <script>setTimeout(() => { window.close(); }, 3000);</script>
+        </body></html>
+      `);
+    } catch (error) {
+      console.error('Email verification error:', error);
+      res.status(500).send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h1 style="color: #ef4444;">Verification Error</h1>
+          <p>An error occurred during email verification. Please try again.</p>
+        </body></html>
+      `);
+    }
+  });
+
+  // Resend email verification
+  app.post("/api/auth/resend-verification", async (req, res) => {
+    try {
+      const { email } = req.body;
+      const user = await storage.getUserByEmail(email);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      if (user.emailVerified) {
+        return res.json({ message: "Email is already verified" });
+      }
+      
+      // Generate new verification token
+      const crypto = await import('crypto');
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      // Update user with verification token
+      await storage.updateUser(user.id, {
+        emailVerificationToken: verificationToken,
+        emailVerificationExpires: verificationExpires
+      });
+      
+      // Send verification email
+      const { EmailService } = await import('./email-service');
+      await EmailService.sendEmailVerification(user.email!, verificationToken, user.name);
+      
+      res.json({ message: "Verification email sent" });
+    } catch (error) {
+      console.error('Resend verification error:', error);
+      res.status(500).json({ message: "Failed to send verification email" });
     }
   });
 

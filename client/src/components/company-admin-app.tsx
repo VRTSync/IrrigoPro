@@ -16,6 +16,8 @@ import BillingSheets from "@/pages/billing-sheets";
 import { UserSelector } from "@/components/user-selector";
 import UserProfile from "@/pages/user-profile";
 import Login from "@/pages/login";
+import ForgotPassword from "@/pages/forgot-password";
+import ResetPassword from "@/pages/reset-password";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import OnboardingFlow from "@/components/onboarding/onboarding-flow";
@@ -114,6 +116,8 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/user-profile" component={UserProfile} />
           <Route path="/user-selector" component={() => <UserSelector onUserSelect={() => {}} currentUser={user} />} />
           <Route path="/login" component={Login} />
+          <Route path="/forgot-password" component={ForgotPassword} />
+          <Route path="/reset-password" component={ResetPassword} />
           <Route path="/field-portal" component={FieldPortal} />
           {/* Redirect estimates and work-orders to operations page */}
           <Route path="/estimates" component={Operations} />

@@ -28,6 +28,14 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager
   companyId: integer("company_id").references(() => companies.id), // null for super_admin
   isActive: boolean("is_active").notNull().default(true),
+  // Email verification fields
+  emailVerified: boolean("email_verified").notNull().default(false),
+  emailVerificationToken: text("email_verification_token"),
+  emailVerificationExpires: timestamp("email_verification_expires"),
+  // Password reset fields
+  passwordResetToken: text("password_reset_token"),
+  passwordResetExpires: timestamp("password_reset_expires"),
+  // Timestamps
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

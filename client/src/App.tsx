@@ -13,6 +13,8 @@ import Customers from "@/pages/customers";
 import FieldTech from "@/pages/field-tech";
 import WorkOrders from "@/pages/work-orders";
 import Login from "@/pages/login";
+import ForgotPassword from "@/pages/forgot-password";
+import ResetPassword from "@/pages/reset-password";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import ManagerDashboard from "@/pages/manager-dashboard";
@@ -125,6 +127,8 @@ function Router() {
         <QueryClientProvider client={queryClient}>
           <Switch>
             <Route path="/login" component={Login} />
+            <Route path="/forgot-password" component={ForgotPassword} />
+            <Route path="/reset-password" component={ResetPassword} />
             <Route path="/user-selector" component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
             <Route path="/" component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
             <Route component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />

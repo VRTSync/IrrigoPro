@@ -112,6 +112,16 @@ export default function Login() {
             </Button>
           </form>
 
+          <div className="mt-4 text-center">
+            <Button 
+              variant="link" 
+              onClick={() => window.location.href = '/forgot-password'}
+              className="text-sm text-gray-600 hover:text-blue-600"
+            >
+              Forgot your password?
+            </Button>
+          </div>
+
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
             <div className="text-sm text-blue-800">
               <div className="font-medium mb-2">Demo Credentials:</div>
