@@ -1959,6 +1959,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Serve the QuickBooks debug script
+  app.get("/quickbooks-temp-fix.js", (req, res) => {
+    res.type('application/javascript');
+    res.send(`
+// QuickBooks Debug Script
+console.log("QuickBooks debug script loaded successfully");
+console.log("Current domain:", window.location.host);
+console.log("Required redirect URI:", window.location.protocol + "//" + window.location.host + "/api/quickbooks/callback");
+    `);
+  });
+
   // QuickBooks integration routes
   app.get("/api/quickbooks/auth", async (req, res) => {
     try {

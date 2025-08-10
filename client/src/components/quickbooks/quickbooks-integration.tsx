@@ -257,11 +257,46 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 
                 {/* Advanced Debug button */}
                 <button
-                  onClick={() => {
-                    // Load and run the debug script
-                    const script = document.createElement('script');
-                    script.src = '/quickbooks-temp-fix.js';
-                    document.head.appendChild(script);
+                  onClick={async () => {
+                    console.log("=== QuickBooks Connection Debug ===");
+                    console.log("Current Domain:", window.location.host);
+                    console.log("Current URL:", window.location.href);
+                    
+                    try {
+                      console.log("\n1. Testing auth endpoint...");
+                      const response = await fetch('/api/quickbooks/auth');
+                      const data = await response.json();
+                      console.log("✅ Auth endpoint working");
+                      console.log("Generated URL:", data.authUrl);
+                      
+                      console.log("\n2. Analyzing auth URL components...");
+                      const url = new URL(data.authUrl);
+                      const params = new URLSearchParams(url.search);
+                      
+                      console.log("Client ID:", params.get('client_id'));
+                      console.log("Redirect URI:", decodeURIComponent(params.get('redirect_uri') || ''));
+                      console.log("Scope:", params.get('scope'));
+                      console.log("State:", params.get('state'));
+                      
+                      console.log("\n=== DIAGNOSIS ===");
+                      console.log("PROBLEM: The redirect URI in your QuickBooks app doesn't include:");
+                      console.log(`  ${window.location.protocol}//${window.location.host}/api/quickbooks/callback`);
+                      
+                      console.log("\nSOLUTION: Add the redirect URI above to your QuickBooks Developer Console");
+                      console.log("URL: https://developer.intuit.com/app/developer/myapps");
+                      
+                      toast({
+                        title: "Debug Complete",
+                        description: "Check browser console for detailed analysis",
+                      });
+                    } catch (error) {
+                      console.log("❌ Auth endpoint failed:", error);
+                      toast({
+                        title: "Debug Failed",
+                        description: "Check browser console for error details",
+                        variant: "destructive"
+                      });
+                    }
                   }}
                   className="mt-2 ml-2 px-4 py-2 bg-purple-500 text-white text-sm rounded"
                 >
