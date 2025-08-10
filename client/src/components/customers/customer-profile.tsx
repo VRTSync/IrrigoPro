@@ -292,30 +292,31 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                           setEstimateModalOpen(true);
                         }}>
                     <CardContent className="p-4 sm:p-6">
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-3">
-                            <div className="bg-blue-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
-                              <FileText className="w-4 h-4 text-white" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <h3 className="font-bold text-gray-900 text-base sm:text-lg group-hover:text-blue-700 transition-colors truncate">{estimate.estimateNumber}</h3>
-                              <p className="text-gray-600 font-medium text-sm sm:text-base truncate">{estimate.projectName}</p>
-                            </div>
+                      <div className="space-y-4">
+                        {/* Header */}
+                        <div className="flex items-center gap-3">
+                          <div className="bg-blue-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                            <FileText className="w-5 h-5 text-white" />
                           </div>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm">
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <Calendar className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                              <span>Created {formatDate(estimate.createdAt)}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <DollarSign className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                              <span className="font-semibold">{formatCurrency(Number(estimate.totalAmount || 0))}</span>
-                            </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-gray-900 text-lg group-hover:text-blue-700 transition-colors">{estimate.estimateNumber}</h3>
+                            <p className="text-gray-600 font-medium text-sm">{estimate.projectName}</p>
+                          </div>
+                          <div className="flex-shrink-0">
+                            {getStatusBadge(estimate.status, 'estimate')}
                           </div>
                         </div>
-                        <div className="text-left sm:text-right flex-shrink-0">
-                          {getStatusBadge(estimate.status, 'estimate')}
+                        
+                        {/* Details */}
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 pt-2 border-t border-gray-100">
+                          <div className="flex items-center gap-2 text-gray-500 text-sm">
+                            <Calendar className="w-4 h-4 flex-shrink-0" />
+                            <span>Created {formatDate(estimate.createdAt)}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-gray-500 text-sm">
+                            <DollarSign className="w-4 h-4 flex-shrink-0" />
+                            <span className="font-semibold text-blue-600">{formatCurrency(Number(estimate.totalAmount || 0))}</span>
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -351,32 +352,33 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                           setWorkOrderModalOpen(true);
                         }}>
                     <CardContent className="p-4 sm:p-6">
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-3">
-                            <div className="bg-green-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
-                              <Wrench className="w-4 h-4 text-white" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <h3 className="font-bold text-gray-900 text-base sm:text-lg group-hover:text-green-700 transition-colors truncate">{workOrder.workOrderNumber}</h3>
-                              <p className="text-gray-600 font-medium text-sm sm:text-base truncate">{workOrder.projectName}</p>
-                            </div>
+                      <div className="space-y-4">
+                        {/* Header */}
+                        <div className="flex items-center gap-3">
+                          <div className="bg-green-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                            <Wrench className="w-5 h-5 text-white" />
                           </div>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm">
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <Calendar className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                              <span>Created {formatDate(workOrder.createdAt)}</span>
-                            </div>
-                            {workOrder.assignedTechnicianName && (
-                              <div className="flex items-center gap-1.5 text-gray-500">
-                                <User className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                                <span className="font-medium truncate">{workOrder.assignedTechnicianName}</span>
-                              </div>
-                            )}
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-gray-900 text-lg group-hover:text-green-700 transition-colors">{workOrder.workOrderNumber}</h3>
+                            <p className="text-gray-600 font-medium text-sm">{workOrder.projectName}</p>
+                          </div>
+                          <div className="flex-shrink-0">
+                            {getStatusBadge(workOrder.status, 'workorder')}
                           </div>
                         </div>
-                        <div className="text-left sm:text-right flex-shrink-0">
-                          {getStatusBadge(workOrder.status, 'workorder')}
+                        
+                        {/* Details */}
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 pt-2 border-t border-gray-100">
+                          <div className="flex items-center gap-2 text-gray-500 text-sm">
+                            <Calendar className="w-4 h-4 flex-shrink-0" />
+                            <span>Created {formatDate(workOrder.createdAt)}</span>
+                          </div>
+                          {workOrder.assignedTechnicianName && (
+                            <div className="flex items-center gap-2 text-gray-500 text-sm">
+                              <User className="w-4 h-4 flex-shrink-0" />
+                              <span className="font-medium">{workOrder.assignedTechnicianName}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -411,38 +413,39 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 {billingSheets.map((billingSheet) => (
                   <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent">
                     <CardContent className="p-4 sm:p-6">
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-3">
-                            <div className="bg-orange-500 p-2 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
-                              <Receipt className="w-4 h-4 text-white" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <h3 className="font-bold text-gray-900 text-base sm:text-lg group-hover:text-orange-700 transition-colors truncate">{billingSheet.billingNumber}</h3>
-                              <p className="text-gray-600 font-medium text-sm sm:text-base truncate">{billingSheet.notes || 'Billing sheet'}</p>
-                            </div>
+                      <div className="space-y-4">
+                        {/* Header */}
+                        <div className="flex items-center gap-3">
+                          <div className="bg-orange-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                            <Receipt className="w-5 h-5 text-white" />
                           </div>
-                          <div className="flex flex-col gap-2 text-xs sm:text-sm">
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <Calendar className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                              <span>Created {formatDate(billingSheet.createdAt)}</span>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-gray-900 text-lg group-hover:text-orange-700 transition-colors">{billingSheet.billingNumber}</h3>
+                            <p className="text-gray-600 font-medium text-sm">{billingSheet.notes || 'Billing sheet'}</p>
+                          </div>
+                          <div className="flex-shrink-0 text-right">
+                            <div className="mb-1">
+                              {getStatusBadge('billed', 'billing')}
                             </div>
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <User className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                              <span className="font-medium truncate">{billingSheet.technicianName}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <Package className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                              <span>{billingSheet.items.length} items</span>
+                            <div className="text-lg font-bold text-orange-600">
+                              {formatCurrency(Number(billingSheet.totalAmount || 0))}
                             </div>
                           </div>
                         </div>
-                        <div className="text-left sm:text-right flex-shrink-0">
-                          <div className="mb-2">
-                            {getStatusBadge('billed', 'billing')}
+                        
+                        {/* Details */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-100">
+                          <div className="flex items-center gap-2 text-gray-500 text-sm">
+                            <Calendar className="w-4 h-4 flex-shrink-0" />
+                            <span>Created {formatDate(billingSheet.createdAt)}</span>
                           </div>
-                          <div className="text-base sm:text-lg font-bold text-orange-600">
-                            {formatCurrency(Number(billingSheet.totalAmount || 0))}
+                          <div className="flex items-center gap-2 text-gray-500 text-sm">
+                            <User className="w-4 h-4 flex-shrink-0" />
+                            <span className="font-medium">{billingSheet.technicianName}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-gray-500 text-sm">
+                            <Package className="w-4 h-4 flex-shrink-0" />
+                            <span>{billingSheet.items.length} items</span>
                           </div>
                         </div>
                       </div>
