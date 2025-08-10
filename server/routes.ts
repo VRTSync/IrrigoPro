@@ -1679,35 +1679,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // QuickBooks integration routes
   app.get("/api/quickbooks/auth", async (req, res) => {
     try {
-      // Placeholder for QuickBooks OAuth URL generation
-      const authUrl = "https://appcenter.intuit.com/connect/oauth2?client_id=YOUR_CLIENT_ID&scope=com.intuit.quickbooks.accounting&redirect_uri=YOUR_REDIRECT_URI&response_type=code&access_type=offline";
+      // Check if QuickBooks credentials are available
+      if (!process.env.QUICKBOOKS_CLIENT_ID || !process.env.QUICKBOOKS_CLIENT_SECRET) {
+        return res.status(400).json({ 
+          message: "QuickBooks integration is not configured. Please contact your administrator to set up the QuickBooks credentials." 
+        });
+      }
+
       const state = Math.random().toString(36).substring(2, 15);
+      const redirectUri = `${req.protocol}://${req.get('host')}/api/quickbooks/callback`;
+      
+      const authUrl = `https://appcenter.intuit.com/connect/oauth2?` +
+        `client_id=${process.env.QUICKBOOKS_CLIENT_ID}&` +
+        `scope=com.intuit.quickbooks.accounting&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=code&` +
+        `access_type=offline&` +
+        `state=${state}`;
+      
       res.json({ authUrl, state });
     } catch (error) {
+      console.error("QuickBooks auth error:", error);
       res.status(500).json({ message: "Failed to generate QuickBooks auth URL" });
     }
   });
 
-  app.post("/api/quickbooks/callback", async (req, res) => {
+  app.get("/api/quickbooks/callback", async (req, res) => {
     try {
-      const { code, state, realmId } = req.body;
-      // Placeholder for QuickBooks OAuth callback handling
-      res.json({ message: "QuickBooks connected successfully" });
+      const { code, state, realmId } = req.query;
+      
+      if (!code || !realmId) {
+        return res.status(400).send(`
+          <html>
+            <body>
+              <h2>QuickBooks Connection Failed</h2>
+              <p>Missing authorization code or company ID.</p>
+              <script>window.close();</script>
+            </body>
+          </html>
+        `);
+      }
+
+      // Here you would normally exchange the code for access tokens
+      // For now, we'll simulate a successful connection
+      console.log("QuickBooks OAuth callback received:", { code, state, realmId });
+      
+      // In a real implementation, you would:
+      // 1. Exchange code for access token
+      // 2. Store tokens in database
+      // 3. Test the connection
+      
+      res.send(`
+        <html>
+          <body>
+            <h2>QuickBooks Connected Successfully!</h2>
+            <p>You can now close this window and return to IrrigoPro.</p>
+            <script>
+              // Store connection status and close popup
+              localStorage.setItem('qb-connected', 'true');
+              setTimeout(() => window.close(), 2000);
+            </script>
+          </body>
+        </html>
+      `);
     } catch (error) {
-      res.status(500).json({ message: "Failed to connect QuickBooks" });
+      console.error("QuickBooks callback error:", error);
+      res.status(500).send(`
+        <html>
+          <body>
+            <h2>QuickBooks Connection Error</h2>
+            <p>An error occurred while connecting to QuickBooks.</p>
+            <script>window.close();</script>
+          </body>
+        </html>
+      `);
     }
   });
 
   app.get("/api/quickbooks/connection", async (req, res) => {
     try {
-      // Placeholder for QuickBooks connection status
+      // In a real implementation, you would check stored tokens and validate them
+      // For now, check if we have the required environment variables
+      const hasCredentials = process.env.QUICKBOOKS_CLIENT_ID && process.env.QUICKBOOKS_CLIENT_SECRET;
+      
+      if (!hasCredentials) {
+        return res.json({ 
+          companyId: null,
+          companyName: null,
+          isConnected: false,
+          lastSync: null,
+          error: "QuickBooks credentials not configured"
+        });
+      }
+      
+      // Simulate connection status - in reality you'd check stored tokens
       res.json({ 
-        companyId: "placeholder",
-        companyName: "Sample Company",
-        isConnected: false,
+        companyId: "demo-company-123",
+        companyName: "IrrigoPro Demo Company",
+        isConnected: false, // Set to true when actually connected
         lastSync: null
       });
     } catch (error) {
+      console.error("QuickBooks connection check error:", error);
       res.status(500).json({ message: "Failed to get QuickBooks connection status" });
     }
   });

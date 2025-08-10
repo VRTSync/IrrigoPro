@@ -44,26 +44,45 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const connectMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("GET", "/api/quickbooks/auth", {});
-      const { authUrl } = await response.json();
+      const data = await response.json();
       
-      // In a real implementation, this would open the QuickBooks OAuth flow
+      if (!data.authUrl) {
+        throw new Error("No authorization URL received");
+      }
+      
+      // Open QuickBooks OAuth flow in a new window
+      const popup = window.open(
+        data.authUrl, 
+        "quickbooks-oauth", 
+        "width=600,height=700,scrollbars=yes,resizable=yes"
+      );
+      
+      if (!popup) {
+        throw new Error("Popup blocked. Please allow popups for this site.");
+      }
+      
       setIsConnecting(true);
       
-      // Simulate OAuth flow completion
-      setTimeout(() => {
-        setIsConnecting(false);
-        toast({
-          title: "QuickBooks Connected",
-          description: "Successfully connected to QuickBooks Online. You can now sync estimates and invoices."
-        });
-        queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
-      }, 2000);
+      // Listen for the popup to close (indicating OAuth completion)
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          setIsConnecting(false);
+          
+          // Check connection status after popup closes
+          setTimeout(() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/quickbooks/connection"] });
+          }, 1000);
+        }
+      }, 1000);
+      
+      return { success: true };
     },
-    onError: () => {
+    onError: (error: any) => {
       setIsConnecting(false);
       toast({
         title: "Connection Failed",
-        description: "Failed to connect to QuickBooks. Please try again.",
+        description: error.message || "Failed to connect to QuickBooks. Please try again.",
         variant: "destructive"
       });
     }
