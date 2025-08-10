@@ -71,64 +71,70 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     throwOnError: false
   });
 
-  // QuickBooks connection handler using XMLHttpRequest to avoid fetch issues
+  // Simple and direct QuickBooks connection handler
   const handleQuickBooksConnect = () => {
-    console.log("🔵 QuickBooks connection started");
+    console.log("🔵 Button clicked - QuickBooks connection started");
+    
+    // Prevent double clicks
+    if (isConnecting) {
+      console.log("🔵 Already connecting, ignoring click");
+      return;
+    }
+    
     setIsConnecting(true);
     
+    console.log("🔵 Creating XHR request...");
     const xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/quickbooks/auth');
     
-    xhr.onload = function() {
-      console.log("🔵 XHR Response status:", xhr.status);
+    xhr.onreadystatechange = function() {
+      console.log("🔵 XHR State changed:", xhr.readyState, xhr.status);
       
-      if (xhr.status === 200) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          console.log("🟢 Auth data received:", data);
-          
-          if (data?.authUrl) {
-            toast({
-              title: "Redirecting to QuickBooks",
-              description: "Opening QuickBooks authorization...",
-              variant: "default"
-            });
+      if (xhr.readyState === 4) {
+        if (xhr.status === 200) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            console.log("🟢 Success! Auth data:", data);
             
-            console.log("🟢 Redirecting to QuickBooks...");
-            window.location.href = data.authUrl;
-          } else {
-            throw new Error("No authorization URL received");
+            if (data?.authUrl) {
+              console.log("🟢 Redirecting to:", data.authUrl);
+              // Direct redirect without delay
+              window.location.href = data.authUrl;
+            } else {
+              throw new Error("No authUrl in response");
+            }
+          } catch (error) {
+            console.error("🔴 Parse error:", error);
+            setIsConnecting(false);
+            toast({
+              title: "Error",
+              description: "Failed to parse server response",
+              variant: "destructive"
+            });
           }
-        } catch (parseError) {
-          console.error("🔴 JSON parse error:", parseError);
+        } else {
+          console.error("🔴 HTTP error:", xhr.status, xhr.responseText);
           setIsConnecting(false);
           toast({
-            title: "Connection Failed",
-            description: "Invalid response from server",
+            title: "Connection Failed", 
+            description: `HTTP ${xhr.status}: ${xhr.statusText}`,
             variant: "destructive"
           });
         }
-      } else {
-        console.error("🔴 XHR error:", xhr.status, xhr.statusText);
-        setIsConnecting(false);
-        toast({
-          title: "Connection Failed",
-          description: `Server error: ${xhr.status} ${xhr.statusText}`,
-          variant: "destructive"
-        });
       }
     };
     
     xhr.onerror = function() {
-      console.error("🔴 XHR network error");
+      console.error("🔴 Network error occurred");
       setIsConnecting(false);
       toast({
-        title: "Connection Failed",
-        description: "Network error occurred",
+        title: "Network Error",
+        description: "Could not connect to server",
         variant: "destructive"
       });
     };
     
+    console.log("🔵 Sending XHR request...");
     xhr.send();
   };
 
