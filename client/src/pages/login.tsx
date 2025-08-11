@@ -199,6 +199,8 @@ export default function Login() {
       }
     } catch (error: any) {
       console.error("Login error:", error);
+      console.error("Error details:", JSON.stringify(error, null, 2));
+      console.error("Error stack:", error.stack);
       toast({
         title: "Login Failed",
         description: error.message || "Invalid credentials",
