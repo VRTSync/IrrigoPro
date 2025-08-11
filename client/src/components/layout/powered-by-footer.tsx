@@ -8,7 +8,7 @@ export default function PoweredByFooter() {
         <img 
           src={vrtSyncLogo} 
           alt="VRTSync" 
-          className="h-20 w-auto"
+          className="h-12 w-auto"
         />
       </div>
     </div>
