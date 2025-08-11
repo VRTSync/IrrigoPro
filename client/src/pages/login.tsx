@@ -69,7 +69,7 @@ export default function Login() {
       <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200">
         {/* Animated Terrain Contour Lines */}
         <div className="absolute inset-0">
-          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">
+          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" preserveAspectRatio="xMidYMid slice">
             <defs>
               <linearGradient id="irrigationGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3"/>
@@ -89,61 +89,61 @@ export default function Login() {
             {/* Animated contour lines - like topographic map elevation lines */}
             <g className="animate-pulse" style={{animationDuration: '4s'}}>
               {/* Main terrain contours */}
-              <path d="M0,150 Q100,130 200,140 Q300,150 400,135 Q500,120 600,140 Q700,160 800,145 Q900,130 1000,150 Q1100,170 1200,155" 
-                    fill="none" stroke="#3b82f6" strokeWidth="1.5" opacity="0.6" filter="url(#glow)"/>
+              <path d="M0,80 Q50,60 100,70 Q150,80 200,65 Q250,50 300,70 Q350,90 400,75" 
+                    fill="none" stroke="#3b82f6" strokeWidth="3" opacity="0.8" filter="url(#glow)" className="sm:stroke-2"/>
               
-              <path d="M0,220 Q120,200 240,210 Q360,220 480,205 Q600,190 720,210 Q840,230 960,215 Q1080,200 1200,220" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="1.2" opacity="0.5"/>
+              <path d="M0,140 Q60,120 120,130 Q180,140 240,125 Q300,110 360,130 Q390,140 400,135" 
+                    fill="none" stroke="#1d4ed8" strokeWidth="2.5" opacity="0.7" className="sm:stroke-2"/>
               
-              <path d="M0,290 Q80,270 160,280 Q240,290 320,275 Q400,260 480,280 Q560,300 640,285 Q720,270 800,290 Q880,310 960,295 Q1040,280 1120,300 Q1160,310 1200,305" 
-                    fill="none" stroke="#1e40af" strokeWidth="1.8" opacity="0.7"/>
+              <path d="M0,200 Q40,180 80,190 Q120,200 160,185 Q200,170 240,190 Q280,210 320,195 Q360,180 400,200" 
+                    fill="none" stroke="#1e40af" strokeWidth="3.5" opacity="0.9" className="sm:stroke-2"/>
             </g>
             
             <g className="animate-pulse" style={{animationDuration: '6s', animationDelay: '1s'}}>
               {/* Secondary elevation lines */}
-              <path d="M0,180 Q150,160 300,170 Q450,180 600,165 Q750,150 900,170 Q1050,190 1200,175" 
-                    fill="none" stroke="#3b82f6" strokeWidth="1" opacity="0.4"/>
+              <path d="M0,110 Q75,90 150,100 Q225,110 300,95 Q350,80 400,100" 
+                    fill="none" stroke="#3b82f6" strokeWidth="2" opacity="0.6" className="sm:stroke-1"/>
               
-              <path d="M0,350 Q100,330 200,340 Q300,350 400,335 Q500,320 600,340 Q700,360 800,345 Q900,330 1000,350 Q1100,370 1200,355" 
-                    fill="none" stroke="#2563eb" strokeWidth="1.3" opacity="0.6"/>
+              <path d="M0,260 Q50,240 100,250 Q150,260 200,245 Q250,230 300,250 Q350,270 400,255" 
+                    fill="none" stroke="#2563eb" strokeWidth="2.5" opacity="0.8" className="sm:stroke-1"/>
               
-              <path d="M0,420 Q180,400 360,410 Q540,420 720,405 Q900,390 1080,410 Q1140,420 1200,415" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="1.1" opacity="0.5"/>
+              <path d="M0,320 Q90,300 180,310 Q270,320 360,305 Q380,300 400,310" 
+                    fill="none" stroke="#1d4ed8" strokeWidth="2.2" opacity="0.7" className="sm:stroke-1"/>
             </g>
             
             <g className="animate-pulse" style={{animationDuration: '8s', animationDelay: '2s'}}>
               {/* Fine detail contours */}
-              <path d="M0,120 Q200,100 400,110 Q600,120 800,105 Q1000,90 1200,120" 
-                    fill="none" stroke="#60a5fa" strokeWidth="0.8" opacity="0.3"/>
+              <path d="M0,50 Q100,30 200,40 Q300,50 400,35" 
+                    fill="none" stroke="#60a5fa" strokeWidth="1.8" opacity="0.5" className="sm:stroke-1"/>
               
-              <path d="M0,480 Q150,460 300,470 Q450,480 600,465 Q750,450 900,470 Q1050,490 1200,475" 
-                    fill="none" stroke="#3b82f6" strokeWidth="0.9" opacity="0.4"/>
+              <path d="M0,380 Q75,360 150,370 Q225,380 300,365 Q350,350 400,370" 
+                    fill="none" stroke="#3b82f6" strokeWidth="2" opacity="0.6" className="sm:stroke-1"/>
               
-              <path d="M0,550 Q120,530 240,540 Q360,550 480,535 Q600,520 720,540 Q840,560 960,545 Q1080,530 1200,550" 
-                    fill="none" stroke="#1e40af" strokeWidth="1.1" opacity="0.5"/>
+              <path d="M0,450 Q60,430 120,440 Q180,450 240,435 Q300,420 360,440 Q380,450 400,445" 
+                    fill="none" stroke="#1e40af" strokeWidth="2.2" opacity="0.7" className="sm:stroke-1"/>
             </g>
             
             {/* Irrigation zone markers - small circles representing sprinkler zones */}
             <g className="animate-bounce" style={{animationDelay: '0s', animationDuration: '3s'}}>
-              <circle cx="200" cy="200" r="2" fill="#3b82f6" opacity="0.7"/>
-              <circle cx="400" cy="280" r="1.5" fill="#1d4ed8" opacity="0.6"/>
-              <circle cx="600" cy="240" r="2.5" fill="#1e40af" opacity="0.8"/>
-              <circle cx="800" cy="320" r="2" fill="#2563eb" opacity="0.7"/>
-              <circle cx="1000" cy="260" r="1.8" fill="#3b82f6" opacity="0.6"/>
+              <circle cx="80" cy="120" r="4" fill="#3b82f6" opacity="0.8" className="sm:r-2"/>
+              <circle cx="200" cy="180" r="3" fill="#1d4ed8" opacity="0.7" className="sm:r-1.5"/>
+              <circle cx="320" cy="140" r="5" fill="#1e40af" opacity="0.9" className="sm:r-2.5"/>
+              <circle cx="160" cy="240" r="4" fill="#2563eb" opacity="0.8" className="sm:r-2"/>
+              <circle cx="280" cy="200" r="3.5" fill="#3b82f6" opacity="0.7" className="sm:r-1.8"/>
             </g>
             
             <g className="animate-bounce" style={{animationDelay: '1.5s', animationDuration: '4s'}}>
-              <circle cx="150" cy="350" r="1.5" fill="#60a5fa" opacity="0.5"/>
-              <circle cx="350" cy="180" r="2.2" fill="#1d4ed8" opacity="0.7"/>
-              <circle cx="550" cy="380" r="1.8" fill="#1e40af" opacity="0.6"/>
-              <circle cx="750" cy="220" r="2" fill="#3b82f6" opacity="0.8"/>
-              <circle cx="950" cy="400" r="1.6" fill="#2563eb" opacity="0.5"/>
+              <circle cx="60" cy="280" r="3" fill="#60a5fa" opacity="0.6" className="sm:r-1.5"/>
+              <circle cx="140" cy="160" r="4.5" fill="#1d4ed8" opacity="0.8" className="sm:r-2.2"/>
+              <circle cx="220" cy="320" r="3.5" fill="#1e40af" opacity="0.7" className="sm:r-1.8"/>
+              <circle cx="300" cy="180" r="4" fill="#3b82f6" opacity="0.9" className="sm:r-2"/>
+              <circle cx="380" cy="300" r="3.2" fill="#2563eb" opacity="0.6" className="sm:r-1.6"/>
             </g>
             
             {/* Property boundary lines */}
-            <g opacity="0.2">
-              <path d="M100,100 L100,500 M300,80 L300,520 M500,120 L500,480 M700,90 L700,510 M900,110 L900,490" 
-                    stroke="#1e40af" strokeWidth="0.5" strokeDasharray="5,5"/>
+            <g opacity="0.4">
+              <path d="M100,50 L100,400 M200,40 L200,420 M300,60 L300,380" 
+                    stroke="#1e40af" strokeWidth="1.5" strokeDasharray="8,4" className="sm:stroke-0.5"/>
             </g>
           </svg>
         </div>
