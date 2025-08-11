@@ -13,7 +13,7 @@ import SiteMapsPage from "@/pages/site-maps";
 import CustomerBilling from "@/pages/customer-billing";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
-import { UserSelector } from "@/components/user-selector";
+
 import UserProfile from "@/pages/user-profile";
 import Login from "@/pages/login";
 import ForgotPassword from "@/pages/forgot-password";
@@ -21,6 +21,7 @@ import ResetPassword from "@/pages/reset-password";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import OnboardingFlow from "@/components/onboarding/onboarding-flow";
+import PoweredByFooter from "@/components/layout/powered-by-footer";
 
 interface User {
   id: number;
@@ -97,9 +98,9 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
 
   // Regular company admin app
   return (
-    <div className="min-h-screen pb-20 lg:pb-0">
+    <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
       <Navigation />
-      <div className="px-4 bg-gray-50">
+      <div className="px-4 bg-gray-50 flex-1">
         <Switch>
           <Route path="/" component={AdminDashboard} />
           <Route path="/admin" component={AdminDashboard} />
@@ -114,7 +115,6 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/field-tech" component={FieldTech} />
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/user-profile" component={UserProfile} />
-          <Route path="/user-selector" component={() => <UserSelector onUserSelect={() => {}} currentUser={user} />} />
           <Route path="/login" component={Login} />
           <Route path="/forgot-password" component={ForgotPassword} />
           <Route path="/reset-password" component={ResetPassword} />
@@ -125,6 +125,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route component={NotFound} />
         </Switch>
       </div>
+      <PoweredByFooter />
     </div>
   );
 }

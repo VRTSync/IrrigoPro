@@ -34,6 +34,7 @@ import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 import CompanyAdminApp from "@/components/company-admin-app";
+import PoweredByFooter from "@/components/layout/powered-by-footer";
 
 
 interface User {
@@ -143,9 +144,9 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
             <Navigation />
-            <div className="px-4">
+            <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={FieldTechDashboard} />
                 <Route path="/field-tech" component={FieldTechDashboard} />
@@ -159,6 +160,7 @@ function Router() {
                 <Route component={NotFound} />
               </Switch>
             </div>
+            <PoweredByFooter />
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -171,9 +173,9 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
             <Navigation />
-            <div className="px-4">
+            <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={ManagerDashboard} />
                 <Route path="/manager" component={ManagerDashboard} />
@@ -189,6 +191,7 @@ function Router() {
                 <Route component={NotFound} />
               </Switch>
             </div>
+            <PoweredByFooter />
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -201,9 +204,9 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0">
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
             <Navigation />
-            <div className="px-4">
+            <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={CustomerBilling} />
                 <Route path="/billing" component={CustomerBilling} />
@@ -215,6 +218,7 @@ function Router() {
                 <Route component={NotFound} />
               </Switch>
             </div>
+            <PoweredByFooter />
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -227,9 +231,9 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen pb-20 lg:pb-0">
+          <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
             <Navigation />
-            <div className="px-4 bg-gray-50">
+            <div className="px-4 bg-gray-50 flex-1">
               <Switch>
                 <Route path="/" component={SuperAdminDashboard} />
                 <Route path="/super-admin" component={SuperAdminDashboard} />
@@ -239,6 +243,7 @@ function Router() {
                 <Route component={NotFound} />
               </Switch>
             </div>
+            <PoweredByFooter />
           </div>
           <Toaster />
         </QueryClientProvider>
@@ -262,9 +267,9 @@ function Router() {
   return (
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>
-        <div className="min-h-screen pb-20 lg:pb-0">
+        <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
           <Navigation />
-          <div className="px-4 bg-gray-50">
+          <div className="px-4 bg-gray-50 flex-1">
             <Switch>
               <Route path="/" component={AdminDashboard} />
               <Route path="/admin" component={AdminDashboard} />
@@ -276,7 +281,6 @@ function Router() {
               <Route path="/field-tech" component={FieldTech} />
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-profile" component={UserProfile} />
-              <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
               <Route path="/login" component={Login} />
               <Route path="/field-portal" component={FieldPortal} />
               {/* Redirect estimates and work-orders to operations page */}
@@ -285,6 +289,7 @@ function Router() {
               <Route component={NotFound} />
             </Switch>
           </div>
+          <PoweredByFooter />
         </div>
         <NotificationPermissionBanner />
         <Toaster />

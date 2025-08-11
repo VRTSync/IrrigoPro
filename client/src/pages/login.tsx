@@ -7,6 +7,7 @@ import { User, Lock, LogIn } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo-01_1754798633907.png";
+import PoweredByFooter from "@/components/layout/powered-by-footer";
 
 interface LoginCredentials {
   username: string;
@@ -63,68 +64,69 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <img 
-              src={irrigoProLogo} 
-              alt="IrrigoPro Logo" 
-              className="h-16 w-auto"
-            />
-          </div>
-          <CardTitle className="text-2xl font-bold">IrrigoPro</CardTitle>
-          <p className="text-gray-600">Professional irrigation management platform</p>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                placeholder="Enter your username"
-                value={credentials.username}
-                onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
-                required
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="flex-1 flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-4">
+              <img 
+                src={irrigoProLogo} 
+                alt="IrrigoPro Logo" 
+                className="h-16 w-auto"
               />
             </div>
+            <CardTitle className="text-2xl font-bold">IrrigoPro</CardTitle>
+            <p className="text-gray-600">Professional irrigation management platform</p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="Enter your username"
+                  value={credentials.username}
+                  onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
+                  required
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Password"
-                value={credentials.password}
-                onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
-                required
-              />
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="Password"
+                  value={credentials.password}
+                  onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                  required
+                />
+              </div>
+
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? (
+                  <Lock className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <LogIn className="w-4 h-4 mr-2" />
+                )}
+                Sign In
+              </Button>
+            </form>
+
+            <div className="mt-4 text-center">
+              <Button 
+                variant="link" 
+                onClick={() => window.location.href = '/forgot-password'}
+                className="text-sm text-gray-600 hover:text-blue-600"
+              >
+                Forgot your password?
+              </Button>
             </div>
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (
-                <Lock className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <LogIn className="w-4 h-4 mr-2" />
-              )}
-              Sign In
-            </Button>
-          </form>
-
-          <div className="mt-4 text-center">
-            <Button 
-              variant="link" 
-              onClick={() => window.location.href = '/forgot-password'}
-              className="text-sm text-gray-600 hover:text-blue-600"
-            >
-              Forgot your password?
-            </Button>
-          </div>
-
-
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
+      <PoweredByFooter />
     </div>
   );
 }
