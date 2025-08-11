@@ -13,6 +13,7 @@ import Customers from "@/pages/customers";
 import FieldTech from "@/pages/field-tech";
 import WorkOrders from "@/pages/work-orders";
 import Login from "@/pages/login";
+import SimpleLogin from "@/pages/simple-login";
 import ForgotPassword from "@/pages/forgot-password";
 import ResetPassword from "@/pages/reset-password";
 import FieldPortal from "@/pages/field-portal";
@@ -128,11 +129,12 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <Switch>
-            <Route path="/login" component={Login} />
+            <Route path="/login" component={SimpleLogin} />
+            <Route path="/old-login" component={Login} />
             <Route path="/forgot-password" component={ForgotPassword} />
             <Route path="/reset-password" component={ResetPassword} />
-            <Route path="/" component={Login} />
-            <Route component={Login} />
+            <Route path="/" component={SimpleLogin} />
+            <Route component={SimpleLogin} />
           </Switch>
           <Toaster />
         </QueryClientProvider>
