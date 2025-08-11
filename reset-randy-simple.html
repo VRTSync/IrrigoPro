@@ -1,31 +1,98 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Reset Randy's Password</title>
+    <title>Randy's Production Login</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .credentials { background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .error { color: red; margin: 10px 0; }
+        .success { color: green; margin: 10px 0; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        input { padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        .test-section { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; }
+    </style>
 </head>
 <body>
-    <h1>Reset Randy's Password</h1>
-    <p>Click the button to reset Randy's password to "admin123"</p>
-    <button onclick="resetPassword()">Reset Randy's Password</button>
-    <div id="result"></div>
+    <h1>IrrigoPro Production Login Status</h1>
+    
+    <div class="credentials">
+        <h2>🔑 Current Production Credentials</h2>
+        <p><strong>Site:</strong> <a href="https://irrigopro.com" target="_blank">https://irrigopro.com</a></p>
+        
+        <div id="loginOptions">
+            <p><strong>Option 1:</strong> randy@highplainsprop.com / password123</p>
+            <p><strong>Option 2:</strong> superadmin / password123</p>
+            <p><strong>Option 3:</strong> randymangel / password123</p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>Live Production Test</h3>
+        <div>
+            Username: <input type="text" id="username" value="randy@highplainsprop.com">
+            Password: <input type="password" id="password" value="password123">
+            <button onclick="testLogin()">Test Login</button>
+        </div>
+        <div id="testResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Production Status Check</h3>
+        <button onclick="checkStatus()">Check Production Server</button>
+        <div id="statusResult"></div>
+    </div>
 
     <script>
-        async function resetPassword() {
+        async function testLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('testResult');
+            
+            resultDiv.innerHTML = '<p>Testing login...</p>';
+            
             try {
-                // First, get a new hash for admin123
-                const hashResponse = await fetch('/api/test-auth');
-                const testData = await hashResponse.json();
+                const response = await fetch('https://irrigopro.com/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
                 
-                // Show current users
-                document.getElementById('result').innerHTML = 
-                    '<h2>Current Production Users:</h2>' +
-                    '<pre>' + JSON.stringify(testData.users, null, 2) + '</pre>' +
-                    '<p>Randy should be able to log in with username "randymangel" and password "admin123"</p>';
-                    
+                const data = await response.text();
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = '<div class="success">✅ LOGIN SUCCESSFUL! Randy can use these credentials.</div>';
+                    resultDiv.innerHTML += '<p>Response: ' + data + '</p>';
+                } else {
+                    resultDiv.innerHTML = '<div class="error">❌ Login failed: ' + data + '</div>';
+                }
             } catch (error) {
-                document.getElementById('result').innerHTML = 'Error: ' + error.message;
+                resultDiv.innerHTML = '<div class="error">❌ Connection error: ' + error.message + '</div>';
             }
         }
+
+        async function checkStatus() {
+            const resultDiv = document.getElementById('statusResult');
+            resultDiv.innerHTML = '<p>Checking production status...</p>';
+            
+            try {
+                const response = await fetch('https://irrigopro.com/api/test-auth');
+                const data = await response.text();
+                
+                resultDiv.innerHTML = '<div class="success">✅ Production server is running</div>';
+                resultDiv.innerHTML += '<pre>' + data + '</pre>';
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">❌ Production server error: ' + error.message + '</div>';
+            }
+        }
+
+        // Auto-check status on load
+        window.onload = function() {
+            checkStatus();
+            // Test all three login options automatically
+            setTimeout(() => {
+                testLogin();
+            }, 1000);
+        };
     </script>
 </body>
 </html>
