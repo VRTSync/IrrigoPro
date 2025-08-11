@@ -29,6 +29,7 @@ import SystemUserManagement from "@/pages/system-user-management";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import UserProfile from "@/pages/user-profile";
+import UserManager from "@/pages/UserManager";
 
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -238,6 +239,7 @@ function Router() {
                 <Route path="/" component={SuperAdminDashboard} />
                 <Route path="/super-admin" component={SuperAdminDashboard} />
                 <Route path="/system-users" component={SystemUserManagement} />
+                <Route path="/user-manager" component={UserManager} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
@@ -280,6 +282,7 @@ function Router() {
               <Route path="/customer-billing" component={CustomerBilling} />
               <Route path="/field-tech" component={FieldTech} />
               <Route path="/billing-sheets" component={BillingSheets} />
+              <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
               <Route path="/login" component={Login} />
               <Route path="/field-portal" component={FieldPortal} />

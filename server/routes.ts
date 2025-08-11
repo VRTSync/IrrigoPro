@@ -469,6 +469,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin reset users endpoint
+  app.post("/api/admin/reset-users", async (req, res) => {
+    try {
+      // Hash password123 for all users
+      const password = await bcrypt.hash('password123', 10);
+      
+      // Reset all user passwords
+      const users = await storage.getUsers();
+      for (const user of users) {
+        await storage.updateUser(user.id, {
+          password,
+          emailVerified: true,
+          passwordResetToken: null,
+          passwordResetExpires: null
+        });
+      }
+      
+      res.json({ 
+        message: "All user passwords reset to 'password123'", 
+        usersUpdated: users.length 
+      });
+    } catch (error) {
+      console.error('Password reset error:', error);
+      res.status(500).json({ message: "Failed to reset passwords" });
+    }
+  });
+
   // Emergency Randy password reset
   app.post("/api/reset-randy-password", async (req, res) => {
     try {
