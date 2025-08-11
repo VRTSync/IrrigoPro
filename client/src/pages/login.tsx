@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { motion, useMotionValue, useSpring } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,34 +15,158 @@ interface LoginCredentials {
   password: string;
 }
 
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+
+function TopoLayers({ x, y, active }: { x: import("framer-motion").MotionValue<number>, y: import("framer-motion").MotionValue<number>, active: boolean }) {
+  // Mask size grows when active, shrinks when idle
+  const radius = useSpring(active ? 28 : 12, { stiffness: 90, damping: 18 });
+  const feather = useSpring(active ? 60 : 90, { stiffness: 90, damping: 18 });
+
+  return (
+    <motion.div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0"
+      style={{
+        // Expose x/y as CSS vars for mask positioning
+        ["--x" as any]: x,
+        ["--y" as any]: y,
+        ["--r" as any]: radius,
+        ["--f" as any]: feather,
+      } as any}
+    >
+      {/* Map base (hidden by default, revealed by mask) */}
+      <div
+        className="absolute inset-0 will-change-transform"
+        style={{
+          backgroundImage: `var(--topo-image), radial-gradient(1200px 800px at 30% 20%, #1e3a8a, #1e40af)`,
+          backgroundSize: "auto, cover",
+          backgroundRepeat: "repeat, no-repeat",
+          backgroundPosition: "center, center",
+          maskImage:
+            // Radial mask centered at cursor; inner hard circle + soft feather
+            `radial-gradient(
+              circle at ${x.get()}% ${y.get()}%,
+              rgba(0,0,0,1) ${radius.get()}vw,
+              rgba(0,0,0,0) ${radius.get() + (feather.get()/10)}vw
+            )`,
+          WebkitMaskImage:
+            `radial-gradient(
+              circle at ${x.get()}% ${y.get()}%,
+              rgba(0,0,0,1) ${radius.get()}vw,
+              rgba(0,0,0,0) ${radius.get() + (feather.get()/10)}vw
+            )`,
+        }}
+      />
+
+      {/* Parallax glow behind the reveal to add depth */}
+      <motion.div
+        className="absolute inset-0"
+        style={{
+          background: `radial-gradient(800px 600px at ${x.get()}% ${y.get()}%, rgba(59,130,246,0.12), transparent 60%)`,
+        }}
+      />
+
+      {/* Animated contour overlay (very subtle) */}
+      <div
+        className="absolute inset-0 mix-blend-overlay opacity-30"
+        style={{
+          backgroundImage:
+            `repeating-linear-gradient(
+              45deg,
+              rgba(255,255,255,0.03) 0px,
+              rgba(255,255,255,0.03) 2px,
+              transparent 2px,
+              transparent 16px
+            ), repeating-linear-gradient(
+              -45deg,
+              rgba(255,255,255,0.02) 0px,
+              rgba(255,255,255,0.02) 2px,
+              transparent 2px,
+              transparent 18px
+            )`,
+          backgroundSize: "200px 200px, 180px 180px",
+          animation: "contours 18s linear infinite",
+        }}
+      />
+
+      {/* Dark overlay for contrast so the login card is legible */}
+      <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_40%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.35)_80%)]" />
+
+      {/* Keyframes for contour drift */}
+      <style>{`
+        @keyframes contours {
+          0% { background-position: 0px 0px, 0px 0px; }
+          100% { background-position: 600px 400px, -500px -350px; }
+        }
+
+        /* Respect reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+          .absolute.inset-0 { animation: none !important; }
+        }
+      `}</style>
+    </motion.div>
+  );
+}
+
 export default function Login() {
   const [credentials, setCredentials] = useState<LoginCredentials>({
     username: "",
     password: "",
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  
+  const rootRef = useRef<HTMLDivElement>(null);
 
-  // Track mouse movement for interactive background
+  // Motion values for cursor position (as % of viewport)
+  const mvX = useMotionValue(50);
+  const mvY = useMotionValue(50);
+
+  // Smoothed values
+  const x = useSpring(mvX, { stiffness: 120, damping: 20, mass: 0.4 });
+  const y = useSpring(mvY, { stiffness: 120, damping: 20, mass: 0.4 });
+
+  const [isPointerActive, setIsPointerActive] = useState(false);
+
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setMousePos({
-          x: (e.clientX - rect.left) / rect.width,
-          y: (e.clientY - rect.top) / rect.height,
-        });
+    const el = rootRef.current;
+    if (!el) return;
+
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const rect = el.getBoundingClientRect();
+      let clientX: number, clientY: number;
+      if ('touches' in e && e.touches && e.touches[0]) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        clientX = (e as MouseEvent).clientX;
+        clientY = (e as MouseEvent).clientY;
       }
+      const px = ((clientX - rect.left) / rect.width) * 100;
+      const py = ((clientY - rect.top) / rect.height) * 100;
+      mvX.set(clamp(px, 0, 100));
+      mvY.set(clamp(py, 0, 100));
     };
 
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener('mousemove', handleMouseMove);
-      return () => container.removeEventListener('mousemove', handleMouseMove);
-    }
-  }, []);
+    const onEnter = () => setIsPointerActive(true);
+    const onLeave = () => setIsPointerActive(false);
+
+    el.addEventListener("mousemove", onMove);
+    el.addEventListener("touchmove", onMove as EventListener, { passive: true });
+    el.addEventListener("mouseenter", onEnter);
+    el.addEventListener("mouseleave", onLeave);
+    el.addEventListener("touchstart", onEnter, { passive: true });
+    el.addEventListener("touchend", onLeave, { passive: true });
+
+    return () => {
+      el.removeEventListener("mousemove", onMove);
+      el.removeEventListener("touchmove", onMove as EventListener);
+      el.removeEventListener("mouseenter", onEnter);
+      el.removeEventListener("mouseleave", onLeave);
+      el.removeEventListener("touchstart", onEnter);
+      el.removeEventListener("touchend", onLeave);
+    };
+  }, [mvX, mvY]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,89 +210,60 @@ export default function Login() {
   };
 
   return (
-    <div ref={containerRef} className="min-h-screen relative overflow-hidden flex flex-col">
-      {/* Animated Topographic Map Background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200">
-        {/* Animated Terrain Contour Lines */}
-        <div className="absolute inset-0">
-          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600" preserveAspectRatio="xMidYMid slice">
+    <div
+      ref={rootRef}
+      className="relative min-h-screen w-full overflow-hidden bg-blue-950 text-white flex flex-col"
+      style={{
+        ["--topo-image" as any]:
+          "url('data:image/svg+xml;utf8," +
+          encodeURIComponent(`
+          <svg xmlns='http://www.w3.org/2000/svg' width='800' height='800' viewBox='0 0 800 800'>
             <defs>
-              <linearGradient id="irrigationGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3"/>
-                <stop offset="50%" stopColor="#1d4ed8" stopOpacity="0.4"/>
-                <stop offset="100%" stopColor="#1e40af" stopOpacity="0.5"/>
-              </linearGradient>
-              
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-                <feMerge> 
-                  <feMergeNode in="coloredBlur"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
-              
-              <filter id="mouseGlow">
-                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-                <feMerge> 
-                  <feMergeNode in="coloredBlur"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
+              <filter id='grain'>
+                <feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/>
+                <feColorMatrix type='saturate' values='0'/>
+                <feComponentTransfer>
+                  <feFuncA type='linear' slope='0.06'/>
+                </feComponentTransfer>
               </filter>
             </defs>
-            
-            {/* Clean Topographic Contour Lines */}
-            <g>
-              {/* Simple flowing contour lines */}
-              <path d="M0,120 Q100,100 200,110 Q300,120 400,105" 
-                    fill="none" stroke="#3b82f6" strokeWidth="1" 
-                    opacity="0.3" 
-                    className="sm:stroke-0.8"/>
-              
-              <path d="M0,180 Q120,160 240,170 Q360,180 400,165" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="1" 
-                    opacity="0.25" 
-                    className="sm:stroke-0.8"/>
-              
-              <path d="M0,240 Q80,220 160,230 Q240,240 320,225 Q360,220 400,235" 
-                    fill="none" stroke="#2563eb" strokeWidth="1" 
-                    opacity="0.2" 
-                    className="sm:stroke-0.8"/>
-              
-              <path d="M0,300 Q90,280 180,290 Q270,300 360,285 Q380,280 400,295" 
-                    fill="none" stroke="#60a5fa" strokeWidth="1" 
-                    opacity="0.15" 
-                    className="sm:stroke-0.8"/>
-              
-              <path d="M0,360 Q110,340 220,350 Q330,360 400,345" 
-                    fill="none" stroke="#93c5fd" strokeWidth="1" 
-                    opacity="0.1" 
-                    className="sm:stroke-0.8"/>
+            <rect width='100%' height='100%' fill='#1e3a8a'/>
+            <g fill='none' stroke='#3b82f6' stroke-width='1.5'>
+              ${Array.from({length: 32}).map((_,i)=>{
+                const r = 30 + i*12;
+                const cx = 180 + (i*13 % 140);
+                const cy = 200 + (i*17 % 120);
+                return `<path d='M ${cx} ${cy}
+                  m -${r}, 0 a ${r},${r} 0 1,0 ${r*2},0 a ${r},${r} 0 1,0 -${r*2},0' />`;
+              }).join('')}
+              ${Array.from({length: 28}).map((_,i)=>{
+                const r = 25 + i*10;
+                const cx = 480 + (i*11 % 160);
+                const cy = 450 + (i*7 % 140);
+                return `<path d='M ${cx} ${cy}
+                  m -${r}, 0 a ${r},${r} 0 1,0 ${r*2},0 a ${r},${r} 0 1,0 -${r*2},0' />`;
+              }).join('')}
             </g>
-            
-            {/* Subtle mouse glow effect */}
-            <circle 
-              cx={mousePos.x * 400} 
-              cy={mousePos.y * 600} 
-              r="80" 
-              fill="#3b82f6" 
-              opacity="0.03" 
-              className="transition-all duration-1000 ease-out"
-              style={{
-                filter: "blur(20px)",
-              }}
-            />
-            
-
+            <g fill='none' stroke='#1d4ed8' stroke-width='1'>
+              ${Array.from({length: 24}).map((_,i)=>{
+                const r = 40 + i*8;
+                const cx = 320 + (i*19 % 180);
+                const cy = 320 + (i*23 % 160);
+                return `<path d='M ${cx} ${cy}
+                  m -${r}, 0 a ${r},${r} 0 1,0 ${r*2},0 a ${r},${r} 0 1,0 -${r*2},0' />`;
+              }).join('')}
+            </g>
+            <rect width='100%' height='100%' filter='url(#grain)' opacity='0.25'/>
           </svg>
-        </div>
-        
-        {/* Subtle overlay for depth */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-50/30 to-blue-100/50"></div>
-      </div>
+        `) + "')",
+      }}
+    >
+      {/* Interactive Background */}
+      <TopoLayers x={x} y={y} active={isPointerActive} />
 
       {/* Content */}
-      <div className="relative z-10 flex-1 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white/90 backdrop-blur-sm border-blue-200/30 shadow-2xl">
+      <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md bg-white/10 backdrop-blur-md border-white/20 shadow-2xl text-white">
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
               <img 
@@ -176,13 +272,13 @@ export default function Login() {
                 className="h-16 w-auto drop-shadow-lg"
               />
             </div>
-            <CardTitle className="text-2xl font-bold text-blue-900">IrrigoPro</CardTitle>
-            <p className="text-blue-700">Professional irrigation management platform</p>
+            <CardTitle className="text-2xl font-bold text-white">IrrigoPro</CardTitle>
+            <p className="text-blue-100">Professional irrigation management platform</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-blue-800">Username</Label>
+                <Label htmlFor="username" className="text-blue-100">Username</Label>
                 <Input
                   id="username"
                   type="text"
@@ -190,12 +286,12 @@ export default function Login() {
                   value={credentials.username}
                   onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
                   required
-                  className="bg-white/80 border-blue-300 focus:border-blue-500 focus:ring-blue-500"
+                  className="bg-white/10 border-white/20 text-white placeholder-white/50 focus:border-blue-400 focus:ring-blue-400"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-blue-800">Password</Label>
+                <Label htmlFor="password" className="text-blue-100">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -203,7 +299,7 @@ export default function Login() {
                   value={credentials.password}
                   onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
                   required
-                  className="bg-white/80 border-blue-300 focus:border-blue-500 focus:ring-blue-500"
+                  className="bg-white/10 border-white/20 text-white placeholder-white/50 focus:border-blue-400 focus:ring-blue-400"
                 />
               </div>
 
@@ -225,7 +321,7 @@ export default function Login() {
               <Button 
                 variant="link" 
                 onClick={() => window.location.href = '/forgot-password'}
-                className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                className="text-sm text-blue-200 hover:text-white transition-colors"
               >
                 Forgot your password?
               </Button>

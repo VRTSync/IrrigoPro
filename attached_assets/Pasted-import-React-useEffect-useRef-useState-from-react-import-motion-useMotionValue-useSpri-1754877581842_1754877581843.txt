@@ -1,0 +1,240 @@
+import React, { useEffect, useRef, useState } from "react";
+import { motion, useMotionValue, useSpring } from "framer-motion";
+
+/**
+ * Interactive Topographic Login Background
+ * ------------------------------------------------------------
+ * - Fullscreen background with a faux topographic map.
+ * - Cursor/touch reveals the map via a dynamic radial mask.
+ * - Subtle parallax and animated contour lines for depth.
+ * - Includes a minimal login card to demonstrate usage; remove if you only need the background.
+ *
+ * Tech:
+ * - React + TailwindCSS (no extra setup beyond Tailwind).
+ * - Framer Motion for smooth spring-based cursor tracking.
+ *
+ * Usage:
+ *   export default function App() {
+ *     return <TopoLoginBackground />
+ *   }
+ *
+ * Notes:
+ * - You can swap the `--topo-image` CSS var to any topo tile/image URL.
+ * - Respectful to reduced-motion preferences.
+ */
+
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+export default function TopoLoginBackground() {
+  const rootRef = useRef(null);
+
+  // Motion values for cursor position (as % of viewport)
+  const mvX = useMotionValue(50);
+  const mvY = useMotionValue(50);
+
+  // Smoothed values
+  const x = useSpring(mvX, { stiffness: 120, damping: 20, mass: 0.4 });
+  const y = useSpring(mvY, { stiffness: 120, damping: 20, mass: 0.4 });
+
+  const [isPointerActive, setIsPointerActive] = useState(false);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+
+    const onMove = (e) => {
+      const rect = el.getBoundingClientRect();
+      let clientX, clientY;
+      if (e.touches && e.touches[0]) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
+      const px = ((clientX - rect.left) / rect.width) * 100;
+      const py = ((clientY - rect.top) / rect.height) * 100;
+      mvX.set(clamp(px, 0, 100));
+      mvY.set(clamp(py, 0, 100));
+    };
+
+    const onEnter = () => setIsPointerActive(true);
+    const onLeave = () => setIsPointerActive(false);
+
+    el.addEventListener("mousemove", onMove);
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("mouseenter", onEnter);
+    el.addEventListener("mouseleave", onLeave);
+    el.addEventListener("touchstart", onEnter, { passive: true });
+    el.addEventListener("touchend", onLeave, { passive: true });
+
+    return () => {
+      el.removeEventListener("mousemove", onMove);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("mouseenter", onEnter);
+      el.removeEventListener("mouseleave", onLeave);
+      el.removeEventListener("touchstart", onEnter);
+      el.removeEventListener("touchend", onLeave);
+    };
+  }, [mvX, mvY]);
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative min-h-screen w-full overflow-hidden bg-neutral-950 text-neutral-100"
+      style={{
+        // Swap this to your topo image. The default is an inline SVG contour pattern.
+        // You can set this at a global level too (e.g., :root { --topo-image: url('/my-topo.png') })
+        ["--topo-image"]:
+          "url('data:image/svg+xml;utf8," +
+          encodeURIComponent(`
+          <svg xmlns='http://www.w3.org/2000/svg' width='600' height='600' viewBox='0 0 600 600'>
+            <defs>
+              <filter id='grain'>
+                <feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/>
+                <feColorMatrix type='saturate' values='0'/>
+                <feComponentTransfer>
+                  <feFuncA type='linear' slope='0.08'/>
+                </feComponentTransfer>
+              </filter>
+            </defs>
+            <rect width='100%' height='100%' fill='#101214'/>
+            <g fill='none' stroke='#2b2f36' stroke-width='1'>
+              ${Array.from({length: 48}).map((_,i)=>{
+                const r = 40 + i*9;
+                const cx = 220 + (i*13 % 120);
+                const cy = 240 + (i*17 % 140);
+                return `<path d='M ${cx} ${cy}
+                  m -${r}, 0 a ${r},${r} 0 1,0 ${r*2},0 a ${r},${r} 0 1,0 -${r*2},0' />`;
+              }).join('')}
+              ${Array.from({length: 42}).map((_,i)=>{
+                const r = 30 + i*8;
+                const cx = 430 + (i*11 % 180);
+                const cy = 360 + (i*7 % 160);
+                return `<path d='M ${cx} ${cy}
+                  m -${r}, 0 a ${r},${r} 0 1,0 ${r*2},0 a ${r},${r} 0 1,0 -${r*2},0' />`;
+              }).join('')}
+            </g>
+            <rect width='100%' height='100%' filter='url(#grain)' opacity='0.35'/>
+          </svg>
+        `) + "')",
+      }}
+    >
+      {/* Background stack */}
+      <TopoLayers x={x} y={y} active={isPointerActive} />
+
+      {/* Example login card (optional) */}
+      <div className="pointer-events-auto relative z-10 flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-2xl bg-white/5 p-6 backdrop-blur-md shadow-2xl ring-1 ring-white/10">
+          <div className="mb-4 text-center">
+            <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
+            <p className="text-sm text-neutral-300">Sign in to continue</p>
+          </div>
+          <form className="space-y-4">
+            <label className="block">
+              <span className="mb-1 block text-sm text-neutral-300">Email</span>
+              <input className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="you@example.com"/>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm text-neutral-300">Password</span>
+              <input type="password" className="w-full rounded-xl border border-white/10 bg-white/10 p-3 text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="••••••••"/>
+            </label>
+            <button type="button" className="w-full rounded-xl bg-blue-500/90 p-3 font-medium text-white shadow hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-300">Sign in</button>
+          </form>
+          <p className="mt-4 text-center text-xs text-neutral-400">Demo card. Replace with your own auth UI.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopoLayers({ x, y, active }) {
+  // Mask size grows when active, shrinks when idle
+  const radius = useSpring(active ? 28 : 12, { stiffness: 90, damping: 18 });
+  const feather = useSpring(active ? 60 : 90, { stiffness: 90, damping: 18 });
+
+  return (
+    <motion.div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0"
+      style={{
+        // Expose x/y as CSS vars for mask positioning
+        "--x": x.to((v) => `${v}%`),
+        "--y": y.to((v) => `${v}%`),
+        "--r": radius.to((v) => v), // in vw units (interpreted below)
+        "--f": feather.to((v) => v),
+      }}
+    >
+      {/* Map base (hidden by default, revealed by mask) */}
+      <div
+        className="absolute inset-0 will-change-transform"
+        style={{
+          backgroundImage: `var(--topo-image), radial-gradient(1200px_800px at 30% 20%, #0e1116, #0b0e12)`,
+          backgroundSize: "auto, cover",
+          backgroundRepeat: "repeat, no-repeat",
+          backgroundPosition: "center, center",
+          maskImage:
+            // Radial mask centered at cursor; inner hard circle + soft feather
+            `radial-gradient(
+              circle at var(--x) var(--y),
+              rgba(0,0,0,1) calc(var(--r) * 1vw),
+              rgba(0,0,0,0) calc((var(--r) + (var(--f)/10)) * 1vw)
+            )`,
+          WebkitMaskImage:
+            `radial-gradient(
+              circle at var(--x) var(--y),
+              rgba(0,0,0,1) calc(var(--r) * 1vw),
+              rgba(0,0,0,0) calc((var(--r) + (var(--f)/10)) * 1vw)
+            )`,
+        }}
+      />
+
+      {/* Parallax glow behind the reveal to add depth */}
+      <motion.div
+        className="absolute inset-0"
+        style={{
+          background: "radial-gradient(800px 600px at var(--x) var(--y), rgba(34,197,94,0.08), transparent 60%)",
+        }}
+      />
+
+      {/* Animated contour overlay (very subtle) */}
+      <div
+        className="absolute inset-0 mix-blend-overlay opacity-40"
+        style={{
+          backgroundImage:
+            `repeating-linear-gradient(
+              45deg,
+              rgba(255,255,255,0.04) 0px,
+              rgba(255,255,255,0.04) 2px,
+              transparent 2px,
+              transparent 16px
+            ), repeating-linear-gradient(
+              -45deg,
+              rgba(255,255,255,0.025) 0px,
+              rgba(255,255,255,0.025) 2px,
+              transparent 2px,
+              transparent 18px
+            )`,
+          backgroundSize: "200px 200px, 180px 180px",
+          animation: "contours 18s linear infinite",
+        }}
+      />
+
+      {/* Dark overlay for contrast so the login card is legible */}
+      <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_40%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.35)_80%)]" />
+
+      {/* Keyframes for contour drift */}
+      <style>{`
+        @keyframes contours {
+          0% { background-position: 0px 0px, 0px 0px; }
+          100% { background-position: 600px 400px, -500px -350px; }
+        }
+
+        /* Respect reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+          .absolute.inset-0 { animation: none !important; }
+        }
+      `}</style>
+    </motion.div>
+  );
+}
