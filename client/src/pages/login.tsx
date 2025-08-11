@@ -115,67 +115,59 @@ export default function Login() {
               </filter>
             </defs>
             
-            {/* Topographic Elevation Contour Lines */}
-            <g className="animate-pulse" style={{animationDuration: '4s'}}>
-              {/* 1000ft elevation contour - outer ridgeline */}
-              <path d="M20,500 Q80,480 140,490 Q200,500 260,485 Q320,470 380,490 Q400,495 400,500 Q380,510 320,520 Q260,530 200,525 Q140,520 80,530 Q20,535 20,500 Z" 
-                    fill="none" stroke="#3b82f6" strokeWidth="3" 
-                    opacity={0.8 + mousePos.y * 0.2} 
-                    filter={mousePos.x > 0.3 && mousePos.x < 0.7 && mousePos.y > 0.7 && mousePos.y < 0.9 ? "url(#mouseGlow)" : "url(#glow)"} 
-                    className="sm:stroke-2 transition-all duration-300"/>
-              
-              {/* 800ft elevation contour */}
-              <path d="M40,420 Q100,400 160,410 Q220,420 280,405 Q340,390 380,410 Q400,415 400,420 Q380,430 340,440 Q280,450 220,445 Q160,440 100,450 Q40,455 40,420 Z" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="2.5" 
-                    opacity={0.7 + mousePos.x * 0.2} 
-                    className="sm:stroke-2 transition-all duration-300"/>
-              
-              {/* 600ft elevation contour - central hill */}
-              <path d="M60,340 Q120,320 180,330 Q240,340 300,325 Q360,310 380,330 Q400,335 400,340 Q380,350 360,360 Q300,375 240,370 Q180,365 120,375 Q60,380 60,340 Z" 
-                    fill="none" stroke="#1e40af" strokeWidth="3.5" 
-                    opacity={0.9 + mousePos.y * 0.1} 
-                    className="sm:stroke-2 transition-all duration-300"/>
-            </g>
-            
-            <g className="animate-pulse" style={{animationDuration: '6s', animationDelay: '1s'}}>
-              {/* 400ft elevation contour */}
-              <path d="M80,260 Q140,240 200,250 Q260,260 320,245 Q360,230 380,250 Q400,255 400,260 Q380,270 360,280 Q320,295 260,290 Q200,285 140,295 Q80,300 80,260 Z" 
-                    fill="none" stroke="#3b82f6" strokeWidth="2" 
-                    opacity={0.6 + mousePos.x * 0.3} 
+            {/* Organic Topographic Contour Lines */}
+            <g className="animate-pulse" style={{animationDuration: '6s'}}>
+              {/* Major contour lines - continuous flowing terrain */}
+              <path d="M0,150 Q50,130 100,145 Q200,165 300,140 Q350,130 400,150 Q400,155 350,165 Q300,180 200,175 Q100,170 50,185 Q0,195 0,150" 
+                    fill="none" stroke="#3b82f6" strokeWidth="1.5" 
+                    opacity={0.4 + mousePos.y * 0.2} 
                     className="sm:stroke-1 transition-all duration-500"/>
               
-              {/* 200ft elevation contour - valley area */}
-              <path d="M100,180 Q160,160 220,170 Q280,180 340,165 Q380,150 400,170 Q400,175 380,185 Q340,200 280,195 Q220,190 160,200 Q100,205 100,180 Z" 
-                    fill="none" stroke="#2563eb" strokeWidth="2.5" 
-                    opacity={0.8 + mousePos.y * 0.2} 
-                    filter={mousePos.x > 0.2 && mousePos.x < 0.8 && mousePos.y > 0.2 && mousePos.y < 0.4 ? "url(#mouseGlow)" : "none"} 
+              <path d="M0,220 Q80,200 160,215 Q240,230 320,205 Q380,195 400,220 Q400,235 380,245 Q320,260 240,255 Q160,250 80,265 Q0,275 0,220" 
+                    fill="none" stroke="#1d4ed8" strokeWidth="1.3" 
+                    opacity={0.3 + mousePos.x * 0.2} 
                     className="sm:stroke-1 transition-all duration-500"/>
               
-              {/* Peak elevation 1200ft - highest point */}
-              <path d="M120,100 Q180,80 240,90 Q300,100 360,85 Q380,80 400,90 Q400,95 380,105 Q360,115 300,130 Q240,125 180,135 Q120,140 120,100 Z" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="2.2" 
-                    opacity={0.7 + (mousePos.x + mousePos.y) * 0.15} 
+              <path d="M0,350 Q120,330 240,345 Q360,360 400,340 Q400,355 360,375 Q240,390 120,375 Q0,365 0,350" 
+                    fill="none" stroke="#2563eb" strokeWidth="1.4" 
+                    opacity={0.4 + mousePos.y * 0.1} 
                     className="sm:stroke-1 transition-all duration-500"/>
             </g>
             
-            <g className="animate-pulse" style={{animationDuration: '8s', animationDelay: '2s'}}>
-              {/* Fine contour details - ridge lines */}
-              <path d="M140,40 Q200,20 260,30 Q320,40 380,25 Q400,20 400,25 Q380,35 320,50 Q260,55 200,60 Q140,65 140,40 Z" 
-                    fill="none" stroke="#60a5fa" strokeWidth="1.8" 
-                    opacity={0.5 + mousePos.y * 0.3} 
-                    className="sm:stroke-1 transition-all duration-300"/>
+            <g className="animate-pulse" style={{animationDuration: '8s', animationDelay: '1s'}}>
+              {/* Intermediate contour lines */}
+              <path d="M20,100 Q120,80 220,95 Q320,110 380,85 Q400,80 400,95 Q380,105 320,130 Q220,135 120,120 Q20,115 20,100" 
+                    fill="none" stroke="#60a5fa" strokeWidth="1.2" 
+                    opacity={0.25 + mousePos.x * 0.15} 
+                    className="sm:stroke-0.8 transition-all duration-700"/>
               
-              {/* Irrigation canal contour */}
-              <path d="M30,550 Q90,530 150,540 Q210,550 270,535 Q330,520 390,540 Q400,545 390,555 Q330,570 270,575 Q210,580 150,585 Q90,590 30,585 Q20,580 30,550 Z" 
-                    fill="none" stroke="#3b82f6" strokeWidth="2" 
-                    opacity={0.6 + mousePos.x * 0.2} 
-                    className="sm:stroke-1 transition-all duration-300"/>
+              <path d="M40,280 Q140,260 240,275 Q340,290 400,270 Q400,285 340,305 Q240,320 140,305 Q40,295 40,280" 
+                    fill="none" stroke="#3b82f6" strokeWidth="1.1" 
+                    opacity={0.3 + mousePos.y * 0.15} 
+                    className="sm:stroke-0.8 transition-all duration-700"/>
               
-              {/* Stream bed contour */}
-              <path d="M0,450 Q60,430 120,440 Q180,450 240,435 Q300,420 360,440 Q400,445 400,450 Q360,460 300,470 Q240,475 180,480 Q120,485 60,490 Q0,495 0,450 Z" 
-                    fill="none" stroke="#1e40af" strokeWidth="2.2" 
-                    opacity={0.7 + mousePos.y * 0.2} 
-                    className="sm:stroke-1 transition-all duration-300"/>
+              <path d="M0,450 Q100,430 200,445 Q300,460 400,440 Q400,455 300,475 Q200,490 100,475 Q0,465 0,450" 
+                    fill="none" stroke="#1e40af" strokeWidth="1.3" 
+                    opacity={0.3 + (mousePos.x + mousePos.y) * 0.1} 
+                    className="sm:stroke-0.8 transition-all duration-700"/>
+            </g>
+            
+            <g className="animate-pulse" style={{animationDuration: '10s', animationDelay: '2s'}}>
+              {/* Fine detail contours */}
+              <path d="M60,50 Q160,30 260,45 Q360,60 400,40 Q400,50 360,70 Q260,85 160,70 Q60,60 60,50" 
+                    fill="none" stroke="#93c5fd" strokeWidth="0.9" 
+                    opacity={0.2 + mousePos.y * 0.1} 
+                    className="sm:stroke-0.6 transition-all duration-900"/>
+              
+              <path d="M0,190 Q80,170 160,185 Q240,200 320,175 Q380,165 400,190 Q380,205 320,220 Q240,235 160,220 Q80,210 0,225" 
+                    fill="none" stroke="#dbeafe" strokeWidth="0.8" 
+                    opacity={0.15 + mousePos.x * 0.1} 
+                    className="sm:stroke-0.5 transition-all duration-900"/>
+              
+              <path d="M20,520 Q120,500 220,515 Q320,530 400,510 Q400,520 320,540 Q220,555 120,540 Q20,530 20,520" 
+                    fill="none" stroke="#bfdbfe" strokeWidth="0.8" 
+                    opacity={0.2 + mousePos.y * 0.1} 
+                    className="sm:stroke-0.5 transition-all duration-900"/>
             </g>
             
             {/* Interactive Mouse Follower Effect */}
