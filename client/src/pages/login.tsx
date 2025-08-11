@@ -122,40 +122,7 @@ export default function Login() {
             </Button>
           </div>
 
-          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <div className="text-sm text-blue-800">
-              <div className="font-medium mb-2">Demo Credentials:</div>
-              <div><strong>Admin:</strong> admin / admin123</div>
-              <div><strong>Manager:</strong> manager / manager123</div>
-              <div><strong>Field Tech:</strong> tech / tech123</div>
-            </div>
-            <div className="mt-4 space-y-2">
-              <div className="text-xs font-medium text-blue-800">Quick Login:</div>
-              <div className="space-x-2">
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  onClick={() => setCredentials({ username: "admin", password: "admin123" })}
-                >
-                  Admin
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  onClick={() => setCredentials({ username: "manager", password: "manager123" })}
-                >
-                  Manager
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  onClick={() => setCredentials({ username: "tech", password: "tech123" })}
-                >
-                  Field Tech
-                </Button>
-              </div>
-            </div>
-          </div>
+
         </CardContent>
       </Card>
     </div>

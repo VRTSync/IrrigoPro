@@ -29,7 +29,7 @@ import SystemUserManagement from "@/pages/system-user-management";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import UserProfile from "@/pages/user-profile";
-import { UserSelector } from "@/components/user-selector";
+
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
@@ -129,9 +129,8 @@ function Router() {
             <Route path="/login" component={Login} />
             <Route path="/forgot-password" component={ForgotPassword} />
             <Route path="/reset-password" component={ResetPassword} />
-            <Route path="/user-selector" component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
-            <Route path="/" component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
-            <Route component={() => <UserSelector onUserSelect={(user) => setUser(user as User)} currentUser={user} />} />
+            <Route path="/" component={Login} />
+            <Route component={Login} />
           </Switch>
           <Toaster />
         </QueryClientProvider>
@@ -156,7 +155,6 @@ function Router() {
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
-                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -187,7 +185,6 @@ function Router() {
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/user-profile" component={UserProfile} />
-                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -214,7 +211,6 @@ function Router() {
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/user-profile" component={UserProfile} />
-                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -239,7 +235,6 @@ function Router() {
                 <Route path="/super-admin" component={SuperAdminDashboard} />
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-profile" component={UserProfile} />
-                <Route path="/user-selector" component={() => <UserSelector onUserSelect={setUser} currentUser={user} />} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
