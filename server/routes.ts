@@ -534,9 +534,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid or expired reset token" });
       }
       
+      // Hash the new password before storing
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      
       // Update password and clear reset token
       await storage.updateUser(user.id, {
-        password: newPassword, // In production, you'd hash this
+        password: hashedPassword,
         passwordResetToken: null,
         passwordResetExpires: null,
         updatedAt: new Date()
