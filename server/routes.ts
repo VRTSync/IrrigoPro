@@ -1,6 +1,7 @@
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import bcrypt from 'bcrypt';
 
 // Extend Express Request type to include session
 declare module 'express' {
@@ -454,7 +455,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { username, password } = req.body;
       const user = await storage.getUserByUsername(username);
       
-      if (!user || user.password !== password || !user.isActive) {
+      if (!user || !user.isActive) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      
+      // Use bcrypt to compare password with hash
+      const passwordValid = await bcrypt.compare(password, user.password);
+      if (!passwordValid) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
       
