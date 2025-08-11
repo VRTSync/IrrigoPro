@@ -19,8 +19,8 @@ self.addEventListener('push', (event) => {
   
   const options = {
     body: 'You have new updates',
-    icon: '/LOGO - SPREAD-05_1752764989944.png',
-    badge: '/LOGO - SPREAD-05_1752764989944.png',
+    icon: '/generated-icon.png',
+    badge: '/generated-icon.png',
     vibrate: [200, 100, 200],
     data: {
       dateOfArrival: Date.now(),
@@ -30,12 +30,12 @@ self.addEventListener('push', (event) => {
       {
         action: 'explore',
         title: 'View Details',
-        icon: '/LOGO - SPREAD-05_1752764989944.png'
+        icon: '/generated-icon.png'
       },
       {
         action: 'close',
         title: 'Close',
-        icon: '/LOGO - SPREAD-05_1752764989944.png'
+        icon: '/generated-icon.png'
       }
     ]
   };

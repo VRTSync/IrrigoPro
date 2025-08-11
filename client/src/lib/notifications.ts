@@ -65,8 +65,8 @@ export class NotificationService {
     }
 
     const defaultOptions: NotificationOptions = {
-      icon: '/LOGO - SPREAD-05_1752764989944.png',
-      badge: '/LOGO - SPREAD-05_1752764989944.png',
+      icon: '/generated-icon.png',
+      badge: '/generated-icon.png',
       tag: 'irrigation-notification',
       requireInteraction: false,
       ...options
