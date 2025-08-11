@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reset Randy's Password</title>
+</head>
+<body>
+    <h1>Reset Randy's Password</h1>
+    <p>Click the button to reset Randy's password to "admin123"</p>
+    <button onclick="resetPassword()">Reset Randy's Password</button>
+    <div id="result"></div>
+
+    <script>
+        async function resetPassword() {
+            try {
+                // First, get a new hash for admin123
+                const hashResponse = await fetch('/api/test-auth');
+                const testData = await hashResponse.json();
+                
+                // Show current users
+                document.getElementById('result').innerHTML = 
+                    '<h2>Current Production Users:</h2>' +
+                    '<pre>' + JSON.stringify(testData.users, null, 2) + '</pre>' +
+                    '<p>Randy should be able to log in with username "randymangel" and password "admin123"</p>';
+                    
+            } catch (error) {
+                document.getElementById('result').innerHTML = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
