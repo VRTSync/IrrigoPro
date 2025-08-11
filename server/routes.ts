@@ -1989,9 +1989,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Function to exchange authorization code for access tokens
   async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
-    const host = req.get('host');
-    const protocol = host?.includes('localhost') ? 'http' : 'https';
-    const redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
+    // Use the exact domain from QuickBooks app settings
+    const redirectUri = `https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback`;
     
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
     const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
@@ -2056,10 +2055,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const state = Math.random().toString(36).substring(2, 15);
-      // Use the actual domain from the request instead of localhost
-      const host = req.get('host');
-      const protocol = host?.includes('localhost') ? 'http' : 'https';
-      const redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
+      // Use the exact domain from QuickBooks app settings to avoid domain mismatch
+      const redirectUri = `https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback`;
       
       const authUrl = `https://appcenter.intuit.com/connect/oauth2?` +
         `client_id=${process.env.QUICKBOOKS_CLIENT_ID}&` +
