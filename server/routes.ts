@@ -469,6 +469,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Emergency Randy password reset
+  app.post("/api/reset-randy-password", async (req, res) => {
+    try {
+      const newPassword = 'admin123';
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      
+      // Update Randy's password
+      const user = await storage.updateUserPassword('randy@highplainsprop.com', hashedPassword);
+      if (!user) {
+        return res.status(404).json({ message: "Randy not found" });
+      }
+      
+      res.json({ 
+        message: "Randy's password reset to 'admin123'",
+        username: "randy@highplainsprop.com",
+        newPassword: "admin123"
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Password reset failed", error: error.message });
+    }
+  });
+
   // Authentication routes
   app.post("/api/auth/login", async (req, res) => {
     try {
