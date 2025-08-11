@@ -115,111 +115,47 @@ export default function Login() {
               </filter>
             </defs>
             
-            {/* Organic Topographic Contour Lines */}
-            <g className="animate-pulse" style={{animationDuration: '6s'}}>
-              {/* Major contour lines - continuous flowing terrain */}
-              <path d="M0,150 Q50,130 100,145 Q200,165 300,140 Q350,130 400,150 Q400,155 350,165 Q300,180 200,175 Q100,170 50,185 Q0,195 0,150" 
-                    fill="none" stroke="#3b82f6" strokeWidth="1.5" 
-                    opacity={0.4 + mousePos.y * 0.2} 
-                    className="sm:stroke-1 transition-all duration-500"/>
+            {/* Clean Topographic Contour Lines */}
+            <g>
+              {/* Simple flowing contour lines */}
+              <path d="M0,120 Q100,100 200,110 Q300,120 400,105" 
+                    fill="none" stroke="#3b82f6" strokeWidth="1" 
+                    opacity="0.3" 
+                    className="sm:stroke-0.8"/>
               
-              <path d="M0,220 Q80,200 160,215 Q240,230 320,205 Q380,195 400,220 Q400,235 380,245 Q320,260 240,255 Q160,250 80,265 Q0,275 0,220" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="1.3" 
-                    opacity={0.3 + mousePos.x * 0.2} 
-                    className="sm:stroke-1 transition-all duration-500"/>
+              <path d="M0,180 Q120,160 240,170 Q360,180 400,165" 
+                    fill="none" stroke="#1d4ed8" strokeWidth="1" 
+                    opacity="0.25" 
+                    className="sm:stroke-0.8"/>
               
-              <path d="M0,350 Q120,330 240,345 Q360,360 400,340 Q400,355 360,375 Q240,390 120,375 Q0,365 0,350" 
-                    fill="none" stroke="#2563eb" strokeWidth="1.4" 
-                    opacity={0.4 + mousePos.y * 0.1} 
-                    className="sm:stroke-1 transition-all duration-500"/>
+              <path d="M0,240 Q80,220 160,230 Q240,240 320,225 Q360,220 400,235" 
+                    fill="none" stroke="#2563eb" strokeWidth="1" 
+                    opacity="0.2" 
+                    className="sm:stroke-0.8"/>
+              
+              <path d="M0,300 Q90,280 180,290 Q270,300 360,285 Q380,280 400,295" 
+                    fill="none" stroke="#60a5fa" strokeWidth="1" 
+                    opacity="0.15" 
+                    className="sm:stroke-0.8"/>
+              
+              <path d="M0,360 Q110,340 220,350 Q330,360 400,345" 
+                    fill="none" stroke="#93c5fd" strokeWidth="1" 
+                    opacity="0.1" 
+                    className="sm:stroke-0.8"/>
             </g>
             
-            <g className="animate-pulse" style={{animationDuration: '8s', animationDelay: '1s'}}>
-              {/* Intermediate contour lines */}
-              <path d="M20,100 Q120,80 220,95 Q320,110 380,85 Q400,80 400,95 Q380,105 320,130 Q220,135 120,120 Q20,115 20,100" 
-                    fill="none" stroke="#60a5fa" strokeWidth="1.2" 
-                    opacity={0.25 + mousePos.x * 0.15} 
-                    className="sm:stroke-0.8 transition-all duration-700"/>
-              
-              <path d="M40,280 Q140,260 240,275 Q340,290 400,270 Q400,285 340,305 Q240,320 140,305 Q40,295 40,280" 
-                    fill="none" stroke="#3b82f6" strokeWidth="1.1" 
-                    opacity={0.3 + mousePos.y * 0.15} 
-                    className="sm:stroke-0.8 transition-all duration-700"/>
-              
-              <path d="M0,450 Q100,430 200,445 Q300,460 400,440 Q400,455 300,475 Q200,490 100,475 Q0,465 0,450" 
-                    fill="none" stroke="#1e40af" strokeWidth="1.3" 
-                    opacity={0.3 + (mousePos.x + mousePos.y) * 0.1} 
-                    className="sm:stroke-0.8 transition-all duration-700"/>
-            </g>
-            
-            <g className="animate-pulse" style={{animationDuration: '10s', animationDelay: '2s'}}>
-              {/* Fine detail contours */}
-              <path d="M60,50 Q160,30 260,45 Q360,60 400,40 Q400,50 360,70 Q260,85 160,70 Q60,60 60,50" 
-                    fill="none" stroke="#93c5fd" strokeWidth="0.9" 
-                    opacity={0.2 + mousePos.y * 0.1} 
-                    className="sm:stroke-0.6 transition-all duration-900"/>
-              
-              <path d="M0,190 Q80,170 160,185 Q240,200 320,175 Q380,165 400,190 Q380,205 320,220 Q240,235 160,220 Q80,210 0,225" 
-                    fill="none" stroke="#dbeafe" strokeWidth="0.8" 
-                    opacity={0.15 + mousePos.x * 0.1} 
-                    className="sm:stroke-0.5 transition-all duration-900"/>
-              
-              <path d="M20,520 Q120,500 220,515 Q320,530 400,510 Q400,520 320,540 Q220,555 120,540 Q20,530 20,520" 
-                    fill="none" stroke="#bfdbfe" strokeWidth="0.8" 
-                    opacity={0.2 + mousePos.y * 0.1} 
-                    className="sm:stroke-0.5 transition-all duration-900"/>
-            </g>
-            
-            {/* Interactive Mouse Follower Effect */}
+            {/* Subtle mouse glow effect */}
             <circle 
               cx={mousePos.x * 400} 
               cy={mousePos.y * 600} 
-              r="30" 
-              fill="url(#irrigationGradient)" 
-              opacity="0.1" 
-              className="transition-all duration-700 ease-out"
+              r="80" 
+              fill="#3b82f6" 
+              opacity="0.03" 
+              className="transition-all duration-1000 ease-out"
               style={{
-                filter: "blur(8px)",
-                transform: `scale(${1 + mousePos.y * 0.5})`,
+                filter: "blur(20px)",
               }}
             />
-            
-            {/* Irrigation zone markers - small circles representing sprinkler zones */}
-            <g className="animate-bounce" style={{animationDelay: '0s', animationDuration: '3s'}}>
-              <circle cx="80" cy="120" r="4" fill="#3b82f6" 
-                     opacity={0.8 + (Math.abs(mousePos.x * 400 - 80) < 50 ? 0.2 : 0)} 
-                     className="sm:r-2 transition-all duration-300"/>
-              <circle cx="200" cy="180" r="3" fill="#1d4ed8" 
-                     opacity={0.7 + (Math.abs(mousePos.x * 400 - 200) < 50 ? 0.3 : 0)} 
-                     className="sm:r-1.5 transition-all duration-300"/>
-              <circle cx="320" cy="140" r="5" fill="#1e40af" 
-                     opacity={0.9 + (Math.abs(mousePos.x * 400 - 320) < 50 ? 0.1 : 0)} 
-                     className="sm:r-2.5 transition-all duration-300"/>
-              <circle cx="160" cy="240" r="4" fill="#2563eb" 
-                     opacity={0.8 + (Math.abs(mousePos.y * 600 - 240) < 50 ? 0.2 : 0)} 
-                     className="sm:r-2 transition-all duration-300"/>
-              <circle cx="280" cy="200" r="3.5" fill="#3b82f6" 
-                     opacity={0.7 + (Math.abs(mousePos.x * 400 - 280) < 50 ? 0.3 : 0)} 
-                     className="sm:r-1.8 transition-all duration-300"/>
-            </g>
-            
-            <g className="animate-bounce" style={{animationDelay: '1.5s', animationDuration: '4s'}}>
-              <circle cx="60" cy="280" r="3" fill="#60a5fa" 
-                     opacity={0.6 + (Math.abs(mousePos.y * 600 - 280) < 50 ? 0.4 : 0)} 
-                     className="sm:r-1.5 transition-all duration-300"/>
-              <circle cx="140" cy="160" r="4.5" fill="#1d4ed8" 
-                     opacity={0.8 + (Math.abs(mousePos.x * 400 - 140) < 50 ? 0.2 : 0)} 
-                     className="sm:r-2.2 transition-all duration-300"/>
-              <circle cx="220" cy="320" r="3.5" fill="#1e40af" 
-                     opacity={0.7 + (Math.abs(mousePos.y * 600 - 320) < 50 ? 0.3 : 0)} 
-                     className="sm:r-1.8 transition-all duration-300"/>
-              <circle cx="300" cy="180" r="4" fill="#3b82f6" 
-                     opacity={0.9 + (Math.abs(mousePos.x * 400 - 300) < 50 ? 0.1 : 0)} 
-                     className="sm:r-2 transition-all duration-300"/>
-              <circle cx="380" cy="300" r="3.2" fill="#2563eb" 
-                     opacity={0.6 + (Math.abs(mousePos.x * 400 - 380) < 50 ? 0.4 : 0)} 
-                     className="sm:r-1.6 transition-all duration-300"/>
-            </g>
             
 
           </svg>
