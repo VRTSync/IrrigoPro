@@ -120,3 +120,5 @@ Customer Management Permissions: Complete role-based access control implemented 
 - **Simplified Access**: Removed QuickBooks integration from multiple page locations to prevent confusion and ensure consistent functionality
 - **Working Implementation**: Fixed QuickBooks OAuth connection using direct fetch API calls instead of complex React Query mutations
 - **Component Cleanup**: Removed debug logging and simplified component initialization for production-ready implementation
+- **Deployment Ready**: Updated OAuth redirect URIs to automatically detect deployed .replit.app domains for stable QuickBooks integration
+- **Development vs Production**: System now supports both development and deployed environments with proper domain detection
