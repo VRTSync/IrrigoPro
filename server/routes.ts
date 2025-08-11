@@ -1987,6 +1987,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     res.sendFile('simple-quickbooks-test.html', { root: '.' });
   });
 
+  // Serve QuickBooks debug test page
+  app.get("/quickbooks-debug-test", (req, res) => {
+    res.sendFile('quickbooks-debug-test.html', { root: '.' });
+  });
+
   // Function to exchange authorization code for access tokens
   async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
     // Use the exact domain from QuickBooks app settings
@@ -2022,9 +2027,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     
     // Get company info from QuickBooks API
     try {
-      const apiBase = process.env.QUICKBOOKS_SANDBOX === 'true' 
-        ? 'https://sandbox-quickbooks.api.intuit.com' 
-        : 'https://quickbooks.api.intuit.com';
+      // Use sandbox for development apps by default
+      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
       const companyInfoResponse = await fetch(`${apiBase}/v3/company/${realmId}/companyinfo/${realmId}`, {
         headers: {
           'Authorization': `Bearer ${tokenData.access_token}`,
@@ -2058,7 +2062,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Use the exact domain from QuickBooks app settings to avoid domain mismatch
       const redirectUri = `https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback`;
       
-      const authUrl = `https://appcenter.intuit.com/connect/oauth2?` +
+      // For development apps, use the app/connect path
+      const authUrl = `https://appcenter.intuit.com/app/connect/oauth2?` +
         `client_id=${process.env.QUICKBOOKS_CLIENT_ID}&` +
         `scope=com.intuit.quickbooks.accounting&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
@@ -2066,6 +2071,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `access_type=offline&` +
         `state=${state}`;
       
+      console.log("Generated QuickBooks auth URL:", authUrl);
       res.json({ authUrl, state });
     } catch (error) {
       console.error("QuickBooks auth error:", error);
@@ -2270,10 +2276,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      // Fetch real customers from QuickBooks API
-      const apiBase = process.env.QUICKBOOKS_SANDBOX === 'true' 
-        ? 'https://sandbox-quickbooks.api.intuit.com' 
-        : 'https://quickbooks.api.intuit.com';
+      // Fetch real customers from QuickBooks API - use sandbox for development
+      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
       
       const customersResponse = await fetch(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Customer`, {
         headers: {
