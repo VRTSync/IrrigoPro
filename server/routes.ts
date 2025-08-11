@@ -1987,6 +1987,64 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     res.sendFile('simple-quickbooks-test.html', { root: '.' });
   });
 
+  // Function to exchange authorization code for access tokens
+  async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
+    const host = req.get('host');
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
+    
+    const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
+    const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
+    
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: redirectUri
+    });
+
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authHeader}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: body.toString()
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Token exchange failed:', response.status, errorText);
+      throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
+    }
+
+    const tokenData = await response.json();
+    console.log('Successfully exchanged code for tokens');
+    
+    // Get company info from QuickBooks API
+    try {
+      const apiBase = process.env.QUICKBOOKS_SANDBOX === 'true' 
+        ? 'https://sandbox-quickbooks.api.intuit.com' 
+        : 'https://quickbooks.api.intuit.com';
+      const companyInfoResponse = await fetch(`${apiBase}/v3/company/${realmId}/companyinfo/${realmId}`, {
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`,
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (companyInfoResponse.ok) {
+        const companyData = await companyInfoResponse.json();
+        tokenData.companyName = companyData?.QueryResponse?.CompanyInfo?.[0]?.CompanyName || `Company ${realmId}`;
+      }
+    } catch (companyError) {
+      console.error('Failed to fetch company info:', companyError);
+      tokenData.companyName = `Company ${realmId}`;
+    }
+
+    return tokenData;
+  }
+
   // QuickBooks integration routes
   app.get("/api/quickbooks/auth", async (req, res) => {
     try {
@@ -2038,13 +2096,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log("QuickBooks OAuth callback received:", { code, state, realmId });
       
       try {
-        // Store QuickBooks connection data
+        // Exchange authorization code for real access tokens
+        const tokenResponse = await exchangeCodeForTokens(code as string, realmId as string, req);
+        
         const qbData = {
-          accessToken: `demo_token_${Date.now()}`, // In production, exchange code for real token
-          refreshToken: `demo_refresh_${Date.now()}`,
+          accessToken: tokenResponse.access_token,
+          refreshToken: tokenResponse.refresh_token,
           companyId: realmId as string,
-          companyName: `QuickBooks Company ${realmId}`,
-          expiresAt: new Date(Date.now() + (3600 * 1000)), // 1 hour
+          companyName: tokenResponse.companyName || `QuickBooks Company ${realmId}`,
+          expiresAt: new Date(Date.now() + (tokenResponse.expires_in * 1000)),
           lastSync: new Date()
         };
 
@@ -2204,36 +2264,55 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(401).json({ message: "QuickBooks not connected" });
       }
 
-      // In production, this would make actual QuickBooks API calls
-      // For now, simulate importing customers from QuickBooks
-      const mockQuickBooksCustomers = [
-        {
-          qb_id: "1",
-          name: "Green Valley Landscaping",
-          email: "info@greenvalleylandscaping.com",
-          phone: "(555) 123-4567",
-          address: "123 Main St, Anytown, CA 90210"
-        },
-        {
-          qb_id: "2", 
-          name: "Desert Springs Golf Course",
-          email: "maintenance@desertsprings.com",
-          phone: "(555) 987-6543",
-          address: "456 Golf Course Dr, Desert City, AZ 85001"
-        },
-        {
-          qb_id: "3",
-          name: "Sunset Residential Properties",
-          email: "contact@sunsetproperties.com", 
-          phone: "(555) 456-7890",
-          address: "789 Sunset Blvd, Coastal Town, CA 90405"
+      // Get actual QuickBooks integration data
+      const integration = await storage.getQuickBooksIntegration();
+      if (!integration || !integration.accessToken) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "QuickBooks not connected. Please connect to QuickBooks first." 
+        });
+      }
+
+      // Fetch real customers from QuickBooks API
+      const apiBase = process.env.QUICKBOOKS_SANDBOX === 'true' 
+        ? 'https://sandbox-quickbooks.api.intuit.com' 
+        : 'https://quickbooks.api.intuit.com';
+      
+      const customersResponse = await fetch(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Customer`, {
+        headers: {
+          'Authorization': `Bearer ${integration.accessToken}`,
+          'Accept': 'application/json'
         }
-      ];
+      });
+
+      if (!customersResponse.ok) {
+        const errorText = await customersResponse.text();
+        console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
+        return res.status(500).json({ 
+          success: false, 
+          message: `Failed to fetch customers from QuickBooks: ${customersResponse.status}` 
+        });
+      }
+
+      const qbData = await customersResponse.json();
+      const qbCustomers = qbData?.QueryResponse?.Customer || [];
+      
+      console.log(`Found ${qbCustomers.length} customers in QuickBooks`);
+      
+      const quickBooksCustomers = qbCustomers.map((customer: any) => ({
+        qb_id: customer.Id,
+        name: customer.Name,
+        email: customer.PrimaryEmailAddr?.Address || '',
+        phone: customer.PrimaryPhone?.FreeFormNumber || '',
+        address: customer.BillAddr ? 
+          `${customer.BillAddr.Line1 || ''} ${customer.BillAddr.City || ''} ${customer.BillAddr.CountrySubDivisionCode || ''} ${customer.BillAddr.PostalCode || ''}`.trim() 
+          : ''
+      }));
 
       let syncedCount = 0;
       const results = [];
 
-      for (const qbCustomer of mockQuickBooksCustomers) {
+      for (const qbCustomer of quickBooksCustomers) {
         try {
           // Check if customer already exists
           const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
@@ -2263,7 +2342,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       res.json({
         success: true,
         syncedCount,
-        totalCustomers: mockQuickBooksCustomers.length,
+        totalCustomers: quickBooksCustomers.length,
         results,
         message: `Successfully synced ${syncedCount} customers from QuickBooks`
       });
