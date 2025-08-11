@@ -3554,5 +3554,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
 
 
+  // PDF Generation Route for Sample Invoice
+  app.get("/api/sample-invoice-pdf", async (req, res) => {
+    try {
+      const { PDFGenerator } = await import('./pdf-generator');
+      const invoiceUrl = `http://localhost:5000/invoice-preview.html`;
+      
+      const pdfBuffer = await PDFGenerator.generateInvoicePDFFromUrl(invoiceUrl);
+      
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="Sample-Invoice-INV-202508-0014.pdf"');
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      res.status(500).json({ message: "Failed to generate PDF" });
+    }
+  });
+
   return httpServer;
 }

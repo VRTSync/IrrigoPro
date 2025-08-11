@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download Sample Invoice PDF</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px; 
+            background: #f5f5f5; 
+        }
+        .container { 
+            background: white; 
+            padding: 40px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
+            text-align: center; 
+        }
+        .download-btn { 
+            display: inline-block; 
+            background: #0077C5; 
+            color: white; 
+            padding: 15px 30px; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            font-size: 16px; 
+            margin: 20px 0; 
+        }
+        .download-btn:hover { background: #005a9e; }
+        .preview-link { 
+            color: #0077C5; 
+            text-decoration: none; 
+            margin-left: 20px; 
+        }
+        .preview-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Sample Invoice PDF</h1>
+        <p>Download the professional PDF version of the sample QuickBooks invoice:</p>
+        
+        <p><strong>Invoice Details:</strong><br>
+        Customer: First Bank - Corporate<br>
+        Invoice #: INV-202508-0014<br>
+        Total: $307.00</p>
+        
+        <a href="/api/sample-invoice-pdf" class="download-btn" download="Sample-Invoice-INV-202508-0014.pdf">📄 Download PDF</a>
+        <a href="/invoice-preview.html" class="preview-link" target="_blank">View HTML Preview</a>
+        
+        <p style="margin-top: 30px; color: #666; font-size: 14px;">
+        This PDF demonstrates the professional invoice format used by IrrigoPro's QuickBooks integration system.
+        </p>
+    </div>
+</body>
+</html>
