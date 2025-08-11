@@ -65,13 +65,15 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     onSuccess: (data) => {
       toast({
         title: "Customer Sync Complete",
-        description: `${data.syncedCount} customers imported from QuickBooks`,
+        description: `${data.syncedCount || data.totalCustomers || 0} customers imported from QuickBooks`,
         variant: "default"
       });
       // Refresh customer list
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
     },
     onError: (error) => {
+      console.error("Customer sync error:", error);
       toast({
         title: "Sync Failed",
         description: error.message || "Failed to sync customers from QuickBooks",
