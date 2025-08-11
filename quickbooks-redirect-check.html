@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QuickBooks Redirect URI Check</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .uri { background: #f5f5f5; padding: 15px; border-radius: 5px; font-family: monospace; }
+        .instructions { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>QuickBooks OAuth Redirect URI Setup</h1>
+    
+    <h2>Current Redirect URI:</h2>
+    <div class="uri" id="redirectUri">Loading...</div>
+    
+    <div class="instructions">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Go to <a href="https://developer.intuit.com" target="_blank">QuickBooks Developer Console</a></li>
+            <li>Sign in and select your app</li>
+            <li>Click on "Keys & OAuth" tab</li>
+            <li>In the "Redirect URIs" section, add the exact URI shown above</li>
+            <li>Save the changes</li>
+            <li>Test the connection again</li>
+        </ol>
+    </div>
+
+    <h2>Test Connection:</h2>
+    <button onclick="testConnection()">Get Fresh QuickBooks Auth URL</button>
+    <div id="authUrl"></div>
+
+    <script>
+        async function loadRedirectUri() {
+            try {
+                const response = await fetch('/api/quickbooks/auth');
+                const data = await response.json();
+                const url = new URL(data.authUrl);
+                const redirectUri = url.searchParams.get('redirect_uri');
+                document.getElementById('redirectUri').textContent = redirectUri;
+            } catch (error) {
+                document.getElementById('redirectUri').textContent = 'Error loading redirect URI';
+            }
+        }
+
+        async function testConnection() {
+            try {
+                const response = await fetch('/api/quickbooks/auth');
+                const data = await response.json();
+                document.getElementById('authUrl').innerHTML = 
+                    `<p>Fresh auth URL:</p><div class="uri"><a href="${data.authUrl}" target="_blank">${data.authUrl}</a></div>`;
+            } catch (error) {
+                document.getElementById('authUrl').textContent = 'Error generating auth URL';
+            }
+        }
+
+        loadRedirectUri();
+    </script>
+</body>
+</html>
