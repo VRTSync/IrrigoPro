@@ -7,7 +7,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, User, Edit, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Plus, User, Edit, Trash2, MoreHorizontal } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const userFormSchema = z.object({
   username: z.string().min(1, "Username is required"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters").optional(),
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Valid email is required"),
   role: z.enum(["super_admin", "company_admin", "irrigation_manager", "field_tech", "billing_manager"]),
@@ -28,6 +30,8 @@ type UserFormData = z.infer<typeof userFormSchema>;
 export default function SystemUserManagement() {
   const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [deletingUser, setDeletingUser] = useState<any>(null);
 
   // Fetch all users (super admin can see all)
   const { data: users = [], isLoading } = useQuery({
@@ -63,19 +67,67 @@ export default function SystemUserManagement() {
 
   const onSubmit = async (data: UserFormData) => {
     try {
-      await apiRequest("/api/users", "POST", data);
+      if (editingUser) {
+        // Update existing user (exclude password if empty)
+        const updateData: Partial<UserFormData> = { ...data };
+        if (!data.password) {
+          delete (updateData as any).password;
+        }
+        await apiRequest(`/api/users/${editingUser.id}`, "PUT", updateData);
+        toast({
+          title: "Success",
+          description: "User updated successfully",
+        });
+      } else {
+        // Create new user
+        await apiRequest("/api/users", "POST", data);
+        toast({
+          title: "Success",
+          description: "User created successfully",
+        });
+      }
 
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       setIsCreateDialogOpen(false);
+      setEditingUser(null);
       form.reset();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: editingUser ? "Failed to update user" : "Failed to create user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditUser = (user: any) => {
+    setEditingUser(user);
+    form.reset({
+      username: user.username || "",
+      password: "", // Leave password empty for editing
+      name: user.name || "",
+      email: user.email || "",
+      role: user.role || "company_admin",
+      companyId: user.companyId || null,
+    });
+    setIsCreateDialogOpen(true);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+
+    try {
+      await apiRequest(`/api/users/${deletingUser.id}`, "DELETE");
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setDeletingUser(null);
       toast({
         title: "Success",
-        description: "User created successfully",
+        description: "User deleted successfully",
       });
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to create user",
+        description: "Failed to delete user",
         variant: "destructive",
       });
     }
@@ -124,7 +176,13 @@ export default function SystemUserManagement() {
             Manage all users across all companies
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
+          setIsCreateDialogOpen(open);
+          if (!open) {
+            setEditingUser(null);
+            form.reset();
+          }
+        }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -133,9 +191,9 @@ export default function SystemUserManagement() {
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Create New User</DialogTitle>
+              <DialogTitle>{editingUser ? "Edit User" : "Create New User"}</DialogTitle>
               <DialogDescription>
-                Add a new user to the system.
+                {editingUser ? "Update user information." : "Add a new user to the system."}
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
@@ -159,9 +217,13 @@ export default function SystemUserManagement() {
                   name="password"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Password *</FormLabel>
+                      <FormLabel>{editingUser ? "Password (leave empty to keep current)" : "Password *"}</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="Enter password" {...field} />
+                        <Input 
+                          type="password" 
+                          placeholder={editingUser ? "Leave empty to keep current password" : "Enter password"} 
+                          {...field} 
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -258,7 +320,7 @@ export default function SystemUserManagement() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit">Create User</Button>
+                  <Button type="submit">{editingUser ? "Update User" : "Create User"}</Button>
                 </div>
               </form>
             </Form>
@@ -302,18 +364,50 @@ export default function SystemUserManagement() {
                   </div>
                 </div>
                 <div className="flex space-x-2">
-                  <Button variant="outline" size="sm">
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleEditUser(user)}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Edit User
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => setDeletingUser(user)}
+                        className="text-red-600"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete User
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             ))}
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deletingUser} onOpenChange={() => setDeletingUser(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete User</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deletingUser?.name}" ({deletingUser?.username})? This action cannot be undone and will remove all associated data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteUser} className="bg-red-600 hover:bg-red-700">
+              Delete User
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

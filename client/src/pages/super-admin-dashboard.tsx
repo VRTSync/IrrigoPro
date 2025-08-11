@@ -6,7 +6,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Building2, Users, TrendingUp, Activity } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Plus, Building2, Users, TrendingUp, Activity, Edit, Trash2, MoreHorizontal } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -27,6 +30,8 @@ type CompanyFormData = z.infer<typeof companyFormSchema>;
 export default function SuperAdminDashboard() {
   const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [editingCompany, setEditingCompany] = useState<any>(null);
+  const [deletingCompany, setDeletingCompany] = useState<any>(null);
 
   // Fetch companies
   const { data: companies = [], isLoading } = useQuery({
@@ -62,19 +67,63 @@ export default function SuperAdminDashboard() {
 
   const onSubmit = async (data: CompanyFormData) => {
     try {
-      await apiRequest("/api/companies", "POST", data);
+      if (editingCompany) {
+        // Update existing company
+        await apiRequest(`/api/companies/${editingCompany.id}`, "PUT", data);
+        toast({
+          title: "Success",
+          description: "Company updated successfully",
+        });
+      } else {
+        // Create new company
+        await apiRequest("/api/companies", "POST", data);
+        toast({
+          title: "Success",
+          description: "Company created successfully",
+        });
+      }
 
       queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       setIsCreateDialogOpen(false);
+      setEditingCompany(null);
       form.reset();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: editingCompany ? "Failed to update company" : "Failed to create company",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditCompany = (company: any) => {
+    setEditingCompany(company);
+    form.reset({
+      name: company.name || "",
+      address: company.address || "",
+      phone: company.phone || "",
+      email: company.email || "",
+      website: company.website || "",
+      subscription: company.subscription || "basic",
+    });
+    setIsCreateDialogOpen(true);
+  };
+
+  const handleDeleteCompany = async () => {
+    if (!deletingCompany) return;
+
+    try {
+      await apiRequest(`/api/companies/${deletingCompany.id}`, "DELETE");
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      setDeletingCompany(null);
       toast({
         title: "Success",
-        description: "Company created successfully",
+        description: "Company deleted successfully",
       });
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to create company",
+        description: "Failed to delete company",
         variant: "destructive",
       });
     }
@@ -100,7 +149,13 @@ export default function SuperAdminDashboard() {
             Manage all companies using the irrigation system
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
+          setIsCreateDialogOpen(open);
+          if (!open) {
+            setEditingCompany(null);
+            form.reset();
+          }
+        }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -109,9 +164,9 @@ export default function SuperAdminDashboard() {
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Create New Company</DialogTitle>
+              <DialogTitle>{editingCompany ? "Edit Company" : "Create New Company"}</DialogTitle>
               <DialogDescription>
-                Add a new company to the irrigation management system.
+                {editingCompany ? "Update company information." : "Add a new company to the irrigation management system."}
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
@@ -180,7 +235,7 @@ export default function SuperAdminDashboard() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit">Create Company</Button>
+                  <Button type="submit">{editingCompany ? "Update Company" : "Create Company"}</Button>
                 </div>
               </form>
             </Form>
@@ -263,15 +318,9 @@ export default function SuperAdminDashboard() {
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <h3 className="font-semibold">{company.name}</h3>
-                    <span
-                      className={`px-2 py-1 text-xs rounded-full ${
-                        company.isActive
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
+                    <Badge variant={company.isActive ? "default" : "destructive"}>
                       {company.isActive ? "Active" : "Inactive"}
-                    </span>
+                    </Badge>
                   </div>
                   {company.email && (
                     <p className="text-sm text-muted-foreground">{company.email}</p>
@@ -281,18 +330,50 @@ export default function SuperAdminDashboard() {
                   )}
                 </div>
                 <div className="flex space-x-2">
-                  <Button variant="outline" size="sm">
-                    Edit
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    View Users
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleEditCompany(company)}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Edit Company
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => setDeletingCompany(company)}
+                        className="text-red-600"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete Company
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             ))}
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deletingCompany} onOpenChange={() => setDeletingCompany(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Company</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deletingCompany?.name}"? This action cannot be undone and will remove all associated data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteCompany} className="bg-red-600 hover:bg-red-700">
+              Delete Company
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

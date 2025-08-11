@@ -118,6 +118,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Super admin routes for companies
+  app.put("/api/companies/:id", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.id);
+      const updatedCompany = await storage.updateCompany(companyId, req.body);
+      if (!updatedCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+      res.json(updatedCompany);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update company" });
+    }
+  });
+
+  app.delete("/api/companies/:id", async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.id);
+      const success = await storage.deleteCompany(companyId);
+      if (!success) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+      res.json({ message: "Company deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete company" });
+    }
+  });
+
   // Company Profile Management (Company Admin only)
   app.get("/api/company/:companyId/profile", async (req, res) => {
     try {
@@ -283,6 +310,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to create user" });
+    }
+  });
+
+  // Super admin routes for users
+  app.put("/api/users/:id", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const userData = insertUserSchema.partial().parse(req.body);
+      const user = await storage.updateUser(userId, userData);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      // Remove password from response
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const success = await storage.deleteUser(userId);
+      if (!success) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json({ message: "User deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete user" });
     }
   });
 
