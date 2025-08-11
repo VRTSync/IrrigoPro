@@ -269,7 +269,7 @@ export default function Login() {
               <img 
                 src={irrigoProLogo} 
                 alt="IrrigoPro Logo" 
-                className="h-16 w-auto drop-shadow-lg"
+                className="h-24 w-auto drop-shadow-lg"
               />
             </div>
             <CardTitle className="text-2xl font-bold text-white">IrrigoPro</CardTitle>
