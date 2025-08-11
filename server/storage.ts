@@ -909,6 +909,39 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async saveQuickBooksIntegration(data: { companyId: string; accessToken: string; refreshToken: string; expiresAt: Date }): Promise<void> {
+    try {
+      // Check if integration already exists
+      const existing = await db.select().from(quickbooksIntegration).limit(1);
+      
+      if (existing.length > 0) {
+        // Update existing
+        await db.update(quickbooksIntegration)
+          .set({
+            companyId: data.companyId,
+            accessToken: data.accessToken,
+            refreshToken: data.refreshToken,
+            expiresAt: data.expiresAt,
+            updatedAt: new Date()
+          })
+          .where(eq(quickbooksIntegration.id, existing[0].id));
+      } else {
+        // Create new
+        await db.insert(quickbooksIntegration).values({
+          companyId: data.companyId,
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken,
+          expiresAt: data.expiresAt,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      }
+    } catch (error) {
+      console.error('Error saving QuickBooks integration:', error);
+      throw error;
+    }
+  }
+
   async getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
     // Check if QuickBooks integration exists
     const integration = await db.select().from(quickbooksIntegration).limit(1);

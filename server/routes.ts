@@ -1,6 +1,13 @@
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+
+// Extend Express Request type to include session
+declare module 'express' {
+  interface Request {
+    session: any;
+  }
+}
 import type { UploadedFile } from "express-fileupload";
 import { 
   insertUserSchema,
@@ -2031,21 +2038,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log("QuickBooks OAuth callback received:", { code, state, realmId });
       
       try {
-        // Store QuickBooks connection data in session
-        req.session.quickbooks = {
+        // Store QuickBooks connection data
+        const qbData = {
           accessToken: `demo_token_${Date.now()}`, // In production, exchange code for real token
           refreshToken: `demo_refresh_${Date.now()}`,
           companyId: realmId as string,
           companyName: `QuickBooks Company ${realmId}`,
-          expiresAt: Date.now() + (3600 * 1000), // 1 hour
-          lastSync: new Date().toISOString()
+          expiresAt: new Date(Date.now() + (3600 * 1000)), // 1 hour
+          lastSync: new Date()
         };
 
-        // Force session save
-        req.session.save((err) => {
-          if (err) {
-            console.error('Session save error:', err);
-          }
+        // Save to database instead of session
+        await storage.saveQuickBooksIntegration({
+          companyId: realmId as string,
+          accessToken: qbData.accessToken,
+          refreshToken: qbData.refreshToken,
+          expiresAt: qbData.expiresAt
         });
 
         console.log(`QuickBooks connection established for company: ${realmId}`);
@@ -2164,14 +2172,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
       
-      // Check if we have valid QuickBooks tokens in session
-      const qbAuth = req.session?.quickbooks;
-      if (qbAuth?.companyId && qbAuth?.accessToken) {
+      // Get from database instead of session
+      const qbStatus = await storage.getQuickBooksCustomerStatus();
+      if (qbStatus.isConnected) {
         res.json({
+          companyId: qbStatus.companyName,
+          companyName: qbStatus.companyName,
           isConnected: true,
-          companyId: qbAuth.companyId,
-          companyName: qbAuth.companyName || `QuickBooks Company ${qbAuth.companyId}`,
-          lastSync: qbAuth.lastSync || new Date().toISOString()
+          lastSync: qbStatus.lastSync
         });
       } else {
         res.json({
@@ -2189,8 +2197,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/quickbooks/sync-customers", async (req, res) => {
     try {
-      const qbAuth = req.session?.quickbooks;
-      if (!qbAuth?.companyId || !qbAuth?.accessToken) {
+      const qbStatus = await storage.getQuickBooksCustomerStatus();
+      if (!qbStatus.isConnected) {
         return res.status(401).json({ message: "QuickBooks not connected" });
       }
 

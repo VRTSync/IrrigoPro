@@ -209,6 +209,7 @@ function Router() {
             <div className="px-4">
               <Switch>
                 <Route path="/" component={CustomerBilling} />
+                <Route path="/billing" component={CustomerBilling} />
                 <Route path="/customers" component={CustomerBilling} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
