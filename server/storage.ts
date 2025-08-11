@@ -419,7 +419,10 @@ export class DatabaseStorage implements IStorage {
     return customer || undefined;
   }
 
-
+  async getCustomerById(id: number): Promise<Customer | undefined> {
+    const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+    return customer || undefined;
+  }
 
   async getCustomerByQuickBooksId(quickbooksId: string): Promise<Customer | undefined> {
     const [customer] = await db.select().from(customers).where(eq(customers.quickbooksId, quickbooksId));
@@ -926,7 +929,7 @@ export class DatabaseStorage implements IStorage {
     return {
       isConnected: isTokenValid,
       companyName: qbIntegration.companyId,
-      lastSync: qbIntegration.updatedAt.toISOString(),
+      lastSync: qbIntegration.updatedAt?.toISOString() || new Date().toISOString(),
       customerCount: allCustomers.length
     };
   }
@@ -1267,7 +1270,7 @@ export class DatabaseStorage implements IStorage {
       markupAmount: markupAmount.toString(),
       taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
-      workDate: new Date(sheetData.workDate as string || new Date())
+      workDate: new Date(sheetData.workDate as string || new Date()).toISOString()
     };
 
     console.log('Creating billing sheet with data:', finalSheetData);
@@ -1591,7 +1594,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
-    const [newInvoice] = await db.insert(invoices).values(invoice).returning();
+    const [newInvoice] = await db.insert(invoices).values([invoice]).returning();
     return newInvoice;
   }
 
@@ -1767,6 +1770,7 @@ export class DatabaseStorage implements IStorage {
       name: parts.name,
       description: parts.description,
       sku: parts.sku,
+      category: parts.category,
       price: parts.price,
       laborHours: parts.laborHours,
       usageCount: partUsage.usageCount
