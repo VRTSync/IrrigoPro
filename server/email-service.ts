@@ -1,7 +1,7 @@
 import { Client } from 'postmark';
 
 // Initialize Postmark client
-const client = new Client(process.env.POSTMARK_API_KEY || '');
+const client = new Client(process.env.POSTMARK_API_TOKEN || '');
 
 export interface EstimateEmailData {
   estimateId: number;
@@ -26,12 +26,14 @@ export interface EstimateEmailData {
 
 export class EmailService {
   private static baseUrl = process.env.NODE_ENV === 'production' 
-    ? 'https://your-app.replit.app' 
+    ? (process.env.REPLIT_DOMAINS?.includes('irrigopro.com') 
+        ? 'https://irrigopro.com' 
+        : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.replit.app`)
     : 'http://localhost:5000';
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
-    if (!process.env.POSTMARK_API_KEY) {
-      console.error('POSTMARK_API_KEY not configured');
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured');
       return;
     }
 
@@ -209,8 +211,8 @@ Thank you for choosing our irrigation services!
   }
 
   static async sendApprovalConfirmation(customerEmail: string, estimateNumber: string, approved: boolean): Promise<void> {
-    if (!process.env.POSTMARK_API_KEY) {
-      console.error('POSTMARK_API_KEY not configured');
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured');
       return;
     }
 
@@ -262,8 +264,8 @@ Your Irrigation Team
 
   // Email verification functionality
   static async sendEmailVerification(email: string, verificationToken: string, userName: string): Promise<void> {
-    if (!process.env.POSTMARK_API_KEY) {
-      console.error('POSTMARK_API_KEY not configured');
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured');
       return;
     }
 
@@ -347,8 +349,8 @@ The IrrigoPro Team
 
   // Password reset functionality
   static async sendPasswordReset(email: string, resetToken: string, userName: string): Promise<void> {
-    if (!process.env.POSTMARK_API_KEY) {
-      console.error('POSTMARK_API_KEY not configured');
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured');
       return;
     }
 
