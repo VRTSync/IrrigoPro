@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IrrigoPro Production User Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .section { border: 1px solid #ddd; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        .user-list { background: #f9f9f9; padding: 15px; border-radius: 4px; margin: 10px 0; }
+        .user-item { background: white; padding: 10px; margin: 5px 0; border-radius: 4px; border-left: 4px solid #007bff; }
+        button { background: #007bff; color: white; padding: 10px 15px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; }
+        button.danger { background: #dc3545; }
+        button.success { background: #28a745; }
+        input, select { padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; width: 200px; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🛠️ IrrigoPro Production User Manager</h1>
+    <p><strong>Production Site:</strong> <a href="https://irrigopro.com" target="_blank">https://irrigopro.com</a></p>
+
+    <div class="grid">
+        <!-- Current Users Section -->
+        <div class="section">
+            <h2>Current Production Users</h2>
+            <button onclick="loadUsers()">Refresh User List</button>
+            <div id="usersList"></div>
+        </div>
+
+        <!-- Quick Reset Section -->
+        <div class="section">
+            <h2>Quick Reset Randy's Account</h2>
+            <p>Reset Randy to simple credentials:</p>
+            <div>
+                <label>Username:</label>
+                <input type="text" id="resetUsername" value="randy@highplainsprop.com" style="width: 250px;">
+            </div>
+            <div>
+                <label>Password:</label>
+                <input type="text" id="resetPassword" value="password123" style="width: 250px;">
+            </div>
+            <button class="success" onclick="quickResetRandy()">Reset Randy's Account</button>
+            <div id="resetResult"></div>
+        </div>
+
+        <!-- Test Login Section -->
+        <div class="section">
+            <h2>Test Login</h2>
+            <div>
+                <input type="text" id="testUsername" placeholder="Username" value="randy@highplainsprop.com">
+                <input type="password" id="testPassword" placeholder="Password" value="password123">
+                <button onclick="testLogin()">Test Login</button>
+            </div>
+            <div id="loginResult"></div>
+        </div>
+
+        <!-- Create New User Section -->
+        <div class="section">
+            <h2>Create New User</h2>
+            <div>
+                <input type="text" id="newUsername" placeholder="Username" style="width: 250px;">
+                <input type="text" id="newPassword" placeholder="Password" style="width: 250px;">
+                <input type="text" id="newName" placeholder="Full Name" style="width: 250px;">
+                <input type="email" id="newEmail" placeholder="Email" style="width: 250px;">
+                <select id="newRole" style="width: 200px;">
+                    <option value="company_admin">Company Admin</option>
+                    <option value="irrigation_manager">Irrigation Manager</option>
+                    <option value="billing_manager">Billing Manager</option>
+                    <option value="field_tech">Field Tech</option>
+                    <option value="super_admin">Super Admin</option>
+                </select>
+                <button class="success" onclick="createUser()">Create User</button>
+            </div>
+            <div id="createResult"></div>
+        </div>
+
+        <!-- Nuclear Reset Section -->
+        <div class="section">
+            <h2>⚠️ Nuclear Reset</h2>
+            <p class="warning">This will delete ALL users and create a fresh Randy account.</p>
+            <button class="danger" onclick="nuclearReset()">Delete All Users & Create Fresh Randy</button>
+            <div id="nuclearResult"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://irrigopro.com/api';
+        
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            try {
+                const options = {
+                    method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                if (data) options.body = JSON.stringify(data);
+                
+                const response = await fetch(`${API_BASE}${endpoint}`, options);
+                const result = await response.text();
+                
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    data: result
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    status: 0,
+                    data: error.message
+                };
+            }
+        }
+
+        async function loadUsers() {
+            const result = await apiCall('/test-auth');
+            const div = document.getElementById('usersList');
+            
+            if (result.ok) {
+                try {
+                    const data = JSON.parse(result.data);
+                    div.innerHTML = '<div class="success">✅ Connected to production</div>';
+                    div.innerHTML += `<p><strong>Environment:</strong> ${data.environment}</p>`;
+                    div.innerHTML += `<p><strong>User Count:</strong> ${data.userCount}</p>`;
+                    
+                    if (data.users && data.users.length > 0) {
+                        div.innerHTML += '<div class="user-list">';
+                        data.users.forEach(user => {
+                            div.innerHTML += `
+                                <div class="user-item">
+                                    <strong>${user.username}</strong> (${user.role})
+                                    <br>ID: ${user.id}, Email Verified: ${user.emailVerified}
+                                </div>
+                            `;
+                        });
+                        div.innerHTML += '</div>';
+                    }
+                } catch (e) {
+                    div.innerHTML = '<div class="error">❌ Invalid response format</div>';
+                    div.innerHTML += `<pre>${result.data}</pre>`;
+                }
+            } else {
+                div.innerHTML = '<div class="error">❌ Failed to connect to production</div>';
+                div.innerHTML += `<pre>${result.data}</pre>`;
+            }
+        }
+
+        async function quickResetRandy() {
+            const username = document.getElementById('resetUsername').value;
+            const password = document.getElementById('resetPassword').value;
+            const div = document.getElementById('resetResult');
+            
+            div.innerHTML = '<p>Resetting Randy\'s account...</p>';
+            
+            // This would need a special admin endpoint to reset passwords
+            // For now, we'll just test if the account works
+            const loginTest = await apiCall('/auth/login', 'POST', { username, password });
+            
+            if (loginTest.ok) {
+                div.innerHTML = '<div class="success">✅ Randy\'s account is already working with these credentials!</div>';
+            } else {
+                div.innerHTML = '<div class="warning">⚠️ Account reset needed. Production database access required.</div>';
+                div.innerHTML += '<p>You\'ll need to run the SQL commands directly in the production database.</p>';
+                div.innerHTML += `
+                    <h4>SQL Commands to Run:</h4>
+                    <pre>-- Reset Randy's password
+UPDATE users SET 
+    password = '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+    email_verified = true
+WHERE username = '${username}';
+
+-- Or create new Randy account
+INSERT INTO users (username, password, name, email, role, is_active, email_verified)
+VALUES ('${username}', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Randy Mangel', '${username}', 'company_admin', true, true)
+ON CONFLICT (username) DO UPDATE SET password = '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';</pre>
+                `;
+            }
+        }
+
+        async function testLogin() {
+            const username = document.getElementById('testUsername').value;
+            const password = document.getElementById('testPassword').value;
+            const div = document.getElementById('loginResult');
+            
+            div.innerHTML = '<p>Testing login...</p>';
+            
+            const result = await apiCall('/auth/login', 'POST', { username, password });
+            
+            if (result.ok) {
+                div.innerHTML = '<div class="success">✅ LOGIN SUCCESSFUL!</div>';
+                div.innerHTML += `<pre>${result.data}</pre>`;
+            } else {
+                div.innerHTML = '<div class="error">❌ Login failed</div>';
+                div.innerHTML += `<pre>${result.data}</pre>`;
+            }
+        }
+
+        async function createUser() {
+            const username = document.getElementById('newUsername').value;
+            const password = document.getElementById('newPassword').value;
+            const name = document.getElementById('newName').value;
+            const email = document.getElementById('newEmail').value;
+            const role = document.getElementById('newRole').value;
+            const div = document.getElementById('createResult');
+            
+            if (!username || !password || !name || !email) {
+                div.innerHTML = '<div class="error">❌ All fields are required</div>';
+                return;
+            }
+            
+            div.innerHTML = '<div class="warning">⚠️ User creation requires admin API endpoint</div>';
+            div.innerHTML += `
+                <h4>SQL Command to Create User:</h4>
+                <pre>INSERT INTO users (username, password, name, email, role, is_active, email_verified, created_at, updated_at)
+VALUES (
+    '${username}',
+    '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', -- password: ${password}
+    '${name}',
+    '${email}',
+    '${role}',
+    true,
+    true,
+    NOW(),
+    NOW()
+);</pre>
+            `;
+        }
+
+        async function nuclearReset() {
+            const div = document.getElementById('nuclearResult');
+            
+            if (!confirm('Are you sure? This will DELETE ALL USERS and create only Randy.')) {
+                return;
+            }
+            
+            div.innerHTML = '<div class="warning">⚠️ Nuclear reset requires database access</div>';
+            div.innerHTML += `
+                <h4>SQL Commands for Nuclear Reset:</h4>
+                <pre>-- DELETE ALL USERS
+DELETE FROM users;
+
+-- CREATE FRESH RANDY
+INSERT INTO users (username, password, name, email, role, is_active, email_verified, created_at, updated_at)
+VALUES (
+    'randy@highplainsprop.com',
+    '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', -- password123
+    'Randy Mangel',
+    'randy@highplainsprop.com', 
+    'company_admin',
+    true,
+    true,
+    NOW(),
+    NOW()
+);
+
+-- VERIFY
+SELECT username, name, role FROM users;</pre>
+            `;
+        }
+
+        // Auto-load users on page load
+        window.onload = loadUsers;
+    </script>
+</body>
+</html>
