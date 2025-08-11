@@ -115,55 +115,67 @@ export default function Login() {
               </filter>
             </defs>
             
-            {/* Animated contour lines - like topographic map elevation lines */}
+            {/* Topographic Elevation Contour Lines */}
             <g className="animate-pulse" style={{animationDuration: '4s'}}>
-              {/* Main terrain contours */}
-              <path d="M0,80 Q50,60 100,70 Q150,80 200,65 Q250,50 300,70 Q350,90 400,75" 
+              {/* 1000ft elevation contour - outer ridgeline */}
+              <path d="M20,500 Q80,480 140,490 Q200,500 260,485 Q320,470 380,490 Q400,495 400,500 Q380,510 320,520 Q260,530 200,525 Q140,520 80,530 Q20,535 20,500 Z" 
                     fill="none" stroke="#3b82f6" strokeWidth="3" 
                     opacity={0.8 + mousePos.y * 0.2} 
-                    filter={mousePos.x > 0.3 && mousePos.x < 0.7 && mousePos.y > 0.1 && mousePos.y < 0.3 ? "url(#mouseGlow)" : "url(#glow)"} 
+                    filter={mousePos.x > 0.3 && mousePos.x < 0.7 && mousePos.y > 0.7 && mousePos.y < 0.9 ? "url(#mouseGlow)" : "url(#glow)"} 
                     className="sm:stroke-2 transition-all duration-300"/>
               
-              <path d="M0,140 Q60,120 120,130 Q180,140 240,125 Q300,110 360,130 Q390,140 400,135" 
+              {/* 800ft elevation contour */}
+              <path d="M40,420 Q100,400 160,410 Q220,420 280,405 Q340,390 380,410 Q400,415 400,420 Q380,430 340,440 Q280,450 220,445 Q160,440 100,450 Q40,455 40,420 Z" 
                     fill="none" stroke="#1d4ed8" strokeWidth="2.5" 
                     opacity={0.7 + mousePos.x * 0.2} 
                     className="sm:stroke-2 transition-all duration-300"/>
               
-              <path d="M0,200 Q40,180 80,190 Q120,200 160,185 Q200,170 240,190 Q280,210 320,195 Q360,180 400,200" 
+              {/* 600ft elevation contour - central hill */}
+              <path d="M60,340 Q120,320 180,330 Q240,340 300,325 Q360,310 380,330 Q400,335 400,340 Q380,350 360,360 Q300,375 240,370 Q180,365 120,375 Q60,380 60,340 Z" 
                     fill="none" stroke="#1e40af" strokeWidth="3.5" 
                     opacity={0.9 + mousePos.y * 0.1} 
                     className="sm:stroke-2 transition-all duration-300"/>
             </g>
             
             <g className="animate-pulse" style={{animationDuration: '6s', animationDelay: '1s'}}>
-              {/* Secondary elevation lines */}
-              <path d="M0,110 Q75,90 150,100 Q225,110 300,95 Q350,80 400,100" 
+              {/* 400ft elevation contour */}
+              <path d="M80,260 Q140,240 200,250 Q260,260 320,245 Q360,230 380,250 Q400,255 400,260 Q380,270 360,280 Q320,295 260,290 Q200,285 140,295 Q80,300 80,260 Z" 
                     fill="none" stroke="#3b82f6" strokeWidth="2" 
                     opacity={0.6 + mousePos.x * 0.3} 
                     className="sm:stroke-1 transition-all duration-500"/>
               
-              <path d="M0,260 Q50,240 100,250 Q150,260 200,245 Q250,230 300,250 Q350,270 400,255" 
+              {/* 200ft elevation contour - valley area */}
+              <path d="M100,180 Q160,160 220,170 Q280,180 340,165 Q380,150 400,170 Q400,175 380,185 Q340,200 280,195 Q220,190 160,200 Q100,205 100,180 Z" 
                     fill="none" stroke="#2563eb" strokeWidth="2.5" 
                     opacity={0.8 + mousePos.y * 0.2} 
-                    filter={mousePos.x > 0.2 && mousePos.x < 0.8 && mousePos.y > 0.4 && mousePos.y < 0.6 ? "url(#mouseGlow)" : "none"} 
+                    filter={mousePos.x > 0.2 && mousePos.x < 0.8 && mousePos.y > 0.2 && mousePos.y < 0.4 ? "url(#mouseGlow)" : "none"} 
                     className="sm:stroke-1 transition-all duration-500"/>
               
-              <path d="M0,320 Q90,300 180,310 Q270,320 360,305 Q380,300 400,310" 
+              {/* Peak elevation 1200ft - highest point */}
+              <path d="M120,100 Q180,80 240,90 Q300,100 360,85 Q380,80 400,90 Q400,95 380,105 Q360,115 300,130 Q240,125 180,135 Q120,140 120,100 Z" 
                     fill="none" stroke="#1d4ed8" strokeWidth="2.2" 
                     opacity={0.7 + (mousePos.x + mousePos.y) * 0.15} 
                     className="sm:stroke-1 transition-all duration-500"/>
             </g>
             
             <g className="animate-pulse" style={{animationDuration: '8s', animationDelay: '2s'}}>
-              {/* Fine detail contours */}
-              <path d="M0,50 Q100,30 200,40 Q300,50 400,35" 
-                    fill="none" stroke="#60a5fa" strokeWidth="1.8" opacity="0.5" className="sm:stroke-1"/>
+              {/* Fine contour details - ridge lines */}
+              <path d="M140,40 Q200,20 260,30 Q320,40 380,25 Q400,20 400,25 Q380,35 320,50 Q260,55 200,60 Q140,65 140,40 Z" 
+                    fill="none" stroke="#60a5fa" strokeWidth="1.8" 
+                    opacity={0.5 + mousePos.y * 0.3} 
+                    className="sm:stroke-1 transition-all duration-300"/>
               
-              <path d="M0,380 Q75,360 150,370 Q225,380 300,365 Q350,350 400,370" 
-                    fill="none" stroke="#3b82f6" strokeWidth="2" opacity="0.6" className="sm:stroke-1"/>
+              {/* Irrigation canal contour */}
+              <path d="M30,550 Q90,530 150,540 Q210,550 270,535 Q330,520 390,540 Q400,545 390,555 Q330,570 270,575 Q210,580 150,585 Q90,590 30,585 Q20,580 30,550 Z" 
+                    fill="none" stroke="#3b82f6" strokeWidth="2" 
+                    opacity={0.6 + mousePos.x * 0.2} 
+                    className="sm:stroke-1 transition-all duration-300"/>
               
-              <path d="M0,450 Q60,430 120,440 Q180,450 240,435 Q300,420 360,440 Q380,450 400,445" 
-                    fill="none" stroke="#1e40af" strokeWidth="2.2" opacity="0.7" className="sm:stroke-1"/>
+              {/* Stream bed contour */}
+              <path d="M0,450 Q60,430 120,440 Q180,450 240,435 Q300,420 360,440 Q400,445 400,450 Q360,460 300,470 Q240,475 180,480 Q120,485 60,490 Q0,495 0,450 Z" 
+                    fill="none" stroke="#1e40af" strokeWidth="2.2" 
+                    opacity={0.7 + mousePos.y * 0.2} 
+                    className="sm:stroke-1 transition-all duration-300"/>
             </g>
             
             {/* Interactive Mouse Follower Effect */}
@@ -217,11 +229,7 @@ export default function Login() {
                      className="sm:r-1.6 transition-all duration-300"/>
             </g>
             
-            {/* Property boundary lines */}
-            <g opacity="0.4">
-              <path d="M100,50 L100,400 M200,40 L200,420 M300,60 L300,380" 
-                    stroke="#1e40af" strokeWidth="1.5" strokeDasharray="8,4" className="sm:stroke-0.5"/>
-            </g>
+
           </svg>
         </div>
         
