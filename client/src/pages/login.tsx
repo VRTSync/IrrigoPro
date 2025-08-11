@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,28 @@ export default function Login() {
     password: "",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  // Track mouse movement for interactive background
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setMousePos({
+          x: (e.clientX - rect.left) / rect.width,
+          y: (e.clientY - rect.top) / rect.height,
+        });
+      }
+    };
+
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('mousemove', handleMouseMove);
+      return () => container.removeEventListener('mousemove', handleMouseMove);
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +85,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex flex-col">
+    <div ref={containerRef} className="min-h-screen relative overflow-hidden flex flex-col">
       {/* Animated Topographic Map Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200">
         {/* Animated Terrain Contour Lines */}
@@ -84,31 +105,53 @@ export default function Login() {
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
+              
+              <filter id="mouseGlow">
+                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                <feMerge> 
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
             </defs>
             
             {/* Animated contour lines - like topographic map elevation lines */}
             <g className="animate-pulse" style={{animationDuration: '4s'}}>
               {/* Main terrain contours */}
               <path d="M0,80 Q50,60 100,70 Q150,80 200,65 Q250,50 300,70 Q350,90 400,75" 
-                    fill="none" stroke="#3b82f6" strokeWidth="3" opacity="0.8" filter="url(#glow)" className="sm:stroke-2"/>
+                    fill="none" stroke="#3b82f6" strokeWidth="3" 
+                    opacity={0.8 + mousePos.y * 0.2} 
+                    filter={mousePos.x > 0.3 && mousePos.x < 0.7 && mousePos.y > 0.1 && mousePos.y < 0.3 ? "url(#mouseGlow)" : "url(#glow)"} 
+                    className="sm:stroke-2 transition-all duration-300"/>
               
               <path d="M0,140 Q60,120 120,130 Q180,140 240,125 Q300,110 360,130 Q390,140 400,135" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="2.5" opacity="0.7" className="sm:stroke-2"/>
+                    fill="none" stroke="#1d4ed8" strokeWidth="2.5" 
+                    opacity={0.7 + mousePos.x * 0.2} 
+                    className="sm:stroke-2 transition-all duration-300"/>
               
               <path d="M0,200 Q40,180 80,190 Q120,200 160,185 Q200,170 240,190 Q280,210 320,195 Q360,180 400,200" 
-                    fill="none" stroke="#1e40af" strokeWidth="3.5" opacity="0.9" className="sm:stroke-2"/>
+                    fill="none" stroke="#1e40af" strokeWidth="3.5" 
+                    opacity={0.9 + mousePos.y * 0.1} 
+                    className="sm:stroke-2 transition-all duration-300"/>
             </g>
             
             <g className="animate-pulse" style={{animationDuration: '6s', animationDelay: '1s'}}>
               {/* Secondary elevation lines */}
               <path d="M0,110 Q75,90 150,100 Q225,110 300,95 Q350,80 400,100" 
-                    fill="none" stroke="#3b82f6" strokeWidth="2" opacity="0.6" className="sm:stroke-1"/>
+                    fill="none" stroke="#3b82f6" strokeWidth="2" 
+                    opacity={0.6 + mousePos.x * 0.3} 
+                    className="sm:stroke-1 transition-all duration-500"/>
               
               <path d="M0,260 Q50,240 100,250 Q150,260 200,245 Q250,230 300,250 Q350,270 400,255" 
-                    fill="none" stroke="#2563eb" strokeWidth="2.5" opacity="0.8" className="sm:stroke-1"/>
+                    fill="none" stroke="#2563eb" strokeWidth="2.5" 
+                    opacity={0.8 + mousePos.y * 0.2} 
+                    filter={mousePos.x > 0.2 && mousePos.x < 0.8 && mousePos.y > 0.4 && mousePos.y < 0.6 ? "url(#mouseGlow)" : "none"} 
+                    className="sm:stroke-1 transition-all duration-500"/>
               
               <path d="M0,320 Q90,300 180,310 Q270,320 360,305 Q380,300 400,310" 
-                    fill="none" stroke="#1d4ed8" strokeWidth="2.2" opacity="0.7" className="sm:stroke-1"/>
+                    fill="none" stroke="#1d4ed8" strokeWidth="2.2" 
+                    opacity={0.7 + (mousePos.x + mousePos.y) * 0.15} 
+                    className="sm:stroke-1 transition-all duration-500"/>
             </g>
             
             <g className="animate-pulse" style={{animationDuration: '8s', animationDelay: '2s'}}>
@@ -123,21 +166,55 @@ export default function Login() {
                     fill="none" stroke="#1e40af" strokeWidth="2.2" opacity="0.7" className="sm:stroke-1"/>
             </g>
             
+            {/* Interactive Mouse Follower Effect */}
+            <circle 
+              cx={mousePos.x * 400} 
+              cy={mousePos.y * 600} 
+              r="30" 
+              fill="url(#irrigationGradient)" 
+              opacity="0.1" 
+              className="transition-all duration-700 ease-out"
+              style={{
+                filter: "blur(8px)",
+                transform: `scale(${1 + mousePos.y * 0.5})`,
+              }}
+            />
+            
             {/* Irrigation zone markers - small circles representing sprinkler zones */}
             <g className="animate-bounce" style={{animationDelay: '0s', animationDuration: '3s'}}>
-              <circle cx="80" cy="120" r="4" fill="#3b82f6" opacity="0.8" className="sm:r-2"/>
-              <circle cx="200" cy="180" r="3" fill="#1d4ed8" opacity="0.7" className="sm:r-1.5"/>
-              <circle cx="320" cy="140" r="5" fill="#1e40af" opacity="0.9" className="sm:r-2.5"/>
-              <circle cx="160" cy="240" r="4" fill="#2563eb" opacity="0.8" className="sm:r-2"/>
-              <circle cx="280" cy="200" r="3.5" fill="#3b82f6" opacity="0.7" className="sm:r-1.8"/>
+              <circle cx="80" cy="120" r="4" fill="#3b82f6" 
+                     opacity={0.8 + (Math.abs(mousePos.x * 400 - 80) < 50 ? 0.2 : 0)} 
+                     className="sm:r-2 transition-all duration-300"/>
+              <circle cx="200" cy="180" r="3" fill="#1d4ed8" 
+                     opacity={0.7 + (Math.abs(mousePos.x * 400 - 200) < 50 ? 0.3 : 0)} 
+                     className="sm:r-1.5 transition-all duration-300"/>
+              <circle cx="320" cy="140" r="5" fill="#1e40af" 
+                     opacity={0.9 + (Math.abs(mousePos.x * 400 - 320) < 50 ? 0.1 : 0)} 
+                     className="sm:r-2.5 transition-all duration-300"/>
+              <circle cx="160" cy="240" r="4" fill="#2563eb" 
+                     opacity={0.8 + (Math.abs(mousePos.y * 600 - 240) < 50 ? 0.2 : 0)} 
+                     className="sm:r-2 transition-all duration-300"/>
+              <circle cx="280" cy="200" r="3.5" fill="#3b82f6" 
+                     opacity={0.7 + (Math.abs(mousePos.x * 400 - 280) < 50 ? 0.3 : 0)} 
+                     className="sm:r-1.8 transition-all duration-300"/>
             </g>
             
             <g className="animate-bounce" style={{animationDelay: '1.5s', animationDuration: '4s'}}>
-              <circle cx="60" cy="280" r="3" fill="#60a5fa" opacity="0.6" className="sm:r-1.5"/>
-              <circle cx="140" cy="160" r="4.5" fill="#1d4ed8" opacity="0.8" className="sm:r-2.2"/>
-              <circle cx="220" cy="320" r="3.5" fill="#1e40af" opacity="0.7" className="sm:r-1.8"/>
-              <circle cx="300" cy="180" r="4" fill="#3b82f6" opacity="0.9" className="sm:r-2"/>
-              <circle cx="380" cy="300" r="3.2" fill="#2563eb" opacity="0.6" className="sm:r-1.6"/>
+              <circle cx="60" cy="280" r="3" fill="#60a5fa" 
+                     opacity={0.6 + (Math.abs(mousePos.y * 600 - 280) < 50 ? 0.4 : 0)} 
+                     className="sm:r-1.5 transition-all duration-300"/>
+              <circle cx="140" cy="160" r="4.5" fill="#1d4ed8" 
+                     opacity={0.8 + (Math.abs(mousePos.x * 400 - 140) < 50 ? 0.2 : 0)} 
+                     className="sm:r-2.2 transition-all duration-300"/>
+              <circle cx="220" cy="320" r="3.5" fill="#1e40af" 
+                     opacity={0.7 + (Math.abs(mousePos.y * 600 - 320) < 50 ? 0.3 : 0)} 
+                     className="sm:r-1.8 transition-all duration-300"/>
+              <circle cx="300" cy="180" r="4" fill="#3b82f6" 
+                     opacity={0.9 + (Math.abs(mousePos.x * 400 - 300) < 50 ? 0.1 : 0)} 
+                     className="sm:r-2 transition-all duration-300"/>
+              <circle cx="380" cy="300" r="3.2" fill="#2563eb" 
+                     opacity={0.6 + (Math.abs(mousePos.x * 400 - 380) < 50 ? 0.4 : 0)} 
+                     className="sm:r-1.6 transition-all duration-300"/>
             </g>
             
             {/* Property boundary lines */}
