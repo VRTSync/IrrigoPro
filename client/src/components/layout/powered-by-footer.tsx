@@ -1,4 +1,4 @@
-import vrtSyncLogo from "@assets/VRTSync-LOGO-1_1754876481741.png";
+import vrtSyncLogo from "@assets/FINAL-02_1754876518960.png";
 
 export default function PoweredByFooter() {
   return (
