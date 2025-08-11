@@ -42,7 +42,18 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const server = await registerRoutes(app);
+  console.log("Starting server...");
+  console.log("Node environment:", process.env.NODE_ENV);
+  console.log("Database URL available:", !!process.env.DATABASE_URL);
+  
+  let server;
+  try {
+    server = await registerRoutes(app);
+    console.log("Routes registered successfully");
+  } catch (error) {
+    console.error("Failed to register routes:", error);
+    throw error;
+  }
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

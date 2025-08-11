@@ -1,0 +1,192 @@
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(kCapture)]: false,
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(websocket)]: [Circular *1]
+2025-08-10 21:22:21.33
+99158512
+User
+},
+2025-08-10 21:22:21.33
+99158512
+User
+_sender: Sender {
+2025-08-10 21:22:21.33
+99158512
+User
+_extensions: {},
+2025-08-10 21:22:21.33
+99158512
+User
+_socket: [TLSSocket],
+2025-08-10 21:22:21.33
+99158512
+User
+_firstFragment: true,
+2025-08-10 21:22:21.33
+99158512
+User
+_compress: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_bufferedBytes: 0,
+2025-08-10 21:22:21.33
+99158512
+User
+_queue: [],
+2025-08-10 21:22:21.33
+99158512
+User
+_state: 0,
+2025-08-10 21:22:21.33
+99158512
+User
+onerror: [Function: senderOnError],
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(websocket)]: [Circular *1]
+2025-08-10 21:22:21.33
+99158512
+User
+},
+2025-08-10 21:22:21.33
+99158512
+User
+_socket: TLSSocket {
+2025-08-10 21:22:21.33
+99158512
+User
+_tlsOptions: [Object],
+2025-08-10 21:22:21.33
+99158512
+User
+_secureEstablished: true,
+2025-08-10 21:22:21.33
+99158512
+User
+_securePending: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_newSessionPending: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_controlReleased: true,
+2025-08-10 21:22:21.33
+99158512
+User
+secureConnecting: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_SNICallback: null,
+2025-08-10 21:22:21.33
+99158512
+User
+servername: 'ep-jolly-dust-afpa5g2f.c-2.us-west-2.aws.neon.tech',
+2025-08-10 21:22:21.33
+99158512
+User
+alpnProtocol: false,
+2025-08-10 21:22:21.33
+99158512
+User
+authorized: true,
+2025-08-10 21:22:21.33
+99158512
+User
+authorizationError: null,
+2025-08-10 21:22:21.33
+99158512
+User
+encrypted: true,
+2025-08-10 21:22:21.33
+99158512
+User
+_events: [Object: null prototype],
+2025-08-10 21:22:21.33
+99158512
+User
+_eventsCount: 6,
+2025-08-10 21:22:21.33
+99158512
+User
+connecting: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_hadError: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_parent: null,
+2025-08-10 21:22:21.33
+99158512
+User
+_host: 'ep-jolly-dust-afpa5g2f.c-2.us-west-2.aws.neon.tech',
+2025-08-10 21:22:21.33
+99158512
+User
+_closeAfterHandlingError: false,
+2025-08-10 21:22:21.33
+99158512
+User
+_readableState: [ReadableState],
+2025-08-10 21:22:21.33
+99158512
+User
+_writableState: [WritableState],
+2025-08-10 21:22:21.33
+99158512
+User
+_sockname: null,
+2025-08-10 21:22:21.33
+99158512
+User
+_pendingData: null,
+2025-08-10 21:22:21.33
+99158512
+User
+_pendingEncoding: '',
+2025-08-10 21:22:21.33
+99158512
+User
+_requestCert: true,
+2025-08-10 21:22:21.33
+99158512
+User
+_rejectUnauthorized: true,
+2025-08-10 21:22:21.33
+99158512
+User
+_httpMessage: null,
+2025-08-10 21:22:21.33
+99158512
+User
+autoSelectFamilyAttemptedAddresses: [Array],
+2025-08-10 21:22:21.33
+99158512
+User
+timeout: 0,
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(alpncallback)]: null,
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(res)]: [TLSWrap],
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(verified)]: true,
+2025-08-10 21:22:21.33
+99158512
+User
+[Symbol(pendingSession)]: null,
