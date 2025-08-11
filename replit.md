@@ -122,3 +122,4 @@ Customer Management Permissions: Complete role-based access control implemented 
 - **Component Cleanup**: Removed debug logging and simplified component initialization for production-ready implementation
 - **Deployment Ready**: Updated OAuth redirect URIs to automatically detect deployed .replit.app domains for stable QuickBooks integration
 - **Development vs Production**: System now supports both development and deployed environments with proper domain detection
+- **Custom Domain Support**: Added irrigopro.com domain detection for professional QuickBooks OAuth integration with custom branding
