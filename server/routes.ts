@@ -1992,6 +1992,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     res.sendFile('quickbooks-debug-test.html', { root: '.' });
   });
 
+  // Serve domain check page
+  app.get("/check-domain", (req, res) => {
+    res.sendFile('check-domain.html', { root: '.' });
+  });
+
   // Function to exchange authorization code for access tokens
   async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
     // Use deployed domain or fallback to current domain
