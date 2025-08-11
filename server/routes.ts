@@ -449,6 +449,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test endpoint to check database and users
+  app.get("/api/test-auth", async (req, res) => {
+    try {
+      const allUsers = await storage.getUsers();
+      res.json({ 
+        message: "Server is running", 
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV,
+        userCount: allUsers.length,
+        users: allUsers.map(u => ({ id: u.id, username: u.username, role: u.role, emailVerified: u.emailVerified }))
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        message: "Database connection failed", 
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
   // Authentication routes
   app.post("/api/auth/login", async (req, res) => {
     try {
