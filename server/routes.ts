@@ -2049,10 +2049,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         };
 
         // Save to database instead of session
+        console.log("Saving QuickBooks integration with realmId:", realmId);
         await storage.saveQuickBooksIntegration({
           companyId: realmId as string,
           accessToken: qbData.accessToken,
           refreshToken: qbData.refreshToken,
+          realmId: realmId as string,
           expiresAt: qbData.expiresAt
         });
 

@@ -909,7 +909,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async saveQuickBooksIntegration(data: { companyId: string; accessToken: string; refreshToken: string; expiresAt: Date }): Promise<void> {
+  async saveQuickBooksIntegration(data: { companyId: string; accessToken: string; refreshToken: string; realmId: string; expiresAt: Date }): Promise<void> {
     try {
       // Check if integration already exists
       const existing = await db.select().from(quickbooksIntegration).limit(1);
@@ -921,6 +921,7 @@ export class DatabaseStorage implements IStorage {
             companyId: data.companyId,
             accessToken: data.accessToken,
             refreshToken: data.refreshToken,
+            realmId: data.realmId,
             expiresAt: data.expiresAt,
             updatedAt: new Date()
           })
@@ -931,6 +932,7 @@ export class DatabaseStorage implements IStorage {
           companyId: data.companyId,
           accessToken: data.accessToken,
           refreshToken: data.refreshToken,
+          realmId: data.realmId,
           expiresAt: data.expiresAt,
           createdAt: new Date(),
           updatedAt: new Date()
