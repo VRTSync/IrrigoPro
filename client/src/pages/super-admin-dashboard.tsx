@@ -154,42 +154,45 @@ export default function SuperAdminDashboard() {
   return (
     <div className="container mx-auto p-6 space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Super Admin Dashboard</h1>
-        <p className="text-muted-foreground mb-4">
-          Manage all companies using the irrigation system
-        </p>
-        <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
-          setIsCreateDialogOpen(open);
-          if (!open) {
-            setEditingCompany(null);
-            form.reset(editingCompany ? {
-              name: "",
-              address: "",
-              phone: "",
-              email: "",
-              website: "",
-              subscription: "basic",
-            } : {
-              adminEmail: "",
-              adminPassword: "",
-            });
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              <span className="hidden sm:inline">Add New Company Admin</span>
-              <span className="sm:hidden">Add Admin</span>
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>{editingCompany ? "Edit Company" : "Create Company Admin"}</DialogTitle>
-              <DialogDescription>
-                {editingCompany ? "Update company information." : "Create a company admin account. They will complete their profile and company setup on first login."}
-              </DialogDescription>
-            </DialogHeader>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Super Admin Dashboard</h1>
+          <p className="text-muted-foreground">
+            Manage all companies using the irrigation system
+          </p>
+        </div>
+        <Button onClick={() => setIsCreateDialogOpen(true)} className="w-full sm:w-auto">
+          <Plus className="mr-2 h-4 w-4" />
+          <span className="hidden sm:inline">Add New Company Admin</span>
+          <span className="sm:hidden">Add Admin</span>
+        </Button>
+      </div>
+
+      {/* Dialog - positioned outside the header */}
+      <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
+        setIsCreateDialogOpen(open);
+        if (!open) {
+          setEditingCompany(null);
+          form.reset(editingCompany ? {
+            name: "",
+            address: "",
+            phone: "",
+            email: "",
+            website: "",
+            subscription: "basic",
+          } : {
+            adminEmail: "",
+            adminPassword: "",
+          });
+        }
+      }}>
+        <DialogContent className="sm:max-w-[425px] w-[95vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingCompany ? "Edit Company" : "Create Company Admin"}</DialogTitle>
+            <DialogDescription>
+              {editingCompany ? "Update company information." : "Create a company admin account. They will complete their profile and company setup on first login."}
+            </DialogDescription>
+          </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 {editingCompany ? (
@@ -271,10 +274,9 @@ export default function SuperAdminDashboard() {
                   <Button type="submit">{editingCompany ? "Update Company" : "Create Company"}</Button>
                 </div>
               </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
-      </div>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       {/* System Stats */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
