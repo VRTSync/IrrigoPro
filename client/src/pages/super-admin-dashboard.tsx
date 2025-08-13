@@ -98,10 +98,11 @@ export default function SuperAdminDashboard() {
       setIsCreateDialogOpen(false);
       setEditingCompany(null);
       form.reset();
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error.message || (editingCompany ? "Failed to update company" : "Failed to create company admin");
       toast({
         title: "Error",
-        description: editingCompany ? "Failed to update company" : "Failed to create company admin",
+        description: errorMessage,
         variant: "destructive",
       });
     }

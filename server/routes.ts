@@ -270,6 +270,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { adminEmail, adminPassword } = req.body;
 
+      // Check if user already exists
+      const existingUser = await storage.getUserByUsername(adminEmail);
+      if (existingUser) {
+        return res.status(400).json({ message: "A user with this email already exists" });
+      }
+
       // Create placeholder company first (admin will complete setup)
       const companyData = {
         name: `Company for ${adminEmail} (Setup Required)`,
