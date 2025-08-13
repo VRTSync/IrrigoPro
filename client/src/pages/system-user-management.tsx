@@ -169,18 +169,11 @@ export default function SystemUserManagement() {
   return (
     <div className="container mx-auto p-6 space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">System User Management</h1>
-          <p className="text-muted-foreground">
-            Manage all users across all companies
-          </p>
-        </div>
-        <Button onClick={() => setIsCreateDialogOpen(true)} className="w-full sm:w-auto">
-          <Plus className="mr-2 h-4 w-4" />
-          <span className="hidden sm:inline">Add New User</span>
-          <span className="sm:hidden">Add User</span>
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">System User Management</h1>
+        <p className="text-muted-foreground">
+          Manage all users across all companies
+        </p>
       </div>
 
       {/* Dialog - positioned outside the header */}
