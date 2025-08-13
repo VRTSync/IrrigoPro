@@ -2,6 +2,8 @@ import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
+import { EmailService } from "./email-service";
 
 // Extend Express Request type to include session
 declare module 'express' {
@@ -517,7 +519,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         companyId
       });
-      const user = await storage.createUser(userData);
+      
+      // Generate email verification token if email is provided
+      let emailVerificationToken = null;
+      let emailVerificationExpires = null;
+      
+      if (userData.email) {
+        emailVerificationToken = crypto.randomBytes(32).toString('hex');
+        emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      }
+      
+      const user = await storage.createUser({
+        ...userData,
+        emailVerified: false,
+        emailVerificationToken,
+        emailVerificationExpires
+      });
+      
+      // Send verification email if email is provided
+      if (userData.email && emailVerificationToken) {
+        try {
+          await EmailService.sendEmailVerification(userData.email, emailVerificationToken, userData.name);
+          console.log(`Verification email sent to ${userData.email}`);
+        } catch (emailError) {
+          console.error('Failed to send verification email:', emailError);
+          // Don't fail user creation if email fails
+        }
+      }
+      
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
@@ -525,7 +554,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create user" });
+      console.error('Full error details for user creation:', error);
+      res.status(500).json({ message: "Failed to create user", error: error.message });
     }
   });
 
@@ -702,7 +732,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       // Send reset email
-      const { EmailService } = await import('./email-service');
       await EmailService.sendPasswordReset(user.email!, resetToken, user.name);
       
       res.json({ message: "If this email exists, you will receive a password reset link." });
@@ -746,6 +775,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Password reset error:', error);
       res.status(500).json({ message: "Password reset failed" });
+    }
+  });
+
+  // Resend email verification
+  app.post("/api/auth/resend-verification", async (req, res) => {
+    try {
+      const { email } = req.body;
+      const user = await storage.getUserByEmail(email);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      if (user.emailVerified) {
+        return res.status(400).json({ message: "Email already verified" });
+      }
+      
+      // Generate new verification token
+      const emailVerificationToken = crypto.randomBytes(32).toString('hex');
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      // Update user with new token
+      await storage.updateUser(user.id, {
+        emailVerificationToken,
+        emailVerificationExpires,
+        updatedAt: new Date()
+      });
+      
+      // Send verification email
+      try {
+        await EmailService.sendEmailVerification(email, emailVerificationToken, user.name);
+        console.log(`Verification email resent to ${email}`);
+        res.json({ message: "Verification email sent" });
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        res.status(500).json({ message: "Failed to send verification email" });
+      }
+    } catch (error) {
+      console.error('Error resending verification:', error);
+      res.status(500).json({ message: "Failed to resend verification email" });
     }
   });
 

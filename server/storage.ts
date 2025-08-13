@@ -308,8 +308,8 @@ export class DatabaseStorage implements IStorage {
     // Check if company has proper setup (not just auto-generated placeholder)
     const hasSetupRequiredInName = company.name.includes("(Setup Required)");
     const hasValidName = company.name.trim() !== "";
-    const hasValidAddress = company.address && company.address.trim() !== "";
-    const hasValidEmail = company.email && company.email.trim() !== "";
+    const hasValidAddress = Boolean(company.address && company.address.trim() !== "");
+    const hasValidEmail = Boolean(company.email && company.email.trim() !== "");
     
     const isSetupComplete = !hasSetupRequiredInName && hasValidName && hasValidAddress && hasValidEmail;
     return isSetupComplete;
@@ -1331,7 +1331,7 @@ export class DatabaseStorage implements IStorage {
       markupAmount: markupAmount.toString(),
       taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
-      workDate: new Date(sheetData.workDate as string || new Date()).toISOString()
+      workDate: sheetData.workDate ? new Date(sheetData.workDate).toISOString() : new Date().toISOString()
     };
 
     console.log('Creating billing sheet with data:', finalSheetData);
@@ -1345,7 +1345,7 @@ export class DatabaseStorage implements IStorage {
       billingNumber
     };
     
-    const [newSheet] = await db.insert(billingSheets).values(finalSheetDataWithNumber).returning();
+    const [newSheet] = await db.insert(billingSheets).values([finalSheetDataWithNumber]).returning();
     
     // If items are provided, insert them
     if (items && Array.isArray(items)) {
@@ -1655,7 +1655,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
-    const [newInvoice] = await db.insert(invoices).values([invoice]).returning();
+    const [newInvoice] = await db.insert(invoices).values(invoice).returning();
     return newInvoice;
   }
 
