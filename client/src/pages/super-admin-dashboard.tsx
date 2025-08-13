@@ -70,23 +70,24 @@ export default function SuperAdminDashboard() {
     },
   });
 
-  // Use different forms for create vs edit
-  const form = useForm<CompanyAdminFormData | CompanyFormData>({
+  // Use a unified form that adapts to create vs edit mode
+  const form = useForm<any>({
     resolver: zodResolver(editingCompany ? companyFormSchema : companyAdminFormSchema),
-    defaultValues: editingCompany ? {
-      name: "",
-      address: "",
-      phone: "",
-      email: "",
-      website: "",
-      subscription: "basic",
-    } : {
+    defaultValues: {
+      // Company fields (always present)
       companyName: "",
       companyAddress: "",
       companyPhone: "",
       companyEmail: "",
       companyWebsite: "",
       subscription: "basic",
+      // Legacy fields for editing
+      name: "",
+      address: "",
+      phone: "",
+      email: "",
+      website: "",
+      // Admin fields (for creation only)
       adminUsername: "",
       adminPassword: "",
       adminName: "",
@@ -210,7 +211,7 @@ export default function SuperAdminDashboard() {
               <span className="sm:hidden">Add Admin</span>
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingCompany ? "Edit Company" : "Create New Company Admin"}</DialogTitle>
               <DialogDescription>
@@ -218,7 +219,7 @@ export default function SuperAdminDashboard() {
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                 {/* Company Information */}
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Company Information</h3>
