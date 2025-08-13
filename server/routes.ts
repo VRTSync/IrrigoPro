@@ -259,7 +259,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
-  // Super Admin: Create company admin (company + admin user)
+  // Super Admin: Create company admin (placeholder company + admin user)
   app.post("/api/super-admin/create-company-admin", async (req, res) => {
     try {
       const userRole = req.headers['x-user-role'];
@@ -268,41 +268,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Super admin only." });
       }
 
-      const {
-        companyName,
-        companyAddress,
-        companyPhone,
-        companyEmail,
-        companyWebsite,
-        subscription,
-        adminUsername,
-        adminPassword,
-        adminName,
-        adminEmail
-      } = req.body;
+      const { adminEmail, adminPassword } = req.body;
 
-      // Create company first
+      // Create placeholder company first (admin will complete setup)
       const companyData = {
-        name: companyName,
-        address: companyAddress || '',
-        phone: companyPhone || '',
-        email: companyEmail || '',
-        website: companyWebsite || '',
-        subscription: subscription || 'basic'
+        name: `Company for ${adminEmail} (Setup Required)`,
+        address: '',
+        phone: '',
+        email: '',
+        website: '',
+        subscription: 'basic'
       };
 
       const company = await storage.createCompany(companyData);
 
-      // Create admin user for the company
+      // Create admin user with minimal info
       const userData = {
-        username: adminUsername,
+        username: adminEmail,
         password: adminPassword,
-        name: adminName,
+        name: 'Company Admin', // Placeholder - they'll update on first login
         email: adminEmail,
         role: 'company_admin' as const,
         companyId: company.id,
         isActive: true,
-        emailVerified: true
+        emailVerified: false // They'll need to verify on first login
       };
 
       const user = await storage.createUser(userData);

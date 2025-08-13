@@ -17,18 +17,8 @@ import { apiRequest, queryClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 const companyAdminFormSchema = z.object({
-  // Company details
-  companyName: z.string().min(1, "Company name is required"),
-  companyAddress: z.string().optional(),
-  companyPhone: z.string().optional(),
-  companyEmail: z.string().email().optional().or(z.literal("")),
-  companyWebsite: z.string().optional(),
-  subscription: z.string().default("basic"),
-  // Admin user details
-  adminUsername: z.string().min(1, "Admin username is required"),
-  adminPassword: z.string().min(6, "Password must be at least 6 characters"),
-  adminName: z.string().min(1, "Admin name is required"),
   adminEmail: z.string().email("Valid admin email is required"),
+  adminPassword: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 // Schema for editing existing companies
@@ -73,51 +63,34 @@ export default function SuperAdminDashboard() {
   // Use a unified form that adapts to create vs edit mode
   const form = useForm<any>({
     resolver: zodResolver(editingCompany ? companyFormSchema : companyAdminFormSchema),
-    defaultValues: {
-      // Company fields (always present)
-      companyName: "",
-      companyAddress: "",
-      companyPhone: "",
-      companyEmail: "",
-      companyWebsite: "",
-      subscription: "basic",
-      // Legacy fields for editing
+    defaultValues: editingCompany ? {
       name: "",
       address: "",
       phone: "",
       email: "",
       website: "",
-      // Admin fields (for creation only)
-      adminUsername: "",
-      adminPassword: "",
-      adminName: "",
+      subscription: "basic",
+    } : {
       adminEmail: "",
+      adminPassword: "",
     },
   });
 
-  const onSubmit = async (data: CompanyAdminFormData) => {
+  const onSubmit = async (data: any) => {
     try {
       if (editingCompany) {
         // Update existing company
-        const companyData = {
-          name: data.companyName,
-          address: data.companyAddress,
-          phone: data.companyPhone,
-          email: data.companyEmail,
-          website: data.companyWebsite,
-          subscription: data.subscription,
-        };
-        await apiRequest(`/api/companies/${editingCompany.id}`, "PUT", companyData);
+        await apiRequest(`/api/companies/${editingCompany.id}`, "PUT", data);
         toast({
           title: "Success",
           description: "Company updated successfully",
         });
       } else {
-        // Create new company and admin user
+        // Create new company admin with minimal info
         await apiRequest("/api/super-admin/create-company-admin", "POST", data);
         toast({
           title: "Success",
-          description: "Company and admin user created successfully",
+          description: "Company admin created successfully. They will complete setup on first login.",
         });
       }
 
@@ -189,18 +162,16 @@ export default function SuperAdminDashboard() {
           setIsCreateDialogOpen(open);
           if (!open) {
             setEditingCompany(null);
-            // Reset form to new company admin defaults
-            form.reset({
-              companyName: "",
-              companyAddress: "",
-              companyPhone: "",
-              companyEmail: "",
-              companyWebsite: "",
+            form.reset(editingCompany ? {
+              name: "",
+              address: "",
+              phone: "",
+              email: "",
+              website: "",
               subscription: "basic",
-              adminUsername: "",
-              adminPassword: "",
-              adminName: "",
+            } : {
               adminEmail: "",
+              adminPassword: "",
             });
           }
         }}>
@@ -211,75 +182,71 @@ export default function SuperAdminDashboard() {
               <span className="sm:hidden">Add Admin</span>
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>{editingCompany ? "Edit Company" : "Create New Company Admin"}</DialogTitle>
+              <DialogTitle>{editingCompany ? "Edit Company" : "Create Company Admin"}</DialogTitle>
               <DialogDescription>
-                {editingCompany ? "Update company information." : "Create a new company and its admin user for the irrigation management system."}
+                {editingCompany ? "Update company information." : "Create a company admin account. They will complete their profile and company setup on first login."}
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-                {/* Company Information */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Company Information</h3>
-                  
-                  <FormField
-                    control={form.control}
-                    name={editingCompany ? "name" : "companyName"}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Company Name *</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Enter company name" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name={editingCompany ? "email" : "companyEmail"}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Company Email</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Enter company email" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name={editingCompany ? "phone" : "companyPhone"}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Phone</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Enter phone number" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                {/* Admin User Information - Only for new companies */}
-                {!editingCompany && (
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                {editingCompany ? (
+                  /* Company Information for editing */
                   <div className="space-y-4">
-                    <h3 className="text-lg font-medium">Admin User Information</h3>
-                    
                     <FormField
                       control={form.control}
-                      name="adminUsername"
+                      name="name"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Admin Username *</FormLabel>
+                          <FormLabel>Company Name *</FormLabel>
                           <FormControl>
-                            <Input placeholder="Enter admin username" {...field} />
+                            <Input placeholder="Enter company name" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Company Email</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter company email" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter phone number" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                ) : (
+                  /* Simple admin creation */
+                  <div className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="adminEmail"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Admin Email *</FormLabel>
+                          <FormControl>
+                            <Input type="email" placeholder="Enter admin email" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -291,37 +258,9 @@ export default function SuperAdminDashboard() {
                       name="adminPassword"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Admin Password *</FormLabel>
+                          <FormLabel>Password *</FormLabel>
                           <FormControl>
-                            <Input type="password" placeholder="Enter admin password" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="adminName"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Admin Name *</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Enter admin full name" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="adminEmail"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Admin Email *</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Enter admin email" {...field} />
+                            <Input type="password" placeholder="Enter password (min 6 characters)" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
