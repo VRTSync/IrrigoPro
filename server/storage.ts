@@ -298,8 +298,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async checkCompanyProfileExists(companyId: number): Promise<boolean> {
-    const result = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId));
-    return result.length > 0;
+    const result = await db.select().from(companies).where(eq(companies.id, companyId));
+    if (result.length === 0) {
+      return false;
+    }
+    
+    const company = result[0];
+    // Check if company has proper setup (not just auto-generated placeholder)
+    const hasSetupRequiredInName = company.name.includes("(Setup Required)");
+    const hasValidName = company.name.trim() !== "";
+    const hasValidAddress = company.address && company.address.trim() !== "";
+    const hasValidEmail = company.email && company.email.trim() !== "";
+    
+    const isSetupComplete = !hasSetupRequiredInName && hasValidName && hasValidAddress && hasValidEmail;
+    return isSetupComplete;
   }
 
   // Initialize fresh system with minimal data for onboarding demo
