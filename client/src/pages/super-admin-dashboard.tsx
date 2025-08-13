@@ -159,14 +159,14 @@ export default function SuperAdminDashboard() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Add Company
+              Add New Company Admin
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>{editingCompany ? "Edit Company" : "Create New Company"}</DialogTitle>
+              <DialogTitle>{editingCompany ? "Edit Company" : "Create New Company Admin"}</DialogTitle>
               <DialogDescription>
-                {editingCompany ? "Update company information." : "Add a new company to the irrigation management system."}
+                {editingCompany ? "Update company information." : "Create a new company and its admin user for the irrigation management system."}
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
