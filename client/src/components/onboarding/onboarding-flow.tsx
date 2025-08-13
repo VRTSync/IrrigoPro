@@ -77,19 +77,19 @@ export default function OnboardingFlow({ companyId, currentUser, onComplete }: O
 
   const createCompanyMutation = useMutation({
     mutationFn: async (data: CompanySetupFormData) => {
-      return apiRequest(`/api/company/${companyId}/profile`, "POST", data);
+      return apiRequest(`/api/company/${companyId}/profile`, "PUT", data);
     },
     onSuccess: () => {
       toast({
         title: "Success",
-        description: "Company profile created successfully!",
+        description: "Company profile updated successfully!",
       });
       setCurrentStep(3);
     },
     onError: (error: Error) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to create company profile",
+        description: error.message || "Failed to update company profile",
         variant: "destructive",
       });
     },
