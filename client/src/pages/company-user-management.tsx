@@ -268,11 +268,19 @@ export default function CompanyUserManagement() {
   return (
     <div className="container mx-auto p-6 space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
-        <p className="text-muted-foreground">
-          Manage users in your company
-        </p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
+          <p className="text-muted-foreground">
+            Manage users in your company
+          </p>
+        </div>
+        <DialogTrigger asChild>
+          <Button className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="w-4 h-4 mr-2" />
+            Add User
+          </Button>
+        </DialogTrigger>
       </div>
 
       {/* Dialog - positioned outside the header */}
