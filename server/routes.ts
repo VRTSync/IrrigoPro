@@ -451,25 +451,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/dashboard/stats", async (req, res) => {
     try {
       console.log("Fetching dashboard statistics...");
+      const userRole = req.headers['x-user-role'];
+      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
       
-      // Use storage methods instead of direct DB queries
-      const allUsers = await storage.getUsers();
-      const activeUsers = allUsers.filter(user => user.isActive).length;
-      console.log("Active users:", activeUsers);
+      let stats;
       
-      const allWorkOrders = await storage.getWorkOrders();
-      const openWorkOrders = allWorkOrders.filter(wo => wo.status === "assigned").length;
-      console.log("Open work orders:", openWorkOrders);
-      
-      const allCustomers = await storage.getCustomers();
-      const activeCustomers = allCustomers.length;
-      console.log("Active customers:", activeCustomers);
-
-      const stats = {
-        activeUsers,
-        openWorkOrders, 
-        activeCustomers
-      };
+      if (userRole === 'super_admin') {
+        // Super admin sees system-wide stats
+        const allUsers = await storage.getUsers();
+        const activeUsers = allUsers.filter(user => user.isActive).length;
+        
+        const allWorkOrders = await storage.getWorkOrders();
+        const openWorkOrders = allWorkOrders.filter(wo => wo.status === "assigned").length;
+        
+        const allCustomers = await storage.getCustomers();
+        const activeCustomers = allCustomers.length;
+        
+        stats = { activeUsers, openWorkOrders, activeCustomers };
+      } else if (userRole === 'company_admin' && userCompanyId) {
+        // Company admin sees only their company's stats
+        const allUsers = await storage.getUsers();
+        const companyUsers = allUsers.filter(user => user.companyId === userCompanyId);
+        const activeUsers = companyUsers.filter(user => user.isActive).length;
+        
+        const allWorkOrders = await storage.getWorkOrders();
+        const companyWorkOrders = allWorkOrders.filter(wo => wo.companyId === userCompanyId);
+        const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned").length;
+        
+        const allCustomers = await storage.getCustomers();
+        const companyCustomers = allCustomers.filter(customer => customer.companyId === userCompanyId);
+        const activeCustomers = companyCustomers.length;
+        
+        stats = { activeUsers, openWorkOrders, activeCustomers };
+        console.log(`Company ${userCompanyId} stats:`, stats);
+      } else {
+        // Other roles get limited or no stats
+        stats = { activeUsers: 0, openWorkOrders: 0, activeCustomers: 0 };
+      }
       
       console.log("Final stats:", stats);
       res.json(stats);
