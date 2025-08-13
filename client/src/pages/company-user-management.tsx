@@ -275,16 +275,13 @@ export default function CompanyUserManagement() {
             Manage users in your company
           </p>
         </div>
-        <DialogTrigger asChild>
-          <Button className="bg-blue-600 hover:bg-blue-700">
-            <Plus className="w-4 h-4 mr-2" />
-            Add User
-          </Button>
-        </DialogTrigger>
-      </div>
-
-      {/* Dialog - positioned outside the header */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="w-4 h-4 mr-2" />
+              Add User
+            </Button>
+          </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Create New User</DialogTitle>
@@ -382,6 +379,7 @@ export default function CompanyUserManagement() {
             </Form>
           </DialogContent>
         </Dialog>
+      </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
