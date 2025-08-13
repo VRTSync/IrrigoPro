@@ -159,7 +159,8 @@ export default function SuperAdminDashboard() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Add New Company Admin
+              <span className="hidden sm:inline">Add New Company Admin</span>
+              <span className="sm:hidden">Add Admin</span>
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
