@@ -16,21 +16,16 @@ import { z } from "zod";
 import { apiRequest, queryClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const userFormSchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(6, "Password must be at least 6 characters").optional(),
-  name: z.string().min(1, "Name is required"),
-  email: z.string().email("Valid email is required"),
-  role: z.enum(["super_admin", "company_admin", "irrigation_manager", "field_tech", "billing_manager"]),
-  companyId: z.number().nullable().optional(),
+const companyAdminFormSchema = z.object({
+  adminEmail: z.string().email("Valid admin email is required"),
+  adminPassword: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-type UserFormData = z.infer<typeof userFormSchema>;
+type CompanyAdminFormData = z.infer<typeof companyAdminFormSchema>;
 
 export default function SystemUserManagement() {
   const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<any>(null);
   const [deletingUser, setDeletingUser] = useState<any>(null);
 
   // Fetch all users (super admin can see all)
@@ -53,65 +48,38 @@ export default function SystemUserManagement() {
     },
   });
 
-  const form = useForm<UserFormData>({
-    resolver: zodResolver(userFormSchema),
+  const form = useForm<CompanyAdminFormData>({
+    resolver: zodResolver(companyAdminFormSchema),
     defaultValues: {
-      username: "",
-      password: "",
-      name: "",
-      email: "",
-      role: "company_admin",
-      companyId: null,
+      adminEmail: "",
+      adminPassword: "",
     },
   });
 
-  const onSubmit = async (data: UserFormData) => {
+  const onSubmit = async (data: CompanyAdminFormData) => {
     try {
-      if (editingUser) {
-        // Update existing user (exclude password if empty)
-        const updateData: Partial<UserFormData> = { ...data };
-        if (!data.password) {
-          delete (updateData as any).password;
-        }
-        await apiRequest(`/api/users/${editingUser.id}`, "PUT", updateData);
-        toast({
-          title: "Success",
-          description: "User updated successfully",
-        });
-      } else {
-        // Create new user
-        await apiRequest("/api/users", "POST", data);
-        toast({
-          title: "Success",
-          description: "User created successfully",
-        });
-      }
+      // Create new company admin with minimal info
+      await apiRequest("/api/super-admin/create-company-admin", "POST", data);
+      toast({
+        title: "Success",
+        description: "Company admin created successfully. They will complete setup on first login.",
+      });
 
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       setIsCreateDialogOpen(false);
-      setEditingUser(null);
       form.reset();
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error.message || "Failed to create company admin";
       toast({
         title: "Error",
-        description: editingUser ? "Failed to update user" : "Failed to create user",
+        description: errorMessage,
         variant: "destructive",
       });
     }
   };
 
-  const handleEditUser = (user: any) => {
-    setEditingUser(user);
-    form.reset({
-      username: user.username || "",
-      password: "", // Leave password empty for editing
-      name: user.name || "",
-      email: user.email || "",
-      role: user.role || "company_admin",
-      companyId: user.companyId || null,
-    });
-    setIsCreateDialogOpen(true);
-  };
+
 
   const handleDeleteUser = async () => {
     if (!deletingUser) return;
@@ -169,158 +137,78 @@ export default function SystemUserManagement() {
   return (
     <div className="container mx-auto p-6 space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">System User Management</h1>
-        <p className="text-muted-foreground">
-          Manage all users across all companies
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">System User Management</h1>
+          <p className="text-muted-foreground">
+            Manage all users across all companies
+          </p>
+        </div>
+        <Button onClick={() => setIsCreateDialogOpen(true)} className="w-full sm:w-auto">
+          <Plus className="mr-2 h-4 w-4" />
+          <span className="hidden sm:inline">Add New Company Admin</span>
+          <span className="sm:hidden">Add Admin</span>
+        </Button>
       </div>
 
       {/* Dialog - positioned outside the header */}
       <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
         setIsCreateDialogOpen(open);
         if (!open) {
-          setEditingUser(null);
           form.reset();
         }
       }}>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>{editingUser ? "Edit User" : "Create New User"}</DialogTitle>
-              <DialogDescription>
-                {editingUser ? "Update user information." : "Add a new user to the system."}
-              </DialogDescription>
-            </DialogHeader>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="username"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Username *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter username" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+        <DialogContent className="sm:max-w-[425px] w-[95vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Company Admin</DialogTitle>
+            <DialogDescription>
+              Create a company admin account. They will complete their profile and company setup on first login.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="adminEmail"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Admin Email *</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="Enter admin email" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{editingUser ? "Password (leave empty to keep current)" : "Password *"}</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="password" 
-                          placeholder={editingUser ? "Leave empty to keep current password" : "Enter password"} 
-                          {...field} 
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              <FormField
+                control={form.control}
+                name="adminPassword"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Password *</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="Enter password (min 6 characters)" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Full Name *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter full name" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter email" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role *</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select role" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="super_admin">Super Admin</SelectItem>
-                          <SelectItem value="company_admin">Company Admin</SelectItem>
-                          <SelectItem value="irrigation_manager">Irrigation Manager</SelectItem>
-                          <SelectItem value="field_tech">Field Tech</SelectItem>
-                          <SelectItem value="billing_manager">Billing Manager</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="companyId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company</FormLabel>
-                      <Select
-                        onValueChange={(value) => field.onChange(value === "null" ? null : Number(value))}
-                        defaultValue={field.value?.toString() || "null"}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select company" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="null">System Level (Super Admin only)</SelectItem>
-                          {companies.map((company: any) => (
-                            <SelectItem key={company.id} value={company.id.toString()}>
-                              {company.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <div className="flex justify-end space-x-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsCreateDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit">{editingUser ? "Update User" : "Create User"}</Button>
-                </div>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
+              <div className="flex justify-end space-x-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCreateDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">Create Company Admin</Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       {/* Users List */}
       <Card>
@@ -365,10 +253,6 @@ export default function SystemUserManagement() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleEditUser(user)}>
-                        <Edit className="mr-2 h-4 w-4" />
-                        Edit User
-                      </DropdownMenuItem>
                       <DropdownMenuItem 
                         onClick={() => setDeletingUser(user)}
                         className="text-red-600"
