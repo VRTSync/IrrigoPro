@@ -259,6 +259,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
+  // Super Admin: Create company admin (company + admin user)
+  app.post("/api/super-admin/create-company-admin", async (req, res) => {
+    try {
+      const userRole = req.headers['x-user-role'];
+      
+      if (userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Access denied. Super admin only." });
+      }
+
+      const {
+        companyName,
+        companyAddress,
+        companyPhone,
+        companyEmail,
+        companyWebsite,
+        subscription,
+        adminUsername,
+        adminPassword,
+        adminName,
+        adminEmail
+      } = req.body;
+
+      // Create company first
+      const companyData = {
+        name: companyName,
+        address: companyAddress || '',
+        phone: companyPhone || '',
+        email: companyEmail || '',
+        website: companyWebsite || '',
+        subscription: subscription || 'basic'
+      };
+
+      const company = await storage.createCompany(companyData);
+
+      // Create admin user for the company
+      const userData = {
+        username: adminUsername,
+        password: adminPassword,
+        name: adminName,
+        email: adminEmail,
+        role: 'company_admin' as const,
+        companyId: company.id,
+        isActive: true,
+        emailVerified: true
+      };
+
+      const user = await storage.createUser(userData);
+
+      res.status(201).json({ company, user });
+    } catch (error) {
+      console.error('Error creating company admin:', error);
+      res.status(500).json({ message: "Failed to create company admin" });
+    }
+  });
+
   app.get("/api/admin/system-stats", async (req, res) => {
     try {
       const users = await storage.getUsers();

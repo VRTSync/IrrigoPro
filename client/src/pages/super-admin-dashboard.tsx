@@ -16,6 +16,22 @@ import { z } from "zod";
 import { apiRequest, queryClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
+const companyAdminFormSchema = z.object({
+  // Company details
+  companyName: z.string().min(1, "Company name is required"),
+  companyAddress: z.string().optional(),
+  companyPhone: z.string().optional(),
+  companyEmail: z.string().email().optional().or(z.literal("")),
+  companyWebsite: z.string().optional(),
+  subscription: z.string().default("basic"),
+  // Admin user details
+  adminUsername: z.string().min(1, "Admin username is required"),
+  adminPassword: z.string().min(6, "Password must be at least 6 characters"),
+  adminName: z.string().min(1, "Admin name is required"),
+  adminEmail: z.string().email("Valid admin email is required"),
+});
+
+// Schema for editing existing companies
 const companyFormSchema = z.object({
   name: z.string().min(1, "Company name is required"),
   address: z.string().optional(),
@@ -25,6 +41,7 @@ const companyFormSchema = z.object({
   subscription: z.string().default("basic"),
 });
 
+type CompanyAdminFormData = z.infer<typeof companyAdminFormSchema>;
 type CompanyFormData = z.infer<typeof companyFormSchema>;
 
 export default function SuperAdminDashboard() {
@@ -53,33 +70,53 @@ export default function SuperAdminDashboard() {
     },
   });
 
-  const form = useForm<CompanyFormData>({
-    resolver: zodResolver(companyFormSchema),
-    defaultValues: {
+  // Use different forms for create vs edit
+  const form = useForm<CompanyAdminFormData | CompanyFormData>({
+    resolver: zodResolver(editingCompany ? companyFormSchema : companyAdminFormSchema),
+    defaultValues: editingCompany ? {
       name: "",
       address: "",
       phone: "",
       email: "",
       website: "",
       subscription: "basic",
+    } : {
+      companyName: "",
+      companyAddress: "",
+      companyPhone: "",
+      companyEmail: "",
+      companyWebsite: "",
+      subscription: "basic",
+      adminUsername: "",
+      adminPassword: "",
+      adminName: "",
+      adminEmail: "",
     },
   });
 
-  const onSubmit = async (data: CompanyFormData) => {
+  const onSubmit = async (data: CompanyAdminFormData) => {
     try {
       if (editingCompany) {
         // Update existing company
-        await apiRequest(`/api/companies/${editingCompany.id}`, "PUT", data);
+        const companyData = {
+          name: data.companyName,
+          address: data.companyAddress,
+          phone: data.companyPhone,
+          email: data.companyEmail,
+          website: data.companyWebsite,
+          subscription: data.subscription,
+        };
+        await apiRequest(`/api/companies/${editingCompany.id}`, "PUT", companyData);
         toast({
           title: "Success",
           description: "Company updated successfully",
         });
       } else {
-        // Create new company
-        await apiRequest("/api/companies", "POST", data);
+        // Create new company and admin user
+        await apiRequest("/api/super-admin/create-company-admin", "POST", data);
         toast({
           title: "Success",
-          description: "Company created successfully",
+          description: "Company and admin user created successfully",
         });
       }
 
@@ -90,7 +127,7 @@ export default function SuperAdminDashboard() {
     } catch (error) {
       toast({
         title: "Error",
-        description: editingCompany ? "Failed to update company" : "Failed to create company",
+        description: editingCompany ? "Failed to update company" : "Failed to create company admin",
         variant: "destructive",
       });
     }
@@ -151,7 +188,19 @@ export default function SuperAdminDashboard() {
           setIsCreateDialogOpen(open);
           if (!open) {
             setEditingCompany(null);
-            form.reset();
+            // Reset form to new company admin defaults
+            form.reset({
+              companyName: "",
+              companyAddress: "",
+              companyPhone: "",
+              companyEmail: "",
+              companyWebsite: "",
+              subscription: "basic",
+              adminUsername: "",
+              adminPassword: "",
+              adminName: "",
+              adminEmail: "",
+            });
           }
         }}>
           <DialogTrigger asChild>
@@ -170,47 +219,115 @@ export default function SuperAdminDashboard() {
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company Name *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter company name" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {/* Company Information */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Company Information</h3>
+                  
+                  <FormField
+                    control={form.control}
+                    name={editingCompany ? "name" : "companyName"}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company Name *</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter company name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter email" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                  <FormField
+                    control={form.control}
+                    name={editingCompany ? "email" : "companyEmail"}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company Email</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter company email" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter phone number" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                  <FormField
+                    control={form.control}
+                    name={editingCompany ? "phone" : "companyPhone"}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter phone number" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {/* Admin User Information - Only for new companies */}
+                {!editingCompany && (
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-medium">Admin User Information</h3>
+                    
+                    <FormField
+                      control={form.control}
+                      name="adminUsername"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Admin Username *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter admin username" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="adminPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Admin Password *</FormLabel>
+                          <FormControl>
+                            <Input type="password" placeholder="Enter admin password" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="adminName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Admin Name *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter admin full name" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="adminEmail"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Admin Email *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter admin email" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
 
                 <FormField
                   control={form.control}
