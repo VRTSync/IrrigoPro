@@ -142,13 +142,11 @@ export default function SuperAdminDashboard() {
   return (
     <div className="container mx-auto p-6 space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Super Admin Dashboard</h1>
-          <p className="text-muted-foreground">
-            Manage all companies using the irrigation system
-          </p>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Super Admin Dashboard</h1>
+        <p className="text-muted-foreground mb-4">
+          Manage all companies using the irrigation system
+        </p>
         <Dialog open={isCreateDialogOpen} onOpenChange={(open) => {
           setIsCreateDialogOpen(open);
           if (!open) {
