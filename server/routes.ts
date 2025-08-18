@@ -3708,5 +3708,63 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // QuickBooks Developer Portal Required URLs
+  
+  // Launch URL - Called when user clicks "Launch" button in QuickBooks App Menu
+  app.get("/api/quickbooks/launch", async (req, res) => {
+    try {
+      // Log the launch request
+      console.log('QuickBooks Launch URL accessed:', req.query);
+      
+      // Redirect to the main application with QuickBooks context
+      // The realmId (company ID) will be provided by QuickBooks
+      const realmId = req.query.realmId;
+      
+      if (realmId) {
+        // Store the QuickBooks company context in session if needed
+        req.session.quickbooksRealmId = realmId;
+      }
+      
+      // Redirect to customer billing page where QuickBooks integration is located
+      res.redirect('/customer-billing?source=quickbooks_launch');
+    } catch (error) {
+      console.error('QuickBooks Launch URL error:', error);
+      res.status(500).json({ message: "QuickBooks launch failed" });
+    }
+  });
+  
+  // Disconnect URL - Called when user disconnects the app from QuickBooks
+  app.post("/api/quickbooks/disconnect", async (req, res) => {
+    try {
+      console.log('QuickBooks Disconnect URL accessed:', req.body);
+      
+      // Handle the disconnection
+      // This would typically:
+      // 1. Remove stored QuickBooks tokens for this company
+      // 2. Update company settings to reflect disconnection
+      // 3. Log the disconnection event
+      
+      const realmId = req.body.realmId;
+      
+      if (realmId && req.session) {
+        // Clear QuickBooks session data
+        delete req.session.quickbooksRealmId;
+        delete req.session.quickbooksTokens;
+      }
+      
+      // For now, just acknowledge the disconnection
+      // In a full implementation, you'd clean up stored tokens and company associations
+      
+      res.json({ 
+        message: "QuickBooks disconnection processed successfully",
+        status: "disconnected",
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('QuickBooks Disconnect URL error:', error);
+      res.status(500).json({ message: "QuickBooks disconnect processing failed" });
+    }
+  });
+
   return httpServer;
 }
