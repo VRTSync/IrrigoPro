@@ -32,6 +32,7 @@ import CompanyProfile from "@/pages/company-profile";
 import UserProfile from "@/pages/user-profile";
 import UserManager from "@/pages/UserManager";
 import LicenseAgreement from "@/pages/license-agreement";
+import PrivacyPolicy from "@/pages/privacy-policy";
 
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -163,6 +164,7 @@ function Router() {
                 <Route path="/site-maps" component={FieldTechMaps} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
+                <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -195,6 +197,7 @@ function Router() {
                 <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
+                <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -223,6 +226,7 @@ function Router() {
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
+                <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -250,6 +254,7 @@ function Router() {
                 <Route path="/user-manager" component={UserManager} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
+                <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -294,6 +299,7 @@ function Router() {
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
               <Route path="/license-agreement" component={LicenseAgreement} />
+              <Route path="/privacy-policy" component={PrivacyPolicy} />
               <Route path="/login" component={Login} />
               <Route path="/field-portal" component={FieldPortal} />
               {/* Redirect estimates and work-orders to operations page */}
