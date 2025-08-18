@@ -31,6 +31,7 @@ import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import UserProfile from "@/pages/user-profile";
 import UserManager from "@/pages/UserManager";
+import LicenseAgreement from "@/pages/license-agreement";
 
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -133,6 +134,7 @@ function Router() {
             <Route path="/old-login" component={Login} />
             <Route path="/forgot-password" component={ForgotPassword} />
             <Route path="/reset-password" component={ResetPassword} />
+            <Route path="/license-agreement" component={LicenseAgreement} />
             <Route path="/" component={SimpleLogin} />
             <Route component={SimpleLogin} />
           </Switch>
@@ -159,6 +161,8 @@ function Router() {
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
+                <Route path="/user-profile" component={UserProfile} />
+                <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -190,6 +194,7 @@ function Router() {
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -217,6 +222,7 @@ function Router() {
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -243,6 +249,7 @@ function Router() {
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-manager" component={UserManager} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/login" component={Login} />
                 <Route component={NotFound} />
               </Switch>
@@ -286,6 +293,7 @@ function Router() {
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
+              <Route path="/license-agreement" component={LicenseAgreement} />
               <Route path="/login" component={Login} />
               <Route path="/field-portal" component={FieldPortal} />
               {/* Redirect estimates and work-orders to operations page */}
