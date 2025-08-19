@@ -3790,6 +3790,49 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // QuickBooks Developer Portal Required URLs
   
+  // Security Assessment API endpoints
+  app.get("/api/security/assessment", async (req, res) => {
+    try {
+      const { securityManager } = await import('./security');
+      const assessment = await securityManager.performSecurityAssessment();
+      res.json(assessment);
+    } catch (error) {
+      console.error("Error performing security assessment:", error);
+      res.status(500).json({ message: "Failed to perform security assessment" });
+    }
+  });
+
+  app.get("/api/security/status", async (req, res) => {
+    try {
+      const { securityManager } = await import('./security');
+      const status = securityManager.getSecurityStatus();
+      res.json(status);
+    } catch (error) {
+      console.error("Error getting security status:", error);
+      res.status(500).json({ message: "Failed to get security status" });
+    }
+  });
+
+  app.post("/api/security/incident", async (req, res) => {
+    try {
+      const { securityManager } = await import('./security');
+      const { type, severity, description, affectedSystems, userId } = req.body;
+      
+      securityManager.reportSecurityIncident({
+        type,
+        severity,
+        description,
+        affectedSystems,
+        userId
+      });
+      
+      res.json({ message: "Security incident reported successfully" });
+    } catch (error) {
+      console.error("Error reporting security incident:", error);
+      res.status(500).json({ message: "Failed to report security incident" });
+    }
+  });
+
   // Logging and troubleshooting API endpoints
   app.get("/api/logs", async (req, res) => {
     try {
