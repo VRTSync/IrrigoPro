@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown } from "lucide-react";
+import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -51,6 +51,9 @@ export default function CompanyUserManagement() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
+  const [userDependencies, setUserDependencies] = useState<any>(null);
+  const [isLoadingDependencies, setIsLoadingDependencies] = useState(false);
 
   // Get current user from localStorage
   useEffect(() => {
@@ -182,6 +185,91 @@ export default function CompanyUserManagement() {
       toast({
         title: "Error",
         description: "Failed to deactivate user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const checkUserDependencies = async (user: User) => {
+    setDeletingUser(user);
+    setIsLoadingDependencies(true);
+    try {
+      const response = await apiRequest(`/api/users/${user.id}/dependencies`, "GET");
+      setUserDependencies(response);
+    } catch (error) {
+      console.error('Failed to check user dependencies:', error);
+      setUserDependencies(null);
+      toast({
+        title: "Error",
+        description: "Failed to analyze user data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingDependencies(false);
+    }
+  };
+
+  const handleSmartDelete = async () => {
+    if (!deletingUser) return;
+    try {
+      const response = await apiRequest(`/api/users/${deletingUser.id}`, "DELETE");
+      
+      queryClient.invalidateQueries({ queryKey: [`/api/company/${currentUser?.companyId}/users`] });
+      setDeletingUser(null);
+      setUserDependencies(null);
+      
+      toast({
+        title: "Success",
+        description: response.message || "User deleted successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSoftDelete = async () => {
+    if (!deletingUser) return;
+    try {
+      const response = await apiRequest(`/api/users/${deletingUser.id}/soft-delete`, "POST");
+      
+      queryClient.invalidateQueries({ queryKey: [`/api/company/${currentUser?.companyId}/users`] });
+      setDeletingUser(null);
+      setUserDependencies(null);
+      
+      toast({
+        title: "Success",
+        description: "User deleted (data preserved for business records)",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleHardDelete = async () => {
+    if (!deletingUser) return;
+    try {
+      const response = await apiRequest(`/api/users/${deletingUser.id}/hard-delete`, "DELETE");
+      
+      queryClient.invalidateQueries({ queryKey: [`/api/company/${currentUser?.companyId}/users`] });
+      setDeletingUser(null);
+      setUserDependencies(null);
+      
+      toast({
+        title: "Success",
+        description: "User permanently deleted with data cleanup",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete user",
         variant: "destructive",
       });
     }
@@ -506,6 +594,14 @@ export default function CompanyUserManagement() {
                                 </AlertDialogContent>
                               </AlertDialog>
                             )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => checkUserDependencies(user)}
+                              className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
                           </>
                         )}
                       </div>
@@ -602,6 +698,164 @@ export default function CompanyUserManagement() {
               </div>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* User Deletion Dialog with Data Impact Analysis */}
+      <Dialog open={!!deletingUser} onOpenChange={(open) => {
+        if (!open) {
+          setDeletingUser(null);
+          setUserDependencies(null);
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              Delete User: {deletingUser?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Choose how to handle this user's deletion based on their work history
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingDependencies ? (
+            <div className="py-8 text-center">
+              <Database className="h-8 w-8 text-gray-400 mx-auto animate-pulse" />
+              <p className="mt-2 text-gray-600">Analyzing user data dependencies...</p>
+            </div>
+          ) : userDependencies ? (
+            <div className="space-y-6">
+              {/* Data Impact Summary */}
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h4 className="font-semibold mb-3 flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Data Impact Analysis
+                </h4>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">{userDependencies.workOrderCount}</div>
+                    <div className="text-gray-600">Work Orders</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">{userDependencies.billingSheetCount}</div>
+                    <div className="text-gray-600">Billing Sheets</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-600">{userDependencies.notificationCount}</div>
+                    <div className="text-gray-600">Notifications</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Deletion Options */}
+              <div className="space-y-4">
+                <h4 className="font-semibold">Choose Deletion Method:</h4>
+                
+                {/* Smart Delete - Recommended */}
+                <div className="border rounded-lg p-4 bg-blue-50 dark:bg-blue-900/20 border-blue-200">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-800 rounded-lg">
+                      <Database className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h5 className="font-medium text-blue-900 dark:text-blue-100">
+                        Smart Delete (Recommended)
+                      </h5>
+                      <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                        {userDependencies.hasWorkOrders || userDependencies.hasBillingSheets 
+                          ? "Uses soft delete to preserve business records for billing/payroll integrity"
+                          : "Uses permanent deletion since no work history exists"
+                        }
+                      </p>
+                      <Button 
+                        onClick={handleSmartDelete}
+                        className="mt-3 bg-blue-600 hover:bg-blue-700"
+                        size="sm"
+                      >
+                        Use Smart Delete
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Soft Delete */}
+                <div className="border rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-yellow-100 dark:bg-yellow-800 rounded-lg">
+                      <Archive className="h-4 w-4 text-yellow-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h5 className="font-medium">Soft Delete (Preserve Data)</h5>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        Marks user as deleted but keeps all work history intact for business records
+                      </p>
+                      <Button 
+                        onClick={handleSoftDelete}
+                        variant="outline"
+                        className="mt-3 border-yellow-200 hover:bg-yellow-50"
+                        size="sm"
+                      >
+                        Soft Delete
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hard Delete - Warning */}
+                <div className="border rounded-lg p-4 bg-red-50 dark:bg-red-900/20 border-red-200">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-red-100 dark:bg-red-800 rounded-lg">
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h5 className="font-medium text-red-900 dark:text-red-100">
+                        Hard Delete (Permanent)
+                      </h5>
+                      <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                        ⚠️ Permanently removes user and cleans up data. Historical work records will show "[Deleted User]"
+                      </p>
+                      <Button 
+                        onClick={handleHardDelete}
+                        variant="outline"
+                        className="mt-3 border-red-200 hover:bg-red-50 text-red-600 hover:text-red-700"
+                        size="sm"
+                      >
+                        Permanent Delete
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDeletingUser(null);
+                    setUserDependencies(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <AlertTriangle className="h-8 w-8 text-red-400 mx-auto" />
+              <p className="mt-2 text-gray-600">Failed to analyze user data. Please try again.</p>
+              <Button 
+                variant="outline" 
+                className="mt-4"
+                onClick={() => {
+                  setDeletingUser(null);
+                  setUserDependencies(null);
+                }}
+              >
+                Close
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
