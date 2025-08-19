@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
-import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench } from "lucide-react";
+import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
 
@@ -12,6 +12,9 @@ interface DashboardStats {
   pendingEstimates: number;
   approvedThisMonth: number;
   totalRevenue: number;
+  activeUsers: number;
+  openWorkOrders: number;
+  activeCustomers: number;
   workOrderStats: {
     pending: number;
     inProgress: number;
@@ -101,98 +104,81 @@ export default function Dashboard() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Pending Estimates</p>
-                  {isLoading ? (
-                    <Skeleton className="h-8 w-12 mt-2" />
-                  ) : (
-                    <p className="text-2xl font-bold text-gray-900">{stats?.pendingEstimates || 0}</p>
-                  )}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          {/* Active Users Card */}
+          <Link href="/company-user-management">
+            <Card className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Active Users</p>
+                    {isLoading ? (
+                      <Skeleton className="h-8 w-12 mt-2" />
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900">{stats?.activeUsers || 0}</p>
+                    )}
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <Users className="w-5 h-5 text-blue-600" />
+                  </div>
                 </div>
-                <div className="bg-amber-50 p-3 rounded-lg">
-                  <Clock className="w-5 h-5 text-amber-600" />
+                <div className="mt-4 flex items-center text-sm">
+                  <UserCheck className="w-4 h-4 text-blue-600 mr-1" />
+                  <span className="text-blue-600 font-medium">Click to manage users</span>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center text-sm">
-                <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                <span className="text-green-600 font-medium">+2</span>
-                <span className="text-gray-600 ml-1">from last week</span>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Link>
 
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Approved This Month</p>
-                  {isLoading ? (
-                    <Skeleton className="h-8 w-12 mt-2" />
-                  ) : (
-                    <p className="text-2xl font-bold text-gray-900">{stats?.approvedThisMonth || 0}</p>
-                  )}
+          {/* Open Work Orders Card */}
+          <Link href="/work-orders">
+            <Card className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Open Work Orders</p>
+                    {isLoading ? (
+                      <Skeleton className="h-8 w-12 mt-2" />
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900">{stats?.openWorkOrders || 0}</p>
+                    )}
+                  </div>
+                  <div className="bg-orange-50 p-3 rounded-lg">
+                    <Wrench className="w-5 h-5 text-orange-600" />
+                  </div>
                 </div>
-                <div className="bg-green-50 p-3 rounded-lg">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
+                <div className="mt-4 flex items-center text-sm">
+                  <FolderOpen className="w-4 h-4 text-orange-600 mr-1" />
+                  <span className="text-orange-600 font-medium">View all work orders</span>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center text-sm">
-                <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                <span className="text-green-600 font-medium">+12%</span>
-                <span className="text-gray-600 ml-1">from last month</span>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Link>
 
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                  {isLoading ? (
-                    <Skeleton className="h-8 w-20 mt-2" />
-                  ) : (
-                    <p className="text-2xl font-bold text-gray-900">{formatCurrency(stats?.totalRevenue || 0)}</p>
-                  )}
+          {/* Active Customers Card */}
+          <Link href="/customers">
+            <Card className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow cursor-pointer">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Active Customers</p>
+                    {isLoading ? (
+                      <Skeleton className="h-8 w-12 mt-2" />
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900">{stats?.activeCustomers || 0}</p>
+                    )}
+                  </div>
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <Users className="w-5 h-5 text-green-600" />
+                  </div>
                 </div>
-                <div className="bg-blue-50 p-3 rounded-lg">
-                  <DollarSign className="w-5 h-5 text-blue-600" />
+                <div className="mt-4 flex items-center text-sm">
+                  <CheckCircle className="w-4 h-4 text-green-600 mr-1" />
+                  <span className="text-green-600 font-medium">Manage customers</span>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center text-sm">
-                <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                <span className="text-green-600 font-medium">+18%</span>
-                <span className="text-gray-600 ml-1">from last month</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Active Work Orders</p>
-                  {isLoading ? (
-                    <Skeleton className="h-8 w-16 mt-2" />
-                  ) : (
-                    <p className="text-2xl font-bold text-gray-900">{stats?.workOrderStats?.inProgress || 0}</p>
-                  )}
-                </div>
-                <div className="bg-orange-50 p-3 rounded-lg">
-                  <Wrench className="w-5 h-5 text-orange-600" />
-                </div>
-              </div>
-              <div className="mt-4 flex items-center text-sm">
-                <span className="text-gray-600">
-                  {stats?.workOrderStats?.pending || 0} pending, {stats?.workOrderStats?.completed || 0} completed
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
       </div>
 
