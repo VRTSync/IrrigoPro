@@ -18,8 +18,7 @@ import {
   DollarSign,
   Clock,
   Package,
-  Map,
-  CreditCard
+  Map
 } from "lucide-react";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
@@ -39,7 +38,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [workOrderModalOpen, setWorkOrderModalOpen] = useState(false);
   const [showSiteMaps, setShowSiteMaps] = useState(false);
-  const [showBillingView, setShowBillingView] = useState(false);
+
   const [activeView, setActiveView] = useState<'estimates' | 'work-orders' | 'billing-sheets'>('estimates');
 
   // Fetch customer-related data
@@ -161,6 +160,18 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                         <span className="font-medium text-sm sm:text-base break-words">{customer.address}</span>
                       </div>
                     )}
+                    {/* Site Maps Button */}
+                    <div className="mt-3">
+                      <Button 
+                        onClick={() => setShowSiteMaps(true)}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-2 bg-white hover:bg-blue-50 border-blue-200 text-blue-700 hover:text-blue-800"
+                      >
+                        <Map className="w-4 h-4" />
+                        <span className="text-sm">View Site Maps</span>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -194,34 +205,6 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="mb-8">
-          <Card className="bg-gradient-to-r from-slate-50 to-gray-50 border border-gray-200">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold text-gray-800">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-                <Button 
-                  onClick={() => setShowSiteMaps(true)}
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 w-full sm:w-auto"
-                >
-                  <Map className="w-4 h-4 sm:w-5 sm:h-5" />
-                  <span className="text-sm sm:text-base">View Site Maps</span>
-                </Button>
-                <Button 
-                  onClick={() => setShowBillingView(true)}
-                  variant="outline"
-                  className="flex items-center justify-center gap-2 border-gray-300 hover:bg-gray-50 px-4 py-3 w-full sm:w-auto"
-                >
-                  <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
-                  <span className="text-sm sm:text-base">View Billing</span>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Property Notes Section */}
