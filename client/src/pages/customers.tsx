@@ -373,7 +373,10 @@ export default function Customers() {
                                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                                           <AlertDialogAction
                                             className="bg-red-600 hover:bg-red-700"
-                                            onClick={() => handleDeleteCustomer(customer.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteCustomer(customer.id);
+                                            }}
                                             disabled={deleteCustomerMutation.isPending}
                                           >
                                             {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
