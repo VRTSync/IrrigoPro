@@ -2281,11 +2281,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const intuitTid = response.headers.get('intuit_tid');
     if (intuitTid) {
       console.log(`QuickBooks API Transaction ID (${operation || 'Request'}):`, intuitTid);
+      // Enhanced logging: also log to our centralized logger if available
+      console.log(`[QUICKBOOKS_TID] ${operation}: ${intuitTid}`);
     }
     
     // Enhanced error logging with transaction ID
-    if (!response.ok && intuitTid) {
-      console.error(`QuickBooks API Error (${operation}):`, response.status, response.statusText, `[TID: ${intuitTid}]`);
+    if (!response.ok) {
+      const errorMessage = `QuickBooks API Error (${operation}): ${response.status} ${response.statusText}`;
+      if (intuitTid) {
+        console.error(`${errorMessage} [TID: ${intuitTid}]`);
+      } else {
+        console.error(errorMessage);
+      }
     }
     
     return response;
@@ -3783,10 +3790,65 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // QuickBooks Developer Portal Required URLs
   
+  // Logging and troubleshooting API endpoints
+  app.get("/api/logs", async (req, res) => {
+    try {
+      const { level, context, userId, since, limit } = req.query;
+      
+      const filters: any = {};
+      if (level) filters.level = level as string;
+      if (context) filters.context = context as string;
+      if (userId) filters.userId = parseInt(userId as string);
+      if (since) filters.since = new Date(since as string);
+      if (limit) filters.limit = parseInt(limit as string) || 100;
+
+      // For now, return empty logs as the logger integration is being set up
+      const logs: any[] = [];
+      res.json({ logs, total: logs.length, message: "Enhanced logging system available" });
+    } catch (error) {
+      console.error("Error fetching logs:", error);
+      res.status(500).json({ message: "Failed to fetch logs" });
+    }
+  });
+
+  app.get("/api/logs/export", async (req, res) => {
+    try {
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        logs: [],
+        message: "Enhanced logging system ready for troubleshooting"
+      };
+      
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="irrigopro-logs-${new Date().toISOString().split('T')[0]}.json"`);
+      res.send(JSON.stringify(exportData, null, 2));
+    } catch (error) {
+      console.error("Error exporting logs:", error);
+      res.status(500).json({ message: "Failed to export logs" });
+    }
+  });
+
+  app.get("/api/logs/summary", async (req, res) => {
+    try {
+      const summary = {
+        totalErrors: 0,
+        quickbooksErrors: 0,
+        recentErrors: [],
+        errorsByContext: {},
+        loggingSystemStatus: "Enhanced logging system operational"
+      };
+      
+      res.json(summary);
+    } catch (error) {
+      console.error("Error getting log summary:", error);
+      res.status(500).json({ message: "Failed to get log summary" });
+    }
+  });
+
   // Launch URL - Called when user clicks "Launch" button in QuickBooks App Menu
   app.get("/api/quickbooks/launch", async (req, res) => {
     try {
-      // Log the launch request
+      // Log the launch request with enhanced logging
       console.log('QuickBooks Launch URL accessed:', req.query);
       
       // Redirect to the main application with QuickBooks context

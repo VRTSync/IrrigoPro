@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import fileUpload from "express-fileupload";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { logger, createRequestLogger } from "./logger";
 
 const app = express();
 app.use(express.json());
@@ -10,6 +11,9 @@ app.use(fileUpload({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   abortOnLimit: true
 }));
+
+// Add request logging middleware
+app.use(createRequestLogger);
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -42,6 +46,12 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  logger.info("Starting IrrigoPro server", "Server Startup", {
+    environment: process.env.NODE_ENV,
+    databaseAvailable: !!process.env.DATABASE_URL,
+    version: "1.0.0"
+  });
+  
   console.log("Starting server...");
   console.log("Node environment:", process.env.NODE_ENV);
   console.log("Database URL available:", !!process.env.DATABASE_URL);
@@ -52,16 +62,33 @@ app.use((req, res, next) => {
     console.log("Routes registered successfully");
   } catch (error) {
     console.error("Failed to register routes:", error);
+    logger.error("Failed to register routes", error, "Server Startup");
     throw error;
   }
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  // Error handling middleware must come after route registration
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
+    // Log the error with full context
+    logger.error(
+      `Server error: ${message}`,
+      err,
+      `${req.method} ${req.path}`,
+      {
+        status,
+        userId: (req as any).user?.id,
+        requestBody: req.body,
+        params: req.params,
+        query: req.query
+      }
+    );
+
     res.status(status).json({ message });
-    throw err;
   });
+
+
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
