@@ -385,15 +385,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Check user's data dependencies before deletion
+  app.get("/api/users/:id/dependencies", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const dependencies = await storage.getUserDataDependencies(userId);
+      res.json(dependencies);
+    } catch (error) {
+      console.error('Failed to check user dependencies:', error);
+      res.status(500).json({ message: "Failed to check user dependencies" });
+    }
+  });
+
+  // Soft delete user (recommended for users with completed work)
+  app.post("/api/users/:id/soft-delete", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const success = await storage.softDeleteUser(userId);
+      if (!success) {
+        return res.status(500).json({ message: "Failed to delete user" });
+      }
+      
+      res.json({ 
+        message: "User deleted successfully (soft delete - data preserved)",
+        deletedUser: { id: user.id, name: user.name }
+      });
+    } catch (error) {
+      console.error('Failed to soft delete user:', error);
+      res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
+
+  // Hard delete user with cascade (use with caution)
+  app.delete("/api/users/:id/hard-delete", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const success = await storage.hardDeleteUserWithCascade(userId);
+      if (!success) {
+        return res.status(500).json({ message: "Failed to delete user" });
+      }
+      
+      res.json({ 
+        message: "User permanently deleted with data cleanup",
+        deletedUser: { id: user.id, name: user.name }
+      });
+    } catch (error) {
+      console.error('Failed to hard delete user:', error);
+      res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
+
+  // Original delete endpoint (kept for compatibility but updated to use soft delete by default)
   app.delete("/api/users/:id", async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
-      const success = await storage.deleteUser(userId);
-      if (!success) {
+      const user = await storage.getUser(userId);
+      if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      res.json({ message: "User deleted successfully" });
+
+      // Check if user has dependencies
+      const dependencies = await storage.getUserDataDependencies(userId);
+      const hasData = dependencies.hasWorkOrders || dependencies.hasBillingSheets;
+
+      if (hasData) {
+        // Use soft delete for users with data
+        const success = await storage.softDeleteUser(userId);
+        if (!success) {
+          return res.status(500).json({ message: "Failed to delete user" });
+        }
+        res.json({ 
+          message: "User deleted successfully (soft delete - data preserved)",
+          type: "soft_delete",
+          preservedData: {
+            workOrders: dependencies.workOrderCount,
+            billingSheets: dependencies.billingSheetCount
+          }
+        });
+      } else {
+        // Use hard delete for users without dependencies
+        const success = await storage.deleteUser(userId);
+        if (!success) {
+          return res.status(500).json({ message: "Failed to delete user" });
+        }
+        res.json({ 
+          message: "User deleted successfully (permanent deletion)",
+          type: "hard_delete"
+        });
+      }
     } catch (error) {
+      console.error('Failed to delete user:', error);
       res.status(500).json({ message: "Failed to delete user" });
     }
   });

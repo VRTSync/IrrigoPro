@@ -28,6 +28,8 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager
   companyId: integer("company_id").references(() => companies.id), // null for super_admin
   isActive: boolean("is_active").notNull().default(true),
+  isDeleted: boolean("is_deleted").notNull().default(false), // Soft delete flag
+  deletedAt: timestamp("deleted_at"), // When user was deleted
   // Email verification fields
   emailVerified: boolean("email_verified").notNull().default(false),
   emailVerificationToken: text("email_verification_token"),

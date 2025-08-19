@@ -74,7 +74,7 @@ import {
   type BillingSheetWithItems
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, like, desc, and, gte, lte, or } from "drizzle-orm";
+import { sql, eq, like, desc, and, gte, lte, or } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 export interface IStorage {
@@ -96,6 +96,16 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
+  softDeleteUser(id: number): Promise<boolean>;
+  getUserDataDependencies(userId: number): Promise<{
+    hasWorkOrders: boolean;
+    hasBillingSheets: boolean;
+    hasNotifications: boolean;
+    workOrderCount: number;
+    billingSheetCount: number;
+    notificationCount: number;
+  }>;
+  hardDeleteUserWithCascade(userId: number): Promise<boolean>;
   
   // Customers
   getCustomers(companyId?: number): Promise<Customer[]>;
@@ -429,6 +439,135 @@ export class DatabaseStorage implements IStorage {
   async deleteUser(id: number): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, id));
     return (result.rowCount || 0) > 0;
+  }
+
+  // Soft delete user - marks as deleted but preserves data integrity
+  async softDeleteUser(id: number): Promise<boolean> {
+    try {
+      const result = await db
+        .update(users)
+        .set({ 
+          isDeleted: true, 
+          deletedAt: new Date(),
+          isActive: false, // Also deactivate
+          updatedAt: new Date()
+        })
+        .where(eq(users.id, id))
+        .returning();
+      return result.length > 0;
+    } catch (error) {
+      console.error('Error soft deleting user:', error);
+      return false;
+    }
+  }
+
+  // Check user's data dependencies before deletion
+  async getUserDataDependencies(userId: number): Promise<{
+    hasWorkOrders: boolean;
+    hasBillingSheets: boolean;
+    hasNotifications: boolean;
+    workOrderCount: number;
+    billingSheetCount: number;
+    notificationCount: number;
+  }> {
+    try {
+      // Check work orders (assigned or completed by user)
+      const workOrdersAssigned = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(workOrders)
+        .where(eq(workOrders.assignedTechnicianId, userId));
+      
+      const workOrdersCompleted = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(workOrders)
+        .where(eq(workOrders.completedByUserId, userId));
+
+      // Check billing sheets
+      const billingSheets = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(billingSheets)
+        .where(eq(billingSheets.technicianId, userId));
+
+      // Check notifications
+      const notifications = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(notifications)
+        .where(eq(notifications.userId, userId));
+
+      const totalWorkOrders = (workOrdersAssigned[0]?.count || 0) + (workOrdersCompleted[0]?.count || 0);
+      const totalBillingSheets = billingSheets[0]?.count || 0;
+      const totalNotifications = notifications[0]?.count || 0;
+
+      return {
+        hasWorkOrders: totalWorkOrders > 0,
+        hasBillingSheets: totalBillingSheets > 0,
+        hasNotifications: totalNotifications > 0,
+        workOrderCount: totalWorkOrders,
+        billingSheetCount: totalBillingSheets,
+        notificationCount: totalNotifications
+      };
+    } catch (error) {
+      console.error('Error checking user dependencies:', error);
+      return {
+        hasWorkOrders: false,
+        hasBillingSheets: false,
+        hasNotifications: false,
+        workOrderCount: 0,
+        billingSheetCount: 0,
+        notificationCount: 0
+      };
+    }
+  }
+
+  // Hard delete user with cascade handling (use with caution)
+  async hardDeleteUserWithCascade(userId: number): Promise<boolean> {
+    const transaction = db.transaction(async (tx) => {
+      try {
+        // Delete notifications
+        await tx.delete(notifications).where(eq(notifications.userId, userId));
+        
+        // Update work orders to remove user references (preserve historical data)
+        await tx
+          .update(workOrders)
+          .set({ 
+            assignedTechnicianId: null,
+            assignedTechnicianName: `[Deleted User: ${userId}]`
+          })
+          .where(eq(workOrders.assignedTechnicianId, userId));
+
+        await tx
+          .update(workOrders)
+          .set({ 
+            completedByUserId: null,
+            completedByUserName: `[Deleted User: ${userId}]`
+          })
+          .where(eq(workOrders.completedByUserId, userId));
+
+        // Update billing sheets to preserve historical data
+        await tx
+          .update(billingSheets)
+          .set({ 
+            technicianId: null,
+            technicianName: `[Deleted User: ${userId}]`
+          })
+          .where(eq(billingSheets.technicianId, userId));
+
+        // Finally delete the user
+        const result = await tx.delete(users).where(eq(users.id, userId));
+        
+        return (result.rowCount || 0) > 0;
+      } catch (error) {
+        console.error('Error in hard delete transaction:', error);
+        throw error;
+      }
+    });
+
+    try {
+      return await transaction;
+    } catch (error) {
+      console.error('Transaction failed:', error);
+      return false;
+    }
   }
 
   // Customers
