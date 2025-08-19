@@ -35,6 +35,11 @@ export const users = pgTable("users", {
   // Password reset fields
   passwordResetToken: text("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),
+  // Multi-Factor Authentication fields
+  mfaEnabled: boolean("mfa_enabled").notNull().default(false),
+  mfaSecret: text("mfa_secret"),
+  mfaBackupCodes: text("mfa_backup_codes"), // JSON array of backup codes
+  mfaLastUsed: timestamp("mfa_last_used"),
   // Timestamps
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
