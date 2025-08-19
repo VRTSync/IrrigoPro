@@ -1463,7 +1463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers", async (req, res) => {
+  app.post("/api/customers", requireAdminAccess, async (req, res) => {
     try {
       const customerData = insertCustomerSchema.parse(req.body);
       const customer = await storage.createCustomer(customerData);
@@ -1476,7 +1476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/customers/:id", async (req, res) => {
+  app.put("/api/customers/:id", requireAdminAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customerData = insertCustomerSchema.partial().parse(req.body);
@@ -1510,7 +1510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/customers/:id", async (req, res) => {
+  app.delete("/api/customers/:id", requireAdminAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.deleteCustomer(id);
@@ -1554,7 +1554,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers/import-csv", async (req, res) => {
+  app.post("/api/customers/import-csv", requireAdminAccess, async (req, res) => {
     try {
       const file = (req as any).files?.file;
       if (!file) {

@@ -136,7 +136,7 @@ export default function Customers() {
             <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
             <p className="text-gray-600 mt-1">Manage your customer database</p>
           </div>
-          {userRole === 'company_admin' && (
+          {(userRole === 'company_admin' || userRole === 'super_admin') && (
             <div className="mt-4 sm:mt-0">
               <CustomerForm
                 trigger={
@@ -152,9 +152,9 @@ export default function Customers() {
       </div>
 
       <Tabs defaultValue="customers" className="w-full">
-        <TabsList className={userRole === 'company_admin' ? "grid w-full grid-cols-2" : "grid w-full grid-cols-1"}>
+        <TabsList className={(userRole === 'company_admin' || userRole === 'super_admin') ? "grid w-full grid-cols-2" : "grid w-full grid-cols-1"}>
           <TabsTrigger value="customers" className="text-sm">Customer List</TabsTrigger>
-          {userRole === 'company_admin' && (
+          {(userRole === 'company_admin' || userRole === 'super_admin') && (
             <TabsTrigger value="integrations" className="text-sm">
               <Settings className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
               <span className="hidden sm:inline">Integrations</span>
@@ -347,7 +347,7 @@ export default function Customers() {
                                 >
                                   <Eye className="w-4 h-4" />
                                 </Button>
-                                {userRole === 'company_admin' && (
+                                {(userRole === 'company_admin' || userRole === 'super_admin') && (
                                   <>
                                     <CustomerForm
                                       customer={customer}
@@ -412,7 +412,7 @@ export default function Customers() {
                       : "Get started by adding your first customer."
                   }
                 </p>
-                {userRole === 'company_admin' && (
+                {(userRole === 'company_admin' || userRole === 'super_admin') && (
                   <CustomerForm
                     trigger={
                       <Button className="bg-primary text-white hover:bg-blue-700">
@@ -427,7 +427,7 @@ export default function Customers() {
           )}
         </TabsContent>
 
-        {userRole === 'company_admin' && (
+        {(userRole === 'company_admin' || userRole === 'super_admin') && (
           <TabsContent value="integrations">
             <CustomerIntegration />
           </TabsContent>
