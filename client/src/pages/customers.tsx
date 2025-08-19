@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,28 @@ import { CustomerIntegration } from "@/components/integrations/customer-integrat
 import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";
 import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showSiteMaps, setShowSiteMaps] = useState<Customer | null>(null);
   const [userRole, setUserRole] = useState<string>("company_admin");
+  
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Get user role from localStorage
   useEffect(() => {
@@ -34,6 +50,33 @@ export default function Customers() {
   const { data: customers, isLoading } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
   });
+
+  // Delete customer mutation
+  const deleteCustomerMutation = useMutation({
+    mutationFn: async (customerId: number) => {
+      const response = await apiRequest("DELETE", `/api/customers/${customerId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast({
+        title: "Success",
+        description: "Customer deleted successfully",
+      });
+    },
+    onError: (error) => {
+      console.error("Delete customer error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete customer. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDeleteCustomer = (customerId: number) => {
+    deleteCustomerMutation.mutate(customerId);
+  };
 
   // Check for auto-selection from site maps page
   useEffect(() => {
@@ -314,9 +357,31 @@ export default function Customers() {
                                         </Button>
                                       }
                                     />
-                                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
-                                      <Trash2 className="w-4 h-4" />
-                                    </Button>
+                                    <AlertDialog>
+                                      <AlertDialogTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
+                                          <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                          <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+                                          <AlertDialogDescription>
+                                            Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.
+                                          </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                          <AlertDialogAction
+                                            className="bg-red-600 hover:bg-red-700"
+                                            onClick={() => handleDeleteCustomer(customer.id)}
+                                            disabled={deleteCustomerMutation.isPending}
+                                          >
+                                            {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
+                                          </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
                                   </>
                                 )}
                               </>
@@ -439,9 +504,31 @@ export default function Customers() {
                                   </Button>
                                 }
                               />
-                              <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50">
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      className="bg-red-600 hover:bg-red-700"
+                                      onClick={() => handleDeleteCustomer(customer.id)}
+                                      disabled={deleteCustomerMutation.isPending}
+                                    >
+                                      {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
                             </>
                           )}
                         </>
