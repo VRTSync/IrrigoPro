@@ -108,22 +108,35 @@ export function CustomerIntegration() {
   // QuickBooks mutations
   const connectQuickBooks = useMutation({
     mutationFn: async () => {
-      // For demo purposes, directly connect
-      return apiRequest('/api/integrations/quickbooks/customers/connect', {
-        method: 'POST'
-      });
+      // Get the OAuth URL from the server
+      const response = await apiRequest('/api/quickbooks/auth');
+      return response;
     },
-    onSuccess: () => {
-      toast({
-        title: "QuickBooks Connected",
-        description: "Successfully connected to QuickBooks Online. You can now sync customer data."
-      });
-      queryClient.invalidateQueries({ queryKey: ['/api/integrations/quickbooks'] });
+    onSuccess: (data: any) => {
+      // Open QuickBooks OAuth in a new window
+      const popup = window.open(
+        data.authUrl,
+        'quickbooks-auth',
+        'width=600,height=700,scrollbars=yes,resizable=yes'
+      );
+      
+      // Listen for the popup to close or for a successful callback
+      const checkClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkClosed);
+          // Refresh the integration status
+          queryClient.invalidateQueries({ queryKey: ['/api/integrations/quickbooks'] });
+          toast({
+            title: "QuickBooks Authorization",
+            description: "Please complete the authorization in the popup window."
+          });
+        }
+      }, 1000);
     },
     onError: (error: any) => {
       toast({
         title: "Connection Failed",
-        description: error.message || "Failed to connect to QuickBooks",
+        description: error.message || "Failed to generate QuickBooks authorization URL",
         variant: "destructive"
       });
     }
@@ -131,14 +144,14 @@ export function CustomerIntegration() {
 
   const syncQuickBooks = useMutation({
     mutationFn: async () => {
-      return apiRequest('/api/integrations/quickbooks/customers/sync', {
+      return apiRequest('/api/quickbooks/sync-customers', {
         method: 'POST'
       });
     },
     onSuccess: (data: any) => {
       toast({
         title: "Sync Complete",
-        description: `Successfully synced ${data.customersAdded} customers from QuickBooks.`
+        description: `Successfully synced ${data.syncedCount || data.customersAdded || 0} customers from QuickBooks.`
       });
       queryClient.invalidateQueries({ queryKey: ['/api/integrations/quickbooks'] });
       queryClient.invalidateQueries({ queryKey: ['/api/customers'] });
@@ -154,7 +167,7 @@ export function CustomerIntegration() {
 
   const disconnectQuickBooks = useMutation({
     mutationFn: async () => {
-      return apiRequest('/api/integrations/quickbooks/customers/disconnect', {
+      return apiRequest('/api/quickbooks/disconnect', {
         method: 'POST'
       });
     },
