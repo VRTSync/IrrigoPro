@@ -483,20 +483,20 @@ export class DatabaseStorage implements IStorage {
         .where(eq(workOrders.completedByUserId, userId));
 
       // Check billing sheets
-      const billingSheets = await db
+      const billingSheetsResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(billingSheets)
         .where(eq(billingSheets.technicianId, userId));
 
       // Check notifications
-      const notifications = await db
+      const notificationsResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(notifications)
         .where(eq(notifications.userId, userId));
 
       const totalWorkOrders = (workOrdersAssigned[0]?.count || 0) + (workOrdersCompleted[0]?.count || 0);
-      const totalBillingSheets = billingSheets[0]?.count || 0;
-      const totalNotifications = notifications[0]?.count || 0;
+      const totalBillingSheets = billingSheetsResult[0]?.count || 0;
+      const totalNotifications = notificationsResult[0]?.count || 0;
 
       return {
         hasWorkOrders: totalWorkOrders > 0,

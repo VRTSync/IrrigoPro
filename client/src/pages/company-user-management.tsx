@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -560,49 +561,72 @@ export default function CompanyUserManagement() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end space-x-2">
                         {user.id !== currentUser?.id && (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleEditUser(user)}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            {user.isActive && (
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="outline" size="sm">
-                                    <UserX className="w-4 h-4" />
+                          <TooltipProvider>
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleEditUser(user)}
+                                  >
+                                    <Edit className="w-4 h-4" />
                                   </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Deactivate User</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      Are you sure you want to deactivate {user.name}? They will no longer be able to log in to the system.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      onClick={() => handleDeactivateUser(user)}
-                                      className="bg-red-600 hover:bg-red-700"
-                                    >
-                                      Deactivate
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => checkUserDependencies(user)}
-                              className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Edit user details</p>
+                                </TooltipContent>
+                              </Tooltip>
+                              {user.isActive && (
+                                <AlertDialog>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <AlertDialogTrigger asChild>
+                                        <Button variant="outline" size="sm">
+                                          <UserX className="w-4 h-4" />
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Deactivate user account</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Deactivate User</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        Are you sure you want to deactivate {user.name}? They will no longer be able to log in to the system.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => handleDeactivateUser(user)}
+                                        className="bg-red-600 hover:bg-red-700"
+                                      >
+                                        Deactivate
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => checkUserDependencies(user)}
+                                    className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Delete user permanently</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </>
+                          </TooltipProvider>
                         )}
                       </div>
                     </TableCell>
