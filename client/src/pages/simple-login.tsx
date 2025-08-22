@@ -222,6 +222,20 @@ export default function SimpleLogin() {
                       <strong>Super Admin:</strong> superadmin / password123
                     </div>
                   </div>
+                  
+                  <div className="mt-4 pt-3 border-t border-blue-200">
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => window.open('http://localhost:3000', '_blank')}
+                      className="w-full text-xs text-blue-700 border-blue-200 hover:bg-blue-50 flex items-center gap-2 justify-center"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                      Access Standalone Rails KML Uploader
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

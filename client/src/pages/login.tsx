@@ -319,7 +319,7 @@ export default function Login() {
               </Button>
             </form>
 
-            <div className="mt-4 text-center">
+            <div className="mt-4 text-center space-y-2">
               <Button 
                 variant="link" 
                 onClick={() => window.location.href = '/forgot-password'}
@@ -327,6 +327,19 @@ export default function Login() {
               >
                 Forgot your password?
               </Button>
+              
+              <div className="pt-2 border-t border-white/10">
+                <Button 
+                  variant="link" 
+                  onClick={() => window.open('http://localhost:3000', '_blank')}
+                  className="text-xs text-blue-300 hover:text-white transition-colors flex items-center gap-1 mx-auto"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  Standalone KML Uploader
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
