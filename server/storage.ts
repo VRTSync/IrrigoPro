@@ -1109,6 +1109,16 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async getQuickBooksIntegration(): Promise<any | null> {
+    try {
+      const integration = await db.select().from(quickbooksIntegration).limit(1);
+      return integration.length > 0 ? integration[0] : null;
+    } catch (error) {
+      console.error('Error getting QuickBooks integration:', error);
+      return null;
+    }
+  }
+
   async getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
     // Check if QuickBooks integration exists
     const integration = await db.select().from(quickbooksIntegration).limit(1);
