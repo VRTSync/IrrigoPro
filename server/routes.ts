@@ -1887,6 +1887,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/parts/bulk-import", async (req, res) => {
     try {
       const { csvData, columnMappings } = req.body;
+      console.log('Bulk import request:', { hasCSV: !!csvData, mappingsLength: columnMappings?.length, mappings: columnMappings });
+      
       if (!csvData || typeof csvData !== 'string') {
         return res.status(400).json({ message: "CSV data is required" });
       }
