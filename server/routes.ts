@@ -1968,7 +1968,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 partData.category = value;
                 break;
               case 'price':
-                partData.price = parseFloat(value) || 0;
+                partData.price = value ? parseFloat(value) : 0;
                 break;
               case 'material':
                 partData.material = value || null;
@@ -1992,7 +1992,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 partData.sku = value || null;
                 break;
               case 'laborHours':
-                partData.laborHours = parseFloat(value) || 0.25;
+                partData.laborHours = value ? parseFloat(value) : 0.25;
                 break;
             }
           });
@@ -2008,6 +2008,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!partData.laborHours) {
             partData.laborHours = 0.25; // Default 15 minutes
           }
+
+          // Add required fields for part creation
+          partData.companyId = 3; // Default company ID - in real app this would come from user session
+          partData.price = partData.price?.toString() || "0";
+          partData.laborHours = partData.laborHours?.toString() || "0.25";
 
           // Check for duplicates
           if (existingNames.has(partData.name.toLowerCase())) {
