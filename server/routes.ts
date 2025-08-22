@@ -1865,6 +1865,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PATCH alias for PUT (frontend expects PATCH for partial updates)
+  app.patch("/api/parts/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const partData = insertPartSchema.partial().parse(req.body);
+      const part = await storage.updatePart(id, partData);
+      if (!part) {
+        return res.status(404).json({ message: "Part not found" });
+      }
+      res.json(part);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid part data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update part" });
+    }
+  });
+
   app.get("/api/parts", async (req, res) => {
     try {
       const parts = await storage.getParts();

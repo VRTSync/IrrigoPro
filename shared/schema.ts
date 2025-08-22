@@ -160,8 +160,15 @@ export const parts = pgTable("parts", {
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
   sku: text("sku").notNull(),
-  category: text("category"),
+  // Enhanced categorization based on your irrigation parts structure
+  category: text("category").notNull(), // Main category: Backflow, Bushing, Controller, etc.
+  material: text("material"), // PVC, Copper, Brass, NETAFIM, etc.
+  size: text("size"), // 1", 1.5", 2", etc.
+  brand: text("brand"), // Hunter, Febco, Rainbird, LEIT, etc.
+  fittingType: text("fitting_type"), // 90° Coupler, Tee, Union, Cap, etc.
+  detail: text("detail"), // Additional specifications like "Pressure Vacuum Breaker"
   quickbooksId: text("quickbooks_id"), // QuickBooks item ID for integration
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -469,7 +476,14 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
-export const insertPartSchema = createInsertSchema(parts).omit({ id: true });
+export const insertPartSchema = createInsertSchema(parts).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+}).extend({
+  price: z.string().min(0, "Price must be positive"),
+  laborHours: z.string().min(0, "Labor hours must be positive"),
+});
 export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true });
 export const insertEstimateZoneSchema = createInsertSchema(estimateZones).omit({ id: true });
 export const insertEstimateItemSchema = createInsertSchema(estimateItems).omit({ id: true });

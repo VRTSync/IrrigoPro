@@ -6,14 +6,377 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, RefreshCw } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, RefreshCw, Filter, DollarSign, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import type { Part } from "@shared/schema";
+import { insertPartSchema } from "@shared/schema";
 import { PartsIntegration } from "@/components/integrations/parts-integration";
+
+// Irrigation parts categories based on your CSV
+const PART_CATEGORIES = [
+  "Backflow", "Bushing", "Controller", "Decoder", "Filter", "Fitting", 
+  "Head", "Irrigation Box", "Labor", "Misc", "Module", "Nipple", 
+  "Nozzle", "Pipe", "Rental", "Service", "Valve", "Wire"
+];
+
+const MATERIALS = [
+  "PVC", "Copper", "Brass", "NETAFIM", "POLY", "BACKFLOW", "Insert"
+];
+
+const BRANDS = [
+  "Hunter", "Rainbird", "Febco", "LEIT", "EBON", "Wilkins", "Mcdonald", "Leemco", "Ranier"
+];
+
+const FITTING_TYPES = [
+  "90° Coupler", "45° Coupler", "Tee", "Union", "Cap", "Coupler", "Male Adapter", 
+  "Female Adapter", "Plug", "Slip-Fix", "Cross", "Manifold", "Ball Valve"
+];
+
+const COMMON_SIZES = [
+  "0.125\"", "0.25\"", "0.375\"", "0.5\"", "0.75\"", "1\"", "1.25\"", "1.5\"", 
+  "2\"", "2.5\"", "3\"", "4\"", "6\"", "8\"", "10\"", "12\""
+];
+
+const PartFormSchema = insertPartSchema;
+
+interface PartFormDialogProps {
+  part?: Part;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
+  const { toast } = useToast();
+  
+  const form = useForm<z.infer<typeof PartFormSchema>>({
+    resolver: zodResolver(PartFormSchema),
+    defaultValues: {
+      companyId: 3, // High Plains Property
+      name: part?.name || "",
+      description: part?.description || "",
+      price: part?.price || "0.00",
+      laborHours: part?.laborHours || "1.00",
+      sku: part?.sku || "",
+      category: part?.category || "",
+      material: part?.material || "",
+      size: part?.size || "",
+      brand: part?.brand || "",
+      fittingType: part?.fittingType || "",
+      detail: part?.detail || "",
+      isActive: part?.isActive ?? true,
+    },
+  });
+
+  const createPartMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof PartFormSchema>) => {
+      return await apiRequest("/api/parts", "POST", data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Part Created",
+        description: "Part has been added to your catalog",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+      onOpenChange(false);
+      form.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create part",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updatePartMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof PartFormSchema>) => {
+      return await apiRequest(`/api/parts/${part?.id}`, "PATCH", data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Part Updated",
+        description: "Part has been updated successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update part",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onSubmit = (data: z.infer<typeof PartFormSchema>) => {
+    if (part) {
+      updatePartMutation.mutate(data);
+    } else {
+      createPartMutation.mutate(data);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{part ? "Edit Part" : "Add New Part"}</DialogTitle>
+          <DialogDescription>
+            {part ? "Update the part details below" : "Add a new irrigation part to your catalog"}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Part Name *</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="e.g., Sprinkler Head - Hunter - 1 inch" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="sku"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>SKU *</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="e.g., HUN-SP-1IN" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="category"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {PART_CATEGORIES.map((category) => (
+                          <SelectItem key={category} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="material"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Material</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select material" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {MATERIALS.map((material) => (
+                          <SelectItem key={material} value={material}>
+                            {material}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="size"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Size</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select size" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {COMMON_SIZES.map((size) => (
+                          <SelectItem key={size} value={size}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="brand"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Brand</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select brand" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {BRANDS.map((brand) => (
+                          <SelectItem key={brand} value={brand}>
+                            {brand}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="fittingType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fitting Type</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select fitting type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {FITTING_TYPES.map((type) => (
+                          <SelectItem key={type} value={type}>
+                            {type}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="price"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Price ($) *</FormLabel>
+                    <FormControl>
+                      <Input {...field} type="number" step="0.01" min="0" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="laborHours"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Labor Hours *</FormLabel>
+                    <FormControl>
+                      <Input {...field} type="number" step="0.25" min="0" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            <FormField
+              control={form.control}
+              name="detail"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Detail</FormLabel>
+                  <FormControl>
+                    <Input {...field} placeholder="Additional specifications" value={field.value || ""} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description</FormLabel>
+                  <FormControl>
+                    <Textarea {...field} placeholder="Detailed description of the part" value={field.value || ""} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button 
+                type="submit" 
+                disabled={createPartMutation.isPending || updatePartMutation.isPending}
+              >
+                {createPartMutation.isPending || updatePartMutation.isPending ? "Saving..." : part ? "Update Part" : "Create Part"}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function PartsCatalog() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [materialFilter, setMaterialFilter] = useState<string>("");
+  const [selectedPart, setSelectedPart] = useState<Part | undefined>();
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const { toast } = useToast();
 
   const { data: parts, isLoading } = useQuery<Part[]>({
@@ -44,204 +407,256 @@ export default function PartsCatalog() {
     },
   });
 
-  const filteredParts = parts?.filter(part =>
-    part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.sku.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const deletePartMutation = useMutation({
+    mutationFn: async (partId: number) => {
+      return await apiRequest(`/api/parts/${partId}`, "DELETE");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Part Deleted",
+        description: "Part has been removed from your catalog",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete part",
+        variant: "destructive",
+      });
+    },
+  });
 
-  const formatCurrency = (amount: number) => {
+  const filteredParts = parts?.filter(part => {
+    const matchesSearch = part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      part.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      part.brand?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesCategory = !categoryFilter || part.category === categoryFilter;
+    const matchesMaterial = !materialFilter || part.material === materialFilter;
+    
+    return matchesSearch && matchesCategory && matchesMaterial;
+  });
+
+  const groupedParts = filteredParts?.reduce((acc, part) => {
+    const category = part.category || 'Uncategorized';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(part);
+    return acc;
+  }, {} as Record<string, Part[]>);
+
+  const formatCurrency = (amount: string | number) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-    }).format(amount);
+    }).format(num);
+  };
+
+  const handleEditPart = (part: Part) => {
+    setSelectedPart(part);
+    setIsFormOpen(true);
+  };
+
+  const handleAddPart = () => {
+    setSelectedPart(undefined);
+    setIsFormOpen(true);
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Parts Catalog</h1>
-            <p className="text-gray-600 mt-1">Manage your irrigation parts and pricing</p>
-          </div>
-          <div className="mt-4 sm:mt-0 flex gap-2">
-            <Button className="bg-primary text-white hover:bg-blue-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Add New Part
-            </Button>
-          </div>
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Parts Catalog</h1>
+          <p className="text-muted-foreground">
+            Manage your irrigation parts inventory with categorized organization
+          </p>
+        </div>
+        
+        <div className="flex gap-2">
+          <Button onClick={handleAddPart} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Add Part
+          </Button>
+          <Button 
+            onClick={() => syncPartsMutation.mutate()}
+            variant="outline"
+            disabled={syncPartsMutation.isPending}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncPartsMutation.isPending ? 'animate-spin' : ''}`} />
+            Sync QuickBooks
+          </Button>
         </div>
       </div>
 
       <Tabs defaultValue="catalog" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList>
           <TabsTrigger value="catalog">Parts Catalog</TabsTrigger>
-          <TabsTrigger value="integrations">
-            <Settings className="w-4 h-4 mr-2" />
-            Integrations
-          </TabsTrigger>
+          <TabsTrigger value="integrations">Integrations</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="catalog" className="space-y-4">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search parts catalog..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+        <TabsContent value="catalog" className="space-y-6">
+          {/* Search and Filters */}
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+              <Input
+                placeholder="Search parts, SKU, or description..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full md:w-48">
+                <SelectValue placeholder="All Categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Categories</SelectItem>
+                {PART_CATEGORIES.map((category) => (
+                  <SelectItem key={category} value={category}>
+                    {category}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            <Select value={materialFilter} onValueChange={setMaterialFilter}>
+              <SelectTrigger className="w-full md:w-48">
+                <SelectValue placeholder="All Materials" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Materials</SelectItem>
+                {MATERIALS.map((material) => (
+                  <SelectItem key={material} value={material}>
+                    {material}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Parts Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {isLoading ? (
-          Array.from({ length: 9 }).map((_, i) => (
-            <Card key={i} className="bg-white shadow-sm border border-gray-200">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <Skeleton className="h-8 w-8 rounded-lg" />
-                  <Skeleton className="h-4 w-16" />
-                </div>
-                <Skeleton className="h-5 w-3/4 mb-2" />
-                <Skeleton className="h-4 w-full mb-4" />
-                <div className="flex items-center justify-between">
-                  <Skeleton className="h-6 w-16" />
-                  <Skeleton className="h-4 w-20" />
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          filteredParts?.map((part) => (
-            <Card key={part.id} className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="bg-blue-50 p-2 rounded-lg">
-                    <Package className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="font-medium text-gray-900 mb-2">{part.name}</h3>
-                  <p className="text-sm text-gray-600 mb-4">{part.description}</p>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-lg font-semibold text-gray-900">{formatCurrency(parseFloat(part.price))}</p>
-                      <p className="text-xs text-gray-500">SKU: {part.sku}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">{part.laborHours} hours</p>
-                      <p className="text-xs text-gray-500">Labor time</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-          </div>
-
-          {/* Empty State */}
-          {!isLoading && filteredParts?.length === 0 && (
-            <Card className="bg-white shadow-sm border border-gray-200">
-              <CardContent className="p-12 text-center">
-                <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No parts found</h3>
-                <p className="text-gray-600 mb-4">
-                  {searchQuery ? "No parts match your search criteria." : "Get started by adding your first part to the catalog."}
+          {/* Parts Display */}
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-48" />
+              ))}
+            </div>
+          ) : !filteredParts?.length ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Package className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Parts Found</h3>
+                <p className="text-muted-foreground text-center mb-4">
+                  {parts?.length === 0 
+                    ? "Start by adding parts to your catalog or syncing from QuickBooks"
+                    : "Try adjusting your search filters"
+                  }
                 </p>
-                <Button className="bg-primary text-white hover:bg-blue-700">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New Part
-                </Button>
+                {parts?.length === 0 && (
+                  <Button onClick={handleAddPart} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Your First Part
+                  </Button>
+                )}
               </CardContent>
             </Card>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(groupedParts || {}).map(([category, categoryParts]) => (
+                <div key={category} className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-semibold">{category}</h2>
+                    <Badge variant="secondary">{categoryParts.length}</Badge>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {categoryParts.map((part) => (
+                      <Card key={part.id} className="hover:shadow-md transition-shadow">
+                        <CardHeader className="pb-3">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <CardTitle className="text-lg">{part.name}</CardTitle>
+                              <p className="text-sm text-muted-foreground">{part.sku}</p>
+                            </div>
+                            <div className="flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleEditPart(part)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => deletePartMutation.mutate(part.id)}
+                                disabled={deletePartMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        
+                        <CardContent className="space-y-3">
+                          <div className="flex flex-wrap gap-1">
+                            {part.material && (
+                              <Badge variant="outline" className="text-xs">{part.material}</Badge>
+                            )}
+                            {part.size && (
+                              <Badge variant="outline" className="text-xs">{part.size}</Badge>
+                            )}
+                            {part.brand && (
+                              <Badge variant="outline" className="text-xs">{part.brand}</Badge>
+                            )}
+                            {part.fittingType && (
+                              <Badge variant="outline" className="text-xs">{part.fittingType}</Badge>
+                            )}
+                          </div>
+                          
+                          {part.description && (
+                            <p className="text-sm text-muted-foreground line-clamp-2">
+                              {part.description}
+                            </p>
+                          )}
+                          
+                          <div className="flex justify-between items-center pt-2">
+                            <div className="flex items-center gap-2">
+                              <DollarSign className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-semibold">{formatCurrency(part.price)}</span>
+                            </div>
+                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {part.laborHours}h
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </TabsContent>
 
         <TabsContent value="integrations" className="space-y-6">
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-green-50 p-2 rounded-lg">
-                    <Calculator className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium text-gray-900">QuickBooks Parts Sync</h3>
-                    <p className="text-sm text-gray-600">Sync irrigation parts from your QuickBooks inventory</p>
-                  </div>
-                </div>
-                <Button 
-                  className="bg-green-600 text-white hover:bg-green-700"
-                  onClick={() => syncPartsMutation.mutate()}
-                  disabled={syncPartsMutation.isPending}
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${syncPartsMutation.isPending ? 'animate-spin' : ''}`} />
-                  {syncPartsMutation.isPending ? 'Syncing...' : 'Sync Parts'}
-                </Button>
-              </div>
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <h4 className="font-medium text-blue-900 mb-2">Irrigation Parts Filter</h4>
-                <p className="text-sm text-blue-700 mb-3">
-                  This sync will only import QuickBooks inventory items that contain irrigation-related keywords:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter', 'backflow', 'decoder', 'filter', 'bushing'].map(keyword => (
-                    <Badge key={keyword} variant="secondary" className="bg-blue-100 text-blue-800">
-                      {keyword}
-                    </Badge>
-                  ))}
-                </div>
-                <p className="text-xs text-blue-600 mt-3">
-                  Only items with these keywords in their name or description will be imported.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="bg-orange-50 p-2 rounded-lg">
-                  <Settings className="w-5 h-5 text-orange-600" />
-                </div>
-                <div>
-                  <h3 className="font-medium text-gray-900">Sync Settings</h3>
-                  <p className="text-sm text-gray-600">Configure how parts are imported from QuickBooks</p>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Include inactive items</p>
-                    <p className="text-xs text-gray-600">Import parts marked as inactive in QuickBooks</p>
-                  </div>
-                  <Button variant="outline" size="sm">Configure</Button>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Price synchronization</p>
-                    <p className="text-xs text-gray-600">Update local prices when QuickBooks prices change</p>
-                  </div>
-                  <Button variant="outline" size="sm">Configure</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <PartsIntegration />
         </TabsContent>
       </Tabs>
+
+      <PartFormDialog
+        part={selectedPart}
+        open={isFormOpen}
+        onOpenChange={setIsFormOpen}
+      />
     </div>
   );
 }
