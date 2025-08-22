@@ -562,21 +562,25 @@ export default function PartsCatalog() {
                     <div className="rounded-lg border bg-card shadow-sm">
                       <Table>
                         <TableHeader>
-                          <TableRow className="bg-muted/30 hover:bg-muted/30">
-                            <TableHead className="font-semibold text-foreground">Part Name</TableHead>
-                            <TableHead className="font-semibold text-foreground">SKU</TableHead>
-                            <TableHead className="font-semibold text-foreground">Specifications</TableHead>
-                            <TableHead className="font-semibold text-foreground text-right">Price</TableHead>
-                            <TableHead className="font-semibold text-foreground text-center">Labor</TableHead>
-                            <TableHead className="font-semibold text-foreground text-right">Actions</TableHead>
+                          <TableRow className="bg-blue-600 hover:bg-blue-600 border-b border-blue-700">
+                            <TableHead className="font-semibold text-white">Part Name</TableHead>
+                            <TableHead className="font-semibold text-white">SKU</TableHead>
+                            <TableHead className="font-semibold text-white">Specifications</TableHead>
+                            <TableHead className="font-semibold text-white text-right">Price</TableHead>
+                            <TableHead className="font-semibold text-white text-center">Labor</TableHead>
+                            <TableHead className="font-semibold text-white text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {categoryParts.map((part, index) => (
                             <TableRow 
                               key={part.id} 
-                              className={`hover:bg-muted/40 transition-colors border-b ${
+                              className={`transition-colors border-b ${
                                 index === categoryParts.length - 1 ? 'border-b-0' : ''
+                              } ${
+                                index % 2 === 0 
+                                  ? 'bg-white dark:bg-gray-950 hover:bg-blue-50 dark:hover:bg-blue-950/30' 
+                                  : 'bg-gray-50 dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-blue-950/30'
                               }`}
                             >
                               <TableCell className="py-4">
