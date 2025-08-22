@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, RefreshCw, Filter, DollarSign, Clock } from "lucide-react";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -18,7 +18,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import type { Part } from "@shared/schema";
 import { insertPartSchema } from "@shared/schema";
-import { PartsIntegration } from "@/components/integrations/parts-integration";
+
 import { BulkImport } from "@/components/parts/bulk-import";
 
 // Irrigation parts categories based on your CSV
@@ -394,29 +394,7 @@ export default function PartsCatalog() {
     queryKey: ["/api/parts"],
   });
 
-  // QuickBooks parts sync mutation
-  const syncPartsMutation = useMutation({
-    mutationFn: async () => {
-      console.log("Triggering QuickBooks parts sync...");
-      return await apiRequest("/api/quickbooks/sync-parts", "POST");
-    },
-    onSuccess: (data) => {
-      console.log("QuickBooks parts sync successful:", data);
-      toast({
-        title: "Parts Sync Successful",
-        description: `Found ${data.totalParts} irrigation parts out of ${data.filteredFrom} total items`,
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
-    },
-    onError: (error: any) => {
-      console.error("QuickBooks parts sync failed:", error);
-      toast({
-        title: "Sync Failed",
-        description: error.message || "Failed to sync parts from QuickBooks",
-        variant: "destructive",
-      });
-    },
-  });
+
 
   const deletePartMutation = useMutation({
     mutationFn: async (partId: number) => {
@@ -492,15 +470,6 @@ export default function PartsCatalog() {
             <Plus className="h-4 w-4" />
             Add Part
           </Button>
-          <Button 
-            onClick={() => syncPartsMutation.mutate()}
-            variant="outline"
-            disabled={syncPartsMutation.isPending}
-            className="gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncPartsMutation.isPending ? 'animate-spin' : ''}`} />
-            Sync QuickBooks
-          </Button>
         </div>
       </div>
 
@@ -508,7 +477,6 @@ export default function PartsCatalog() {
         <TabsList>
           <TabsTrigger value="catalog">Parts Catalog</TabsTrigger>
           <TabsTrigger value="import">Bulk Import</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
         </TabsList>
 
         <TabsContent value="catalog" className="space-y-6">
@@ -663,10 +631,6 @@ export default function PartsCatalog() {
           <BulkImport onImportComplete={() => {
             queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
           }} />
-        </TabsContent>
-
-        <TabsContent value="integrations" className="space-y-6">
-          <PartsIntegration />
         </TabsContent>
       </Tabs>
 

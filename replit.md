@@ -13,6 +13,7 @@ Admin Access Restriction: Company admin users should not have direct access to e
 Navigation Improvements: Company admin navigation streamlined to 5 items with improved wording and Admin dropdown containing Team and Company management options for better alignment and organization.
 Site Map Access Control: Site map creation is restricted to admin and super admin roles only. Managers and field techs can view existing site maps but cannot create new ones. Backend API creation routes protected with role-based middleware.
 Customer Management Permissions: Complete role-based access control implemented for customer management. Irrigation managers and field technicians have strict view-only access - they cannot create, edit, or delete customers, cannot access integrations, and cannot edit property notes. Only company admin and super admin users have full customer management privileges including creation, editing, deletion, integrations access, and property notes editing. Backend API routes are protected with requireAdminAccess middleware and frontend UI properly restricts access based on user roles. This ensures complete data integrity and prevents any unauthorized customer information modifications.
+Parts Management Independence: Parts catalog operates independently from QuickBooks integration. Internal parts CRUD system provides complete inventory control without external dependencies. QuickBooks integration removed from parts catalog to ensure reliable operation and reduce complexity.
 
 ## System Architecture
 
