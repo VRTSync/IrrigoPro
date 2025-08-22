@@ -120,10 +120,20 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   });
 
   const onSubmit = (data: z.infer<typeof PartFormSchema>) => {
+    // Transform "none" values to null for optional fields
+    const processedData = {
+      ...data,
+      material: data.material === "none" ? null : data.material,
+      size: data.size === "none" ? null : data.size,
+      brand: data.brand === "none" ? null : data.brand,
+      fittingType: data.fittingType === "none" ? null : data.fittingType,
+      detail: data.detail === "none" ? null : data.detail,
+    };
+    
     if (part) {
-      updatePartMutation.mutate(data);
+      updatePartMutation.mutate(processedData);
     } else {
-      createPartMutation.mutate(data);
+      createPartMutation.mutate(processedData);
     }
   };
 
@@ -199,14 +209,14 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Material</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select material" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {MATERIALS.map((material) => (
                           <SelectItem key={material} value={material}>
                             {material}
@@ -225,14 +235,14 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Size</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select size" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {COMMON_SIZES.map((size) => (
                           <SelectItem key={size} value={size}>
                             {size}
@@ -251,14 +261,14 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Brand</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select brand" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {BRANDS.map((brand) => (
                           <SelectItem key={brand} value={brand}>
                             {brand}
@@ -277,14 +287,14 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Fitting Type</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select fitting type" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
                         {FITTING_TYPES.map((type) => (
                           <SelectItem key={type} value={type}>
                             {type}
@@ -434,8 +444,8 @@ export default function PartsCatalog() {
       part.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
       part.brand?.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesCategory = !categoryFilter || part.category === categoryFilter;
-    const matchesMaterial = !materialFilter || part.material === materialFilter;
+    const matchesCategory = !categoryFilter || categoryFilter === "all" || part.category === categoryFilter;
+    const matchesMaterial = !materialFilter || materialFilter === "all" || part.material === materialFilter;
     
     return matchesSearch && matchesCategory && matchesMaterial;
   });
@@ -519,7 +529,7 @@ export default function PartsCatalog() {
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Categories</SelectItem>
+                <SelectItem value="all">All Categories</SelectItem>
                 {PART_CATEGORIES.map((category) => (
                   <SelectItem key={category} value={category}>
                     {category}
@@ -533,7 +543,7 @@ export default function PartsCatalog() {
                 <SelectValue placeholder="All Materials" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Materials</SelectItem>
+                <SelectItem value="all">All Materials</SelectItem>
                 {MATERIALS.map((material) => (
                   <SelectItem key={material} value={material}>
                     {material}
