@@ -1886,7 +1886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Bulk import parts from CSV
   app.post("/api/parts/bulk-import", async (req, res) => {
     try {
-      const { csvData } = req.body;
+      const { csvData, columnMappings } = req.body;
       if (!csvData || typeof csvData !== 'string') {
         return res.status(400).json({ message: "CSV data is required" });
       }
@@ -1897,13 +1897,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "CSV must have header and at least one data row" });
       }
 
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-      const requiredFields = ['name', 'category', 'price'];
-      const missingFields = requiredFields.filter(field => !headers.includes(field));
+      const csvHeaders = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
       
-      if (missingFields.length > 0) {
-        return res.status(400).json({ 
-          message: `Missing required fields: ${missingFields.join(', ')}` 
+      // Use column mappings if provided, otherwise fall back to old behavior
+      let fieldMappings: { [key: string]: string } = {};
+      
+      if (columnMappings && Array.isArray(columnMappings)) {
+        // Create mapping from CSV column index to database field
+        columnMappings.forEach((mapping: any) => {
+          const csvIndex = csvHeaders.indexOf(mapping.csvColumn);
+          if (csvIndex >= 0 && mapping.dbField !== 'skip') {
+            fieldMappings[csvIndex] = mapping.dbField;
+          }
+        });
+        
+        // Check if we have required fields mapped
+        const requiredFields = ['name', 'category', 'price'];
+        const mappedFields = Object.values(fieldMappings);
+        const missingFields = requiredFields.filter(field => !mappedFields.includes(field));
+        
+        if (missingFields.length > 0) {
+          return res.status(400).json({ 
+            message: `Missing required field mappings: ${missingFields.join(', ')}` 
+          });
+        }
+      } else {
+        // Old behavior - map by header names
+        const headers = csvHeaders.map(h => h.toLowerCase());
+        const requiredFields = ['name', 'category', 'price'];
+        const missingFields = requiredFields.filter(field => !headers.includes(field));
+        
+        if (missingFields.length > 0) {
+          return res.status(400).json({ 
+            message: `Missing required fields: ${missingFields.join(', ')}` 
+          });
+        }
+        
+        // Create legacy mapping
+        headers.forEach((header, index) => {
+          fieldMappings[index] = header;
         });
       }
 
@@ -1923,12 +1955,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const rowData = lines[i].split(',').map(cell => cell.trim());
         
         try {
-          // Create part object from CSV row
+          // Create part object from CSV row using field mappings
           const partData: any = {};
           
-          headers.forEach((header, index) => {
-            const value = rowData[index] || '';
-            switch (header) {
+          Object.entries(fieldMappings).forEach(([csvIndex, dbField]) => {
+            const value = rowData[parseInt(csvIndex)] || '';
+            switch (dbField) {
               case 'name':
                 partData.name = value;
                 break;
@@ -1955,6 +1987,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 break;
               case 'description':
                 partData.description = value || null;
+                break;
+              case 'sku':
+                partData.sku = value || null;
+                break;
+              case 'laborHours':
+                partData.laborHours = parseFloat(value) || 0.25;
                 break;
             }
           });

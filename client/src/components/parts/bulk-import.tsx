@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Download, AlertCircle, CheckCircle2, FileText } from "lucide-react";
+import { Upload, Download, AlertCircle, CheckCircle2, FileText, Settings } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 
 interface ImportResult {
@@ -23,12 +25,36 @@ interface ImportResult {
   }>;
 }
 
+interface ColumnMapping {
+  csvColumn: string;
+  dbField: string;
+}
+
+const DB_FIELDS = [
+  { value: 'name', label: 'Part Name' },
+  { value: 'category', label: 'Category' },
+  { value: 'price', label: 'Price' },
+  { value: 'material', label: 'Material' },
+  { value: 'size', label: 'Size' },
+  { value: 'brand', label: 'Brand' },
+  { value: 'fitting_type', label: 'Fitting Type' },
+  { value: 'detail', label: 'Detail' },
+  { value: 'description', label: 'Description' },
+  { value: 'sku', label: 'SKU' },
+  { value: 'laborHours', label: 'Labor Hours' },
+  { value: 'skip', label: 'Skip Column' }
+];
+
 export function BulkImport({ onImportComplete }: { onImportComplete: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [csvText, setCsvText] = useState("");
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [progress, setProgress] = useState(0);
+  const [showColumnMapping, setShowColumnMapping] = useState(false);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>([]);
+  const [csvPreview, setCsvPreview] = useState<string[][]>([]);
   const { toast } = useToast();
 
   const downloadTemplate = () => {
@@ -50,6 +76,18 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
     window.URL.revokeObjectURL(url);
   };
 
+  const parseCSV = (csvData: string) => {
+    const lines = csvData.trim().split('\n');
+    if (lines.length === 0) return { headers: [], preview: [] };
+    
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const preview = lines.slice(1, 6).map(line => 
+      line.split(',').map(cell => cell.trim().replace(/"/g, ''))
+    );
+    
+    return { headers, preview };
+  };
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile && selectedFile.type === 'text/csv') {
@@ -57,7 +95,35 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
       // Read file content for preview
       const reader = new FileReader();
       reader.onload = (e) => {
-        setCsvText(e.target?.result as string);
+        const csvData = e.target?.result as string;
+        setCsvText(csvData);
+        
+        const { headers, preview } = parseCSV(csvData);
+        setCsvHeaders(headers);
+        setCsvPreview(preview);
+        
+        // Auto-map columns based on common names
+        const autoMappings = headers.map(header => {
+          const lowerHeader = header.toLowerCase();
+          let dbField = 'skip';
+          
+          if (lowerHeader.includes('name') || lowerHeader.includes('part')) dbField = 'name';
+          else if (lowerHeader.includes('category')) dbField = 'category';
+          else if (lowerHeader.includes('price') || lowerHeader.includes('cost')) dbField = 'price';
+          else if (lowerHeader.includes('material')) dbField = 'material';
+          else if (lowerHeader.includes('size')) dbField = 'size';
+          else if (lowerHeader.includes('brand')) dbField = 'brand';
+          else if (lowerHeader.includes('fitting')) dbField = 'fitting_type';
+          else if (lowerHeader.includes('detail')) dbField = 'detail';
+          else if (lowerHeader.includes('description')) dbField = 'description';
+          else if (lowerHeader.includes('sku')) dbField = 'sku';
+          else if (lowerHeader.includes('labor') || lowerHeader.includes('hour')) dbField = 'laborHours';
+          
+          return { csvColumn: header, dbField };
+        });
+        
+        setColumnMappings(autoMappings);
+        setShowColumnMapping(true);
       };
       reader.readAsText(selectedFile);
     } else {
@@ -69,7 +135,17 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
     }
   };
 
-  const processImport = async (data: string) => {
+  const updateColumnMapping = (csvColumn: string, dbField: string) => {
+    setColumnMappings(prev => 
+      prev.map(mapping => 
+        mapping.csvColumn === csvColumn 
+          ? { ...mapping, dbField }
+          : mapping
+      )
+    );
+  };
+
+  const processImport = async (data: string, mappings?: ColumnMapping[]) => {
     setImporting(true);
     setProgress(0);
     setImportResult(null);
@@ -80,7 +156,10 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
         setProgress((prev) => Math.min(prev + 10, 90));
       }, 200);
 
-      const response = await apiRequest("/api/parts/bulk-import", "POST", { csvData: data });
+      const response = await apiRequest("/api/parts/bulk-import", "POST", { 
+        csvData: data,
+        columnMappings: mappings || columnMappings
+      });
 
       clearInterval(progressInterval);
       setProgress(100);
@@ -138,7 +217,31 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
       });
       return;
     }
-    processImport(csvText);
+    
+    const { headers } = parseCSV(csvText);
+    if (headers.length > 0) {
+      setCsvHeaders(headers);
+      const autoMappings = headers.map(header => ({ csvColumn: header, dbField: 'skip' }));
+      setColumnMappings(autoMappings);
+      setShowColumnMapping(true);
+    } else {
+      processImport(csvText);
+    }
+  };
+
+  const proceedWithImport = () => {
+    const validMappings = columnMappings.filter(m => m.dbField !== 'skip');
+    if (validMappings.length === 0) {
+      toast({
+        title: "No columns mapped",
+        description: "Please map at least one column to a database field",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    processImport(csvText, columnMappings);
+    setShowColumnMapping(false);
   };
 
   return (
@@ -276,6 +379,97 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
           </div>
         </CardContent>
       </Card>
+
+      {/* Column Mapping Interface */}
+      {showColumnMapping && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Map CSV Columns
+            </CardTitle>
+            <CardDescription>
+              Map your CSV columns to database fields. Columns marked as "Skip" will be ignored during import.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Preview Table */}
+            <div className="space-y-3">
+              <h4 className="font-medium">CSV Preview (first 5 rows)</h4>
+              <div className="border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30">
+                      {csvHeaders.map((header, index) => (
+                        <TableHead key={index} className="font-semibold">
+                          {header}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {csvPreview.map((row, rowIndex) => (
+                      <TableRow key={rowIndex}>
+                        {row.map((cell, cellIndex) => (
+                          <TableCell key={cellIndex} className="text-sm">
+                            {cell || <span className="text-muted-foreground italic">empty</span>}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            {/* Column Mapping */}
+            <div className="space-y-3">
+              <h4 className="font-medium">Column Mapping</h4>
+              <div className="grid gap-3">
+                {columnMappings.map((mapping, index) => (
+                  <div key={index} className="flex items-center gap-3 p-3 border rounded-lg">
+                    <div className="flex-1">
+                      <Label className="text-sm font-medium">{mapping.csvColumn}</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">→</span>
+                      <Select
+                        value={mapping.dbField}
+                        onValueChange={(value) => updateColumnMapping(mapping.csvColumn, value)}
+                      >
+                        <SelectTrigger className="w-48">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DB_FIELDS.map((field) => (
+                            <SelectItem key={field.value} value={field.value}>
+                              {field.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Import Controls */}
+            <div className="flex gap-3 pt-4 border-t">
+              <Button onClick={proceedWithImport} disabled={importing} className="flex-1">
+                {importing ? "Importing..." : "Proceed with Import"}
+              </Button>
+              <Button 
+                onClick={() => setShowColumnMapping(false)} 
+                variant="outline"
+                disabled={importing}
+              >
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
