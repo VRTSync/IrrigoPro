@@ -2769,13 +2769,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       const quickBooksCustomers = qbCustomers.map((customer: any) => ({
         qb_id: customer.Id,
-        name: customer.Name,
+        name: customer.Name || customer.CompanyName || customer.DisplayName || `Customer ${customer.Id}`,
         email: customer.PrimaryEmailAddr?.Address || '',
         phone: customer.PrimaryPhone?.FreeFormNumber || '',
         address: customer.BillAddr ? 
           `${customer.BillAddr.Line1 || ''} ${customer.BillAddr.City || ''} ${customer.BillAddr.CountrySubDivisionCode || ''} ${customer.BillAddr.PostalCode || ''}`.trim() 
           : ''
-      }));
+      })).filter(customer => customer.email); // Only sync customers with email addresses
 
       let syncedCount = 0;
       const results = [];
@@ -2786,12 +2786,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
           
           if (!existingCustomer) {
+            // Validate required fields before creating
+            if (!qbCustomer.name || !qbCustomer.email) {
+              console.log(`Skipping customer ${qbCustomer.qb_id}: missing required name or email`);
+              results.push({ 
+                action: 'error', 
+                customer: qbCustomer, 
+                error: 'Missing required name or email' 
+              });
+              continue;
+            }
+
             // Create new customer from QuickBooks data
             const newCustomer = await storage.createCustomer({
               name: qbCustomer.name,
               email: qbCustomer.email,
-              phone: qbCustomer.phone,
-              address: qbCustomer.address,
+              phone: qbCustomer.phone || '',
+              address: qbCustomer.address || '',
               quickbooksId: qbCustomer.qb_id,
               companyId: 99 // Use current company
             });
