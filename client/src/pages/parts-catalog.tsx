@@ -1,19 +1,49 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings } from "lucide-react";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, RefreshCw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import type { Part } from "@shared/schema";
 import { PartsIntegration } from "@/components/integrations/parts-integration";
 
 export default function PartsCatalog() {
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast } = useToast();
 
   const { data: parts, isLoading } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
+  });
+
+  // QuickBooks parts sync mutation
+  const syncPartsMutation = useMutation({
+    mutationFn: async () => {
+      console.log("Triggering QuickBooks parts sync...");
+      return await apiRequest("/api/quickbooks/sync-parts", {
+        method: "POST",
+      });
+    },
+    onSuccess: (data) => {
+      console.log("QuickBooks parts sync successful:", data);
+      toast({
+        title: "Parts Sync Successful",
+        description: `Found ${data.totalParts} irrigation parts out of ${data.filteredFrom} total items`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+    },
+    onError: (error: any) => {
+      console.error("QuickBooks parts sync failed:", error);
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync parts from QuickBooks",
+        variant: "destructive",
+      });
+    },
   });
 
   const filteredParts = parts?.filter(part =>
@@ -142,8 +172,76 @@ export default function PartsCatalog() {
           )}
         </TabsContent>
 
-        <TabsContent value="integrations">
-          <PartsIntegration />
+        <TabsContent value="integrations" className="space-y-6">
+          <Card className="bg-white shadow-sm border border-gray-200">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="bg-green-50 p-2 rounded-lg">
+                    <Calculator className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-gray-900">QuickBooks Parts Sync</h3>
+                    <p className="text-sm text-gray-600">Sync irrigation parts from your QuickBooks inventory</p>
+                  </div>
+                </div>
+                <Button 
+                  className="bg-green-600 text-white hover:bg-green-700"
+                  onClick={() => syncPartsMutation.mutate()}
+                  disabled={syncPartsMutation.isPending}
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${syncPartsMutation.isPending ? 'animate-spin' : ''}`} />
+                  {syncPartsMutation.isPending ? 'Syncing...' : 'Sync Parts'}
+                </Button>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <h4 className="font-medium text-blue-900 mb-2">Irrigation Parts Filter</h4>
+                <p className="text-sm text-blue-700 mb-3">
+                  This sync will only import QuickBooks inventory items that contain irrigation-related keywords:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter'].map(keyword => (
+                    <Badge key={keyword} variant="secondary" className="bg-blue-100 text-blue-800">
+                      {keyword}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-blue-600 mt-3">
+                  Only items with these keywords in their name or description will be imported.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white shadow-sm border border-gray-200">
+            <CardContent className="p-6">
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="bg-orange-50 p-2 rounded-lg">
+                  <Settings className="w-5 h-5 text-orange-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">Sync Settings</h3>
+                  <p className="text-sm text-gray-600">Configure how parts are imported from QuickBooks</p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Include inactive items</p>
+                    <p className="text-xs text-gray-600">Import parts marked as inactive in QuickBooks</p>
+                  </div>
+                  <Button variant="outline" size="sm">Configure</Button>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Price synchronization</p>
+                    <p className="text-xs text-gray-600">Update local prices when QuickBooks prices change</p>
+                  </div>
+                  <Button variant="outline" size="sm">Configure</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

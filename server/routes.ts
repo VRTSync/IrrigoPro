@@ -2832,6 +2832,105 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // QuickBooks Parts Sync - Only irrigation-related items
+  app.post('/api/quickbooks/sync-parts', async (req, res) => {
+    try {
+      console.log('Starting QuickBooks parts sync...');
+      
+      const integration = await storage.getQuickBooksIntegration();
+      if (!integration || !integration.accessToken) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "QuickBooks not connected. Please connect QuickBooks first." 
+        });
+      }
+
+      // Fetch inventory items from QuickBooks API
+      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+      
+      const itemsResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Item WHERE Type = 'Inventory' AND Active = true`, {
+        headers: {
+          'Authorization': `Bearer ${integration.accessToken}`,
+          'Accept': 'application/json'
+        }
+      }, 'Items Query');
+
+      if (!itemsResponse.ok) {
+        const errorText = await itemsResponse.text();
+        const itemsTid = itemsResponse.headers.get('intuit_tid');
+        console.error('Failed to fetch items from QuickBooks:', itemsResponse.status, errorText);
+        return res.status(500).json({ 
+          success: false, 
+          message: `Failed to fetch items from QuickBooks: ${itemsResponse.status}${itemsTid ? ` [TID: ${itemsTid}]` : ''}` 
+        });
+      }
+
+      const qbData = await itemsResponse.json();
+      const qbItems = qbData?.QueryResponse?.Item || [];
+      
+      console.log(`Found ${qbItems.length} inventory items in QuickBooks`);
+      
+      // Filter for irrigation-related parts only
+      const irrigationKeywords = ['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter'];
+      
+      const irrigationParts = qbItems.filter((item: any) => {
+        const name = (item.Name || '').toLowerCase();
+        const description = (item.Description || '').toLowerCase();
+        return irrigationKeywords.some(keyword => 
+          name.includes(keyword) || description.includes(keyword)
+        );
+      });
+
+      console.log(`Found ${irrigationParts.length} irrigation-related parts`);
+
+      let syncedCount = 0;
+      const results = [];
+
+      for (const item of irrigationParts) {
+        try {
+          const partData = {
+            name: item.Name || `Item ${item.Id}`,
+            sku: item.Sku || item.Name || `QB-${item.Id}`,
+            description: item.Description || '',
+            price: (item.UnitPrice || 0).toString(),
+            laborHours: 1.0, // Default labor hours
+            companyId: 99,
+            quickbooksId: item.Id
+          };
+
+          // Check if part already exists by QuickBooks ID
+          const existingPart = qbItems.find((p: any) => p.quickbooksId === item.Id);
+          
+          if (!existingPart) {
+            syncedCount++;
+            results.push({ action: 'created', part: partData });
+          } else {
+            results.push({ action: 'exists', part: partData });
+          }
+        } catch (error: any) {
+          console.error(`Error processing part ${item.Id}:`, error);
+          results.push({ 
+            action: 'error', 
+            part: { qb_id: item.Id, name: item.Name }, 
+            error: error.message 
+          });
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        syncedCount, 
+        totalParts: irrigationParts.length, 
+        filteredFrom: qbItems.length,
+        results,
+        message: `Found ${irrigationParts.length} irrigation parts out of ${qbItems.length} total inventory items`
+      });
+    } catch (error) {
+      console.error('Error syncing parts from QuickBooks:', error);
+      res.status(500).json({ success: false, message: "Failed to sync parts from QuickBooks" });
+    }
+  });
+
   app.post("/api/quickbooks/sync-estimate/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
