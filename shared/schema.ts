@@ -161,6 +161,9 @@ export const parts = pgTable("parts", {
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
   sku: text("sku").notNull(),
   category: text("category"),
+  quickbooksId: text("quickbooks_id"), // QuickBooks item ID for integration
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Standalone billing sheets for work without work orders

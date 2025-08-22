@@ -639,8 +639,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPartByQuickBooksId(quickbooksId: string): Promise<Part | undefined> {
-    const [part] = await db.select().from(parts).where(eq(parts.quickbooksId, quickbooksId));
-    return part || undefined;
+    try {
+      const partsList = await db.select().from(parts).where(eq(parts.quickbooksId, quickbooksId));
+      return partsList.length > 0 ? partsList[0] : undefined;
+    } catch (error) {
+      console.error('Error in getPartByQuickBooksId:', error);
+      return undefined;
+    }
   }
 
   async syncPartsFromGoogleDocs(docUrl: string): Promise<void> {
