@@ -144,19 +144,20 @@ export function CustomerIntegration() {
 
   const syncQuickBooks = useMutation({
     mutationFn: async () => {
-      return apiRequest('/api/quickbooks/sync-customers', {
-        method: 'POST'
-      });
+      console.log("Triggering QuickBooks customer sync...");
+      return apiRequest('/api/quickbooks/sync-customers', 'POST');
     },
     onSuccess: (data: any) => {
+      console.log("QuickBooks sync successful:", data);
       toast({
         title: "Sync Complete",
         description: `Successfully synced ${data.syncedCount || data.customersAdded || 0} customers from QuickBooks.`
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/integrations/quickbooks'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/integrations/quickbooks/customers/status'] });
       queryClient.invalidateQueries({ queryKey: ['/api/customers'] });
     },
     onError: (error: any) => {
+      console.error("QuickBooks sync failed:", error);
       toast({
         title: "Sync Failed",
         description: error.message || "Failed to sync customer data",

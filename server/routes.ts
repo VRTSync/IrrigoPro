@@ -2720,14 +2720,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/quickbooks/sync-customers", async (req, res) => {
     try {
+      console.log("Starting QuickBooks customer sync...");
+      
       const qbStatus = await storage.getQuickBooksCustomerStatus();
+      console.log("QuickBooks status:", qbStatus);
+      
       if (!qbStatus.isConnected) {
+        console.log("QuickBooks not connected - aborting sync");
         return res.status(401).json({ message: "QuickBooks not connected" });
       }
 
       // Get actual QuickBooks integration data
       const integration = await storage.getQuickBooksIntegration();
+      console.log("QuickBooks integration data available:", !!integration);
+      
       if (!integration || !integration.accessToken) {
+        console.log("Missing integration or access token");
         return res.status(400).json({ 
           success: false, 
           message: "QuickBooks not connected. Please connect to QuickBooks first." 
