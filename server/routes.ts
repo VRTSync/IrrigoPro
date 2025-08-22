@@ -1913,8 +1913,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         });
         
-        // Check if we have required fields mapped
-        const requiredFields = ['name', 'category', 'price'];
+        // Check if we have required fields mapped (only name and price are truly required)
+        const requiredFields = ['name', 'price'];
         const mappedFields = Object.values(fieldMappings);
         const missingFields = requiredFields.filter(field => !mappedFields.includes(field));
         
@@ -2015,6 +2015,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           partData.companyId = 3; // Default company ID - in real app this would come from user session
           partData.price = partData.price?.toString() || "0";
           partData.laborHours = partData.laborHours?.toString() || "0.25";
+          
+          // Set default category if not provided
+          if (!partData.category) {
+            partData.category = 'General';
+          }
 
           // Check for duplicates
           if (existingNames.has(partData.name.toLowerCase())) {
