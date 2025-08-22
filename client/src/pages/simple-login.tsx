@@ -227,13 +227,16 @@ export default function SimpleLogin() {
                     <Button 
                       variant="outline" 
                       size="sm"
-                      onClick={() => window.open('http://localhost:3000', '_blank')}
+                      onClick={() => {
+                        const message = `Rails KML Uploader Setup\n\nTo run the standalone Rails application:\n\n1. Open terminal and navigate to: rails-kml-uploader/\n2. Install dependencies: bundle install\n3. Setup database: rails db:create && rails db:migrate\n4. Start Rails server: rails server\n5. Open browser to: http://localhost:3000\n\nFeatures:\n• Drag & drop KML upload\n• PostGIS geospatial storage\n• Interactive Leaflet maps\n• Background job processing\n• AWS deployment ready\n\nTech Stack: Ruby on Rails 7.1, PostgreSQL, Redis, Sidekiq`;
+                        alert(message);
+                      }}
                       className="w-full text-xs text-blue-700 border-blue-200 hover:bg-blue-50 flex items-center gap-2 justify-center"
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      Access Standalone Rails KML Uploader
+                      Rails KML Uploader Setup Guide
                     </Button>
                   </div>
                 </div>

@@ -331,13 +331,16 @@ export default function Login() {
               <div className="pt-2 border-t border-white/10">
                 <Button 
                   variant="link" 
-                  onClick={() => window.open('http://localhost:3000', '_blank')}
+                  onClick={() => {
+                    const message = `Standalone Rails KML Uploader\n\nTo run the standalone application:\n\n1. Navigate to: rails-kml-uploader/\n2. Run: bundle install\n3. Run: rails db:create && rails db:migrate\n4. Run: rails server\n5. Access at: http://localhost:3000\n\nThe standalone app includes:\n• PostgreSQL with PostGIS\n• Background job processing\n• Interactive Leaflet maps\n• AWS deployment ready`;
+                    alert(message);
+                  }}
                   className="text-xs text-blue-300 hover:text-white transition-colors flex items-center gap-1 mx-auto"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Standalone KML Uploader
+                  Rails KML Uploader Info
                 </Button>
               </div>
             </div>
