@@ -2899,13 +2899,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           };
 
           // Check if part already exists by QuickBooks ID
-          const existingPart = qbItems.find((p: any) => p.quickbooksId === item.Id);
+          const existingPart = await storage.getPartByQuickBooksId(item.Id);
           
           if (!existingPart) {
+            // Actually create the part in the database
+            const newPart = await storage.createPart(partData);
             syncedCount++;
-            results.push({ action: 'created', part: partData });
+            results.push({ action: 'created', part: newPart });
           } else {
-            results.push({ action: 'exists', part: partData });
+            results.push({ action: 'exists', part: existingPart });
           }
         } catch (error: any) {
           console.error(`Error processing part ${item.Id}:`, error);

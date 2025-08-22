@@ -638,6 +638,11 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
+  async getPartByQuickBooksId(quickbooksId: string): Promise<Part | undefined> {
+    const [part] = await db.select().from(parts).where(eq(parts.quickbooksId, quickbooksId));
+    return part || undefined;
+  }
+
   async syncPartsFromGoogleDocs(docUrl: string): Promise<void> {
     // Implementation for Google Docs sync would go here
     console.log(`Syncing parts from Google Docs URL: ${docUrl}`);
