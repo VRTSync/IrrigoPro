@@ -569,10 +569,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         const allWorkOrders = await storage.getWorkOrders();
         const companyWorkOrders = allWorkOrders.filter(wo => wo.companyId === userCompanyId);
-        const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned").length;
+        const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned" || wo.status === "in_progress").length;
         
         const allCustomers = await storage.getCustomers();
-        const companyCustomers = allCustomers.filter(customer => customer.companyId === userCompanyId);
+        // For debugging: log actual customer data
+        console.log(`All customers found: ${allCustomers.length}`);
+        console.log(`Customer company IDs:`, allCustomers.map(c => ({ id: c.id, name: c.name, companyId: c.companyId })));
+        
+        // Include customers for this company OR customers with companyId 99 (QuickBooks sync default)
+        // This handles cases where QuickBooks sync used a default company ID
+        const companyCustomers = allCustomers.filter(customer => 
+          customer.companyId === userCompanyId || 
+          customer.companyId === 99 || // QuickBooks sync default
+          customer.companyId === null || 
+          customer.companyId === undefined
+        );
         const activeCustomers = companyCustomers.length;
         
         stats = { activeUsers, openWorkOrders, activeCustomers };
@@ -2797,14 +2808,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               continue;
             }
 
-            // Create new customer from QuickBooks data
+            // Create new customer from QuickBooks data  
             const newCustomer = await storage.createCustomer({
               name: qbCustomer.name,
               email: qbCustomer.email,
               phone: qbCustomer.phone || '',
               address: qbCustomer.address || '',
               quickbooksId: qbCustomer.qb_id,
-              companyId: 99 // Use current company
+              companyId: 3 // Use actual company ID from High Plains Property
             });
             
             syncedCount++;
@@ -2894,7 +2905,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             description: item.Description || '',
             price: (item.UnitPrice || 0).toString(),
             laborHours: 1.0, // Default labor hours
-            companyId: 99,
+            companyId: 3, // Use actual company ID from High Plains Property
             quickbooksId: item.Id
           };
 
