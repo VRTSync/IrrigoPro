@@ -24,9 +24,7 @@ export default function PartsCatalog() {
   const syncPartsMutation = useMutation({
     mutationFn: async () => {
       console.log("Triggering QuickBooks parts sync...");
-      return await apiRequest("/api/quickbooks/sync-parts", {
-        method: "POST",
-      });
+      return await apiRequest("/api/quickbooks/sync-parts", "POST");
     },
     onSuccess: (data) => {
       console.log("QuickBooks parts sync successful:", data);
