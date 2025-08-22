@@ -559,87 +559,125 @@ export default function PartsCatalog() {
                   
                   {/* Desktop Table View */}
                   <div className="hidden md:block">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Part Name</TableHead>
-                          <TableHead>SKU</TableHead>
-                          <TableHead>Specifications</TableHead>
-                          <TableHead>Price</TableHead>
-                          <TableHead>Labor</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {categoryParts.map((part) => (
-                          <TableRow key={part.id} className="hover:bg-muted/50">
-                            <TableCell>
-                              <div>
-                                <div className="font-medium">{part.name}</div>
-                                {part.description && (
-                                  <div className="text-sm text-muted-foreground line-clamp-1">
-                                    {part.description}
-                                  </div>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">{part.sku}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-wrap gap-1">
-                                {part.material && (
-                                  <Badge variant="outline" className="text-xs">{part.material}</Badge>
-                                )}
-                                {part.size && (
-                                  <Badge variant="outline" className="text-xs">{part.size}</Badge>
-                                )}
-                                {part.brand && (
-                                  <Badge variant="outline" className="text-xs">{part.brand}</Badge>
-                                )}
-                                {part.fittingType && (
-                                  <Badge variant="outline" className="text-xs">{part.fittingType}</Badge>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-semibold">{formatCurrency(part.price)}</TableCell>
-                            <TableCell>{part.laborHours}h</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleEditPart(part)}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => deletePartMutation.mutate(part.id)}
-                                  disabled={deletePartMutation.isPending}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
+                    <div className="rounded-lg border bg-card shadow-sm">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-muted/30 hover:bg-muted/30">
+                            <TableHead className="font-semibold text-foreground">Part Name</TableHead>
+                            <TableHead className="font-semibold text-foreground">SKU</TableHead>
+                            <TableHead className="font-semibold text-foreground">Specifications</TableHead>
+                            <TableHead className="font-semibold text-foreground text-right">Price</TableHead>
+                            <TableHead className="font-semibold text-foreground text-center">Labor</TableHead>
+                            <TableHead className="font-semibold text-foreground text-right">Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {categoryParts.map((part, index) => (
+                            <TableRow 
+                              key={part.id} 
+                              className={`hover:bg-muted/40 transition-colors border-b ${
+                                index === categoryParts.length - 1 ? 'border-b-0' : ''
+                              }`}
+                            >
+                              <TableCell className="py-4">
+                                <div className="space-y-1">
+                                  <div className="font-medium text-base leading-tight">{part.name}</div>
+                                  {part.description && (
+                                    <div className="text-sm text-muted-foreground line-clamp-1 max-w-xs">
+                                      {part.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <code className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                                  {part.sku}
+                                </code>
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <div className="flex flex-wrap gap-1 max-w-sm">
+                                  {part.material && (
+                                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                      {part.material}
+                                    </Badge>
+                                  )}
+                                  {part.size && (
+                                    <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                      {part.size}
+                                    </Badge>
+                                  )}
+                                  {part.brand && (
+                                    <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                                      {part.brand}
+                                    </Badge>
+                                  )}
+                                  {part.fittingType && (
+                                    <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                                      {part.fittingType}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <DollarSign className="h-4 w-4 text-green-600" />
+                                  <span className="font-semibold text-lg text-green-700 dark:text-green-400">
+                                    {formatCurrency(part.price)}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <Clock className="h-4 w-4 text-blue-600" />
+                                  <span className="font-medium text-blue-700 dark:text-blue-400">
+                                    {part.laborHours}h
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4 text-right">
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900 dark:hover:text-blue-300"
+                                    onClick={() => handleEditPart(part)}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900 dark:hover:text-red-300"
+                                    onClick={() => deletePartMutation.mutate(part.id)}
+                                    disabled={deletePartMutation.isPending}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
 
                   {/* Mobile List View */}
                   <div className="md:hidden space-y-3">
                     {categoryParts.map((part) => (
-                      <Card key={part.id} className="p-4">
+                      <Card key={part.id} className="p-4 shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-blue-500">
                         <div className="flex justify-between items-start mb-3">
-                          <div className="flex-1">
-                            <h3 className="font-medium text-base">{part.name}</h3>
-                            <p className="text-sm text-muted-foreground font-mono">{part.sku}</p>
+                          <div className="flex-1 space-y-1">
+                            <h3 className="font-semibold text-base leading-tight">{part.name}</h3>
+                            <code className="inline-block px-2 py-1 bg-muted rounded text-xs font-mono">
+                              {part.sku}
+                            </code>
                           </div>
-                          <div className="flex gap-1 ml-2">
+                          <div className="flex gap-1 ml-3">
                             <Button
                               size="sm"
                               variant="ghost"
+                              className="hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900 dark:hover:text-blue-300"
                               onClick={() => handleEditPart(part)}
                             >
                               <Edit className="h-4 w-4" />
@@ -647,6 +685,7 @@ export default function PartsCatalog() {
                             <Button
                               size="sm"
                               variant="ghost"
+                              className="hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900 dark:hover:text-red-300"
                               onClick={() => deletePartMutation.mutate(part.id)}
                               disabled={deletePartMutation.isPending}
                             >
@@ -657,33 +696,45 @@ export default function PartsCatalog() {
                         
                         <div className="flex flex-wrap gap-1 mb-3">
                           {part.material && (
-                            <Badge variant="outline" className="text-xs">{part.material}</Badge>
+                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                              {part.material}
+                            </Badge>
                           )}
                           {part.size && (
-                            <Badge variant="outline" className="text-xs">{part.size}</Badge>
+                            <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                              {part.size}
+                            </Badge>
                           )}
                           {part.brand && (
-                            <Badge variant="outline" className="text-xs">{part.brand}</Badge>
+                            <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                              {part.brand}
+                            </Badge>
                           )}
                           {part.fittingType && (
-                            <Badge variant="outline" className="text-xs">{part.fittingType}</Badge>
+                            <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                              {part.fittingType}
+                            </Badge>
                           )}
                         </div>
                         
                         {part.description && (
-                          <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                          <p className="text-sm text-muted-foreground mb-4 line-clamp-2 leading-relaxed">
                             {part.description}
                           </p>
                         )}
                         
-                        <div className="flex justify-between items-center text-sm">
+                        <div className="flex justify-between items-center pt-2 border-t border-muted/30">
                           <div className="flex items-center gap-2">
-                            <DollarSign className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-semibold">{formatCurrency(part.price)}</span>
+                            <DollarSign className="h-4 w-4 text-green-600" />
+                            <span className="font-semibold text-green-700 dark:text-green-400 text-base">
+                              {formatCurrency(part.price)}
+                            </span>
                           </div>
-                          <div className="flex items-center gap-1 text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {part.laborHours}h
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-4 w-4 text-blue-600" />
+                            <span className="font-medium text-blue-700 dark:text-blue-400">
+                              {part.laborHours}h
+                            </span>
                           </div>
                         </div>
                       </Card>
