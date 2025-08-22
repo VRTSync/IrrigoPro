@@ -2745,7 +2745,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Fetch real customers from QuickBooks API - use sandbox for development
       const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
       
-      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Customer`, {
+      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
         headers: {
           'Authorization': `Bearer ${integration.accessToken}`,
           'Accept': 'application/json'
@@ -2765,7 +2765,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const qbData = await customersResponse.json();
       const qbCustomers = qbData?.QueryResponse?.Customer || [];
       
-      console.log(`Found ${qbCustomers.length} customers in QuickBooks`);
+      console.log(`Found ${qbCustomers.length} active customers in QuickBooks`);
       
       const quickBooksCustomers = qbCustomers.map((customer: any) => ({
         qb_id: customer.Id,
