@@ -2871,7 +2871,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log(`Found ${qbItems.length} inventory items in QuickBooks`);
       
       // Filter for irrigation-related parts only
-      const irrigationKeywords = ['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter'];
+      const irrigationKeywords = ['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter', 'backflow', 'decoder', 'filter', 'bushing'];
       
       const irrigationParts = qbItems.filter((item: any) => {
         const name = (item.Name || '').toLowerCase();

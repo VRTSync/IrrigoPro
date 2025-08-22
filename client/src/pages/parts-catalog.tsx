@@ -200,7 +200,7 @@ export default function PartsCatalog() {
                   This sync will only import QuickBooks inventory items that contain irrigation-related keywords:
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter'].map(keyword => (
+                  {['sprinkler', 'irrigation', 'valve', 'controller', 'nozzle', 'pipe', 'fitting', 'timer', 'drip', 'emitter', 'backflow', 'decoder', 'filter', 'bushing'].map(keyword => (
                     <Badge key={keyword} variant="secondary" className="bg-blue-100 text-blue-800">
                       {keyword}
                     </Badge>
