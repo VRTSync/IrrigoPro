@@ -21,23 +21,32 @@ export function PropertyNotes({ customer, userRole = "company_admin" }: Property
 
   const updatePropertyNotes = useMutation({
     mutationFn: async (updatedNotes: string) => {
+      console.log("Updating property notes for customer:", customer.id, "with notes:", updatedNotes);
       return apiRequest(`/api/customers/${customer.id}`, "PATCH", {
         propertyNotes: updatedNotes,
       });
     },
-    onSuccess: () => {
+    onSuccess: (updatedCustomer) => {
+      console.log("Property notes update successful:", updatedCustomer);
       toast({
         title: "Property Notes Updated",
         description: "Property notes have been saved successfully",
       });
+      // Update local customer object
+      customer.propertyNotes = notes;
+      // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/estimates`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/work-orders`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/billing-sheets`] });
       setIsEditing(false);
     },
     onError: (error: any) => {
+      console.error("Property notes update error:", error);
       toast({
         title: "Error",
-        description: "Failed to update property notes",
+        description: "Failed to update property notes. Please try again.",
         variant: "destructive",
       });
     },
@@ -60,7 +69,7 @@ export function PropertyNotes({ customer, userRole = "company_admin" }: Property
             <StickyNoteIcon className="w-5 h-5 text-orange-600" />
             <span>Property Notes</span>
           </div>
-          {!isEditing && userRole === 'company_admin' && (
+          {!isEditing && (userRole === 'company_admin' || userRole === 'super_admin') && (
             <Button
               variant="outline"
               size="sm"
