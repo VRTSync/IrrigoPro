@@ -2769,7 +2769,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       const quickBooksCustomers = qbCustomers.map((customer: any) => ({
         qb_id: customer.Id,
-        name: customer.Name || customer.CompanyName || customer.DisplayName || `Customer ${customer.Id}`,
+        name: customer.CompanyName || customer.Name || customer.DisplayName || `Customer ${customer.Id}`,
         email: customer.PrimaryEmailAddr?.Address || '',
         phone: customer.PrimaryPhone?.FreeFormNumber || '',
         address: customer.BillAddr ? 
