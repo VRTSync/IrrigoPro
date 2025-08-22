@@ -19,6 +19,7 @@ import { z } from "zod";
 import type { Part } from "@shared/schema";
 import { insertPartSchema } from "@shared/schema";
 import { PartsIntegration } from "@/components/integrations/parts-integration";
+import { BulkImport } from "@/components/parts/bulk-import";
 
 // Irrigation parts categories based on your CSV
 const PART_CATEGORIES = [
@@ -496,6 +497,7 @@ export default function PartsCatalog() {
       <Tabs defaultValue="catalog" className="w-full">
         <TabsList>
           <TabsTrigger value="catalog">Parts Catalog</TabsTrigger>
+          <TabsTrigger value="import">Bulk Import</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
         </TabsList>
 
@@ -645,6 +647,12 @@ export default function PartsCatalog() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="import" className="space-y-6">
+          <BulkImport onImportComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+          }} />
         </TabsContent>
 
         <TabsContent value="integrations" className="space-y-6">

@@ -1883,6 +1883,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk import parts from CSV
+  app.post("/api/parts/bulk-import", async (req, res) => {
+    try {
+      const { csvData } = req.body;
+      if (!csvData || typeof csvData !== 'string') {
+        return res.status(400).json({ message: "CSV data is required" });
+      }
+
+      // Parse CSV data
+      const lines = csvData.trim().split('\n');
+      if (lines.length < 2) {
+        return res.status(400).json({ message: "CSV must have header and at least one data row" });
+      }
+
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const requiredFields = ['name', 'category', 'price'];
+      const missingFields = requiredFields.filter(field => !headers.includes(field));
+      
+      if (missingFields.length > 0) {
+        return res.status(400).json({ 
+          message: `Missing required fields: ${missingFields.join(', ')}` 
+        });
+      }
+
+      const results = {
+        success: true,
+        imported: 0,
+        skipped: 0,
+        errors: [] as Array<{ row: number; field: string; message: string; }>
+      };
+
+      // Get existing parts to check for duplicates
+      const existingParts = await storage.getParts();
+      const existingNames = new Set(existingParts.map(p => p.name.toLowerCase()));
+
+      // Process each row
+      for (let i = 1; i < lines.length; i++) {
+        const rowData = lines[i].split(',').map(cell => cell.trim());
+        
+        try {
+          // Create part object from CSV row
+          const partData: any = {};
+          
+          headers.forEach((header, index) => {
+            const value = rowData[index] || '';
+            switch (header) {
+              case 'name':
+                partData.name = value;
+                break;
+              case 'category':
+                partData.category = value;
+                break;
+              case 'price':
+                partData.price = parseFloat(value) || 0;
+                break;
+              case 'material':
+                partData.material = value || null;
+                break;
+              case 'size':
+                partData.size = value || null;
+                break;
+              case 'brand':
+                partData.brand = value || null;
+                break;
+              case 'fitting_type':
+                partData.fittingType = value || null;
+                break;
+              case 'detail':
+                partData.detail = value || null;
+                break;
+              case 'description':
+                partData.description = value || null;
+                break;
+            }
+          });
+
+          // Generate SKU if not provided
+          if (!partData.sku) {
+            const categoryPrefix = partData.category ? partData.category.substring(0, 3).toUpperCase() : 'GEN';
+            const namePrefix = partData.name ? partData.name.substring(0, 3).toUpperCase() : 'ITM';
+            partData.sku = `${categoryPrefix}-${namePrefix}-${Date.now().toString().slice(-6)}`;
+          }
+
+          // Set default labor hours
+          if (!partData.laborHours) {
+            partData.laborHours = 0.25; // Default 15 minutes
+          }
+
+          // Check for duplicates
+          if (existingNames.has(partData.name.toLowerCase())) {
+            results.skipped++;
+            continue;
+          }
+
+          // Validate part data
+          const validatedData = insertPartSchema.parse(partData);
+          
+          // Create part
+          await storage.createPart(validatedData);
+          results.imported++;
+          existingNames.add(partData.name.toLowerCase());
+          
+        } catch (error) {
+          results.errors.push({
+            row: i + 1,
+            field: 'general',
+            message: error instanceof z.ZodError 
+              ? error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
+              : 'Invalid data format'
+          });
+        }
+      }
+
+      // Update success status based on results
+      results.success = results.errors.length === 0 || results.imported > 0;
+      
+      res.json(results);
+    } catch (error) {
+      console.error('Bulk import error:', error);
+      res.status(500).json({ message: "Failed to process bulk import" });
+    }
+  });
+
   app.get("/api/parts", async (req, res) => {
     try {
       const parts = await storage.getParts();
