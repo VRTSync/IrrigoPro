@@ -58,4 +58,4 @@ Customer Management Permissions: Complete role-based access control implemented 
 - **ORM**: Drizzle ORM
 - **Session Management**: connect-pg-simple
 - **Email Service**: Postmark API
-- **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
+- **QuickBooks Integration**: OAuth2 authentication, customer sync with active-only filtering, invoice creation. Prioritizes company names over individual names for business customers.
