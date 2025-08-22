@@ -698,6 +698,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Company admin password change endpoint
+  app.post("/api/company/:companyId/users/:userId/change-password", requireCompanySetup, async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const userId = parseInt(req.params.userId);
+      const { newPassword } = req.body;
+      
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters long" });
+      }
+      
+      // Verify user belongs to company
+      const existingUser = await storage.getUser(userId);
+      if (!existingUser || existingUser.companyId !== companyId) {
+        return res.status(403).json({ message: "Not authorized to modify this user" });
+      }
+
+      // Hash the new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      
+      // Update the user's password
+      const user = await storage.updateUser(userId, { 
+        password: hashedPassword,
+        updatedAt: new Date()
+      });
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      console.error('Password change error:', error);
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
   // Test endpoint to check database and users
   app.get("/api/test-auth", async (req, res) => {
     try {

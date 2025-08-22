@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database } from "lucide-react";
+import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database, Key } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -33,8 +33,17 @@ const editUserFormSchema = z.object({
   role: z.enum(["irrigation_manager", "field_tech", "billing_manager"]),
 });
 
+const changePasswordSchema = z.object({
+  newPassword: z.string().min(6, "Password must be at least 6 characters"),
+  confirmPassword: z.string().min(6, "Password must be at least 6 characters"),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ["confirmPassword"],
+});
+
 type UserFormData = z.infer<typeof userFormSchema>;
 type EditUserFormData = z.infer<typeof editUserFormSchema>;
+type ChangePasswordData = z.infer<typeof changePasswordSchema>;
 
 interface User {
   id: number;
@@ -52,6 +61,7 @@ export default function CompanyUserManagement() {
   const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [changingPasswordUser, setChangingPasswordUser] = useState<User | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [userDependencies, setUserDependencies] = useState<any>(null);
@@ -129,6 +139,14 @@ export default function CompanyUserManagement() {
       name: "",
       email: "",
       role: "field_tech",
+    },
+  });
+
+  const passwordForm = useForm<ChangePasswordData>({
+    resolver: zodResolver(changePasswordSchema),
+    defaultValues: {
+      newPassword: "",
+      confirmPassword: "",
     },
   });
 
@@ -250,6 +268,29 @@ export default function CompanyUserManagement() {
       toast({
         title: "Error",
         description: "Failed to delete user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const onPasswordChangeSubmit = async (data: ChangePasswordData) => {
+    if (!changingPasswordUser) return;
+    
+    try {
+      await apiRequest(`/api/company/${currentUser?.companyId}/users/${changingPasswordUser.id}/change-password`, "POST", {
+        newPassword: data.newPassword
+      });
+
+      setChangingPasswordUser(null);
+      passwordForm.reset();
+      toast({
+        title: "Success",
+        description: "Password changed successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to change password",
         variant: "destructive",
       });
     }
@@ -544,14 +585,24 @@ export default function CompanyUserManagement() {
                     {getRoleDisplayName(user.role)}
                   </Badge>
                   {user.id !== currentUser?.id && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-blue-600 hover:text-blue-900 p-1"
-                      onClick={() => handleEditUser(user)}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
+                    <div className="flex space-x-1">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-blue-600 hover:text-blue-900 p-1"
+                        onClick={() => handleEditUser(user)}
+                      >
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-green-600 hover:text-green-900 p-1"
+                        onClick={() => setChangingPasswordUser(user)}
+                      >
+                        <Key className="w-4 h-4" />
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -634,6 +685,21 @@ export default function CompanyUserManagement() {
                                   </TooltipTrigger>
                                   <TooltipContent>
                                     <p>Edit user details</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setChangingPasswordUser(user)}
+                                      className="text-blue-600 hover:text-blue-900"
+                                    >
+                                      <Key className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Change password</p>
                                   </TooltipContent>
                                 </Tooltip>
                                 {user.isActive && (
@@ -779,6 +845,61 @@ export default function CompanyUserManagement() {
                   Cancel
                 </Button>
                 <Button type="submit">Update User</Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Password Change Dialog */}
+      <Dialog open={!!changingPasswordUser} onOpenChange={(open) => !open && setChangingPasswordUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+            <DialogDescription>
+              Change password for {changingPasswordUser?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...passwordForm}>
+            <form onSubmit={passwordForm.handleSubmit(onPasswordChangeSubmit)} className="space-y-4">
+              <FormField
+                control={passwordForm.control}
+                name="newPassword"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>New Password</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="Enter new password" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={passwordForm.control}
+                name="confirmPassword"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Confirm Password</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="Confirm new password" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setChangingPasswordUser(null);
+                    passwordForm.reset();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">Change Password</Button>
               </div>
             </form>
           </Form>
