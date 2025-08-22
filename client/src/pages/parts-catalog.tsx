@@ -2,6 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -556,68 +557,135 @@ export default function PartsCatalog() {
                     <Badge variant="secondary">{categoryParts.length}</Badge>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Part Name</TableHead>
+                          <TableHead>SKU</TableHead>
+                          <TableHead>Specifications</TableHead>
+                          <TableHead>Price</TableHead>
+                          <TableHead>Labor</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {categoryParts.map((part) => (
+                          <TableRow key={part.id} className="hover:bg-muted/50">
+                            <TableCell>
+                              <div>
+                                <div className="font-medium">{part.name}</div>
+                                {part.description && (
+                                  <div className="text-sm text-muted-foreground line-clamp-1">
+                                    {part.description}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">{part.sku}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {part.material && (
+                                  <Badge variant="outline" className="text-xs">{part.material}</Badge>
+                                )}
+                                {part.size && (
+                                  <Badge variant="outline" className="text-xs">{part.size}</Badge>
+                                )}
+                                {part.brand && (
+                                  <Badge variant="outline" className="text-xs">{part.brand}</Badge>
+                                )}
+                                {part.fittingType && (
+                                  <Badge variant="outline" className="text-xs">{part.fittingType}</Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-semibold">{formatCurrency(part.price)}</TableCell>
+                            <TableCell>{part.laborHours}h</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleEditPart(part)}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => deletePartMutation.mutate(part.id)}
+                                  disabled={deletePartMutation.isPending}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Mobile List View */}
+                  <div className="md:hidden space-y-3">
                     {categoryParts.map((part) => (
-                      <Card key={part.id} className="hover:shadow-md transition-shadow">
-                        <CardHeader className="pb-3">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <CardTitle className="text-lg">{part.name}</CardTitle>
-                              <p className="text-sm text-muted-foreground">{part.sku}</p>
-                            </div>
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleEditPart(part)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => deletePartMutation.mutate(part.id)}
-                                disabled={deletePartMutation.isPending}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
+                      <Card key={part.id} className="p-4">
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex-1">
+                            <h3 className="font-medium text-base">{part.name}</h3>
+                            <p className="text-sm text-muted-foreground font-mono">{part.sku}</p>
                           </div>
-                        </CardHeader>
+                          <div className="flex gap-1 ml-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditPart(part)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => deletePartMutation.mutate(part.id)}
+                              disabled={deletePartMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
                         
-                        <CardContent className="space-y-3">
-                          <div className="flex flex-wrap gap-1">
-                            {part.material && (
-                              <Badge variant="outline" className="text-xs">{part.material}</Badge>
-                            )}
-                            {part.size && (
-                              <Badge variant="outline" className="text-xs">{part.size}</Badge>
-                            )}
-                            {part.brand && (
-                              <Badge variant="outline" className="text-xs">{part.brand}</Badge>
-                            )}
-                            {part.fittingType && (
-                              <Badge variant="outline" className="text-xs">{part.fittingType}</Badge>
-                            )}
-                          </div>
-                          
-                          {part.description && (
-                            <p className="text-sm text-muted-foreground line-clamp-2">
-                              {part.description}
-                            </p>
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {part.material && (
+                            <Badge variant="outline" className="text-xs">{part.material}</Badge>
                           )}
-                          
-                          <div className="flex justify-between items-center pt-2">
-                            <div className="flex items-center gap-2">
-                              <DollarSign className="h-4 w-4 text-muted-foreground" />
-                              <span className="font-semibold">{formatCurrency(part.price)}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              {part.laborHours}h
-                            </div>
+                          {part.size && (
+                            <Badge variant="outline" className="text-xs">{part.size}</Badge>
+                          )}
+                          {part.brand && (
+                            <Badge variant="outline" className="text-xs">{part.brand}</Badge>
+                          )}
+                          {part.fittingType && (
+                            <Badge variant="outline" className="text-xs">{part.fittingType}</Badge>
+                          )}
+                        </div>
+                        
+                        {part.description && (
+                          <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                            {part.description}
+                          </p>
+                        )}
+                        
+                        <div className="flex justify-between items-center text-sm">
+                          <div className="flex items-center gap-2">
+                            <DollarSign className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-semibold">{formatCurrency(part.price)}</span>
                           </div>
-                        </CardContent>
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {part.laborHours}h
+                          </div>
+                        </div>
                       </Card>
                     ))}
                   </div>
