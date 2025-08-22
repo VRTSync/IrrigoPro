@@ -43,6 +43,7 @@ export default function Navigation() {
               { path: "/site-maps", label: "Maps", icon: MapIcon },
             ]
           },
+          { path: "/parts", label: "Parts", icon: Package },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { 
             path: "/admin", 
