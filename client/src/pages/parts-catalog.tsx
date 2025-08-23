@@ -9,9 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock } from "lucide-react";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
@@ -444,6 +445,7 @@ export default function PartsCatalog() {
   const [materialFilter, setMaterialFilter] = useState<string>("");
   const [selectedPart, setSelectedPart] = useState<Part | undefined>();
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   const { data: parts, isLoading } = useQuery<Part[]>({
@@ -509,6 +511,16 @@ export default function PartsCatalog() {
   const handleAddPart = () => {
     setSelectedPart(undefined);
     setIsFormOpen(true);
+  };
+
+  const toggleSection = (category: string) => {
+    const newCollapsed = new Set(collapsedSections);
+    if (newCollapsed.has(category)) {
+      newCollapsed.delete(category);
+    } else {
+      newCollapsed.add(category);
+    }
+    setCollapsedSections(newCollapsed);
   };
 
   return (
@@ -605,12 +617,24 @@ export default function PartsCatalog() {
             </Card>
           ) : (
             <div className="space-y-6">
-              {Object.entries(groupedParts || {}).map(([category, categoryParts]) => (
-                <div key={category} className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-semibold">{category}</h2>
-                    <Badge variant="secondary">{categoryParts.length}</Badge>
-                  </div>
+              {Object.entries(groupedParts || {}).map(([category, categoryParts]) => {
+                const isCollapsed = collapsedSections.has(category);
+                return (
+                  <Collapsible key={category} open={!isCollapsed} onOpenChange={() => toggleSection(category)}>
+                    <div className="space-y-4">
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 p-2 rounded-lg transition-colors">
+                          {isCollapsed ? (
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                          )}
+                          <h2 className="text-xl font-semibold">{category}</h2>
+                          <Badge variant="secondary">{categoryParts.length}</Badge>
+                        </div>
+                      </CollapsibleTrigger>
+                      
+                      <CollapsibleContent>
                   
                   {/* Desktop Table View */}
                   <div className="hidden md:block">
@@ -783,8 +807,11 @@ export default function PartsCatalog() {
                       </Card>
                     ))}
                   </div>
-                </div>
-              ))}
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                );
+              })}
             </div>
           )}
         </TabsContent>
