@@ -1467,7 +1467,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create the consolidated monthly invoice
       const currentDate = new Date();
-      const invoiceNumber = `${currentDate.getFullYear().toString().slice(-2)}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}-${customerId.toString().padStart(3, '0')}-${Date.now().toString().slice(-3)}`;
+      const invoiceNumber = `${Date.now().toString().slice(-5)}`;
       
       // Calculate totals - no markup on parts, tax only on labor
       const laborSubtotal = 
