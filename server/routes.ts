@@ -1636,7 +1636,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const invoiceData = {
             Line: qbLineItems,
             CustomerRef: {
-              value: customer.quickbooksId || "1" // Use customer's QB ID or default
+              value: customer.quickbooksId || integration.defaultCustomerId || "1" // Use customer's QB ID, integration default, or fallback
             },
             DocNumber: invoiceNumber,
             TxnDate: currentDate.toISOString().split('T')[0], // YYYY-MM-DD format
@@ -1671,7 +1671,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             const errorText = await invoiceResponse.text();
             const intuitTid = invoiceResponse.headers.get('intuit_tid');
-            quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+            
+            // Check for customer not found errors
+            if (errorText.includes('InvalidRef') || errorText.includes('Customer')) {
+              quickbooksError = `Customer not found in QuickBooks. Please sync customers first or verify the customer exists in your QuickBooks account.${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+              console.error('QuickBooks customer reference error - customer may not exist:', errorText);
+            } else {
+              quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+            }
+            
             console.error('Failed to create QuickBooks invoice:', invoiceResponse.status, errorText);
             console.error('QuickBooks error details:', errorText);
           }
@@ -3591,7 +3599,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               continue;
             }
 
-            // Create new customer from QuickBooks data  
+            // Create new customer from QuickBooks data with QuickBooks ID mapping
             const newCustomer = await storage.createCustomer({
               name: qbCustomer.name,
               email: qbCustomer.email,
