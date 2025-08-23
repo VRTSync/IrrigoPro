@@ -71,9 +71,18 @@ export default function Navigation() {
             ]
           },
           { path: "/customers", label: "Customers", icon: Users },
+          { 
+            path: "/parts", 
+            label: "Parts", 
+            icon: Package, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/parts", label: "Parts Catalog", icon: Package },
+              { path: "/parts-list", label: "Parts List", icon: Package },
+            ]
+          },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/site-maps", label: "Site Maps", icon: MapIcon },
-          { path: "/parts", label: "Parts", icon: Package },
         ];
       case "field_tech":
         return [
