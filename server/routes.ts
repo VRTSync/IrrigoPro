@@ -1104,25 +1104,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rawEstimates = allEstimates.filter(est => est.customerId === customerId);
 
       // Transform work orders to match frontend expectations
-      const workOrders = rawWorkOrders.map(wo => ({
-        ...wo,
-        laborCost: ((parseFloat(wo.totalHours || '0') * 45) || 0),
-        partsCost: parseFloat(wo.totalPartsCost || '0') || 0,
-        assignedTo: wo.assignedTechnicianName || 'Unassigned',
-        description: wo.description || wo.workSummary || '',
-        billedDate: null, // No billing tracking yet
-        completedDate: wo.completedAt
-      }));
+      // Use the same dynamic calculation logic as the invoice system
+      const workOrders = rawWorkOrders.map(wo => {
+        const laborAmount = parseFloat(wo.totalHours || '0') * 45;
+        const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
+        const dynamicTotalAmount = laborAmount + partsAmount;
+        
+        return {
+          ...wo,
+          laborCost: laborAmount,
+          partsCost: partsAmount,
+          totalAmount: dynamicTotalAmount.toString(), // Use dynamic calculation instead of stored value
+          assignedTo: wo.assignedTechnicianName || 'Unassigned',
+          description: wo.description || wo.workSummary || '',
+          billedDate: null, // No billing tracking yet
+          completedDate: wo.completedAt
+        };
+      });
 
       // Transform billing sheets to match frontend expectations
-      const billingSheets = rawBillingSheets.map(bs => ({
-        ...bs,
-        laborCost: parseFloat(bs.laborSubtotal || '0') || 0,
-        partsCost: parseFloat(bs.partsSubtotal || '0') || 0,
-        description: bs.workDescription || '',
-        billedDate: null, // No billing tracking yet
-        completedDate: bs.workDate
-      }));
+      // Use the same dynamic calculation logic as the invoice system
+      const billingSheets = rawBillingSheets.map(bs => {
+        const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
+        const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
+        const dynamicTotalAmount = laborAmount + partsAmount;
+        
+        return {
+          ...bs,
+          laborCost: laborAmount,
+          partsCost: partsAmount,
+          totalAmount: dynamicTotalAmount.toString(), // Use dynamic calculation instead of stored value
+          description: bs.workDescription || '',
+          billedDate: null, // No billing tracking yet
+          completedDate: bs.workDate
+        };
+      });
 
       // Transform estimates to match frontend expectations
       const estimates = rawEstimates.map(est => ({
@@ -1135,11 +1151,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
 
       // Filter unbilled work (completed work orders and approved billing sheets that haven't been billed)
+      // Use the same billing detection logic as the invoice system (notes field with [BILLED: markers)
       const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && !wo.billedDate
+        wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
       );
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'completed' && !bs.billedDate
+        bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
       );
 
       // Calculate total unbilled amount
@@ -1817,12 +1834,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
             estimates.filter(est => est.status === 'pending').length +
             billingSheets.filter(bs => bs.status === 'pending' || bs.status === 'in_progress').length;
           
+          // Calculate actual unbilled amounts using the same logic as invoice system (notes field with [BILLED: markers)
+          const unbilledWorkOrders = completedWorkOrders.filter(wo => 
+            !wo.notes || !wo.notes.includes('[BILLED:')
+          );
+          const unbilledBillingSheets = completedBillingSheets.filter(bs => 
+            !bs.notes || !bs.notes.includes('[BILLED:')
+          );
+          const unbilledEstimates = approvedEstimates.filter(est => 
+            !est.notes || !est.notes.includes('[BILLED:')
+          );
+          
+          const actualUnbilledAmount = 
+            unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+            unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
+            unbilledEstimates.reduce((sum, est) => sum + parseFloat(est.totalAmount || '0'), 0);
+          
           return {
             ...customer,
             currentMonthBilling: Math.round(currentMonthBilling * 100) / 100,
             monthlyAverage: Math.round(monthlyAverage * 100) / 100,
             billingPace: Math.round(billingPace * 100) / 100,
-            unbilledAmount: Math.round(currentMonthBilling * 100) / 100, // Assume current month is unbilled
+            unbilledAmount: Math.round(actualUnbilledAmount * 100) / 100,
             lastInvoiceDate,
             pendingWorkOrders: pendingCount,
             totalWorkOrders: filteredWorkOrders.length + filteredEstimates.length + filteredBillingSheets.length
