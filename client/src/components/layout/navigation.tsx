@@ -310,15 +310,45 @@ export default function Navigation() {
                 // Get non-center items and expand dropdown items for mobile
                 let otherItems = navItems.filter(item => !item.isCenter);
                 
-                // For mobile, expand dropdown items into individual items
+                // For mobile, expand dropdown items with prioritization
                 const expandedItems: any[] = [];
-                otherItems.forEach(item => {
-                  if (item.isDropdown && item.dropdownItems) {
-                    expandedItems.push(...item.dropdownItems);
-                  } else {
+                
+                // For company admin, prioritize essential functions for mobile
+                if (userRole === 'company_admin') {
+                  // First, add non-dropdown items
+                  otherItems.filter(item => !item.isDropdown).forEach(item => {
                     expandedItems.push(item);
+                  });
+                  
+                  // Then add Team (most important admin function)
+                  const adminItem = otherItems.find(item => item.label === 'Admin');
+                  if (adminItem?.dropdownItems) {
+                    const teamItem = adminItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Team');
+                    if (teamItem) {
+                      expandedItems.push(teamItem);
+                    }
                   }
-                });
+                  
+                  // Add Customers dropdown items
+                  const customersItem = otherItems.find(item => item.label === 'Customers' && item.isDropdown);
+                  if (customersItem?.dropdownItems) {
+                    // Only add Maps from customers dropdown to avoid duplication
+                    const mapsItem = customersItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Maps');
+                    if (mapsItem) {
+                      expandedItems.push(mapsItem);
+                    }
+                  }
+                } else {
+                  // For other roles, use the standard expansion
+                  otherItems.forEach(item => {
+                    if (item.isDropdown && item.dropdownItems) {
+                      expandedItems.push(...item.dropdownItems);
+                    } else {
+                      expandedItems.push(item);
+                    }
+                  });
+                }
+                
                 otherItems = expandedItems;
                 
                 // For field techs, fill all 5 slots exactly
