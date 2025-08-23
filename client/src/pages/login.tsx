@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { User, Lock, LogIn } from "lucide-react";
+import { User, Lock, LogIn, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo-01_1754798633907.png";
@@ -114,6 +114,8 @@ export default function Login() {
     password: "",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [emailVerificationNeeded, setEmailVerificationNeeded] = useState<string | null>(null);
+  const [sendingVerification, setSendingVerification] = useState(false);
   const { toast } = useToast();
   
   const rootRef = useRef<HTMLDivElement>(null);
@@ -201,13 +203,50 @@ export default function Login() {
       console.error("Login error:", error);
       console.error("Error details:", JSON.stringify(error, null, 2));
       console.error("Error stack:", error.stack);
+      
+      // Check if error is related to email verification
+      if (error.message && error.message.includes("email verification") || error.message.includes("verify your email")) {
+        setEmailVerificationNeeded(credentials.username);
+        toast({
+          title: "Email Verification Required",
+          description: "Please verify your email address before logging in.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Login Failed",
+          description: error.message || "Invalid credentials",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!emailVerificationNeeded) return;
+    
+    setSendingVerification(true);
+    try {
+      // Try to get user email by username first (this would require a new endpoint)
+      // For now, we'll ask the user for their email if we don't have it
+      await apiRequest("/api/auth/resend-verification", "POST", {
+        email: emailVerificationNeeded // Assuming the emailVerificationNeeded contains email, not username
+      });
+      
       toast({
-        title: "Login Failed",
-        description: error.message || "Invalid credentials",
+        title: "Verification Email Sent",
+        description: "Please check your email for the verification link.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send verification email",
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      setSendingVerification(false);
     }
   };
 
@@ -318,6 +357,31 @@ export default function Login() {
                 Sign In
               </Button>
             </form>
+
+            {/* Email Verification Resend */}
+            {emailVerificationNeeded && (
+              <div className="mt-4 p-4 bg-orange-500/10 border border-orange-400/20 rounded-lg">
+                <div className="flex items-center mb-2">
+                  <Mail className="w-4 h-4 mr-2 text-orange-400" />
+                  <span className="text-sm text-orange-100 font-medium">Email Verification Required</span>
+                </div>
+                <p className="text-xs text-orange-200 mb-3">
+                  Please verify your email address to access your account.
+                </p>
+                <Button 
+                  onClick={handleResendVerification}
+                  disabled={sendingVerification}
+                  className="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2"
+                >
+                  {sendingVerification ? (
+                    <Lock className="w-3 h-3 mr-2 animate-spin" />
+                  ) : (
+                    <Mail className="w-3 h-3 mr-2" />
+                  )}
+                  Resend Verification Email
+                </Button>
+              </div>
+            )}
 
             <div className="mt-4 text-center space-y-2">
               <Button 

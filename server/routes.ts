@@ -970,6 +970,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin endpoint to resend verification for company users
+  app.post("/api/company/:companyId/users/:userId/resend-verification", requireAdminAccess, async (req, res) => {
+    try {
+      const { companyId, userId } = req.params;
+      const user = await storage.getUser(parseInt(userId));
+      
+      if (!user || user.companyId !== parseInt(companyId)) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      if (user.emailVerified) {
+        return res.status(400).json({ message: "Email already verified" });
+      }
+      
+      if (!user.email) {
+        return res.status(400).json({ message: "User has no email address" });
+      }
+      
+      // Generate new verification token
+      const emailVerificationToken = crypto.randomBytes(32).toString('hex');
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      // Update user with new token
+      await storage.updateUser(user.id, {
+        emailVerificationToken,
+        emailVerificationExpires,
+        updatedAt: new Date()
+      });
+      
+      // Send verification email
+      try {
+        await EmailService.sendEmailVerification(user.email, emailVerificationToken, user.name);
+        console.log(`Admin resent verification email to ${user.email}`);
+        res.json({ message: "Verification email sent" });
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        res.status(500).json({ message: "Failed to send verification email" });
+      }
+    } catch (error) {
+      console.error('Error resending verification:', error);
+      res.status(500).json({ message: "Failed to resend verification email" });
+    }
+  });
+
   // Email verification endpoint
   app.get("/api/auth/verify-email/:token", async (req, res) => {
     try {

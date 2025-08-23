@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database, Key } from "lucide-react";
+import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTriangle, Archive, Database, Key, MailCheck, CheckCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -53,6 +53,9 @@ interface User {
   role: string;
   companyId: number;
   isActive: boolean;
+  emailVerified: boolean;
+  emailVerificationToken?: string;
+  emailVerificationExpires?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -66,6 +69,7 @@ export default function CompanyUserManagement() {
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [userDependencies, setUserDependencies] = useState<any>(null);
   const [isLoadingDependencies, setIsLoadingDependencies] = useState(false);
+  const [sendingVerification, setSendingVerification] = useState<number | null>(null);
 
   // Get current user from localStorage
   useEffect(() => {
@@ -326,6 +330,32 @@ export default function CompanyUserManagement() {
     editForm.setValue("role", user.role as "irrigation_manager" | "field_tech" | "billing_manager");
   };
 
+  const handleResendVerification = async (user: User) => {
+    if (!user.email || user.emailVerified) {
+      return;
+    }
+    
+    setSendingVerification(user.id);
+    try {
+      await apiRequest("/api/auth/resend-verification", "POST", {
+        email: user.email
+      });
+      
+      toast({
+        title: "Success",
+        description: `Verification email sent to ${user.email}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send verification email",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingVerification(null);
+    }
+  };
+
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "company_admin":
@@ -576,7 +606,18 @@ export default function CompanyUserManagement() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">{user.name}</div>
-                    <div className="text-xs text-gray-500 truncate">{user.email}</div>
+                    <div className="text-xs text-gray-500 truncate flex items-center gap-1">
+                      {user.email}
+                      {user.email && (
+                        <span className="flex items-center">
+                          {user.emailVerified ? (
+                            <CheckCircle className="w-3 h-3 text-green-600" title="Email verified" />
+                          ) : (
+                            <Mail className="w-3 h-3 text-orange-500" title="Email not verified" />
+                          )}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-gray-400">@{user.username}</div>
                   </div>
                 </div>
@@ -602,6 +643,18 @@ export default function CompanyUserManagement() {
                       >
                         <Key className="w-4 h-4" />
                       </Button>
+                      {user.email && !user.emailVerified && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-orange-600 hover:text-orange-900 p-1"
+                          onClick={() => handleResendVerification(user)}
+                          disabled={sendingVerification === user.id}
+                          title="Resend verification email"
+                        >
+                          <MailCheck className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -650,7 +703,18 @@ export default function CompanyUserManagement() {
                           </div>
                           <div>
                             <div className="font-medium">{user.name}</div>
-                            <div className="text-sm text-muted-foreground">{user.email}</div>
+                            <div className="text-sm text-muted-foreground flex items-center gap-1">
+                              {user.email}
+                              {user.email && (
+                                <span className="flex items-center">
+                                  {user.emailVerified ? (
+                                    <CheckCircle className="w-3 h-3 text-green-600" title="Email verified" />
+                                  ) : (
+                                    <Mail className="w-3 h-3 text-orange-500" title="Email not verified" />
+                                  )}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs text-muted-foreground">@{user.username}</div>
                           </div>
                         </div>
@@ -702,6 +766,24 @@ export default function CompanyUserManagement() {
                                     <p>Change password</p>
                                   </TooltipContent>
                                 </Tooltip>
+                                {user.email && !user.emailVerified && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleResendVerification(user)}
+                                        disabled={sendingVerification === user.id}
+                                        className="text-orange-600 hover:text-orange-900"
+                                      >
+                                        <MailCheck className="w-4 h-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Resend verification email</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
                                 {user.isActive && (
                                   <AlertDialog>
                                     <Tooltip>
