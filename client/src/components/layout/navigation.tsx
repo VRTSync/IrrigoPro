@@ -86,6 +86,7 @@ export default function Navigation() {
       case "billing_manager":
         return [
           { path: "/customers", label: "Customers", icon: Users },
+          { path: "/parts", label: "Parts", icon: Package },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
         ];

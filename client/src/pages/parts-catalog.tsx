@@ -62,7 +62,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   const form = useForm<z.infer<typeof PartFormSchema>>({
     resolver: zodResolver(PartFormSchema),
     defaultValues: {
-      companyId: 3, // High Plains Property
+      companyId: 1, // Default company ID
       name: "",
       description: "",
       price: "0.00",
