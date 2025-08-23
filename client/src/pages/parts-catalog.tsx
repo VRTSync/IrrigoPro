@@ -448,6 +448,15 @@ export default function PartsCatalog() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
+  // Get current user role to determine permissions
+  const getCurrentUserRole = (): string => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return user.role || "";
+  };
+  
+  const userRole = getCurrentUserRole();
+  const canImport = userRole === "company_admin" || userRole === "super_admin";
+
   const { data: parts, isLoading } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
   });
@@ -544,7 +553,7 @@ export default function PartsCatalog() {
       <Tabs defaultValue="catalog" className="w-full">
         <TabsList>
           <TabsTrigger value="catalog">Parts Catalog</TabsTrigger>
-          <TabsTrigger value="import">Bulk Import</TabsTrigger>
+          {canImport && <TabsTrigger value="import">Bulk Import</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="catalog" className="space-y-6">
@@ -816,11 +825,13 @@ export default function PartsCatalog() {
           )}
         </TabsContent>
 
-        <TabsContent value="import" className="space-y-6">
-          <BulkImport onImportComplete={() => {
-            queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
-          }} />
-        </TabsContent>
+        {canImport && (
+          <TabsContent value="import" className="space-y-6">
+            <BulkImport onImportComplete={() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+            }} />
+          </TabsContent>
+        )}
       </Tabs>
 
       <PartFormDialog
