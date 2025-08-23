@@ -1773,15 +1773,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             bs.createdAt && new Date(bs.createdAt) >= startDate && new Date(bs.createdAt) <= endDate
           );
           
-          const workOrdersBilling = filteredWorkOrders.reduce((sum, wo) => 
-            sum + parseFloat(wo.totalAmount || '0'), 0
-          );
+          // Use dynamic calculation logic for consistent billing amounts
+          const workOrdersBilling = filteredWorkOrders.reduce((sum, wo) => {
+            const laborAmount = parseFloat(wo.totalHours || '0') * 45;
+            const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
+            return sum + laborAmount + partsAmount;
+          }, 0);
           const estimatesBilling = filteredEstimates.reduce((sum, est) => 
             sum + parseFloat(est.totalAmount || '0'), 0
           );
-          const billingSheetsBilling = filteredBillingSheets.reduce((sum, bs) => 
-            sum + parseFloat(bs.totalAmount || '0'), 0
-          );
+          const billingSheetsBilling = filteredBillingSheets.reduce((sum, bs) => {
+            const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
+            const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
+            return sum + laborAmount + partsAmount;
+          }, 0);
           
           const currentMonthBilling = workOrdersBilling + estimatesBilling + billingSheetsBilling;
           
@@ -1802,10 +1807,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
               bs.createdAt && new Date(bs.createdAt) >= monthStart && new Date(bs.createdAt) <= monthEnd
             );
             
+            // Use dynamic calculation for historical data too
             const monthTotal = 
-              monthWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+              monthWorkOrders.reduce((sum, wo) => {
+                const laborAmount = parseFloat(wo.totalHours || '0') * 45;
+                const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
+                return sum + laborAmount + partsAmount;
+              }, 0) +
               monthEstimates.reduce((sum, est) => sum + parseFloat(est.totalAmount || '0'), 0) +
-              monthBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+              monthBillingSheets.reduce((sum, bs) => {
+                const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
+                const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
+                return sum + laborAmount + partsAmount;
+              }, 0);
             
             if (monthTotal > 0) monthlyTotals.push(monthTotal);
           }
@@ -1845,9 +1859,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             !est.notes || !est.notes.includes('[BILLED:')
           );
           
+          // Use dynamic calculation for unbilled amounts
           const actualUnbilledAmount = 
-            unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-            unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0) +
+            unbilledWorkOrders.reduce((sum, wo) => {
+              const laborAmount = parseFloat(wo.totalHours || '0') * 45;
+              const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
+              return sum + laborAmount + partsAmount;
+            }, 0) +
+            unbilledBillingSheets.reduce((sum, bs) => {
+              const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
+              const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
+              return sum + laborAmount + partsAmount;
+            }, 0) +
             unbilledEstimates.reduce((sum, est) => sum + parseFloat(est.totalAmount || '0'), 0);
           
           return {
