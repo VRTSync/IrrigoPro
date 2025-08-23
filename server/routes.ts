@@ -1555,12 +1555,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Send invoice to QuickBooks
+      let quickbooksId = null;
+      let quickbooksSuccess = false;
+      let quickbooksError = null;
+
+      try {
+        // Get QuickBooks integration data
+        const integration = await storage.getQuickBooksIntegration();
+        if (integration && integration.accessToken) {
+          console.log("Creating invoice in QuickBooks...");
+          
+          // Use sandbox or production API based on environment
+          const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+          
+          // Create detailed line items for QuickBooks
+          const qbLineItems = [];
+          
+          // Add work order line items
+          for (const workOrder of unbilledWorkOrders) {
+            const laborAmount = parseFloat(workOrder.totalHours || '0') * 45; // $45/hour rate
+            const partsAmount = parseFloat(workOrder.totalPartsCost || '0');
+            const totalLineAmount = laborAmount + partsAmount;
+            
+            if (totalLineAmount > 0) {
+              qbLineItems.push({
+                Amount: totalLineAmount,
+                DetailType: "SalesItemLineDetail",
+                SalesItemLineDetail: {
+                  ItemRef: {
+                    value: "1", // Default service item
+                    name: "Services"
+                  }
+                },
+                Description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor, $${partsAmount} parts)`
+              });
+            }
+          }
+
+          // Add billing sheet line items
+          for (const billingSheet of unbilledBillingSheets) {
+            const lineTotal = parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0');
+            if (lineTotal > 0) {
+              qbLineItems.push({
+                Amount: lineTotal,
+                DetailType: "SalesItemLineDetail", 
+                SalesItemLineDetail: {
+                  ItemRef: {
+                    value: "1", // Default service item
+                    name: "Services"
+                  }
+                },
+                Description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`
+              });
+            }
+          }
+
+          // Prepare invoice data for QuickBooks
+          const invoiceData = {
+            Line: qbLineItems,
+            CustomerRef: {
+              value: customer.quickbooksId || "1" // Use customer's QB ID or default
+            },
+            DocNumber: invoiceNumber,
+            TxnDate: currentDate.toISOString().split('T')[0], // YYYY-MM-DD format
+            DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
+            SalesTermRef: {
+              value: "3" // Net 30 terms
+            }
+          };
+
+          console.log("Sending invoice to QuickBooks:", JSON.stringify(invoiceData, null, 2));
+
+          const invoiceResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${integration.accessToken}`,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(invoiceData)
+          }, 'Monthly Invoice Creation');
+
+          if (invoiceResponse.ok) {
+            const invoiceResult = await invoiceResponse.json();
+            quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
+            quickbooksSuccess = true;
+            console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
+            
+            // Update local invoice with QuickBooks ID
+            if (quickbooksId) {
+              await storage.updateInvoice(invoice.id, { quickbooksInvoiceId: quickbooksId.toString() });
+            }
+          } else {
+            const errorText = await invoiceResponse.text();
+            const intuitTid = invoiceResponse.headers.get('intuit_tid');
+            quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+            console.error('Failed to create QuickBooks invoice:', invoiceResponse.status, errorText);
+            console.error('QuickBooks error details:', errorText);
+          }
+        } else {
+          console.log("QuickBooks not connected - invoice created locally only");
+        }
+      } catch (qbError) {
+        console.error('Error connecting to QuickBooks:', qbError);
+        quickbooksError = `QuickBooks connection error: ${qbError.message}`;
+      }
+
       res.json({
-        message: "Monthly invoice created successfully",
+        message: quickbooksSuccess 
+          ? "Monthly invoice created successfully and synced to QuickBooks" 
+          : "Monthly invoice created successfully (local only - QuickBooks sync failed)",
         invoice,
         invoiceNumber,
         totalAmount: totalAmount.toFixed(2),
-        itemCount: unbilledWorkOrders.length + unbilledBillingSheets.length
+        itemCount: unbilledWorkOrders.length + unbilledBillingSheets.length,
+        quickbooksId,
+        quickbooksSuccess,
+        quickbooksError
       });
     } catch (error) {
       console.error("Error creating monthly invoice:", error);
