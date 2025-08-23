@@ -73,7 +73,7 @@ export default function Navigation() {
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/site-maps", label: "Site Maps", icon: MapIcon },
-          { path: "/parts-list", label: "Parts", icon: Package },
+          { path: "/parts", label: "Parts", icon: Package },
         ];
       case "field_tech":
         return [
