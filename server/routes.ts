@@ -1932,15 +1932,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const csvHeaders = parseCSVLine(lines[0]);
+      console.log('CSV Headers detected:', csvHeaders);
       
       // Auto-detect enhanced CSV format and use intelligent processing
       const isEnhancedFormat = csvHeaders.includes('Part Type') && 
                               csvHeaders.includes('Product/Service Name') && 
                               csvHeaders.includes('Price');
       
+      console.log('Enhanced format detected:', isEnhancedFormat);
+      console.log('Column mappings provided:', !!columnMappings);
+      
       let fieldMappings: { [key: string]: string } = {};
       
-      if (isEnhancedFormat && !columnMappings) {
+      if (isEnhancedFormat && (!columnMappings || columnMappings.length === 0)) {
         // Enhanced format detected - use intelligent auto-mapping
         console.log('Enhanced CSV format detected - using intelligent processing');
         fieldMappings = {
