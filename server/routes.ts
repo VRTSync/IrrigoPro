@@ -1760,7 +1760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
-          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'approved' || bs.status === 'billed');
+          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed');
           
           // Calculate billing from all sources based on selected date range
           const filteredWorkOrders = completedWorkOrders.filter(wo => 
@@ -1803,7 +1803,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               est.approvedAt && new Date(est.approvedAt) >= monthStart && new Date(est.approvedAt) <= monthEnd
             );
             const monthBillingSheets = billingSheets.filter(bs => 
-              (bs.status === 'approved' || bs.status === 'billed') &&
+              bs.status === 'completed' &&
               bs.createdAt && new Date(bs.createdAt) >= monthStart && new Date(bs.createdAt) <= monthEnd
             );
             
@@ -1849,6 +1849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             billingSheets.filter(bs => bs.status === 'pending' || bs.status === 'in_progress').length;
           
           // Calculate actual unbilled amounts using the same logic as invoice system (notes field with [BILLED: markers)
+          // Don't apply date filtering to unbilled amounts - show total unbilled like invoice preview does
           const unbilledWorkOrders = completedWorkOrders.filter(wo => 
             !wo.notes || !wo.notes.includes('[BILLED:')
           );
@@ -1859,7 +1860,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             !est.notes || !est.notes.includes('[BILLED:')
           );
           
-          // Use dynamic calculation for unbilled amounts
+          // Use dynamic calculation for unbilled amounts (same as invoice preview)
           const actualUnbilledAmount = 
             unbilledWorkOrders.reduce((sum, wo) => {
               const laborAmount = parseFloat(wo.totalHours || '0') * 45;
