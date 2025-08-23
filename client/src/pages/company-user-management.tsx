@@ -599,7 +599,8 @@ export default function CompanyUserManagement() {
         ) : (
           users.map((user: User) => (
             <Card key={user.id} className="p-4 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between">
+              {/* Header Section - User Info and Role Badge */}
+              <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
                   <div className="flex-shrink-0">
                     {getRoleIcon(user.role)}
@@ -621,51 +622,57 @@ export default function CompanyUserManagement() {
                     <div className="text-xs text-gray-400">@{user.username}</div>
                   </div>
                 </div>
-                <div className="flex-shrink-0 flex items-center space-x-2">
+                <div className="flex-shrink-0">
                   <Badge className={getRoleBadgeColor(user.role)} variant="outline">
                     {getRoleDisplayName(user.role)}
                   </Badge>
-                  {user.id !== currentUser?.id && (
-                    <div className="flex space-x-1">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-blue-600 hover:text-blue-900 p-1"
-                        onClick={() => handleEditUser(user)}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-green-600 hover:text-green-900 p-1"
-                        onClick={() => setChangingPasswordUser(user)}
-                      >
-                        <Key className="w-4 h-4" />
-                      </Button>
-                      {user.email && !user.emailVerified && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-orange-600 hover:text-orange-900 p-1"
-                          onClick={() => handleResendVerification(user)}
-                          disabled={sendingVerification === user.id}
-                          title="Resend verification email"
-                        >
-                          <MailCheck className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
-              <div className="mt-2 flex items-center justify-between">
-                <Badge variant={user.isActive ? "default" : "secondary"}>
-                  {user.isActive ? "Active" : "Inactive"}
-                </Badge>
-                <div className="text-xs text-gray-500">
-                  Joined {new Date(user.createdAt).toLocaleDateString()}
+              
+              {/* Footer Section - Status and Actions */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Badge variant={user.isActive ? "default" : "secondary"}>
+                    {user.isActive ? "Active" : "Inactive"}
+                  </Badge>
+                  <div className="text-xs text-gray-500">
+                    Joined {new Date(user.createdAt).toLocaleDateString()}
+                  </div>
                 </div>
+                
+                {/* Action Buttons */}
+                {user.id !== currentUser?.id && (
+                  <div className="flex space-x-1">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-blue-600 hover:text-blue-900 p-1"
+                      onClick={() => handleEditUser(user)}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-green-600 hover:text-green-900 p-1"
+                      onClick={() => setChangingPasswordUser(user)}
+                    >
+                      <Key className="w-4 h-4" />
+                    </Button>
+                    {user.email && !user.emailVerified && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-orange-600 hover:text-orange-900 p-1"
+                        onClick={() => handleResendVerification(user)}
+                        disabled={sendingVerification === user.id}
+                        title="Resend verification email"
+                      >
+                        <MailCheck className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
           ))
