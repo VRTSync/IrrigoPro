@@ -34,6 +34,7 @@ import UserManager from "@/pages/UserManager";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
 import SwitchUser from "@/pages/switch-user";
+import CustomerProfile from "@/pages/customer-profile";
 
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -161,6 +162,7 @@ function Router() {
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/customers" component={Customers} />
+                <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
                 <Route path="/switch-user" component={SwitchUser} />

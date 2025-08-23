@@ -1078,7 +1078,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-
+  // Get individual customer by ID
+  app.get("/api/customers/:id", async (req, res) => {
+    try {
+      const customerId = parseInt(req.params.id);
+      const customer = await storage.getCustomerById(customerId);
+      
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+      
+      res.json(customer);
+    } catch (error) {
+      console.error("Error fetching customer:", error);
+      res.status(500).json({ message: "Failed to fetch customer" });
+    }
+  });
 
   // Get customer billing data - all work orders, billing sheets, and estimates for a customer
   app.get("/api/customers/:id/billing", async (req, res) => {

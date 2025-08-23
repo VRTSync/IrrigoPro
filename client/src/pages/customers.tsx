@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import type { Customer } from "@shared/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
 import { CustomerForm } from "@/components/customer-form";
@@ -30,6 +31,7 @@ export default function Customers() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showSiteMaps, setShowSiteMaps] = useState<Customer | null>(null);
   const [userRole, setUserRole] = useState<string>("company_admin");
+  const [, setLocation] = useLocation();
   
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -213,7 +215,7 @@ export default function Customers() {
                           variant="ghost" 
                           size="sm" 
                           className="text-blue-600 hover:text-blue-900"
-                          onClick={() => setShowSiteMaps(customer)}
+                          onClick={() => setLocation(`/customers/${customer.id}/profile`)}
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
@@ -328,10 +330,10 @@ export default function Customers() {
                                 variant="ghost" 
                                 size="sm" 
                                 className="text-blue-600 hover:text-blue-900"
-                                onClick={() => setShowSiteMaps(customer)}
+                                onClick={() => setLocation(`/customers/${customer.id}/profile`)}
                               >
                                 <Eye className="w-4 h-4 mr-1" />
-                                Map View
+                                View Profile
                               </Button>
                             ) : (
                               <>
