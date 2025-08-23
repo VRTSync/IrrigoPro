@@ -1093,22 +1093,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get all work orders for the customer
       const allWorkOrders = await storage.getWorkOrders();
-      const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
+      const rawWorkOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
 
       // Get all billing sheets for the customer
       const allBillingSheets = await storage.getAllBillingSheets();
-      const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
+      const rawBillingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Get all estimates for the customer
       const allEstimates = await storage.getEstimates();
-      const estimates = allEstimates.filter(est => est.customerId === customerId);
+      const rawEstimates = allEstimates.filter(est => est.customerId === customerId);
+
+      // Transform work orders to match frontend expectations
+      const workOrders = rawWorkOrders.map(wo => ({
+        ...wo,
+        laborCost: ((parseFloat(wo.totalHours || '0') * 45) || 0),
+        partsCost: parseFloat(wo.totalPartsCost || '0') || 0,
+        assignedTo: wo.assignedTechnicianName || 'Unassigned',
+        description: wo.description || wo.workSummary || '',
+        billedDate: null, // No billing tracking yet
+        completedDate: wo.completedAt
+      }));
+
+      // Transform billing sheets to match frontend expectations
+      const billingSheets = rawBillingSheets.map(bs => ({
+        ...bs,
+        laborCost: parseFloat(bs.laborSubtotal || '0') || 0,
+        partsCost: parseFloat(bs.partsSubtotal || '0') || 0,
+        description: bs.workDescription || '',
+        billedDate: null, // No billing tracking yet
+        completedDate: bs.workDate
+      }));
+
+      // Transform estimates to match frontend expectations
+      const estimates = rawEstimates.map(est => ({
+        ...est,
+        laborCost: 0, // Calculate if needed
+        partsCost: 0, // Calculate if needed  
+        description: est.projectDescription || '',
+        billedDate: null,
+        completedDate: est.updatedAt
+      }));
 
       // Filter unbilled work (completed work orders and approved billing sheets that haven't been billed)
       const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && (!wo.billingStatus || wo.billingStatus !== 'billed')
+        wo.status === 'completed' && !wo.billedDate
       );
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'approved' && (!bs.billingStatus || bs.billingStatus !== 'billed')
+        bs.status === 'completed' && !bs.billedDate
       );
 
       // Calculate total unbilled amount
