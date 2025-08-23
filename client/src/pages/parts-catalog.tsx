@@ -13,7 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -62,20 +62,61 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
     resolver: zodResolver(PartFormSchema),
     defaultValues: {
       companyId: 3, // High Plains Property
-      name: part?.name || "",
-      description: part?.description || "",
-      price: part?.price || "0.00",
-      laborHours: part?.laborHours || "1.00",
-      sku: part?.sku || "",
-      category: part?.category || "",
-      material: part?.material || "",
-      size: part?.size || "",
-      brand: part?.brand || "",
-      fittingType: part?.fittingType || "",
-      detail: part?.detail || "",
-      isActive: part?.isActive ?? true,
+      name: "",
+      description: "",
+      price: "0.00",
+      cost: "",
+      laborHours: "1.00",
+      sku: "",
+      category: "",
+      material: "",
+      size: "",
+      brand: "",
+      fittingType: "",
+      detail: "",
+      isActive: true,
     },
   });
+
+  // Reset form when part changes (for editing)
+  useEffect(() => {
+    if (part) {
+      form.reset({
+        companyId: 3,
+        name: part.name || "",
+        description: part.description || "",
+        price: part.price?.toString() || "0.00",
+        cost: part.cost?.toString() || "",
+        laborHours: part.laborHours?.toString() || "1.00",
+        sku: part.sku || "",
+        category: part.category || "",
+        material: part.material || "",
+        size: part.size || "",
+        brand: part.brand || "",
+        fittingType: part.fittingType || "",
+        detail: part.detail || "",
+        isActive: part.isActive ?? true,
+      });
+    } else {
+      // Reset to empty form for adding new part
+      form.reset({
+        companyId: 3,
+        name: "",
+        description: "",
+        price: "0.00",
+        cost: "",
+        laborHours: "1.00",
+        sku: "",
+        category: "",
+        material: "",
+        size: "",
+        brand: "",
+        fittingType: "",
+        detail: "",
+        isActive: true,
+      });
+    }
+  }, [part, form]);
 
   const createPartMutation = useMutation({
     mutationFn: async (data: z.infer<typeof PartFormSchema>) => {
