@@ -3102,17 +3102,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Function to exchange authorization code for access tokens
   async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
-    // Use custom domain, deployed domain, or fallback to current domain
+    // Use exactly what's registered in QuickBooks app
     const host = req.get('host');
-    const protocol = 'https';
     let redirectUri;
     
     if (host?.includes('irrigopro.com')) {
-      redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
-    } else if (host?.includes('.replit.app')) {
-      redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
+      redirectUri = 'https://irrigopro.com/api/quickbooks/callback';
     } else {
-      redirectUri = `https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback`;
+      // Use the development callback for all non-production environments
+      redirectUri = 'https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback';
     }
     
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -3181,17 +3179,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const state = Math.random().toString(36).substring(2, 15);
-      // Use custom domain, deployed domain, or fallback to current domain
+      // Use exactly what's registered in QuickBooks app
       const host = req.get('host');
-      const protocol = 'https';
       let redirectUri;
       
       if (host?.includes('irrigopro.com')) {
-        redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
-      } else if (host?.includes('.replit.app')) {
-        redirectUri = `${protocol}://${host}/api/quickbooks/callback`;
+        redirectUri = 'https://irrigopro.com/api/quickbooks/callback';
       } else {
-        redirectUri = `https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback`;
+        // Use the development callback for all non-production environments
+        redirectUri = 'https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback';
       }
       
       // For development apps, use the app/connect path
