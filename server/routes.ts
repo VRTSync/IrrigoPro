@@ -3577,28 +3577,40 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         address: customer.BillAddr ? 
           `${customer.BillAddr.Line1 || ''} ${customer.BillAddr.City || ''} ${customer.BillAddr.CountrySubDivisionCode || ''} ${customer.BillAddr.PostalCode || ''}`.trim() 
           : ''
-      })).filter(customer => customer.email); // Only sync customers with email addresses
+      }));
+      
+      console.log(`After mapping: ${quickBooksCustomers.length} customers to process`);
+      console.log('Sample customer data:', quickBooksCustomers[0]);
+      
+      // Filter out customers without names, but allow missing emails
+      const validCustomers = quickBooksCustomers.filter(customer => customer.name && customer.name !== `Customer ${customer.qb_id}`);
 
       let syncedCount = 0;
       const results = [];
 
-      for (const qbCustomer of quickBooksCustomers) {
+      console.log(`Processing ${validCustomers.length} valid customers`);
+      
+      for (const qbCustomer of validCustomers) {
         try {
           // Check if customer already exists
           const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
           
           if (!existingCustomer) {
-            // Validate required fields before creating
-            if (!qbCustomer.name || !qbCustomer.email) {
-              console.log(`Skipping customer ${qbCustomer.qb_id}: missing required name or email`);
+            // Validate required fields before creating (name is required, email is optional)
+            if (!qbCustomer.name) {
+              console.log(`Skipping customer ${qbCustomer.qb_id}: missing required name`);
               results.push({ 
                 action: 'error', 
                 customer: qbCustomer, 
-                error: 'Missing required name or email' 
+                error: 'Missing required name' 
               });
               continue;
             }
 
+            // Get user's actual company ID to avoid foreign key errors
+            const user = req.user as any;
+            const userCompanyId = user?.companyId || 1; // Use user's company ID or default to 1
+            
             // Create new customer from QuickBooks data with QuickBooks ID mapping
             const newCustomer = await storage.createCustomer({
               name: qbCustomer.name,
@@ -3606,7 +3618,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               phone: qbCustomer.phone || '',
               address: qbCustomer.address || '',
               quickbooksId: qbCustomer.qb_id,
-              companyId: 3 // Use actual company ID from High Plains Property
+              companyId: userCompanyId
             });
             
             syncedCount++;

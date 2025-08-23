@@ -1,0 +1,125 @@
+Error syncing customer WWMM: error: insert or update on table "customers" violates foreign key constraint "customers_company_id_companies_id_fk"
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1345:74
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+at async DatabaseStorage.createCustomer (file:///home/runner/workspace/dist/index.js:2019:27)
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+at async file:///home/runner/workspace/dist/index.js:5903:33 {
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+length: 293,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+severity: 'ERROR',
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+code: '23503',
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+detail: 'Key (company_id)=(3) is not present in table "companies".',
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+hint: undefined,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+position: undefined,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+internalPosition: undefined,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+internalQuery: undefined,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+table: 'customers',
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+column: undefined,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+dataType: undefined,
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+routine: 'ri_ReportViolation'
+2025-08-22 21:13:42.65
+8d77e2f5
+User
+}
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+Error syncing customer Yorktown HOA: error: insert or update on table "customers" violates foreign key constraint "customers_company_id_companies_id_fk"
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1345:74
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+at async DatabaseStorage.createCustomer (file:///home/runner/workspace/dist/index.js:2019:27)
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+severity: 'ERROR',
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+code: '23503',
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+hint: undefined,
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+position: undefined,
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+internalQuery: undefined,
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+where: undefined,
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+constraint: 'customers_company_id_companies_id_fk',
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+file: 'ri_triggers.c',
+2025-08-22 21:13:42.74
+8d77e2f5
+User
+line: '2608',
