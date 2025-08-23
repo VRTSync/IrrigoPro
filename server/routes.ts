@@ -2200,7 +2200,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get popular parts (frequently used) - this must come before /api/parts/:id
   app.get("/api/parts/popular", async (req, res) => {
     try {
-      const companyId = 1; // Default company ID - in real app this would come from user session
+      const userCompanyId = req.headers['x-user-company-id'];
+      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
       const limit = parseInt(req.query.limit as string) || 10;
       const popularParts = await storage.getPopularParts(companyId, limit);
       res.json(popularParts);
@@ -2496,8 +2497,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             partData.laborHours = 0.25; // Default 15 minutes
           }
 
-          // Add required fields for part creation
-          partData.companyId = 3; // Default company ID - in real app this would come from user session
+          // Add required fields for part creation - get company ID from request headers
+          const userCompanyId = req.headers['x-user-company-id'];
+          partData.companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
           partData.price = partData.price?.toString() || "0";
           partData.laborHours = partData.laborHours?.toString() || "0.25";
           
@@ -2536,7 +2538,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
         } catch (error) {
           console.error(`Row ${i + 1} validation error:`, error);
-          console.error(`Row ${i + 1} data:`, partData);
+          // Only log partData if it exists to avoid ReferenceError
+          if (typeof partData !== 'undefined') {
+            console.error(`Row ${i + 1} data:`, partData);
+          }
           
           if (error instanceof z.ZodError) {
             // Provide detailed validation errors
@@ -2582,7 +2587,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/parts/:id/track-usage", async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
-      const companyId = 1; // Default company ID - in real app this would come from user session
+      const userCompanyId = req.headers['x-user-company-id'];
+      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
       await storage.trackPartUsage(companyId, partId);
       res.json({ message: "Part usage tracked successfully" });
     } catch (error) {
@@ -3811,7 +3817,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             description: item.Description || '',
             price: (item.UnitPrice || 0).toString(),
             laborHours: 1.0, // Default labor hours
-            companyId: 3, // Use actual company ID from High Plains Property
+            companyId: req.headers['x-user-company-id'] ? parseInt(req.headers['x-user-company-id'] as string) : 1, // Use actual company ID from user session
             quickbooksId: item.Id
           };
 
