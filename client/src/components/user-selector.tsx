@@ -63,7 +63,7 @@ export function UserSelector({ onUserSelect, currentUser }: UserSelectorProps) {
       case 'company_admin':
         return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Company Admin</Badge>;
       case 'irrigation_manager':
-        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Manager</Badge>;
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Irrigation Manager</Badge>;
       case 'billing_manager':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Billing Manager</Badge>;
       case 'field_tech':

@@ -392,7 +392,7 @@ export default function CompanyUserManagement() {
       case "company_admin":
         return "Company Admin";
       case "irrigation_manager":
-        return "Manager";
+        return "Irrigation Manager";
       case "field_tech":
         return "Field Tech";
       case "billing_manager":
