@@ -577,12 +577,12 @@ export default function PartsCatalog() {
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-blue-600 hover:bg-blue-600 border-b border-blue-700">
-                            <TableHead className="font-semibold text-white">Part Name</TableHead>
-                            <TableHead className="font-semibold text-white">Description</TableHead>
-                            <TableHead className="font-semibold text-white text-right">Cost</TableHead>
-                            <TableHead className="font-semibold text-white text-right">Price</TableHead>
-                            <TableHead className="font-semibold text-white text-center">Labor</TableHead>
-                            <TableHead className="font-semibold text-white text-right">Actions</TableHead>
+                            <TableHead className="font-semibold text-white text-sm py-2">Part Name</TableHead>
+                            <TableHead className="font-semibold text-white text-sm py-2">Description</TableHead>
+                            <TableHead className="font-semibold text-white text-sm py-2 text-right">Cost</TableHead>
+                            <TableHead className="font-semibold text-white text-sm py-2 text-right">Price</TableHead>
+                            <TableHead className="font-semibold text-white text-sm py-2 text-center">Labor</TableHead>
+                            <TableHead className="font-semibold text-white text-sm py-2 text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -597,56 +597,56 @@ export default function PartsCatalog() {
                                   : 'bg-gray-50 dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-blue-950/30'
                               }`}
                             >
-                              <TableCell className="py-4">
-                                <div className="font-medium text-base leading-tight">{part.name}</div>
+                              <TableCell className="py-3">
+                                <div className="font-medium text-sm leading-tight">{part.name}</div>
                               </TableCell>
-                              <TableCell className="py-4">
-                                <div className="text-sm text-muted-foreground max-w-md">
+                              <TableCell className="py-3">
+                                <div className="text-xs text-muted-foreground max-w-md">
                                   {part.description || 'No description available'}
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4 text-right">
+                              <TableCell className="py-3 text-right">
                                 <div className="flex items-center justify-end gap-1">
-                                  <DollarSign className="h-4 w-4 text-orange-600" />
-                                  <span className="font-semibold text-lg text-orange-700 dark:text-orange-400">
+                                  <DollarSign className="h-3 w-3 text-orange-600" />
+                                  <span className="font-semibold text-sm text-orange-700 dark:text-orange-400">
                                     {part.cost ? formatCurrency(part.cost) : '-'}
                                   </span>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4 text-right">
+                              <TableCell className="py-3 text-right">
                                 <div className="flex items-center justify-end gap-1">
-                                  <DollarSign className="h-4 w-4 text-green-600" />
-                                  <span className="font-semibold text-lg text-green-700 dark:text-green-400">
+                                  <DollarSign className="h-3 w-3 text-green-600" />
+                                  <span className="font-semibold text-sm text-green-700 dark:text-green-400">
                                     {formatCurrency(part.price)}
                                   </span>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4 text-center">
+                              <TableCell className="py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  <Clock className="h-4 w-4 text-blue-600" />
-                                  <span className="font-medium text-blue-700 dark:text-blue-400">
+                                  <Clock className="h-3 w-3 text-blue-600" />
+                                  <span className="font-medium text-xs text-blue-700 dark:text-blue-400">
                                     {part.laborHours}h
                                   </span>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-4 text-right">
+                              <TableCell className="py-3 text-right">
                                 <div className="flex justify-end gap-1">
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900 dark:hover:text-blue-300"
+                                    className="hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900 dark:hover:text-blue-300 h-7 px-2"
                                     onClick={() => handleEditPart(part)}
                                   >
-                                    <Edit className="h-4 w-4" />
+                                    <Edit className="h-3 w-3" />
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900 dark:hover:text-red-300"
+                                    className="hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900 dark:hover:text-red-300 h-7 px-2"
                                     onClick={() => deletePartMutation.mutate(part.id)}
                                     disabled={deletePartMutation.isPending}
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    <Trash2 className="h-3 w-3" />
                                   </Button>
                                 </div>
                               </TableCell>
