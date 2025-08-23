@@ -2341,6 +2341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log('Enhanced format detected:', isEnhancedFormat);
       console.log('Column mappings provided:', !!columnMappings);
+      console.log('Processing', lines.length - 1, 'data rows');
       
       let fieldMappings: { [key: string]: string } = {};
       
@@ -2511,7 +2512,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
 
-          // Validate part data
+          // Validate required fields before schema validation
+          if (!partData.name || partData.name.trim() === '') {
+            results.errors.push({
+              row: i + 1,
+              field: 'name',
+              message: 'Part name is required and cannot be empty'
+            });
+            continue;
+          }
+
+          if (!partData.category || partData.category.trim() === '') {
+            partData.category = 'General'; // Set default category
+          }
+
+          // Validate part data with better error handling
           const validatedData = insertPartSchema.parse(partData);
           
           // Create part
@@ -2520,13 +2535,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           existingNames.add(partData.name.toLowerCase());
           
         } catch (error) {
-          results.errors.push({
-            row: i + 1,
-            field: 'general',
-            message: error instanceof z.ZodError 
-              ? error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
-              : 'Invalid data format'
-          });
+          console.error(`Row ${i + 1} validation error:`, error);
+          console.error(`Row ${i + 1} data:`, partData);
+          
+          if (error instanceof z.ZodError) {
+            // Provide detailed validation errors
+            const errorMessages = error.errors.map(e => {
+              const field = e.path.join('.');
+              return `${field}: ${e.message} (received: ${JSON.stringify(e.input)})`;
+            });
+            results.errors.push({
+              row: i + 1,
+              field: error.errors[0]?.path[0] || 'general',
+              message: errorMessages.join(', ')
+            });
+          } else {
+            results.errors.push({
+              row: i + 1,
+              field: 'general',
+              message: `Import error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            });
+          }
         }
       }
 
