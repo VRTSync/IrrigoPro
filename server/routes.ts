@@ -3358,6 +3358,74 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Add alias for status endpoint
+  app.get("/api/quickbooks/status", async (req, res) => {
+    try {
+      // Get user's company ID from session
+      const user = req.user as any;
+      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      
+      // Get from database for this user's company
+      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
+      console.log("QuickBooks status for company", userCompanyId, ":", qbStatus);
+      
+      res.json(qbStatus);
+    } catch (error) {
+      console.error("Error getting QuickBooks status:", error);
+      res.status(500).json({ 
+        companyId: null,
+        companyName: null,
+        isConnected: false,
+        lastSync: null,
+        error: "Failed to check QuickBooks status"
+      });
+    }
+  });
+
+  app.get("/api/quickbooks/customers", async (req, res) => {
+    try {
+      // Get user's company ID
+      const user = req.user as any;
+      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      
+      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
+      
+      if (!qbStatus.isConnected) {
+        return res.json([]);
+      }
+
+      // Get actual QuickBooks integration data
+      const integration = await storage.getQuickBooksIntegration(userCompanyId);
+      
+      if (!integration || !integration.accessToken) {
+        return res.json([]);
+      }
+
+      // Fetch customers from QuickBooks API
+      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+      
+      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
+        headers: {
+          'Authorization': `Bearer ${integration.accessToken}`,
+          'Accept': 'application/json'
+        }
+      }, 'Customers Query');
+
+      if (!customersResponse.ok) {
+        console.error('Failed to fetch customers from QuickBooks:', customersResponse.status);
+        return res.json([]);
+      }
+
+      const qbData = await customersResponse.json();
+      const qbCustomers = qbData?.QueryResponse?.Customer || [];
+      
+      res.json(qbCustomers);
+    } catch (error) {
+      console.error("Error fetching QuickBooks customers:", error);
+      res.json([]);
+    }
+  });
+
   app.get("/api/quickbooks/connection", async (req, res) => {
     try {
       // In a real implementation, you would check stored tokens and validate them
