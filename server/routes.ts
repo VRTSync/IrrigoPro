@@ -3358,6 +3358,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Clear QuickBooks connection (for reconnecting)
+  app.post("/api/quickbooks/disconnect", async (req, res) => {
+    try {
+      const user = req.user as any;
+      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      
+      // Remove QuickBooks integration for this company
+      await storage.disconnectQuickBooks();
+      
+      res.json({ 
+        success: true, 
+        message: "QuickBooks connection cleared successfully. You can now reconnect." 
+      });
+    } catch (error) {
+      console.error("Error clearing QuickBooks connection:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: "Failed to clear QuickBooks connection" 
+      });
+    }
+  });
+
   // Add alias for status endpoint
   app.get("/api/quickbooks/status", async (req, res) => {
     try {
@@ -3414,7 +3436,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }, 'Customers Query');
 
       if (!customersResponse.ok) {
-        console.error('Failed to fetch customers from QuickBooks:', customersResponse.status);
+        const errorText = await customersResponse.text();
+        const customersTid = customersResponse.headers.get('intuit_tid');
+        console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
+        
+        // Handle 403 authorization errors
+        if (customersResponse.status === 403) {
+          console.error('QuickBooks authorization failed - connection needs to be re-established');
+        }
+        
         return res.json([]);
       }
 
@@ -3509,6 +3539,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const errorText = await customersResponse.text();
         const customersTid = customersResponse.headers.get('intuit_tid');
         console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
+        
+        // Handle 403 authorization errors specifically
+        if (customersResponse.status === 403) {
+          return res.status(403).json({ 
+            success: false, 
+            message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.",
+            errorCode: "AUTHORIZATION_FAILED",
+            needsReconnection: true
+          });
+        }
+        
         return res.status(500).json({ 
           success: false, 
           message: `Failed to fetch customers from QuickBooks: ${customersResponse.status}${customersTid ? ` [TID: ${customersTid}]` : ''}` 
