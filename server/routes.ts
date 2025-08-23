@@ -1561,8 +1561,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let quickbooksError = null;
 
       try {
-        // Get QuickBooks integration data
-        const integration = await storage.getQuickBooksIntegration();
+        // Get QuickBooks integration data for this user's company
+        const user = req.user as any;
+        const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+        const integration = await storage.getQuickBooksIntegration(userCompanyId);
         if (integration && integration.accessToken) {
           console.log("Creating invoice in QuickBooks...");
           
@@ -3184,13 +3186,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           lastSync: new Date()
         };
 
-        // Save to database instead of session
+        // Save to database instead of session - use the user's actual company ID, not the QuickBooks realm ID
         console.log("Saving QuickBooks integration with realmId:", realmId);
+        
+        // Get user's company ID from the current session
+        const user = req.user as any;
+        const userCompanyId = user?.companyId ? user.companyId.toString() : realmId as string;
+        
         await storage.saveQuickBooksIntegration({
-          companyId: realmId as string,
+          companyId: userCompanyId, // Use the user's IrrigoPro company ID, not QB realm ID
           accessToken: qbData.accessToken,
           refreshToken: qbData.refreshToken,
-          realmId: realmId as string,
+          realmId: realmId as string, // Keep QB realm ID for API calls
           expiresAt: qbData.expiresAt
         });
 
@@ -3310,26 +3317,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
       
-      // Get from database instead of session
-      const qbStatus = await storage.getQuickBooksCustomerStatus();
-      if (qbStatus.isConnected) {
-        res.json({
-          companyId: qbStatus.companyName,
-          companyName: qbStatus.companyName,
-          isConnected: true,
-          lastSync: qbStatus.lastSync
-        });
-      } else {
-        res.json({
-          isConnected: false,
-          companyId: null,
-          companyName: null,
-          lastSync: null
-        });
-      }
+      // Get user's company ID from session
+      const user = req.user as any;
+      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      
+      // Get from database for this user's company
+      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
+      console.log("QuickBooks status for company", userCompanyId, ":", qbStatus);
+      
+      res.json(qbStatus);
     } catch (error) {
-      console.error("QuickBooks connection check error:", error);
-      res.status(500).json({ message: "Failed to get QuickBooks connection status" });
+      console.error("Error getting QuickBooks connection status:", error);
+      res.status(500).json({ 
+        companyId: null,
+        companyName: null,
+        isConnected: false,
+        lastSync: null,
+        error: "Failed to check QuickBooks connection status"
+      });
     }
   });
 
@@ -3337,7 +3342,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       console.log("Starting QuickBooks customer sync...");
       
-      const qbStatus = await storage.getQuickBooksCustomerStatus();
+      // Get user's company ID
+      const user = req.user as any;
+      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      
+      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
       console.log("QuickBooks status:", qbStatus);
       
       if (!qbStatus.isConnected) {
@@ -3346,7 +3355,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Get actual QuickBooks integration data
-      const integration = await storage.getQuickBooksIntegration();
+      const integration = await storage.getQuickBooksIntegration(userCompanyId);
       console.log("QuickBooks integration data available:", !!integration);
       
       if (!integration || !integration.accessToken) {

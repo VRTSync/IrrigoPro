@@ -1119,9 +1119,15 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getQuickBooksIntegration(): Promise<any | null> {
+  async getQuickBooksIntegration(companyId?: string): Promise<any | null> {
     try {
-      const integration = await db.select().from(quickbooksIntegration).limit(1);
+      let query = db.select().from(quickbooksIntegration);
+      
+      if (companyId) {
+        query = query.where(eq(quickbooksIntegration.companyId, companyId));
+      }
+      
+      const integration = await query.limit(1);
       return integration.length > 0 ? integration[0] : null;
     } catch (error) {
       console.error('Error getting QuickBooks integration:', error);
@@ -1129,9 +1135,15 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
-    // Check if QuickBooks integration exists
-    const integration = await db.select().from(quickbooksIntegration).limit(1);
+  async getQuickBooksCustomerStatus(companyId?: string): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
+    // Check if QuickBooks integration exists for this company
+    let integration;
+    if (companyId) {
+      integration = await db.select().from(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId)).limit(1);
+    } else {
+      integration = await db.select().from(quickbooksIntegration).limit(1);
+    }
+    
     const allCustomers = await db.select().from(customers);
     
     if (integration.length === 0) {
