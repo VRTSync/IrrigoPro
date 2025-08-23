@@ -1991,9 +1991,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           // Create part object from CSV row using field mappings
           const partData: any = {};
-          if (i <= 3) { // Log first few rows for debugging
-            console.log(`Row ${i} data:`, rowData);
-          }
+
           
           Object.entries(fieldMappings).forEach(([csvIndex, dbField]) => {
             const value = rowData[parseInt(csvIndex)] || '';

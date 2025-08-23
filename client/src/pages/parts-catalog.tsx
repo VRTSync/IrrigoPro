@@ -564,8 +564,7 @@ export default function PartsCatalog() {
                         <TableHeader>
                           <TableRow className="bg-blue-600 hover:bg-blue-600 border-b border-blue-700">
                             <TableHead className="font-semibold text-white">Part Name</TableHead>
-                            <TableHead className="font-semibold text-white">SKU</TableHead>
-                            <TableHead className="font-semibold text-white">Specifications</TableHead>
+                            <TableHead className="font-semibold text-white">Description</TableHead>
                             <TableHead className="font-semibold text-white text-right">Price</TableHead>
                             <TableHead className="font-semibold text-white text-center">Labor</TableHead>
                             <TableHead className="font-semibold text-white text-right">Actions</TableHead>
@@ -584,42 +583,11 @@ export default function PartsCatalog() {
                               }`}
                             >
                               <TableCell className="py-4">
-                                <div className="space-y-1">
-                                  <div className="font-medium text-base leading-tight">{part.name}</div>
-                                  {part.description && (
-                                    <div className="text-sm text-muted-foreground line-clamp-1 max-w-xs">
-                                      {part.description}
-                                    </div>
-                                  )}
-                                </div>
+                                <div className="font-medium text-base leading-tight">{part.name}</div>
                               </TableCell>
                               <TableCell className="py-4">
-                                <code className="px-2 py-1 bg-muted rounded text-sm font-mono">
-                                  {part.sku}
-                                </code>
-                              </TableCell>
-                              <TableCell className="py-4">
-                                <div className="flex flex-wrap gap-1 max-w-sm">
-                                  {part.material && (
-                                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                                      {part.material}
-                                    </Badge>
-                                  )}
-                                  {part.size && (
-                                    <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                      {part.size}
-                                    </Badge>
-                                  )}
-                                  {part.brand && (
-                                    <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
-                                      {part.brand}
-                                    </Badge>
-                                  )}
-                                  {part.fittingType && (
-                                    <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
-                                      {part.fittingType}
-                                    </Badge>
-                                  )}
+                                <div className="text-sm text-muted-foreground max-w-md">
+                                  {part.description || 'No description available'}
                                 </div>
                               </TableCell>
                               <TableCell className="py-4 text-right">
@@ -671,11 +639,8 @@ export default function PartsCatalog() {
                     {categoryParts.map((part) => (
                       <Card key={part.id} className="p-4 shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-blue-500">
                         <div className="flex justify-between items-start mb-3">
-                          <div className="flex-1 space-y-1">
+                          <div className="flex-1">
                             <h3 className="font-semibold text-base leading-tight">{part.name}</h3>
-                            <code className="inline-block px-2 py-1 bg-muted rounded text-xs font-mono">
-                              {part.sku}
-                            </code>
                           </div>
                           <div className="flex gap-1 ml-3">
                             <Button
