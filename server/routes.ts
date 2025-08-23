@@ -1933,10 +1933,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const csvHeaders = parseCSVLine(lines[0]);
       
-      // Use column mappings if provided, otherwise fall back to old behavior
+      // Auto-detect enhanced CSV format and use intelligent processing
+      const isEnhancedFormat = csvHeaders.includes('Part Type') && 
+                              csvHeaders.includes('Product/Service Name') && 
+                              csvHeaders.includes('Price');
+      
       let fieldMappings: { [key: string]: string } = {};
       
-      if (columnMappings && Array.isArray(columnMappings)) {
+      if (isEnhancedFormat && !columnMappings) {
+        // Enhanced format detected - use intelligent auto-mapping
+        console.log('Enhanced CSV format detected - using intelligent processing');
+        fieldMappings = {
+          [csvHeaders.indexOf('Part Type')]: 'category',
+          [csvHeaders.indexOf('Product/Service Name')]: 'name',
+          [csvHeaders.indexOf('Price')]: 'price',
+          [csvHeaders.indexOf('Sales Description')]: 'description'
+        };
+        
+        // Add optional fields if they exist
+        if (csvHeaders.includes('Cost')) {
+          fieldMappings[csvHeaders.indexOf('Cost')] = 'cost';
+        }
+        if (csvHeaders.includes('Material')) {
+          fieldMappings[csvHeaders.indexOf('Material')] = 'material';
+        }
+        if (csvHeaders.includes('Size')) {
+          fieldMappings[csvHeaders.indexOf('Size')] = 'size';
+        }
+        if (csvHeaders.includes('Brand')) {
+          fieldMappings[csvHeaders.indexOf('Brand')] = 'brand';
+        }
+        if (csvHeaders.includes('Fitting Type')) {
+          fieldMappings[csvHeaders.indexOf('Fitting Type')] = 'fitting_type';
+        }
+        if (csvHeaders.includes('Detail')) {
+          fieldMappings[csvHeaders.indexOf('Detail')] = 'detail';
+        }
+        if (csvHeaders.includes('SKU')) {
+          fieldMappings[csvHeaders.indexOf('SKU')] = 'sku';
+        }
+        
+      } else if (columnMappings && Array.isArray(columnMappings)) {
         // Create mapping from CSV column index to database field
         columnMappings.forEach((mapping: any) => {
           const csvIndex = csvHeaders.indexOf(mapping.csvColumn);

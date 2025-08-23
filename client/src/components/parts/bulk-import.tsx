@@ -103,28 +103,42 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
         setCsvHeaders(headers);
         setCsvPreview(preview);
         
-        // Auto-map columns based on common names
-        const autoMappings = headers.map(header => {
-          const lowerHeader = header.toLowerCase();
-          let dbField = 'skip';
-          
-          if (lowerHeader.includes('name') || lowerHeader.includes('part')) dbField = 'name';
-          else if (lowerHeader.includes('category')) dbField = 'category';
-          else if (lowerHeader.includes('price') || lowerHeader.includes('cost')) dbField = 'price';
-          else if (lowerHeader.includes('material')) dbField = 'material';
-          else if (lowerHeader.includes('size')) dbField = 'size';
-          else if (lowerHeader.includes('brand')) dbField = 'brand';
-          else if (lowerHeader.includes('fitting')) dbField = 'fitting_type';
-          else if (lowerHeader.includes('detail')) dbField = 'detail';
-          else if (lowerHeader.includes('description')) dbField = 'description';
-          else if (lowerHeader.includes('sku')) dbField = 'sku';
-          else if (lowerHeader.includes('labor') || lowerHeader.includes('hour')) dbField = 'laborHours';
-          
-          return { csvColumn: header, dbField };
-        });
+        // Check if this is the enhanced CSV format
+        const isEnhancedFormat = headers.includes('Part Type') && 
+                                headers.includes('Product/Service Name') && 
+                                headers.includes('Price');
         
-        setColumnMappings(autoMappings);
-        setShowColumnMapping(true);
+        if (isEnhancedFormat) {
+          // Skip column mapping for enhanced format - it will be processed automatically
+          setShowColumnMapping(false);
+          toast({
+            title: "Enhanced format detected",
+            description: "Your CSV will be processed automatically with intelligent categorization",
+          });
+        } else {
+          // Auto-map columns based on common names for standard format
+          const autoMappings = headers.map(header => {
+            const lowerHeader = header.toLowerCase();
+            let dbField = 'skip';
+            
+            if (lowerHeader.includes('name') || lowerHeader.includes('part')) dbField = 'name';
+            else if (lowerHeader.includes('category')) dbField = 'category';
+            else if (lowerHeader.includes('price') || lowerHeader.includes('cost')) dbField = 'price';
+            else if (lowerHeader.includes('material')) dbField = 'material';
+            else if (lowerHeader.includes('size')) dbField = 'size';
+            else if (lowerHeader.includes('brand')) dbField = 'brand';
+            else if (lowerHeader.includes('fitting')) dbField = 'fitting_type';
+            else if (lowerHeader.includes('detail')) dbField = 'detail';
+            else if (lowerHeader.includes('description')) dbField = 'description';
+            else if (lowerHeader.includes('sku')) dbField = 'sku';
+            else if (lowerHeader.includes('labor') || lowerHeader.includes('hour')) dbField = 'laborHours';
+            
+            return { csvColumn: header, dbField };
+          });
+          
+          setColumnMappings(autoMappings);
+          setShowColumnMapping(true);
+        }
       };
       reader.readAsText(selectedFile);
     } else {
