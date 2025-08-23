@@ -152,10 +152,9 @@ export default function CustomerBilling() {
   // Preview Invoice Mutation
   const previewInvoiceMutation = useMutation({
     mutationFn: async (customerId: number) => {
-      const response = await apiRequest("POST", "/api/invoices/preview", {
+      return await apiRequest("/api/invoices/preview", "POST", {
         customerId
       });
-      return response;
     },
     onSuccess: (data) => {
       setPreviewInvoiceData(data);
@@ -173,10 +172,9 @@ export default function CustomerBilling() {
   // Create Invoice Mutation (after preview confirmation)
   const createInvoiceMutation = useMutation({
     mutationFn: async (customerId: number) => {
-      const response = await apiRequest("POST", "/api/invoices/monthly", {
+      return await apiRequest("/api/invoices/monthly", "POST", {
         customerId
       });
-      return response;
     },
     onSuccess: (data, customerId) => {
       setShowInvoicePreview(false);
