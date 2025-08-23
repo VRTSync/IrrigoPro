@@ -1944,7 +1944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let fieldMappings: { [key: string]: string } = {};
       
-      if (isEnhancedFormat && (!columnMappings || columnMappings.length === 0)) {
+      if (isEnhancedFormat && (!columnMappings || !Array.isArray(columnMappings) || columnMappings.length === 0)) {
         // Enhanced format detected - use intelligent auto-mapping
         console.log('Enhanced CSV format detected - using intelligent processing');
         fieldMappings = {

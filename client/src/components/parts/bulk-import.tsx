@@ -171,10 +171,21 @@ Drip Emitter,Head,0.85,Plastic,2GPH,NETAFIM,Barbed,Self-flushing,Pressure compen
         setProgress((prev) => Math.min(prev + 10, 90));
       }, 200);
 
-      const response = await apiRequest("/api/parts/bulk-import", "POST", { 
-        csvData: data,
-        columnMappings: mappings || columnMappings
-      });
+      // Check if this is enhanced format to avoid sending empty mappings
+      const lines = data.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      const isEnhancedFormat = headers.includes('Part Type') && 
+                              headers.includes('Product/Service Name') && 
+                              headers.includes('Price');
+      
+      const requestData: any = { csvData: data };
+      
+      // Only send column mappings for non-enhanced formats
+      if (!isEnhancedFormat && (mappings || columnMappings)) {
+        requestData.columnMappings = mappings || columnMappings;
+      }
+
+      const response = await apiRequest("/api/parts/bulk-import", "POST", requestData);
 
       clearInterval(progressInterval);
       setProgress(100);
