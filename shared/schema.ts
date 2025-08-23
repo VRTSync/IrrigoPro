@@ -482,8 +482,19 @@ export const insertPartSchema = createInsertSchema(parts).omit({
   createdAt: true, 
   updatedAt: true 
 }).extend({
-  price: z.string().min(0, "Price must be positive"),
-  laborHours: z.string().min(0, "Labor hours must be positive"),
+  price: z.union([z.string(), z.number()]).transform(val => {
+    const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]/g, '')) : val;
+    return isNaN(num) ? 0 : num;
+  }),
+  cost: z.union([z.string(), z.number(), z.null()]).transform(val => {
+    if (val === null || val === undefined || val === '') return null;
+    const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]/g, '')) : val;
+    return isNaN(num) ? null : num;
+  }).optional(),
+  laborHours: z.union([z.string(), z.number()]).transform(val => {
+    const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]/g, '')) : val;
+    return isNaN(num) ? 1.0 : num;
+  }),
 });
 export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true });
 export const insertEstimateZoneSchema = createInsertSchema(estimateZones).omit({ id: true });
