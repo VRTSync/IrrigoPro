@@ -2946,9 +2946,40 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     res.sendFile('check-domain.html', { root: '.' });
   });
 
-  // Helper function to make QuickBooks API requests with intuit_tid capture
+  // Function to refresh QuickBooks token
+  async function refreshQuickBooksToken(refreshToken: string) {
+    const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
+    const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
+    
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    });
+
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authHeader}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: body.toString()
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Token refresh failed:', response.status, errorText);
+      throw new Error(`Token refresh failed: ${response.status} ${errorText}`);
+    }
+
+    const tokenData = await response.json();
+    console.log('Successfully refreshed QuickBooks token');
+    return tokenData;
+  }
+
+  // Helper function to make QuickBooks API requests with intuit_tid capture and automatic token refresh
   async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = ''): Promise<Response> {
-    const response = await fetch(url, options);
+    let response = await fetch(url, options);
     
     // Always capture intuit_tid from response headers
     const intuitTid = response.headers.get('intuit_tid');
@@ -2956,6 +2987,45 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log(`QuickBooks API Transaction ID (${operation || 'Request'}):`, intuitTid);
       // Enhanced logging: also log to our centralized logger if available
       console.log(`[QUICKBOOKS_TID] ${operation}: ${intuitTid}`);
+    }
+    
+    // If we get a 401 (token expired), try to refresh the token and retry
+    if (response.status === 401) {
+      console.log('QuickBooks token expired, attempting to refresh...');
+      try {
+        const integration = await storage.getQuickBooksIntegration();
+        if (integration && integration.refreshToken) {
+          const newTokenData = await refreshQuickBooksToken(integration.refreshToken);
+          
+          // Update the stored integration with new tokens
+          await storage.saveQuickBooksIntegration({
+            companyId: integration.companyId,
+            accessToken: newTokenData.access_token,
+            refreshToken: newTokenData.refresh_token || integration.refreshToken, // Keep old refresh token if new one not provided
+            realmId: integration.realmId,
+            expiresAt: new Date(Date.now() + (newTokenData.expires_in * 1000))
+          });
+          
+          // Retry the original request with the new token
+          const updatedOptions = { ...options };
+          if (updatedOptions.headers) {
+            (updatedOptions.headers as any)['Authorization'] = `Bearer ${newTokenData.access_token}`;
+          }
+          
+          console.log('Retrying request with refreshed token...');
+          response = await fetch(url, updatedOptions);
+          
+          // Update intuit_tid from retry
+          const retryIntuitTid = response.headers.get('intuit_tid');
+          if (retryIntuitTid) {
+            console.log(`QuickBooks API Transaction ID (${operation} - Retry):`, retryIntuitTid);
+            console.log(`[QUICKBOOKS_TID] ${operation} - Retry: ${retryIntuitTid}`);
+          }
+        }
+      } catch (refreshError) {
+        console.error('Failed to refresh QuickBooks token:', refreshError);
+        // Return the original 401 response if refresh fails
+      }
     }
     
     // Enhanced error logging with transaction ID
