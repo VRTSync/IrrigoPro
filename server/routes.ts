@@ -1585,8 +1585,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (integration && integration.accessToken) {
           console.log("Creating invoice in QuickBooks...");
           
-          // Use sandbox or production API based on environment
-          const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+          // Use production QuickBooks API for deployment, sandbox for development
+          const apiBase = process.env.NODE_ENV === 'production' 
+            ? 'https://quickbooks.api.intuit.com' 
+            : 'https://sandbox-quickbooks.api.intuit.com';
           
           // Create detailed line items for QuickBooks
           const qbLineItems = [];
@@ -3144,8 +3146,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     
     // Get company info from QuickBooks API
     try {
-      // Use sandbox for development apps by default
-      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+      // Use production QuickBooks API for deployment, sandbox for development
+      const apiBase = process.env.NODE_ENV === 'production' 
+        ? 'https://quickbooks.api.intuit.com' 
+        : 'https://sandbox-quickbooks.api.intuit.com';
       const companyInfoResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${realmId}/companyinfo/${realmId}`, {
         headers: {
           'Authorization': `Bearer ${tokenData.access_token}`,
@@ -3397,8 +3401,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.json([]);
       }
 
-      // Fetch customers from QuickBooks API
-      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+      // Use production QuickBooks API for deployment, sandbox for development
+      const apiBase = process.env.NODE_ENV === 'production' 
+        ? 'https://quickbooks.api.intuit.com' 
+        : 'https://sandbox-quickbooks.api.intuit.com';
       
       const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
         headers: {
@@ -3487,8 +3493,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      // Fetch real customers from QuickBooks API - use sandbox for development
-      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+      // Use production QuickBooks API for deployment, sandbox for development
+      const apiBase = process.env.NODE_ENV === 'production' 
+        ? 'https://quickbooks.api.intuit.com' 
+        : 'https://sandbox-quickbooks.api.intuit.com';
       
       const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
         headers: {
@@ -3590,8 +3598,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      // Fetch inventory items from QuickBooks API
-      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
+      // Use production QuickBooks API for deployment, sandbox for development
+      const apiBase = process.env.NODE_ENV === 'production' 
+        ? 'https://quickbooks.api.intuit.com' 
+        : 'https://sandbox-quickbooks.api.intuit.com';
       
       const itemsResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Item WHERE Type = 'Inventory' AND Active = true`, {
         headers: {
