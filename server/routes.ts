@@ -1328,12 +1328,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
-      // Filter unbilled work
+      // Filter unbilled work (check if notes contain billing information)
       const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && (!wo.billingStatus || wo.billingStatus !== 'billed')
+        wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
       );
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'approved' && (!bs.billingStatus || bs.billingStatus !== 'billed')
+        bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
       );
 
       if (unbilledWorkOrders.length === 0 && unbilledBillingSheets.length === 0) {
@@ -1342,7 +1342,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create the consolidated monthly invoice
       const currentDate = new Date();
-      const invoiceNumber = `INV-${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${customerId.toString().padStart(4, '0')}`;
+      const invoiceNumber = `INV-${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}-${customerId.toString().padStart(4, '0')}-${Date.now().toString().slice(-4)}`;
       
       // Calculate totals - no markup on parts, tax only on labor
       const laborSubtotal = 
@@ -1409,8 +1409,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalPrice: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')
         });
 
-        // Update work order billing status
-        await storage.updateWorkOrder(workOrder.id, { billingStatus: 'billed' });
+        // Update work order to mark as billed (we'll use notes to track billing status)
+        const currentNotes = workOrder.notes || '';
+        const billingNote = `\n[BILLED: Invoice ${invoiceNumber} - ${currentDate.toLocaleDateString()}]`;
+        await storage.updateWorkOrder(workOrder.id, { 
+          notes: currentNotes + billingNote
+        });
       }
 
       // Create invoice items for billing sheets
@@ -1435,8 +1439,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalPrice: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')
         });
 
-        // Update billing sheet billing status
-        await storage.updateBillingSheet(billingSheet.id, { billingStatus: 'billed' });
+        // Update billing sheet to mark as billed (we'll use notes to track billing status)
+        const currentNotes = billingSheet.notes || '';
+        const billingNote = `\n[BILLED: Invoice ${invoiceNumber} - ${currentDate.toLocaleDateString()}]`;
+        await storage.updateBillingSheet(billingSheet.id, { 
+          notes: currentNotes + billingNote
+        });
       }
 
       res.json({

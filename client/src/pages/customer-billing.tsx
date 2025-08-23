@@ -31,13 +31,39 @@ import { apiRequest } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@shared/schema";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 
+// Extended interfaces for billing data with transformed fields
+interface BillingWorkOrder extends WorkOrder {
+  laborCost: number;
+  partsCost: number;
+  assignedTo: string;
+  description: string;
+  billedDate: Date | null;
+  completedDate: Date | null;
+}
+
+interface BillingBillingSheet extends BillingSheet {
+  laborCost: number;
+  partsCost: number;
+  description: string;
+  billedDate: Date | null;
+  completedDate: Date | null;
+}
+
+interface BillingEstimate extends Estimate {
+  laborCost: number;
+  partsCost: number;
+  description: string;
+  billedDate: Date | null;
+  completedDate: Date | null;
+}
+
 interface CustomerBillingData {
   customer: Customer;
-  workOrders: WorkOrder[];
-  billingSheets: BillingSheet[];
-  estimates: Estimate[];
-  unbilledWorkOrders: WorkOrder[];
-  unbilledBillingSheets: BillingSheet[];
+  workOrders: BillingWorkOrder[];
+  billingSheets: BillingBillingSheet[];
+  estimates: BillingEstimate[];
+  unbilledWorkOrders: BillingWorkOrder[];
+  unbilledBillingSheets: BillingBillingSheet[];
   totalUnbilledAmount: number;
 }
 
@@ -57,9 +83,9 @@ export default function CustomerBilling() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
-  const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingSheet | null>(null);
-  const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<BillingWorkOrder | null>(null);
+  const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingBillingSheet | null>(null);
+  const [selectedEstimate, setSelectedEstimate] = useState<BillingEstimate | null>(null);
   
   // Filter states
   const [dateFilter, setDateFilter] = useState<string>("last_30_days"); // Default to last 30 days
@@ -268,8 +294,14 @@ export default function CustomerBilling() {
     }).format(num);
   };
 
-  const formatDate = (date: string | Date) => {
+  const formatDate = (date: string | Date | null) => {
+    if (!date) return 'N/A';
     return new Date(date).toLocaleDateString();
+  };
+  
+  const formatDateWithOptions = (date: string | Date | null, options?: Intl.DateTimeFormatOptions) => {
+    if (!date) return 'N/A';
+    return new Date(date).toLocaleDateString('en-US', options);
   };
 
   const getStatusBadge = (status: string) => {
@@ -704,7 +736,7 @@ export default function CustomerBilling() {
               {filteredCustomers.map((customer) => {
                 const preview = getCustomerPreview(customer);
                 const daysSinceInvoice = preview.lastInvoiceDate 
-                  ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate).getTime()) / (1000 * 60 * 60 * 24))
+                  ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate!).getTime()) / (1000 * 60 * 60 * 24))
                   : null;
                 
                 return (
@@ -758,7 +790,7 @@ export default function CustomerBilling() {
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-500">Last invoiced:</span>
                           <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
-                            {new Date(preview.lastInvoiceDate).toLocaleDateString('en-US', { 
+                            {formatDateWithOptions(preview.lastInvoiceDate, { 
                               month: 'short', 
                               day: 'numeric' 
                             })}
@@ -933,7 +965,7 @@ export default function CustomerBilling() {
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                                     <div className="flex items-center gap-1">
                                       <Calendar className="w-3 h-3" />
-                                      {new Date(wo.scheduledDate).toLocaleDateString()}
+                                      {formatDate(wo.scheduledDate)}
                                     </div>
                                     {wo.assignedTo && (
                                       <div className="flex items-center gap-1">
@@ -975,7 +1007,7 @@ export default function CustomerBilling() {
                                         <div className="grid grid-cols-2 gap-4">
                                           <div>
                                             <h4 className="font-medium mb-1">Scheduled Date</h4>
-                                            <p className="text-sm text-gray-600">{new Date(wo.scheduledDate).toLocaleDateString()}</p>
+                                            <p className="text-sm text-gray-600">{formatDate(wo.scheduledDate)}</p>
                                           </div>
                                           <div>
                                             <h4 className="font-medium mb-1">Status</h4>
@@ -1022,7 +1054,7 @@ export default function CustomerBilling() {
                                   <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                                     <div className="flex items-center gap-1">
                                       <Calendar className="w-3 h-3" />
-                                      {new Date(bs.createdAt).toLocaleDateString()}
+                                      {formatDate(bs.workDate)}
                                     </div>
                                   </div>
                                 </div>
@@ -1058,7 +1090,7 @@ export default function CustomerBilling() {
                                         <div className="grid grid-cols-2 gap-4">
                                           <div>
                                             <h4 className="font-medium mb-1">Created Date</h4>
-                                            <p className="text-sm text-gray-600">{new Date(bs.createdAt).toLocaleDateString()}</p>
+                                            <p className="text-sm text-gray-600">{formatDate(bs.workDate)}</p>
                                           </div>
                                           <div>
                                             <h4 className="font-medium mb-1">Status</h4>
@@ -1120,7 +1152,7 @@ export default function CustomerBilling() {
                                 <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                                   <div className="flex items-center gap-1">
                                     <Calendar className="w-3 h-3" />
-                                    {new Date(wo.scheduledDate).toLocaleDateString()}
+                                    {formatDate(wo.scheduledDate)}
                                   </div>
                                   {wo.assignedTo && (
                                     <div className="flex items-center gap-1">
