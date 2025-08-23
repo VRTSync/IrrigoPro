@@ -43,9 +43,38 @@ export default function CustomerProfile() {
   }
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto p-4 max-w-4xl space-y-4 lg:space-y-6">
+      {/* Mobile Header */}
+      <div className="lg:hidden">
+        <Button 
+          variant="ghost" 
+          size="sm"
+          onClick={() => setLocation("/customers")}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Customers
+        </Button>
+        <div className="space-y-3">
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight">{customer.name}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="default">Active Customer</Badge>
+            {customer.quickbooksId && (
+              <Badge variant="outline">QuickBooks Synced</Badge>
+            )}
+          </div>
+          <Button 
+            onClick={() => setLocation(`/customers/${id}/site-map`)}
+            className="w-full bg-blue-600 hover:bg-blue-700"
+          >
+            <MapPin className="w-4 h-4 mr-2" />
+            View Site Map
+          </Button>
+        </div>
+      </div>
+
+      {/* Desktop Header */}
+      <div className="hidden lg:flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button 
             variant="ghost" 
@@ -58,9 +87,7 @@ export default function CustomerProfile() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">{customer.name}</h1>
             <div className="flex items-center gap-2 mt-1">
-              <Badge variant="default">
-                Active Customer
-              </Badge>
+              <Badge variant="default">Active Customer</Badge>
               {customer.quickbooksId && (
                 <Badge variant="outline">QuickBooks Synced</Badge>
               )}
@@ -68,7 +95,6 @@ export default function CustomerProfile() {
           </div>
         </div>
 
-        {/* Site Map Button */}
         <Button 
           onClick={() => setLocation(`/customers/${id}/site-map`)}
           className="bg-blue-600 hover:bg-blue-700"
@@ -87,7 +113,61 @@ export default function CustomerProfile() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid md:grid-cols-2 gap-6">
+          {/* Mobile Layout */}
+          <div className="lg:hidden space-y-6">
+            {/* Contact Information */}
+            <div className="space-y-4">
+              <h3 className="font-semibold text-gray-900 text-lg">Contact Details</h3>
+              
+              {customer.email && (
+                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                  <Mail className="w-5 h-5 text-blue-600" />
+                  <span className="text-sm font-medium">{customer.email}</span>
+                </div>
+              )}
+              
+              {customer.phone && (
+                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                  <Phone className="w-5 h-5 text-blue-600" />
+                  <span className="text-sm font-medium">{customer.phone}</span>
+                </div>
+              )}
+              
+              {customer.address && (
+                <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <MapPin className="w-5 h-5 text-blue-600 mt-0.5" />
+                  <span className="text-sm font-medium leading-relaxed">{customer.address}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Account Details */}
+            <div className="space-y-3">
+              <h3 className="font-semibold text-gray-900 text-lg">Account Details</h3>
+              
+              <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600 font-medium">Customer ID:</span>
+                  <span className="font-semibold text-gray-900">#{customer.id}</span>
+                </div>
+                
+                {customer.quickbooksId && (
+                  <div className="flex justify-between items-center border-t pt-3">
+                    <span className="text-gray-600 font-medium">QuickBooks ID:</span>
+                    <span className="font-semibold text-gray-900">{customer.quickbooksId}</span>
+                  </div>
+                )}
+                
+                <div className="flex justify-between items-center border-t pt-3">
+                  <span className="text-gray-600 font-medium">Status:</span>
+                  <span className="font-semibold text-green-600">Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop Layout */}
+          <div className="hidden lg:grid md:grid-cols-2 gap-6">
             {/* Contact Information */}
             <div className="space-y-3">
               <h3 className="font-semibold text-gray-900">Contact Details</h3>
@@ -151,18 +231,18 @@ export default function CustomerProfile() {
         </CardHeader>
         <CardContent>
           {customer.propertyNotes ? (
-            <div className="prose prose-sm max-w-none">
+            <div className="lg:prose lg:prose-sm max-w-none">
               <div 
-                className="whitespace-pre-wrap text-gray-700 leading-relaxed"
+                className="whitespace-pre-wrap text-gray-700 leading-relaxed text-sm lg:text-base p-4 lg:p-0 bg-gray-50 lg:bg-transparent rounded-lg lg:rounded-none"
                 style={{ wordBreak: 'break-word' }}
               >
                 {customer.propertyNotes}
               </div>
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p>No property notes available for this customer.</p>
+            <div className="text-center py-8 lg:py-12 text-gray-500">
+              <FileText className="w-10 h-10 lg:w-12 lg:h-12 mx-auto mb-3 opacity-50" />
+              <p className="text-sm lg:text-base">No property notes available for this customer.</p>
             </div>
           )}
         </CardContent>
@@ -174,7 +254,44 @@ export default function CustomerProfile() {
           <CardTitle>Quick Actions</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-3">
+          {/* Mobile Quick Actions */}
+          <div className="lg:hidden space-y-3">
+            <Button 
+              onClick={() => setLocation(`/customers/${id}/site-map`)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              size="lg"
+            >
+              <MapPin className="w-5 h-5 mr-2" />
+              View Site Map
+            </Button>
+            
+            {customer.phone && (
+              <Button 
+                variant="outline"
+                onClick={() => window.open(`tel:${customer.phone}`, '_self')}
+                className="w-full border-green-600 text-green-600 hover:bg-green-50"
+                size="lg"
+              >
+                <Phone className="w-5 h-5 mr-2" />
+                Call Customer
+              </Button>
+            )}
+            
+            {customer.email && (
+              <Button 
+                variant="outline"
+                onClick={() => window.open(`mailto:${customer.email}`, '_self')}
+                className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
+                size="lg"
+              >
+                <Mail className="w-5 h-5 mr-2" />
+                Email Customer
+              </Button>
+            )}
+          </div>
+
+          {/* Desktop Quick Actions */}
+          <div className="hidden lg:flex flex-wrap gap-3">
             <Button 
               variant="outline" 
               onClick={() => setLocation(`/customers/${id}/site-map`)}
