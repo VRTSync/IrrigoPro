@@ -207,7 +207,7 @@ export default function Navigation() {
                       My Account
                     </DropdownMenuItem>
                   </Link>
-                  <Link href="/user-selector">
+                  <Link href="/switch-user">
                     <DropdownMenuItem>
                       <User className="mr-2 h-4 w-4" />
                       Switch User
@@ -269,7 +269,7 @@ export default function Navigation() {
                       My Account
                     </DropdownMenuItem>
                   </Link>
-                  <Link href="/user-selector">
+                  <Link href="/switch-user">
                     <DropdownMenuItem>
                       <User className="mr-2 h-4 w-4" />
                       Switch User
