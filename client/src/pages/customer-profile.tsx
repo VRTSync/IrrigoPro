@@ -114,109 +114,55 @@ export default function CustomerProfile() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Mobile Layout */}
-          <div className="lg:hidden space-y-6">
-            {/* Contact Information */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-gray-900 text-lg">Contact Details</h3>
-              
-              {customer.email && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                  <Mail className="w-5 h-5 text-blue-600" />
-                  <span className="text-sm font-medium">{customer.email}</span>
-                </div>
-              )}
-              
-              {customer.phone && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                  <Phone className="w-5 h-5 text-blue-600" />
-                  <span className="text-sm font-medium">{customer.phone}</span>
-                </div>
-              )}
-              
-              {customer.address && (
-                <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                  <MapPin className="w-5 h-5 text-blue-600 mt-0.5" />
-                  <span className="text-sm font-medium leading-relaxed">{customer.address}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Account Details */}
-            <div className="space-y-3">
-              <h3 className="font-semibold text-gray-900 text-lg">Account Details</h3>
-              
-              <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 font-medium">Customer ID:</span>
-                  <span className="font-semibold text-gray-900">#{customer.id}</span>
-                </div>
-                
-                {customer.quickbooksId && (
-                  <div className="flex justify-between items-center border-t pt-3">
-                    <span className="text-gray-600 font-medium">QuickBooks ID:</span>
-                    <span className="font-semibold text-gray-900">{customer.quickbooksId}</span>
-                  </div>
-                )}
-                
-                <div className="flex justify-between items-center border-t pt-3">
-                  <span className="text-gray-600 font-medium">Status:</span>
-                  <span className="font-semibold text-green-600">Active</span>
-                </div>
+          <div className="lg:hidden space-y-4">
+            <h3 className="font-semibold text-gray-900 text-lg">Contact Details</h3>
+            
+            {customer.email && (
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <Mail className="w-5 h-5 text-blue-600" />
+                <span className="text-sm font-medium">{customer.email}</span>
               </div>
-            </div>
+            )}
+            
+            {customer.phone && (
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <Phone className="w-5 h-5 text-blue-600" />
+                <span className="text-sm font-medium">{customer.phone}</span>
+              </div>
+            )}
+            
+            {customer.address && (
+              <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                <MapPin className="w-5 h-5 text-blue-600 mt-0.5" />
+                <span className="text-sm font-medium leading-relaxed">{customer.address}</span>
+              </div>
+            )}
           </div>
 
           {/* Desktop Layout */}
-          <div className="hidden lg:grid md:grid-cols-2 gap-6">
-            {/* Contact Information */}
-            <div className="space-y-3">
-              <h3 className="font-semibold text-gray-900">Contact Details</h3>
-              
-              {customer.email && (
-                <div className="flex items-center gap-3">
-                  <Mail className="w-4 h-4 text-gray-500" />
-                  <span className="text-sm">{customer.email}</span>
-                </div>
-              )}
-              
-              {customer.phone && (
-                <div className="flex items-center gap-3">
-                  <Phone className="w-4 h-4 text-gray-500" />
-                  <span className="text-sm">{customer.phone}</span>
-                </div>
-              )}
-              
-              {customer.address && (
-                <div className="flex items-start gap-3">
-                  <MapPin className="w-4 h-4 text-gray-500 mt-1" />
-                  <span className="text-sm">{customer.address}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Additional Information */}
-            <div className="space-y-3">
-              <h3 className="font-semibold text-gray-900">Account Details</h3>
-              
-              <div className="text-sm space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Customer ID:</span>
-                  <span className="font-medium">#{customer.id}</span>
-                </div>
-                
-                {customer.quickbooksId && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">QuickBooks ID:</span>
-                    <span className="font-medium">{customer.quickbooksId}</span>
-                  </div>
-                )}
-                
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Status:</span>
-                  <span className="font-medium text-green-600">Active</span>
-                </div>
+          <div className="hidden lg:block space-y-3">
+            <h3 className="font-semibold text-gray-900">Contact Details</h3>
+            
+            {customer.email && (
+              <div className="flex items-center gap-3">
+                <Mail className="w-4 h-4 text-gray-500" />
+                <span className="text-sm">{customer.email}</span>
               </div>
-            </div>
+            )}
+            
+            {customer.phone && (
+              <div className="flex items-center gap-3">
+                <Phone className="w-4 h-4 text-gray-500" />
+                <span className="text-sm">{customer.phone}</span>
+              </div>
+            )}
+            
+            {customer.address && (
+              <div className="flex items-start gap-3">
+                <MapPin className="w-4 h-4 text-gray-500 mt-1" />
+                <span className="text-sm">{customer.address}</span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
