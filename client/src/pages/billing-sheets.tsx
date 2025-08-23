@@ -7,8 +7,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import type { BillingSheet } from "@shared/schema";
 
 export default function BillingSheets() {
@@ -107,6 +108,38 @@ export default function BillingSheets() {
   );
 
 
+
+  // Delete billing sheet mutation
+  const deleteBillingSheet = useMutation({
+    mutationFn: async (billingSheetId: number) => {
+      const response = await fetch(`/api/billing-sheets/${billingSheetId}`, {
+        method: 'DELETE',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role 
+        }
+      });
+      if (!response.ok) throw new Error('Failed to delete billing sheet');
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Billing Sheet Deleted",
+        description: "Billing sheet has been successfully deleted",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete billing sheet",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Check if user can edit/delete billing sheets
+  const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager';
 
   // Billing sheet approval mutation
   const approveBillingSheet = useMutation({
@@ -322,6 +355,24 @@ export default function BillingSheets() {
                               Continue Draft
                             </Button>
                           )}
+                          
+                          {/* Delete button for company admin and billing manager on draft sheets */}
+                          {canEditDelete && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete draft billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) {
+                                  deleteBillingSheet.mutate(sheet.id);
+                                }
+                              }}
+                              className="border-red-300 text-red-600 hover:bg-red-50 px-3"
+                            >
+                              <Trash2 className="w-3 h-3 mr-1" />
+                              Delete Draft
+                            </Button>
+                          )}
+                          
                           <div className="text-xs text-gray-500">
                             Last saved: {formatDate(sheet.updatedAt)}
                           </div>
@@ -462,6 +513,34 @@ export default function BillingSheets() {
                           >
                             <X className="w-3 h-3 mr-1" />
                             Reject
+                          </Button>
+                        </div>
+                      )}
+                      
+                      {/* Edit and Delete buttons for company admin and billing manager */}
+                      {canEditDelete && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditingDraft(sheet)}
+                            className="border-blue-300 text-blue-600 hover:bg-blue-50 px-3"
+                          >
+                            <Edit className="w-3 h-3 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) {
+                                deleteBillingSheet.mutate(sheet.id);
+                              }
+                            }}
+                            className="border-red-300 text-red-600 hover:bg-red-50 px-3"
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            Delete
                           </Button>
                         </div>
                       )}

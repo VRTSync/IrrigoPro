@@ -27,7 +27,9 @@ import {
   Wrench,
   Play,
   Users,
-  List
+  List,
+  Edit,
+  Trash2
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
 
@@ -37,6 +39,7 @@ export default function WorkOrders() {
   const [selectedWorkOrderForStart, setSelectedWorkOrderForStart] = useState<WorkOrder | null>(null);
   const [selectedWorkOrderForCompletion, setSelectedWorkOrderForCompletion] = useState<WorkOrder | null>(null);
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
+  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [groupByCustomer, setGroupByCustomer] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -223,6 +226,32 @@ export default function WorkOrders() {
       });
     },
   });
+
+  // Delete work order mutation
+  const deleteWorkOrder = useMutation({
+    mutationFn: async (workOrderId: number) => {
+      return apiRequest(`/api/work-orders/${workOrderId}`, "DELETE", {}, {
+        headers: { 'x-user-role': currentUser?.role }
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Work Order Deleted",
+        description: "Work order has been successfully deleted",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete work order",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Check if user can edit/delete work orders
+  const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager';
 
   // Handle loading state for currentUser
   if (!currentUser) {
@@ -533,7 +562,7 @@ export default function WorkOrders() {
                                   Created {formatDate(workOrder.createdAt)}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  {/* Only show green View button for all cards */}
+                                  {/* View button for all cards */}
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -543,6 +572,8 @@ export default function WorkOrders() {
                                     <Eye className="w-3 h-3 mr-1" />
                                     View
                                   </Button>
+                                  
+                                  {/* Assignment dropdown for irrigation managers */}
                                   {currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
                                     <Select
                                       onValueChange={(techId: string) => {
@@ -576,6 +607,36 @@ export default function WorkOrders() {
                                         )) : []}
                                       </SelectContent>
                                     </Select>
+                                  )}
+                                  
+                                  {/* Edit button for company admin and billing manager */}
+                                  {canEditDelete && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setEditingWorkOrder(workOrder)}
+                                      className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                    >
+                                      <Edit className="w-3 h-3 mr-1" />
+                                      Edit
+                                    </Button>
+                                  )}
+                                  
+                                  {/* Delete button for company admin and billing manager */}
+                                  {canEditDelete && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        if (confirm(`Are you sure you want to delete work order ${workOrder.workOrderNumber}? This action cannot be undone.`)) {
+                                          deleteWorkOrder.mutate(workOrder.id);
+                                        }
+                                      }}
+                                      className="text-xs px-3 py-1.5 bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                                    >
+                                      <Trash2 className="w-3 h-3 mr-1" />
+                                      Delete
+                                    </Button>
                                   )}
                                 </div>
                               </div>
@@ -738,11 +799,13 @@ export default function WorkOrders() {
                               e.stopPropagation();
                               setSelectedWorkOrder(workOrder);
                             }}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                            className="bg-green-600 hover:bg-green-700 text-white"
                           >
                             <Eye className="w-4 h-4 mr-1" />
                             View
                           </Button>
+                          
+                          {/* Assignment dropdown for irrigation managers */}
                           {currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
                             <Select
                               onValueChange={(techId: string) => {
@@ -779,6 +842,38 @@ export default function WorkOrders() {
                               </SelectContent>
                             </Select>
                           )}
+                          
+                          {/* Edit button for company admin and billing manager */}
+                          {canEditDelete && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingWorkOrder(workOrder);
+                              }}
+                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                              <Edit className="w-4 h-4 mr-1" />
+                              Edit
+                            </Button>
+                          )}
+                          
+                          {/* Delete button for company admin and billing manager */}
+                          {canEditDelete && (
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm(`Are you sure you want to delete work order ${workOrder.workOrderNumber}? This action cannot be undone.`)) {
+                                  deleteWorkOrder.mutate(workOrder.id);
+                                }
+                              }}
+                              className="bg-red-600 hover:bg-red-700 text-white"
+                            >
+                              <Trash2 className="w-4 h-4 mr-1" />
+                              Delete
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -790,13 +885,18 @@ export default function WorkOrders() {
         )}
 
         {/* Work Order Form Dialog */}
-        {showWorkOrderForm && (
+        {(showWorkOrderForm || editingWorkOrder) && (
           <WorkOrderForm 
-            onClose={() => setShowWorkOrderForm(false)} 
+            onClose={() => {
+              setShowWorkOrderForm(false);
+              setEditingWorkOrder(null);
+            }} 
             onSuccess={() => {
               setShowWorkOrderForm(false);
+              setEditingWorkOrder(null);
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
+            editingWorkOrder={editingWorkOrder}
           />
         )}
 

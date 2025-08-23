@@ -79,6 +79,19 @@ const requireAdminAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
+// Middleware to check if user can edit/delete work orders and billing sheets
+const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole !== 'company_admin' && userRole !== 'billing_manager') {
+    return res.status(403).json({ 
+      message: "Access denied. Only company administrators and billing managers can edit or delete work orders and billing sheets." 
+    });
+  }
+  
+  next();
+};
+
 // Middleware to check if user has permission to view site maps
 const requireViewAccess = (req: Request, res: any, next: any) => {
   const userRole = req.headers['x-user-role'];
@@ -4467,7 +4480,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/billing-sheets/:id", async (req, res) => {
+  app.patch("/api/billing-sheets/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { items, ...billingSheetData } = req.body;
@@ -4513,7 +4526,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/billing-sheets/:id", async (req, res) => {
+  app.delete("/api/billing-sheets/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       await storage.deleteBillingSheet(id);
@@ -4615,7 +4628,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/work-orders/:id", async (req, res) => {
+  app.patch("/api/work-orders/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const workOrderData = insertWorkOrderSchema.partial().parse(req.body);
@@ -4632,7 +4645,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.delete("/api/work-orders/:id", async (req, res) => {
+  app.delete("/api/work-orders/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.deleteWorkOrder(id);
