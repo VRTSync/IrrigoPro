@@ -2009,6 +2009,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   partData.price = isNaN(numValue) ? 0 : numValue;
                 }
                 break;
+              case 'cost':
+                if (value) {
+                  const numValue = parseFloat(value.replace(/[^0-9.-]/g, ''));
+                  partData.cost = isNaN(numValue) ? null : numValue;
+                }
+                break;
               case 'material':
                 partData.material = value || null;
                 break;

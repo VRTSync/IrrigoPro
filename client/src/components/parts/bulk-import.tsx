@@ -34,6 +34,7 @@ const DB_FIELDS = [
   { value: 'name', label: 'Part Name' },
   { value: 'category', label: 'Category' },
   { value: 'price', label: 'Price' },
+  { value: 'cost', label: 'Cost' },
   { value: 'material', label: 'Material' },
   { value: 'size', label: 'Size' },
   { value: 'brand', label: 'Brand' },

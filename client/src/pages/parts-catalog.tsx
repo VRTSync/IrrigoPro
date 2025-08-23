@@ -324,6 +324,20 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
               
               <FormField
                 control={form.control}
+                name="cost"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Cost ($)</FormLabel>
+                    <FormControl>
+                      <Input {...field} type="number" step="0.01" min="0" value={field.value || ""} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
                 name="laborHours"
                 render={({ field }) => (
                   <FormItem>
@@ -565,6 +579,7 @@ export default function PartsCatalog() {
                           <TableRow className="bg-blue-600 hover:bg-blue-600 border-b border-blue-700">
                             <TableHead className="font-semibold text-white">Part Name</TableHead>
                             <TableHead className="font-semibold text-white">Description</TableHead>
+                            <TableHead className="font-semibold text-white text-right">Cost</TableHead>
                             <TableHead className="font-semibold text-white text-right">Price</TableHead>
                             <TableHead className="font-semibold text-white text-center">Labor</TableHead>
                             <TableHead className="font-semibold text-white text-right">Actions</TableHead>
@@ -588,6 +603,14 @@ export default function PartsCatalog() {
                               <TableCell className="py-4">
                                 <div className="text-sm text-muted-foreground max-w-md">
                                   {part.description || 'No description available'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <DollarSign className="h-4 w-4 text-orange-600" />
+                                  <span className="font-semibold text-lg text-orange-700 dark:text-orange-400">
+                                    {part.cost ? formatCurrency(part.cost) : '-'}
+                                  </span>
                                 </div>
                               </TableCell>
                               <TableCell className="py-4 text-right">
@@ -693,11 +716,21 @@ export default function PartsCatalog() {
                         )}
                         
                         <div className="flex justify-between items-center pt-2 border-t border-muted/30">
-                          <div className="flex items-center gap-2">
-                            <DollarSign className="h-4 w-4 text-green-600" />
-                            <span className="font-semibold text-green-700 dark:text-green-400 text-base">
-                              {formatCurrency(part.price)}
-                            </span>
+                          <div className="flex flex-col gap-1">
+                            {part.cost && (
+                              <div className="flex items-center gap-2">
+                                <DollarSign className="h-4 w-4 text-orange-600" />
+                                <span className="text-sm text-orange-700 dark:text-orange-400">
+                                  Cost: {formatCurrency(part.cost)}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                              <DollarSign className="h-4 w-4 text-green-600" />
+                              <span className="font-semibold text-green-700 dark:text-green-400 text-base">
+                                Price: {formatCurrency(part.price)}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-1">
                             <Clock className="h-4 w-4 text-blue-600" />

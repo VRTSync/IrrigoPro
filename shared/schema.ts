@@ -158,6 +158,7 @@ export const parts = pgTable("parts", {
   name: text("name").notNull(),
   description: text("description"),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  cost: decimal("cost", { precision: 10, scale: 2 }),
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
   sku: text("sku").notNull(),
   // Enhanced categorization based on your irrigation parts structure
