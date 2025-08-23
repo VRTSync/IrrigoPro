@@ -33,6 +33,7 @@ import UserProfile from "@/pages/user-profile";
 import UserManager from "@/pages/UserManager";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
+import SwitchUser from "@/pages/switch-user";
 
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -252,6 +253,7 @@ function Router() {
                 <Route path="/super-admin" component={SuperAdminDashboard} />
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-manager" component={UserManager} />
+                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
