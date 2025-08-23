@@ -155,7 +155,7 @@ export default function CustomerBilling() {
       const response = await apiRequest("POST", "/api/invoices/preview", {
         customerId
       });
-      return response.json();
+      return response;
     },
     onSuccess: (data) => {
       setPreviewInvoiceData(data);
@@ -176,7 +176,7 @@ export default function CustomerBilling() {
       const response = await apiRequest("POST", "/api/invoices/monthly", {
         customerId
       });
-      return response.json();
+      return response;
     },
     onSuccess: (data, customerId) => {
       setShowInvoicePreview(false);
