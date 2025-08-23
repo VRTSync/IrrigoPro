@@ -1893,13 +1893,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "CSV data is required" });
       }
 
+      // Proper CSV parsing function
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          
+          if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              // Handle escaped quotes
+              current += '"';
+              i++; // Skip next quote
+            } else {
+              // Toggle quote state
+              inQuotes = !inQuotes;
+            }
+          } else if (char === ',' && !inQuotes) {
+            // End of field
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        
+        // Add the last field
+        result.push(current.trim());
+        return result;
+      };
+
       // Parse CSV data
       const lines = csvData.trim().split('\n');
       if (lines.length < 2) {
         return res.status(400).json({ message: "CSV must have header and at least one data row" });
       }
 
-      const csvHeaders = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      const csvHeaders = parseCSVLine(lines[0]);
       
       // Use column mappings if provided, otherwise fall back to old behavior
       let fieldMappings: { [key: string]: string } = {};
@@ -1954,7 +1986,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Process each row
       for (let i = 1; i < lines.length; i++) {
-        const rowData = lines[i].split(',').map(cell => cell.trim());
+        const rowData = parseCSVLine(lines[i]);
         
         try {
           // Create part object from CSV row using field mappings
