@@ -329,13 +329,13 @@ export default function Navigation() {
                     }
                   }
                   
-                  // Add Customers dropdown items
+                  // Add direct Customers link
                   const customersItem = otherItems.find(item => item.label === 'Customers' && item.isDropdown);
                   if (customersItem?.dropdownItems) {
-                    // Only add Maps from customers dropdown to avoid duplication
-                    const mapsItem = customersItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Maps');
-                    if (mapsItem) {
-                      expandedItems.push(mapsItem);
+                    // Add direct customers link instead of Maps
+                    const customersLink = customersItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Customers');
+                    if (customersLink) {
+                      expandedItems.push(customersLink);
                     }
                   }
                 } else {
