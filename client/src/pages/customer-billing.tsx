@@ -86,6 +86,8 @@ export default function CustomerBilling() {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<BillingWorkOrder | null>(null);
   const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingBillingSheet | null>(null);
   const [selectedEstimate, setSelectedEstimate] = useState<BillingEstimate | null>(null);
+  const [showInvoicePreview, setShowInvoicePreview] = useState(false);
+  const [previewInvoiceData, setPreviewInvoiceData] = useState<any>(null);
   
   // Filter states
   const [dateFilter, setDateFilter] = useState<string>("last_30_days"); // Default to last 30 days
@@ -147,7 +149,28 @@ export default function CustomerBilling() {
     };
   };
 
-  // Create Invoice Mutation
+  // Preview Invoice Mutation
+  const previewInvoiceMutation = useMutation({
+    mutationFn: async (customerId: number) => {
+      const response = await apiRequest("POST", "/api/invoices/preview", {
+        customerId
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setPreviewInvoiceData(data);
+      setShowInvoicePreview(true);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to Preview Invoice",
+        description: error.message || "An error occurred while previewing the invoice.",
+        variant: "destructive",
+      });
+    }
+  });
+
+  // Create Invoice Mutation (after preview confirmation)
   const createInvoiceMutation = useMutation({
     mutationFn: async (customerId: number) => {
       const response = await apiRequest("POST", "/api/invoices/monthly", {
@@ -156,6 +179,8 @@ export default function CustomerBilling() {
       return response.json();
     },
     onSuccess: (data, customerId) => {
+      setShowInvoicePreview(false);
+      setPreviewInvoiceData(null);
       toast({
         title: "Invoice Created Successfully",
         description: `Monthly invoice ${data.invoiceNumber} has been created and synced to QuickBooks.`,
@@ -868,19 +893,19 @@ export default function CustomerBilling() {
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
                       </div>
                       <Button
-                        onClick={() => handleCreateInvoice(selectedCustomerId!)}
-                        disabled={createInvoiceMutation.isPending || customerBillingData.totalUnbilledAmount === 0}
+                        onClick={() => previewInvoiceMutation.mutate(selectedCustomerId!)}
+                        disabled={previewInvoiceMutation.isPending || customerBillingData.totalUnbilledAmount === 0}
                         className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
                       >
-                        {createInvoiceMutation.isPending ? (
+                        {previewInvoiceMutation.isPending ? (
                           <>
                             <Clock className="w-3 h-3 mr-1 animate-spin" />
-                            Creating...
+                            Previewing...
                           </>
                         ) : (
                           <>
                             <Receipt className="w-3 h-3 mr-1" />
-                            Create Invoice
+                            Preview Invoice
                           </>
                         )}
                       </Button>
@@ -1439,6 +1464,133 @@ export default function CustomerBilling() {
           )}
         </div>
       </div>
+
+      {/* Invoice Preview Dialog */}
+      <Dialog open={showInvoicePreview} onOpenChange={setShowInvoicePreview}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              Invoice Preview
+            </DialogTitle>
+          </DialogHeader>
+          
+          {previewInvoiceData && (
+            <div className="space-y-6">
+              {/* Invoice Header */}
+              <div className="border-b pb-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h3 className="font-semibold text-lg mb-2">Invoice Details</h3>
+                    <div className="space-y-1 text-sm">
+                      <div><span className="font-medium">Invoice #:</span> {previewInvoiceData.invoiceNumber}</div>
+                      <div><span className="font-medium">Date:</span> {formatDate(new Date())}</div>
+                      <div><span className="font-medium">Period:</span> {formatDate(previewInvoiceData.periodStart)} - {formatDate(previewInvoiceData.periodEnd)}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg mb-2">Bill To</h3>
+                    <div className="space-y-1 text-sm">
+                      <div className="font-medium">{previewInvoiceData.customerName}</div>
+                      <div>{previewInvoiceData.customerEmail}</div>
+                      {previewInvoiceData.customerPhone && <div>{previewInvoiceData.customerPhone}</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Invoice Items */}
+              <div>
+                <h3 className="font-semibold text-lg mb-3">Invoice Items</h3>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">Description</th>
+                        <th className="text-right p-3 font-medium">Date</th>
+                        <th className="text-right p-3 font-medium">Labor Hours</th>
+                        <th className="text-right p-3 font-medium">Labor</th>
+                        <th className="text-right p-3 font-medium">Parts</th>
+                        <th className="text-right p-3 font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {previewInvoiceData.items?.map((item: any, index: number) => (
+                        <tr key={index}>
+                          <td className="p-3">
+                            <div className="font-medium">{item.description}</div>
+                            <div className="text-sm text-gray-600">{item.technicianName}</div>
+                          </td>
+                          <td className="p-3 text-right text-sm">{formatDate(item.workDate)}</td>
+                          <td className="p-3 text-right">{item.laborHours || '0.00'}</td>
+                          <td className="p-3 text-right">{formatCurrency(item.laborAmount || 0)}</td>
+                          <td className="p-3 text-right">{formatCurrency(item.partsAmount || 0)}</td>
+                          <td className="p-3 text-right font-medium">{formatCurrency(item.totalAmount || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Invoice Summary */}
+              <div className="border-t pt-4">
+                <div className="flex justify-end">
+                  <div className="w-64 space-y-2">
+                    <div className="flex justify-between">
+                      <span>Labor Subtotal:</span>
+                      <span>{formatCurrency(previewInvoiceData.laborSubtotal)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Parts Subtotal:</span>
+                      <span>{formatCurrency(previewInvoiceData.partsSubtotal)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Markup:</span>
+                      <span>{formatCurrency(previewInvoiceData.markupAmount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Tax:</span>
+                      <span>{formatCurrency(previewInvoiceData.taxAmount)}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-2 font-bold text-lg">
+                      <span>Total:</span>
+                      <span>{formatCurrency(previewInvoiceData.totalAmount)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowInvoicePreview(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => createInvoiceMutation.mutate(selectedCustomerId!)}
+                  disabled={createInvoiceMutation.isPending}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {createInvoiceMutation.isPending ? (
+                    <>
+                      <Clock className="w-4 h-4 mr-2 animate-spin" />
+                      Creating & Sending to QuickBooks...
+                    </>
+                  ) : (
+                    <>
+                      <Receipt className="w-4 h-4 mr-2" />
+                      Create Invoice & Send to QuickBooks
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

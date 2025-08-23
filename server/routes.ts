@@ -1309,6 +1309,114 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Invoice preview (no creation, just calculation)
+  app.post("/api/invoices/preview", async (req, res) => {
+    try {
+      const { customerId } = req.body;
+      
+      // Get customer details
+      const customer = await storage.getCustomerById(customerId);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      // Get all work orders for the customer
+      const allWorkOrders = await storage.getWorkOrders();
+      const workOrders = allWorkOrders.filter(wo => wo.customerId === customerId);
+
+      // Get all billing sheets for the customer
+      const allBillingSheets = await storage.getAllBillingSheets();
+      const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
+
+      // Filter unbilled work (check if notes contain billing information)
+      const unbilledWorkOrders = workOrders.filter(wo => 
+        wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
+      );
+      const unbilledBillingSheets = billingSheets.filter(bs => 
+        bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
+      );
+
+      if (unbilledWorkOrders.length === 0 && unbilledBillingSheets.length === 0) {
+        return res.status(400).json({ message: "No unbilled work found for this customer" });
+      }
+
+      // Create preview invoice data (same calculations as actual invoice)
+      const currentDate = new Date();
+      const invoiceNumber = `PREVIEW-${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}-${customerId.toString().padStart(4, '0')}`;
+      
+      // Calculate totals
+      const laborSubtotal = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
+      
+      const partsSubtotal = 
+        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
+        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
+      
+      const markupAmount = 0;
+      const taxAmount = 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
+
+      // Create preview items
+      const previewItems = [];
+
+      // Add work order items
+      for (const workOrder of unbilledWorkOrders) {
+        previewItems.push({
+          sourceType: 'work_order',
+          sourceId: workOrder.id,
+          description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
+          workDate: workOrder.completedAt || workOrder.createdAt,
+          technicianName: workOrder.assignedTechnicianName || 'Unknown',
+          laborHours: parseFloat(workOrder.totalHours || '0'),
+          laborRate: 45,
+          laborAmount: parseFloat(workOrder.totalHours || '0') * 45,
+          partsAmount: parseFloat(workOrder.totalPartsCost || '0'),
+          totalAmount: (parseFloat(workOrder.totalHours || '0') * 45) + parseFloat(workOrder.totalPartsCost || '0')
+        });
+      }
+
+      // Add billing sheet items
+      for (const billingSheet of unbilledBillingSheets) {
+        previewItems.push({
+          sourceType: 'billing_sheet',
+          sourceId: billingSheet.id,
+          description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
+          workDate: billingSheet.workDate,
+          technicianName: billingSheet.technicianName,
+          laborHours: parseFloat(billingSheet.totalHours || '0'),
+          laborRate: parseFloat(billingSheet.laborRate || '45'),
+          laborAmount: parseFloat(billingSheet.laborSubtotal || '0'),
+          partsAmount: parseFloat(billingSheet.partsSubtotal || '0'),
+          totalAmount: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')
+        });
+      }
+
+      // Return preview data
+      const previewData = {
+        invoiceNumber,
+        customerId,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone || null,
+        periodStart: new Date(currentDate.getFullYear(), currentDate.getMonth(), 1),
+        periodEnd: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        markupAmount: markupAmount.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        items: previewItems,
+        itemCount: unbilledWorkOrders.length + unbilledBillingSheets.length
+      };
+
+      res.json(previewData);
+    } catch (error) {
+      console.error("Error creating invoice preview:", error);
+      res.status(500).json({ message: "Failed to create invoice preview" });
+    }
+  });
+
   // Create monthly invoice for customer - consolidates all unbilled work
   app.post("/api/invoices/monthly", async (req, res) => {
     try {
