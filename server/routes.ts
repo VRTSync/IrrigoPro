@@ -1991,6 +1991,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           // Create part object from CSV row using field mappings
           const partData: any = {};
+          if (i <= 3) { // Log first few rows for debugging
+            console.log(`Row ${i} data:`, rowData);
+          }
           
           Object.entries(fieldMappings).forEach(([csvIndex, dbField]) => {
             const value = rowData[parseInt(csvIndex)] || '';
@@ -2002,7 +2005,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 partData.category = value;
                 break;
               case 'price':
-                partData.price = value ? parseFloat(value) : 0;
+                // Only set price if it's not already set (handle multiple price columns)
+                if (!partData.price && value) {
+                  const numValue = parseFloat(value.replace(/[^0-9.-]/g, ''));
+                  partData.price = isNaN(numValue) ? 0 : numValue;
+                }
                 break;
               case 'material':
                 partData.material = value || null;
