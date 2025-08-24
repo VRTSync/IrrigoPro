@@ -357,20 +357,29 @@ export default function CompanyProfile() {
                           const response = await apiRequest('/api/company/logo/upload', 'POST');
                           return response;
                         }}
-                        onComplete={async (uploadUrl) => {
+                        onComplete={async (result) => {
                           try {
+                            // Extract the upload URL from the result
+                            const uploadUrl = result.successful?.[0]?.uploadURL;
+                            if (!uploadUrl) {
+                              throw new Error('No upload URL found in result');
+                            }
+
                             // Save the logo URL to the company profile
-                            const result = await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
+                            const saveResult = await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
                               logoUrl: uploadUrl
                             });
                             
-                            // Invalidate and refetch company data across all pages
-                            queryClient.invalidateQueries({ 
+                            // Force refresh all company profile queries
+                            await queryClient.invalidateQueries({ 
                               predicate: (query) => {
-                                return query.queryKey[0]?.toString().includes('/api/company') && 
-                                       query.queryKey[0]?.toString().includes('/profile');
+                                const key = query.queryKey[0]?.toString() || '';
+                                return key.includes('/api/company') && key.includes('/profile');
                               }
                             });
+
+                            // Also invalidate auth user query
+                            await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
                             
                             toast({
                               title: "Logo uploaded",

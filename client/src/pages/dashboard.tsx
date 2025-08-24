@@ -44,14 +44,16 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/stats"],
   });
 
-  // Get current user info
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const companyId = user.companyId;
+  // Get current user info from session API (production-safe)
+  const { data: user } = useQuery<{ companyId: number }>({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
 
   // Fetch company profile to get company info
   const { data: company } = useQuery({
-    queryKey: [`/api/company/${companyId}/profile`],
-    enabled: !!companyId,
+    queryKey: [`/api/company/${user?.companyId}/profile`],
+    enabled: !!user?.companyId,
     retry: false,
   });
 
