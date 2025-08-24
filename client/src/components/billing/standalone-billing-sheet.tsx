@@ -82,7 +82,7 @@ interface StandaloneBillingSheetProps {
   };
 }
 
-// Helper function to get current user
+// Helper function to get current user (deprecated - use useQuery instead)
 const getCurrentUser = () => {
   const savedUser = localStorage.getItem("user");
   return savedUser ? JSON.parse(savedUser) : null;
@@ -107,7 +107,13 @@ export function StandaloneBillingSheet({
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const currentUser = getCurrentUser();
+  
+  // Get current user from API (production-safe)
+  const { data: currentUser } = useQuery({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
+  
   const isFieldTech = currentUser?.role === 'field_tech';
 
   // Get today's date in YYYY-MM-DD format

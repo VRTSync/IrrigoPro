@@ -83,18 +83,15 @@ export function WorkOrderCompletion({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get current user to check role
-  useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
-  }, []);
+  // Get current user from API (production-safe)
+  const { data: currentUser } = useQuery({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
 
   const { data: parts } = useQuery<Part[]>({
     queryKey: ["/api/parts"],

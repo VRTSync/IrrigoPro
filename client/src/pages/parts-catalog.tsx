@@ -917,13 +917,13 @@ export default function PartsCatalog() {
   
   const { toast } = useToast();
 
-  // Get current user role to determine permissions
-  const getCurrentUserRole = (): string => {
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    return user.role || "";
-  };
+  // Get current user from API (production-safe)
+  const { data: currentUser } = useQuery({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
   
-  const userRole = getCurrentUserRole();
+  const userRole = currentUser?.role || "";
   const canImport = userRole === "company_admin" || userRole === "super_admin";
 
   const { data: parts, isLoading } = useQuery<Part[]>({

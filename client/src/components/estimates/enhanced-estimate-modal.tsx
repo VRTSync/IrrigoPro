@@ -80,6 +80,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  // Get current user from API (production-safe)
+  const { data: currentUser } = useQuery({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
+
   // Fetch estimate data for editing
   const { data: estimate, isLoading: isLoadingEstimate } = useQuery<EstimateWithZones>({
     queryKey: ["/api/estimates", estimateId],
@@ -102,7 +108,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       projectName: "",
       projectAddress: "",
       estimateDate: new Date().toISOString().split('T')[0],
-      createdBy: JSON.parse(localStorage.getItem('user') || '{}').name || "Irrigation Manager",
+      createdBy: currentUser?.name || "Irrigation Manager",
       laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
