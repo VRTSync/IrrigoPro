@@ -32,7 +32,7 @@ import UserProfile from "@/pages/user-profile";
 import UserManager from "@/pages/UserManager";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
-import SwitchUser from "@/pages/switch-user";
+
 import CustomerProfile from "@/pages/customer-profile";
 import EstimateApproval from "@/pages/estimate-approval";
 
@@ -166,7 +166,6 @@ function Router() {
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
-                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -200,7 +199,6 @@ function Router() {
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/billing-sheets" component={BillingSheets} />
-                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -231,7 +229,6 @@ function Router() {
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
-                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -260,7 +257,6 @@ function Router() {
                 <Route path="/super-admin" component={SuperAdminDashboard} />
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-manager" component={UserManager} />
-                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />

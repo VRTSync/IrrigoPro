@@ -1,114 +1,123 @@
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
 import fileUpload from "express-fileupload";
+import session from "express-session";
+import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
-import { logger, createRequestLogger } from "./logger";
+import initializeDatabase from "./db-init";
+import { validateProductionConfig, PRODUCTION_CONFIG } from './production-config';
 
+// Initialize the Express application
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(fileUpload({
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
-  abortOnLimit: true
-}));
 
-// Add request logging middleware
-app.use(createRequestLogger);
+// Validate production environment configuration
+try {
+  validateProductionConfig();
+} catch (error) {
+  console.error('❌ Production configuration validation failed:', error);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+}
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+console.log("Initializing database connection...");
+console.log("Environment:", process.env.NODE_ENV || "development");
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
+// Initialize database
+initializeDatabase().then(() => {
+  console.log("Database connection initialized successfully");
+}).catch((error: any) => {
+  console.error("Failed to initialize database:", error);
+  process.exit(1);
 });
 
-(async () => {
-  logger.info("Starting IrrigoPro server", "Server Startup", {
-    environment: process.env.NODE_ENV,
-    databaseAvailable: !!process.env.DATABASE_URL,
-    version: "1.0.0"
-  });
-  
-  console.log("Starting server...");
-  console.log("Node environment:", process.env.NODE_ENV);
-  console.log("Database URL available:", !!process.env.DATABASE_URL);
-  
-  let server;
-  try {
-    server = await registerRoutes(app);
-    console.log("Routes registered successfully");
-  } catch (error) {
-    console.error("Failed to register routes:", error);
-    logger.error("Failed to register routes", error, "Server Startup");
-    throw error;
+// Log environment info for debugging
+console.log(`[INFO] ${new Date().toISOString()} - Starting IrrigoPro server (Server Startup)`);
+console.log("Starting server...");
+console.log("Node environment:", process.env.NODE_ENV || "development");
+console.log("Database URL available:", !!process.env.DATABASE_URL);
+
+// Parse JSON and URL-encoded data
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Cookie parser for JWT tokens
+app.use(cookieParser());
+
+// File upload middleware
+app.use(fileUpload({
+  limits: { 
+    fileSize: PRODUCTION_CONFIG.UPLOAD_LIMITS.MAX_FILE_SIZE,
+    files: 5 
+  },
+  useTempFiles: true,
+  tempFileDir: '/tmp/',
+  abortOnLimit: true,
+  responseOnLimit: 'File size limit exceeded',
+  uploadTimeout: 60000
+}));
+
+// Session middleware for development compatibility
+app.use(session({
+  secret: PRODUCTION_CONFIG.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: PRODUCTION_CONFIG.SESSION_DURATION
   }
+}));
 
-  // Error handling middleware must come after route registration
-  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    // Log the error with full context
-    logger.error(
-      `Server error: ${message}`,
-      err,
-      `${req.method} ${req.path}`,
-      {
-        status,
-        userId: (req as any).user?.id,
-        requestBody: req.body,
-        params: req.params,
-        query: req.query
-      }
-    );
-
-    res.status(status).json({ message });
-  });
-
-
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
+// Register all routes (includes security middleware)
+registerRoutes(app).then(async (server) => {
+  const port = parseInt(process.env.PORT || "5000");
+  
+  // Setup Vite development server for frontend
+  if (process.env.NODE_ENV !== 'production') {
+    const { setupVite } = await import('./vite');
     await setupVite(app, server);
-  } else {
-    serveStatic(app);
   }
-
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
+  
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`✅ IrrigoPro server running on port ${port}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔒 Security: ${process.env.NODE_ENV === 'production' ? 'Production' : 'Development'}`);
+    
+    if (process.env.NODE_ENV === 'production') {
+      console.log(`🚀 Production deployment ready at ${PRODUCTION_CONFIG.PRODUCTION_DOMAIN}`);
+    } else {
+      console.log(`🛠️  Development server running with fallback authentication`);
+    }
   });
-})();
+}).catch((error: any) => {
+  console.error("Failed to register routes:", error);
+  process.exit(1);
+});
+
+// Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('🔄 SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🔄 SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
+
+// Unhandled error handling
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});
+
+export default app;

@@ -15,8 +15,7 @@ Navigation Improvements: Company admin navigation streamlined to 5 items with im
 Site Map Access Control: Complete site map CRUD operations (create, read, update, delete) are restricted to company administrators only. All other roles including super admins, irrigation managers, billing managers, and field technicians have no access to site maps. Backend API routes protected with requireCompanyAdminAccess middleware.
 Customer Management Permissions: Complete role-based access control implemented for customer management. Irrigation managers and field technicians have strict view-only access - they cannot create, edit, or delete customers, cannot access integrations, and cannot edit property notes. Only company admin and super admin users have full customer management privileges including creation, editing, deletion, integrations access, and property notes editing. Backend API routes are protected with requireAdminAccess middleware and frontend UI properly restricts access based on user roles. This ensures complete data integrity and prevents any unauthorized customer information modifications.
 Parts Management Independence: Parts catalog operates independently from QuickBooks integration. Internal parts CRUD system provides complete inventory control without external dependencies. QuickBooks integration removed from parts catalog to ensure reliable operation and reduce complexity.
-Development Testing Features: Switch User functionality is currently available for development testing but must be completely removed before production deployment. This includes removing the switch-user routes from all user role configurations and removing the Switch User button from the profile dropdown in the navigation component.
-Production Security: All debug console.log statements removed from customer creation flow. Authentication uses session-based user lookup instead of localStorage for production compatibility. Form validation properly handles missing user data with graceful fallbacks.
+Production Security: Complete production-ready security implementation with JWT authentication system, comprehensive security middleware (helmet, rate limiting, CORS), and proper error handling. All debug console.log statements removed from customer creation flow. Session-based fallback authentication maintained for development compatibility while JWT tokens provide production security. Switch User functionality completely removed for production deployment with navigation interface cleaned up for all user roles. Enhanced production configuration with environment validation, graceful shutdown handling, and comprehensive security headers for irrigopro.com deployment.
 Animated Loading Skeletons: Comprehensive loading skeleton system implemented across all major pages (Dashboard, Customers, Work Orders, Estimates, Parts Catalog) with smooth fade-in animations and staggered timing for enhanced user experience during page transitions. All components use production-safe API authentication patterns.
 QuickBooks Access Restrictions: Complete QuickBooks access removal implemented for irrigation managers and field technicians. All QuickBooks API endpoints protected with role-based middleware, QuickBooks tab removed from estimates page for restricted roles, and backend routes return 403 access denied errors for unauthorized access attempts. Only company administrators, super administrators, and billing managers have QuickBooks integration access.
 Production Optimizations: Site map creation uses user session for company ID lookup rather than customer DB queries for better performance. TODO: Implement JWT tokens or proper session management for production deployment to eliminate user DB lookups entirely.
@@ -51,7 +50,22 @@ Parts Catalog Access: Billing managers and irrigation managers have comprehensiv
 - **Authentication & Security**: Secure password reset, email verification, and Multi-Factor Authentication (MFA) using TOTP with backup codes. Comprehensive error tracking with QuickBooks transaction ID capture and a centralized logging system.
 - **User Management**: Company administrators have full user management capabilities within their own company.
 
+### Security & Production Features
+- **JWT Authentication**: Production-ready token-based authentication with configurable expiry and secure token handling
+- **Security Middleware**: Comprehensive security headers, rate limiting, CORS configuration, and input validation
+- **Production Configuration**: Environment validation, graceful shutdown, error handling, and domain-specific settings
+- **Access Control**: Role-based authorization middleware with company-level access restrictions
+- **File Upload Security**: MIME type validation, file size limits, and secure upload handling
+- **Development Fallback**: Backward-compatible authentication for development while enforcing JWT in production
+
 ## External Dependencies
+
+### Backend Security Dependencies
+- **jsonwebtoken**: JWT token generation and validation
+- **helmet**: Security headers and CSP configuration
+- **express-rate-limit**: API rate limiting protection
+- **cors**: Cross-origin resource sharing configuration
+- **cookie-parser**: Secure cookie handling for JWT tokens
 
 ### Frontend Dependencies
 - **UI Components**: Radix UI (via shadcn/ui)
