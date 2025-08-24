@@ -1304,11 +1304,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const customerId = parseInt(req.params.customerId);
       
+      // Get the customer to determine the correct company ID
+      const customer = await storage.getCustomer(customerId);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+      
       // Validate the request body
       const validatedData = insertSiteMapSchema.parse({
         ...req.body,
         customerId,
-        companyId: 1 // Default company ID for now
+        companyId: customer.companyId // Use the customer's company ID
       });
       
       const siteMap = await storage.createSiteMap(validatedData);
