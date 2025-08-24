@@ -47,6 +47,7 @@ export function ObjectUploader({
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -64,6 +65,12 @@ export function ObjectUploader({
     }
 
     setSelectedFile(file);
+    
+    // Create preview URL for images
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    }
   };
 
   const handleUpload = async () => {
@@ -103,6 +110,10 @@ export function ObjectUploader({
       
       // Reset state
       setSelectedFile(null);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
+      }
       
     } catch (error) {
       console.error('Upload error:', error);
@@ -117,10 +128,31 @@ export function ObjectUploader({
     }
   };
 
+  const handleCancel = () => {
+    setSelectedFile(null);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+  };
+
   const clearSelection = () => {
     setSelectedFile(null);
     setUploadProgress(0);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
   };
+
+  // Clean up preview URL when component unmounts
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   return (
     <div className="space-y-4">
@@ -143,20 +175,38 @@ export function ObjectUploader({
 
       {selectedFile && (
         <div className="border rounded-lg p-4 bg-muted/50">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium truncate">{selectedFile.name}</span>
+          <div className="flex items-start gap-4 mb-3">
+            {/* Image thumbnail preview */}
+            {previewUrl && (
+              <div className="flex-shrink-0">
+                <img
+                  src={previewUrl}
+                  alt="Preview"
+                  className="w-16 h-16 object-cover rounded border bg-white"
+                />
+              </div>
+            )}
+            
+            {/* File details */}
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium truncate block">{selectedFile.name}</span>
+              <div className="text-xs text-muted-foreground">
+                Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+              </div>
+              {selectedFile.type && (
+                <div className="text-xs text-muted-foreground">{selectedFile.type}</div>
+              )}
+            </div>
+            
+            {/* Close button */}
             <Button
               variant="ghost"
               size="sm"
-              onClick={clearSelection}
+              onClick={handleCancel}
               disabled={isUploading}
             >
               <X className="h-4 w-4" />
             </Button>
-          </div>
-          
-          <div className="text-xs text-muted-foreground mb-3">
-            Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
           </div>
 
           {isUploading && (
