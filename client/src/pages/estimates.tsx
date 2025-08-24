@@ -20,6 +20,16 @@ export default function Estimates() {
 
   const queryClient = useQueryClient();
 
+  // Get current user role
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+
+  const currentUser = getCurrentUser();
+  const isIrrigationManager = currentUser?.role === 'irrigation_manager';
+  const isFieldTech = currentUser?.role === 'field_tech';
+
   // Check for create parameter in URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -102,9 +112,11 @@ export default function Estimates() {
       </div>
 
       <Tabs defaultValue="estimates" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className={`grid w-full ${isIrrigationManager || isFieldTech ? 'grid-cols-1' : 'grid-cols-2'}`}>
           <TabsTrigger value="estimates">Estimates</TabsTrigger>
-          <TabsTrigger value="quickbooks">QuickBooks</TabsTrigger>
+          {!isIrrigationManager && !isFieldTech && (
+            <TabsTrigger value="quickbooks">QuickBooks</TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="estimates">
@@ -365,9 +377,11 @@ export default function Estimates() {
         </div>
         </TabsContent>
 
-        <TabsContent value="quickbooks">
-          <QuickBooksIntegration />
-        </TabsContent>
+        {!isIrrigationManager && !isFieldTech && (
+          <TabsContent value="quickbooks">
+            <QuickBooksIntegration />
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Estimate Modal */}
