@@ -43,12 +43,12 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const queryClient = useQueryClient();
 
   // Get current user from API (production-safe)
-  const { data: currentUser } = useQuery<User>({
+  const { data: currentUser, isLoading: isLoadingUser } = useQuery<User>({
     queryKey: ["/api/auth/user"],
     retry: false,
   });
 
-  const companyId = currentUser?.companyId || 0;
+  const companyId = currentUser?.companyId;
 
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
@@ -73,7 +73,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
-      companyId: companyId || 0,
+      companyId: companyId ?? 1, // Use nullish coalescing to ensure number type
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -127,23 +127,30 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
     console.log('Submit button clicked');
     console.log('Form is valid:', form.formState.isValid);
     console.log('Form errors:', form.formState.errors);
+    console.log('Current user:', currentUser);
+    console.log('CompanyId from user:', companyId);
+    console.log('Form data companyId:', data.companyId);
     
     // Ensure companyId is set for new customers
     const submissionData = {
       ...data,
-      companyId: data.companyId || companyId || 0
+      companyId: data.companyId || companyId
     };
     
-    if (!submissionData.companyId) {
+    if (!submissionData.companyId || submissionData.companyId < 1) {
       toast({
         title: "Error",
-        description: "Unable to determine company. Please refresh and try again.",
+        description: `Unable to determine company. User: ${!!currentUser}, CompanyId: ${companyId}`,
         variant: "destructive",
       });
       return;
     }
     
-    mutation.mutate(submissionData);
+    console.log('Submitting with data:', submissionData);
+    mutation.mutate({
+      ...submissionData,
+      companyId: submissionData.companyId as number // Type assertion since we validated above
+    });
   };
 
   return (
@@ -158,8 +165,16 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
           </DialogTitle>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        {isLoadingUser ? (
+          <div className="flex items-center justify-center p-8">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-2 text-sm text-gray-600">Loading user data...</p>
+            </div>
+          </div>
+        ) : (
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             {/* Basic Information */}
             <Card>
               <CardHeader>
@@ -472,6 +487,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
             </div>
           </form>
         </Form>
+        )}
       </DialogContent>
     </Dialog>
   );
