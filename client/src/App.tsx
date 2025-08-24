@@ -154,7 +154,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
+            <Navigation user={user} />
             <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={FieldTechDashboard} />
@@ -187,7 +187,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
+            <Navigation user={user} />
             <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={ManagerDashboard} />
@@ -220,7 +220,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
+            <Navigation user={user} />
             <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={CustomerBilling} />
@@ -250,7 +250,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
+            <Navigation user={user} />
             <div className="px-4 bg-gray-50 flex-1">
               <Switch>
                 <Route path="/" component={SuperAdminDashboard} />
@@ -289,7 +289,7 @@ function Router() {
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>
         <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-          <Navigation />
+          <Navigation user={user} />
           <div className="px-4 bg-gray-50 flex-1">
             <Switch>
               <Route path="/" component={AdminDashboard} />
