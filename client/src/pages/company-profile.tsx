@@ -290,20 +290,28 @@ export default function CompanyProfile() {
                   </Label>
                   
                   {/* Current logo display */}
-                  {company?.logo && (
+                  {company?.logo ? (
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
                       <img
                         src={company.logo}
                         alt="Company Logo"
                         className="h-16 w-16 object-contain rounded border"
                         onError={(e) => {
+                          console.error('Logo failed to load:', company.logo);
                           e.currentTarget.style.display = 'none';
                         }}
                       />
                       <div>
                         <p className="text-sm font-medium">Current Logo</p>
                         <p className="text-xs text-muted-foreground">Used in emails and documents</p>
+                        <p className="text-xs text-blue-600 mt-1">✓ Logo saved</p>
                       </div>
+                    </div>
+                  ) : (
+                    <div className="p-6 border-2 border-dashed border-muted rounded-lg text-center">
+                      <Image className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                      <p className="text-sm text-muted-foreground">No logo uploaded</p>
+                      <p className="text-xs text-muted-foreground">Upload a logo to display your company branding</p>
                     </div>
                   )}
 
