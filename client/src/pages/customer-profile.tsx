@@ -15,6 +15,7 @@ export default function CustomerProfile() {
     queryKey: [`/api/customers/${id}`],
   });
 
+  // Loading and error checks - moved after all hooks
   if (isLoading) {
     return (
       <div className="container mx-auto p-4">

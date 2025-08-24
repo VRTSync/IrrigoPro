@@ -100,11 +100,6 @@ export default function WorkOrders() {
     enabled: !!currentUser,
   });
 
-  // Show full page skeleton while loading
-  if (isLoading) {
-    return <WorkOrderListSkeleton />;
-  }
-
   // Fetch notifications for assignment dates (field techs only)
   const { data: notifications } = useQuery({
     queryKey: ["/api/notifications", currentUser?.id],
@@ -264,6 +259,7 @@ export default function WorkOrders() {
     return <div>Loading user data...</div>;
   }
 
+  // Show loading skeleton while loading (after all hooks)
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50/30 p-6">

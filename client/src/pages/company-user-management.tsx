@@ -402,6 +402,7 @@ export default function CompanyUserManagement() {
     }
   };
 
+  // Access control check - moved after all hooks
   if (!currentUser || currentUser.role !== "company_admin") {
     return (
       <div className="container mx-auto p-6">
@@ -417,6 +418,7 @@ export default function CompanyUserManagement() {
     );
   }
 
+  // Loading check - moved after all hooks  
   if (isLoading) {
     return (
       <div className="container mx-auto p-6">

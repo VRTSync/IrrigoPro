@@ -45,11 +45,6 @@ export default function Estimates() {
     queryKey: ["/api/estimates"],
   });
 
-  // Show full page skeleton while loading
-  if (isLoading) {
-    return <EstimateListSkeleton />;
-  }
-
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -89,6 +84,11 @@ export default function Estimates() {
       year: 'numeric'
     });
   };
+
+  // Show full page skeleton while loading (after all hooks)
+  if (isLoading) {
+    return <EstimateListSkeleton />;
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">

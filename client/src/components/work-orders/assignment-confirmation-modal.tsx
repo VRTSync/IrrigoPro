@@ -21,6 +21,7 @@ export function AssignmentConfirmationModal({
   selectedTechnician,
   isLoading = false
 }: AssignmentConfirmationModalProps) {
+  // Early return moved after all hooks (none in this component)
   if (!selectedTechnician) return null;
 
   return (

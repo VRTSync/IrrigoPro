@@ -43,11 +43,6 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/stats"],
   });
 
-  // Show full page skeleton while loading
-  if (isLoading) {
-    return <DashboardSkeleton />;
-  }
-
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -87,6 +82,11 @@ export default function Dashboard() {
     if (diffInDays < 14) return '1 week ago';
     return formatDate(date);
   };
+
+  // Show full page skeleton while loading (after all hooks)
+  if (isLoading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
