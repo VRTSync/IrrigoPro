@@ -23,10 +23,10 @@ export async function apiRequest(
   
   // Add user headers if user is logged in
   if (user?.role) {
-    headers["X-User-Role"] = user.role;
-    headers["X-User-ID"] = user.id?.toString() || "";
-    headers["X-User-Name"] = user.name || "";
-    headers["X-User-Company-Id"] = user.companyId?.toString() || "";
+    headers["x-user-role"] = user.role;
+    headers["x-user-id"] = user.id?.toString() || "";
+    headers["x-user-name"] = user.name || "";
+    headers["x-user-company-id"] = user.companyId?.toString() || "";
   }
 
   const res = await fetch(url, {
@@ -57,10 +57,10 @@ export const getQueryFn: <T>(options: {
     
     // Add user headers if user is logged in
     if (user?.role) {
-      headers["X-User-Role"] = user.role;
-      headers["X-User-ID"] = user.id?.toString() || "";
-      headers["X-User-Name"] = user.name || "";
-      headers["X-User-Company-Id"] = user.companyId?.toString() || "";
+      headers["x-user-role"] = user.role;
+      headers["x-user-id"] = user.id?.toString() || "";
+      headers["x-user-name"] = user.name || "";
+      headers["x-user-company-id"] = user.companyId?.toString() || "";
     }
 
     const res = await fetch(queryKey.join("/") as string, {
