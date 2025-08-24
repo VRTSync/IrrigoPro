@@ -83,9 +83,8 @@ export default function Navigation({ user }: NavigationProps) {
     if (user.role === 'company_admin') {
       return [
         { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-        { path: "/estimates", label: "Estimates", icon: FileText },
-        { path: "/work-orders", label: "Work Orders", icon: ClipboardList },
-        { path: "/billing-sheets", label: "Billing Sheets", icon: FileText },
+        { path: "/operations", label: "Operations", icon: ClipboardList },
+        { path: "/customers", label: "Customers", icon: Users },
         { 
           path: "/admin", 
           label: "Admin", 
