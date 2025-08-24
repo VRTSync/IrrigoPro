@@ -43,7 +43,7 @@ Parts Catalog Access: Billing managers and irrigation managers have comprehensiv
 - **Monthly Invoice Consolidation**: Consolidates all customer work into single monthly QuickBooks invoices with tax-free calculations.
 - **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions and interfaces.
 - **Site Maps & Controller Management System**: KML file import for visualizing irrigation controllers and zones on an interactive map using Leaflet. Site map builder is accessible through individual customer profiles.
-- **Customer Email Approval System**: Integrates with Postmark for secure, token-based customer estimate approvals via email.
+- **Customer Email Approval System**: Integrates with Postmark for secure, token-based customer estimate approvals via email. Approval links show a clean success confirmation page without redirecting customers to the main application.
 - **Notification System**: Database-driven notifications with real-time updates for work order assignments, completions, and estimate approvals.
 - **iOS PWA Push Notifications**: Progressive Web App implementation with service worker, push notifications, and iOS-specific optimizations.
 - **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based location picker.

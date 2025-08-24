@@ -4330,18 +4330,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       );
 
       res.send(`
-        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <div style="max-width: 600px; margin: 0 auto; background: #f0fdf4; border: 1px solid #16a34a; border-radius: 12px; padding: 40px;">
-            <h1 style="color: #16a34a; margin-bottom: 20px;">✓ Estimate Approved!</h1>
-            <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">
-              Thank you for approving estimate ${estimate.estimateNumber}.
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f9fafb;">
+          <div style="max-width: 500px; margin: 0 auto; background: white; border: 2px solid #16a34a; border-radius: 16px; padding: 40px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div style="font-size: 48px; color: #16a34a; margin-bottom: 20px;">✓</div>
+            <h1 style="color: #16a34a; margin-bottom: 15px; font-size: 28px;">Estimate Approved!</h1>
+            <p style="font-size: 18px; color: #374151; margin-bottom: 25px; line-height: 1.5;">
+              Thank you for approving estimate <strong>${estimate.estimateNumber}</strong>.
             </p>
-            <p style="color: #6b7280;">
-              We will begin preparing your irrigation work and will contact you soon with scheduling details.
+            <div style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+              <p style="color: #15803d; margin: 0; font-weight: 500;">
+                We will contact you soon with scheduling details.
+              </p>
+            </div>
+            <p style="color: #6b7280; font-size: 14px; margin: 0;">
+              A confirmation email has been sent to ${estimate.customerEmail}
             </p>
-            <p style="color: #6b7280; margin-top: 30px;">
-              A confirmation email has been sent to ${estimate.customerEmail}.
-            </p>
+            <div style="margin-top: 30px;">
+              <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                You can now close this window.
+              </p>
+            </div>
           </div>
         </body></html>
       `);
