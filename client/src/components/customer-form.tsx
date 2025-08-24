@@ -14,7 +14,7 @@ import { CalendarIcon, DollarSign, Percent, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@shared/schema";
-import type { Customer } from "@shared/schema";
+import type { Customer, User } from "@shared/schema";
 
 const customerFormSchema = insertCustomerSchema.extend({
   companyId: z.number().min(1, "Company ID is required"),
@@ -43,12 +43,12 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const queryClient = useQueryClient();
 
   // Get current user from API (production-safe)
-  const { data: currentUser } = useQuery({
+  const { data: currentUser } = useQuery<User>({
     queryKey: ["/api/auth/user"],
     retry: false,
   });
 
-  const companyId = currentUser?.companyId;
+  const companyId = currentUser?.companyId || 0;
 
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),

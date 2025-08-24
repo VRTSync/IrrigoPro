@@ -54,11 +54,6 @@ export default function Customers() {
     queryKey: ["/api/customers"],
   });
 
-  // Show full page skeleton while loading
-  if (isLoading) {
-    return <CustomerListSkeleton />;
-  }
-
   // Delete customer mutation
   const deleteCustomerMutation = useMutation({
     mutationFn: async (customerId: number) => {
@@ -111,6 +106,11 @@ export default function Customers() {
     customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
     customer.phone?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Show full page skeleton while loading (after all hooks)
+  if (isLoading) {
+    return <CustomerListSkeleton />;
+  }
 
   // Show site maps if selected for field tech
   if (showSiteMaps) {
