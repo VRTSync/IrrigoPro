@@ -74,16 +74,27 @@ export function ObjectUploader({
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile) {
+      console.error('No file selected for upload');
+      return;
+    }
 
+    console.log('Starting upload for file:', selectedFile.name, 'Size:', selectedFile.size, 'Type:', selectedFile.type);
     setIsUploading(true);
     setUploadProgress(0);
 
     try {
       // Get upload parameters
+      console.log('Getting upload parameters...');
       const uploadParams = await onGetUploadParameters();
+      console.log('Upload parameters received:', { method: uploadParams.method, url: uploadParams.url ? 'URL_RECEIVED' : 'NO_URL' });
+      
+      if (!uploadParams.url) {
+        throw new Error('No upload URL received from server');
+      }
       
       // Upload the file directly to the signed URL
+      console.log('Starting file upload to signed URL...');
       const response = await fetch(uploadParams.url, {
         method: uploadParams.method,
         body: selectedFile,
@@ -92,8 +103,12 @@ export function ObjectUploader({
         },
       });
 
+      console.log('Upload response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error('Upload failed with response:', errorText);
+        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
       }
 
       setUploadProgress(100);
@@ -101,6 +116,7 @@ export function ObjectUploader({
       console.log('File uploaded successfully to:', uploadParams.url);
       
       // Call the completion callback with the upload URL
+      console.log('Calling completion callback...');
       onComplete?.(uploadParams.url);
       
       toast({
@@ -116,7 +132,8 @@ export function ObjectUploader({
       }
       
     } catch (error) {
-      console.error('Upload error:', error);
+      console.error('Upload error details:', error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       toast({
         title: "Upload failed",
         description: error instanceof Error ? error.message : "Failed to upload file",

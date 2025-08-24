@@ -365,20 +365,36 @@ export default function CompanyProfile() {
                         maxNumberOfFiles={1}
                         maxFileSize={2097152}
                         onGetUploadParameters={async () => {
-                          const response = await apiRequest('/api/company/logo/upload', 'POST');
-                          return response;
+                          try {
+                            console.log('Getting upload parameters for company logo...');
+                            const response = await apiRequest('/api/company/logo/upload', 'POST');
+                            console.log('Logo upload parameters:', response);
+                            
+                            if (!response || !response.url) {
+                              throw new Error('Invalid upload parameters received from server');
+                            }
+                            
+                            return response;
+                          } catch (error) {
+                            console.error('Error getting logo upload parameters:', error);
+                            throw error;
+                          }
                         }}
                         onComplete={async (uploadUrl: string) => {
                           try {
+                            console.log('Logo upload completed, URL:', uploadUrl);
+                            
                             // The uploadUrl is passed directly from ObjectUploader
                             if (!uploadUrl) {
                               throw new Error('No upload URL provided');
                             }
 
                             // Save the logo URL to the company profile
+                            console.log('Saving logo to company profile...');
                             const saveResult = await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
                               logoUrl: uploadUrl
                             });
+                            console.log('Logo save result:', saveResult);
                             
                             // Force refresh all company profile queries across the app
                             await queryClient.invalidateQueries({ 
