@@ -315,8 +315,8 @@ export default function CompanyProfile() {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
                               queryClient.invalidateQueries({ 
                                 predicate: (query) => {
-                                  return query.queryKey[0]?.toString().includes('/api/company') && 
-                                         query.queryKey[0]?.toString().includes('/profile');
+                                  const key = query.queryKey[0]?.toString() || '';
+                                  return key.includes('/api/company') && key.includes('/profile');
                                 }
                               });
                               toast({
@@ -357,12 +357,11 @@ export default function CompanyProfile() {
                           const response = await apiRequest('/api/company/logo/upload', 'POST');
                           return response;
                         }}
-                        onComplete={async (result) => {
+                        onComplete={async (uploadUrl: string) => {
                           try {
-                            // Extract the upload URL from the result
-                            const uploadUrl = result.successful?.[0]?.uploadURL;
+                            // The uploadUrl is passed directly from ObjectUploader
                             if (!uploadUrl) {
-                              throw new Error('No upload URL found in result');
+                              throw new Error('No upload URL provided');
                             }
 
                             // Save the logo URL to the company profile
@@ -370,7 +369,7 @@ export default function CompanyProfile() {
                               logoUrl: uploadUrl
                             });
                             
-                            // Force refresh all company profile queries
+                            // Force refresh all company profile queries across the app
                             await queryClient.invalidateQueries({ 
                               predicate: (query) => {
                                 const key = query.queryKey[0]?.toString() || '';
@@ -378,8 +377,13 @@ export default function CompanyProfile() {
                               }
                             });
 
-                            // Also invalidate auth user query
+                            // Invalidate auth user query for consistent state
                             await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+
+                            // Refetch current data to ensure UI updates
+                            await queryClient.refetchQueries({ 
+                              queryKey: [`/api/company/${companyId}/profile`] 
+                            });
                             
                             toast({
                               title: "Logo uploaded",
