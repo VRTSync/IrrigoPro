@@ -338,6 +338,21 @@ export default function Navigation() {
                       expandedItems.push(customersLink);
                     }
                   }
+                } else if (userRole === 'irrigation_manager') {
+                  // For irrigation managers, prioritize key operational areas for mobile
+                  // Add non-dropdown items first (Work Orders, Billing, Customers)
+                  otherItems.filter(item => !item.isDropdown).forEach(item => {
+                    expandedItems.push(item);
+                  });
+                  
+                  // Add Parts Catalog (primary parts access) but not Parts List to save space
+                  const partsItem = otherItems.find(item => item.label === 'Parts' && item.isDropdown);
+                  if (partsItem?.dropdownItems) {
+                    const partsCatalog = partsItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Parts Catalog');
+                    if (partsCatalog) {
+                      expandedItems.push(partsCatalog);
+                    }
+                  }
                 } else {
                   // For other roles, use the standard expansion
                   otherItems.forEach(item => {
