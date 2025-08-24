@@ -336,7 +336,9 @@ export default function CompanyProfile() {
                     <div className="p-6 border-2 border-dashed border-muted rounded-lg text-center">
                       <Image className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
                       <p className="text-sm text-muted-foreground">No logo uploaded</p>
-                      <p className="text-xs text-muted-foreground">Upload a logo to display your company branding</p>
+                      <p className="text-xs text-muted-foreground">
+                        Upload a logo to display on Dashboard, Work Orders, Estimates, Customers, and in customer emails
+                      </p>
                     </div>
                   )}
 

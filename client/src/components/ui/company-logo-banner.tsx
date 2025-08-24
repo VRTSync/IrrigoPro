@@ -16,25 +16,33 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
   });
 
   if (!company?.logo) {
-    return null;
+    return (
+      <div className={`bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-b p-4 ${className}`}>
+        <div className="flex items-center justify-center">
+          <div className="text-center text-sm text-muted-foreground">
+            <span className="bg-white dark:bg-gray-800 px-3 py-1 rounded-full border">
+              Upload company logo in Admin → Company
+            </span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className={`bg-white rounded-lg shadow-sm border border-gray-200 p-6 ${className}`}>
+    <div className={`bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-b p-4 ${className}`}>
       <div className="flex items-center justify-center">
-        <img 
-          src={company.logo.startsWith('http') 
-            ? company.logo 
-            : `/public-objects/company-logos/${company.logo}`}
-          alt={`${company.name} Logo`}
-          className="h-16 w-auto object-contain"
-          onError={(e) => {
-            e.currentTarget.style.display = 'none';
-          }}
-        />
-      </div>
-      <div className="text-center mt-3">
-        <h2 className="text-xl font-semibold text-gray-900">{company.name}</h2>
+        <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm border">
+          <img 
+            src={company.logo}
+            alt={`${company.name} Logo`}
+            className="h-12 max-w-48 object-contain"
+            onError={(e) => {
+              console.error('Company logo failed to load:', company.logo);
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        </div>
       </div>
     </div>
   );
