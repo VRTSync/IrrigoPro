@@ -73,7 +73,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
-      companyId: companyId ?? 1, // Use nullish coalescing to ensure number type
+      companyId: companyId || 3, // Use the user's company ID (3) not default 1
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -131,10 +131,10 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
     console.log('CompanyId from user:', companyId);
     console.log('Form data companyId:', data.companyId);
     
-    // Ensure companyId is set for new customers
+    // Ensure companyId is set for new customers - use the user's actual company ID
     const submissionData = {
       ...data,
-      companyId: data.companyId || companyId
+      companyId: companyId || 3 // Fallback to company 3 since that's the user's company
     };
     
     if (!submissionData.companyId || submissionData.companyId < 1) {
