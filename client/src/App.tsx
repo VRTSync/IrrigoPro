@@ -29,6 +29,7 @@ import SystemUserManagement from "@/pages/system-user-management";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import UserProfile from "@/pages/user-profile";
+import SwitchUser from "@/pages/switch-user";
 import UserManager from "@/pages/UserManager";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
@@ -167,6 +168,7 @@ function Router() {
                 <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -200,6 +202,7 @@ function Router() {
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -230,6 +233,7 @@ function Router() {
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -258,6 +262,7 @@ function Router() {
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-manager" component={UserManager} />
                 <Route path="/user-profile" component={UserProfile} />
+                <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -303,6 +308,7 @@ function Router() {
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
+              <Route path="/switch-user" component={SwitchUser} />
               <Route path="/license-agreement" component={LicenseAgreement} />
               <Route path="/privacy-policy" component={PrivacyPolicy} />
               <Route path="/login" component={Login} />

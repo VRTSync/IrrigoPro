@@ -15,6 +15,7 @@ import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 
 import UserProfile from "@/pages/user-profile";
+import SwitchUser from "@/pages/switch-user";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
 
@@ -108,7 +109,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/" component={AdminDashboard} />
           <Route path="/admin" component={AdminDashboard} />
           <Route path="/operations" component={Operations} />
-          <Route path="/users" component={CompanyUserManagement} />
+          <Route path="/team-management" component={CompanyUserManagement} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/quickbooks" component={QuickBooksPage} />
           <Route path="/parts" component={PartsCatalog} />
@@ -118,6 +119,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/field-tech" component={FieldTech} />
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/user-profile" component={UserProfile} />
+          <Route path="/switch-user" component={SwitchUser} />
 
           <Route path="/license-agreement" component={LicenseAgreement} />
           <Route path="/privacy-policy" component={PrivacyPolicy} />

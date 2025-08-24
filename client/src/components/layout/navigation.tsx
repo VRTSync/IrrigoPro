@@ -23,7 +23,8 @@ import {
   UserCog,
   Building2,
   ChevronDown,
-  DollarSign
+  DollarSign,
+  UserCheck
 } from "lucide-react";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { NotificationSystem } from "@/components/notifications/notification-system";
@@ -262,6 +263,12 @@ export default function Navigation({ user }: NavigationProps) {
                       My Account
                     </DropdownMenuItem>
                   </Link>
+                  <Link href="/switch-user">
+                    <DropdownMenuItem>
+                      <UserCheck className="mr-2 h-4 w-4" />
+                      Switch User
+                    </DropdownMenuItem>
+                  </Link>
                   <DropdownMenuItem
                     onClick={() => {
                       localStorage.removeItem("user");
@@ -316,6 +323,12 @@ export default function Navigation({ user }: NavigationProps) {
                     <DropdownMenuItem>
                       <User className="mr-2 h-4 w-4" />
                       My Account
+                    </DropdownMenuItem>
+                  </Link>
+                  <Link href="/switch-user">
+                    <DropdownMenuItem>
+                      <UserCheck className="mr-2 h-4 w-4" />
+                      Switch User
                     </DropdownMenuItem>
                   </Link>
                   <DropdownMenuItem
