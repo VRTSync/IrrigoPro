@@ -313,7 +313,12 @@ export default function CompanyProfile() {
                           onClick={async () => {
                             try {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
-                              queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+                              queryClient.invalidateQueries({ 
+                                predicate: (query) => {
+                                  return query.queryKey[0]?.toString().includes('/api/company') && 
+                                         query.queryKey[0]?.toString().includes('/profile');
+                                }
+                              });
                               toast({
                                 title: "Logo removed",
                                 description: "Company logo has been removed successfully",
@@ -362,8 +367,13 @@ export default function CompanyProfile() {
                             });
                             console.log('Logo save result:', result);
                             
-                            // Invalidate and refetch company data
-                            queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+                            // Invalidate and refetch company data across all pages
+                            queryClient.invalidateQueries({ 
+                              predicate: (query) => {
+                                return query.queryKey[0]?.toString().includes('/api/company') && 
+                                       query.queryKey[0]?.toString().includes('/profile');
+                              }
+                            });
                             
                             toast({
                               title: "Logo uploaded",
