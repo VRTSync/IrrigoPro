@@ -107,6 +107,19 @@ const requireCompanyAdminViewAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
+// QuickBooks access control middleware - irrigation managers and field techs cannot access QuickBooks
+const requireQuickBooksAccess = (req: Request, res: any, next: any) => {
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole === 'irrigation_manager' || userRole === 'field_tech') {
+    return res.status(403).json({ 
+      message: "Access denied. QuickBooks integration is not available for your role." 
+    });
+  }
+  
+  next();
+};
+
 import { db } from "./db";
 import { 
   customers, estimates, workOrders, estimateItems, estimateZones, parts, billingSheets, billingSheetItems, 
@@ -3497,7 +3510,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   }
 
   // QuickBooks integration routes
-  app.get("/api/quickbooks/auth", async (req, res) => {
+  app.get("/api/quickbooks/auth", requireQuickBooksAccess, async (req, res) => {
     try {
       // Check if QuickBooks credentials are available
       if (!process.env.QUICKBOOKS_CLIENT_ID || !process.env.QUICKBOOKS_CLIENT_SECRET) {
@@ -3683,7 +3696,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Clear QuickBooks connection (for reconnecting)
-  app.post("/api/quickbooks/disconnect", async (req, res) => {
+  app.post("/api/quickbooks/disconnect", requireQuickBooksAccess, async (req, res) => {
     try {
       const user = req.user as any;
       const userCompanyId = user?.companyId ? user.companyId.toString() : null;
@@ -3705,7 +3718,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Add alias for status endpoint
-  app.get("/api/quickbooks/status", async (req, res) => {
+  app.get("/api/quickbooks/status", requireQuickBooksAccess, async (req, res) => {
     try {
       // Get user's company ID from session
       const user = req.user as any;
@@ -3728,7 +3741,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/quickbooks/customers", async (req, res) => {
+  app.get("/api/quickbooks/customers", requireQuickBooksAccess, async (req, res) => {
     try {
       // Get user's company ID
       const user = req.user as any;
@@ -3782,7 +3795,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.get("/api/quickbooks/connection", async (req, res) => {
+  app.get("/api/quickbooks/connection", requireQuickBooksAccess, async (req, res) => {
     try {
       // In a real implementation, you would check stored tokens and validate them
       // For now, check if we have the required environment variables
@@ -3819,7 +3832,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/quickbooks/sync-customers", async (req, res) => {
+  app.post("/api/quickbooks/sync-customers", requireQuickBooksAccess, async (req, res) => {
     try {
       console.log("Starting QuickBooks customer sync...");
       
@@ -4065,7 +4078,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/quickbooks/sync-estimate/:id", async (req, res) => {
+  app.post("/api/quickbooks/sync-estimate/:id", requireQuickBooksAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
@@ -5479,7 +5492,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Launch URL - Called when user clicks "Launch" button in QuickBooks App Menu
-  app.get("/api/quickbooks/launch", async (req, res) => {
+  app.get("/api/quickbooks/launch", requireQuickBooksAccess, async (req, res) => {
     try {
       // Log the launch request with enhanced logging
       console.log('QuickBooks Launch URL accessed:', req.query);

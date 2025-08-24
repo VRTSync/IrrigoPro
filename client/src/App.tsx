@@ -196,8 +196,8 @@ function Router() {
                 <Route path="/parts-list" component={PartsList} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/customers" component={Customers} />
+                <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/billing-sheets" component={BillingSheets} />
-                <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
