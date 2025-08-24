@@ -298,6 +298,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reset/clear company logo
+  app.put("/api/company/:companyId/logo-reset", async (req, res) => {
+    try {
+      const userRole = req.headers['x-user-role'];
+      const companyId = parseInt(req.params.companyId);
+      
+      if (userRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
+      }
+
+      // Clear the logo
+      const updatedCompany = await storage.updateCompany(companyId, { 
+        logo: null 
+      });
+
+      if (!updatedCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+
+      res.json({ 
+        message: "Logo cleared successfully" 
+      });
+    } catch (error) {
+      console.error('Error clearing company logo:', error);
+      res.status(500).json({ message: "Failed to clear company logo" });
+    }
+  });
+
   // Update company logo after upload
   app.put("/api/company/:companyId/logo", async (req, res) => {
     try {

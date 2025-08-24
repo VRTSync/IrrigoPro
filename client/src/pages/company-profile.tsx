@@ -301,11 +301,36 @@ export default function CompanyProfile() {
                           e.currentTarget.style.display = 'none';
                         }}
                       />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm font-medium">Current Logo</p>
                         <p className="text-xs text-muted-foreground">Used in emails and documents</p>
                         <p className="text-xs text-blue-600 mt-1">✓ Logo saved</p>
                       </div>
+                      {isEditing && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
+                              queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+                              toast({
+                                title: "Logo removed",
+                                description: "Company logo has been removed successfully",
+                              });
+                            } catch (error) {
+                              console.error('Error removing logo:', error);
+                              toast({
+                                title: "Error",
+                                description: "Failed to remove logo. Please try again.",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <div className="p-6 border-2 border-dashed border-muted rounded-lg text-center">
