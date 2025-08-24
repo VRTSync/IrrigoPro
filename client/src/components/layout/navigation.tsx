@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useQuery } from "@tanstack/react-query";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon } from "lucide-react";
@@ -20,6 +21,21 @@ export default function Navigation() {
   // Get current user role from localStorage
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userRole = user.role;
+  const companyId = user.companyId;
+
+  // Fetch company profile to get company logo
+  const { data: company } = useQuery({
+    queryKey: [`/api/company/${companyId}/profile`],
+    enabled: !!companyId,
+    retry: false,
+  });
+
+  // Determine which logo to use
+  const logoToUse = company?.logo 
+    ? (company.logo.startsWith('http') 
+        ? company.logo 
+        : `/public-objects/company-logos/${company.logo}`)
+    : irrigoProLogo;
 
   // Define navigation items based on user role
   const getNavItems = () => {
@@ -107,9 +123,13 @@ export default function Navigation() {
               <Link href="/">
                 <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
-                    src={irrigoProLogo} 
-                    alt="IrrigoPro Logo" 
+                    src={logoToUse} 
+                    alt={company?.name ? `${company.name} Logo` : "IrrigoPro Logo"}
                     className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
+                    onError={(e) => {
+                      // Fallback to default logo if company logo fails to load
+                      e.currentTarget.src = irrigoProLogo;
+                    }}
                   />
                 </div>
               </Link>
@@ -238,9 +258,13 @@ export default function Navigation() {
             {/* Logo */}
             <div className="flex items-center">
               <img 
-                src={irrigoProLogo} 
-                alt="IrrigoPro Logo" 
+                src={logoToUse} 
+                alt={company?.name ? `${company.name} Logo` : "IrrigoPro Logo"}
                 className="h-10 w-auto"
+                onError={(e) => {
+                  // Fallback to default logo if company logo fails to load
+                  e.currentTarget.src = irrigoProLogo;
+                }}
               />
             </div>
 

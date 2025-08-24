@@ -43,6 +43,17 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/stats"],
   });
 
+  // Get current user info
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const companyId = user.companyId;
+
+  // Fetch company profile to get company info
+  const { data: company } = useQuery({
+    queryKey: [`/api/company/${companyId}/profile`],
+    enabled: !!companyId,
+    retry: false,
+  });
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -90,12 +101,30 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {/* Header */}
+      {/* Header with Company Branding */}
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-            <p className="text-gray-600 mt-1">Manage your irrigation estimates and track your business</p>
+          <div className="flex items-center gap-4">
+            {company?.logo && (
+              <div className="hidden sm:block">
+                <img 
+                  src={company.logo.startsWith('http') 
+                    ? company.logo 
+                    : `/public-objects/company-logos/${company.logo}`}
+                  alt={`${company.name} Logo`}
+                  className="h-12 w-auto object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">
+                {company?.name ? `${company.name} Dashboard` : 'Dashboard'}
+              </h1>
+              <p className="text-gray-600 mt-1">Manage your irrigation estimates and track your business</p>
+            </div>
           </div>
           <div className="mt-4 sm:mt-0 flex space-x-3">
             <Button onClick={() => setShowEstimateModal(true)} className="bg-primary text-white hover:bg-blue-700">
