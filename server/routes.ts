@@ -284,9 +284,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
       }
 
-      // Clear the logo
+      // Clear the logo - set to empty string, not null, for proper frontend handling
       const updatedCompany = await storage.updateCompany(companyId, { 
-        logo: null 
+        logo: "" 
       });
 
       if (!updatedCompany) {
@@ -294,7 +294,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json({ 
-        message: "Logo cleared successfully" 
+        message: "Logo cleared successfully",
+        logo: ""
       });
     } catch (error) {
       // Production error logging would go to monitoring service

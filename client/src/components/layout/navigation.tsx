@@ -31,11 +31,14 @@ import { useQuery } from "@tanstack/react-query";
 
 // Company banner component to show logo from company profile
 function CompanyLogoBanner({ companyId }: { companyId: number }) {
-  const { data: companyProfile } = useQuery({
+  const { data: companyProfile, refetch } = useQuery({
     queryKey: [`/api/company/${companyId}/profile`],
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
   });
 
-  if (!companyProfile?.logo) {
+  // Don't show banner if no logo is set or if logo is empty/null
+  if (!companyProfile?.logo || companyProfile.logo.trim() === '') {
     return null;
   }
 
@@ -48,7 +51,11 @@ function CompanyLogoBanner({ companyId }: { companyId: number }) {
           className="h-12 w-auto object-contain"
           onError={(e) => {
             console.error('Company logo failed to load:', companyProfile.logo);
-            e.currentTarget.style.display = 'none';
+            // Hide the entire banner when logo fails to load
+            const banner = e.currentTarget.closest('.w-full');
+            if (banner) {
+              (banner as HTMLElement).style.display = 'none';
+            }
           }}
         />
       </div>
