@@ -359,7 +359,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                   <FormItem>
                     <FormLabel>Price ($) *</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="0.01" min="0" />
+                      <Input {...field} type="number" step="any" min="0" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -373,7 +373,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                   <FormItem>
                     <FormLabel>Cost ($)</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="0.01" min="0" value={field.value || ""} />
+                      <Input {...field} type="number" step="any" min="0" value={field.value || ""} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -387,7 +387,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                   <FormItem>
                     <FormLabel>Labor Hours *</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="0.25" min="0" />
+                      <Input {...field} type="number" step="any" min="0" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
