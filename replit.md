@@ -7,6 +7,7 @@ IrrigoPro is a comprehensive full-stack irrigation business management system de
 Preferred communication style: Simple, everyday language.
 App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details. Complete visual rebrand implemented across all interfaces, icons, and PWA assets.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request).
+Customer Approval System: Complete email approval workflow with individual estimate status check buttons, proper production domain URLs (irrigopro.com/estimate-approval), and professional customer-facing success pages that avoid admin interface confusion.
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching.
 Business Rules: No markup on parts (bill at cost), no tax calculations on any charges. Labor hours are per-part, not multiplied by quantity. Monthly invoice consolidation combines all customer work into single QuickBooks invoices with tax-free totals. Estimates automatically create work orders when approved - manual work order creation is only for direct billing (non-estimate) work.
 Admin Access Restriction: Company admin users should not have direct access to estimates and work orders pages - only view through modal previews in operations page. Removed navigation paths to /estimates and /work-orders for admin role.
@@ -43,7 +44,7 @@ Parts Catalog Access: Billing managers and irrigation managers have comprehensiv
 - **Monthly Invoice Consolidation**: Consolidates all customer work into single monthly QuickBooks invoices with tax-free calculations.
 - **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions and interfaces.
 - **Site Maps & Controller Management System**: KML file import for visualizing irrigation controllers and zones on an interactive map using Leaflet. Site map builder is accessible through individual customer profiles.
-- **Customer Email Approval System**: Integrates with Postmark for secure, token-based customer estimate approvals via email. Approval links show a clean success confirmation page without redirecting customers to the main application.
+- **Customer Email Approval System**: Complete token-based customer estimate approval system with Postmark email integration. Features dedicated customer approval pages at /estimate-approval/:token with professional success confirmations, proper production domain handling (irrigopro.com), and individual estimate status checking capabilities. Customers receive clean approval experiences without access to admin interfaces.
 - **Notification System**: Database-driven notifications with real-time updates for work order assignments, completions, and estimate approvals.
 - **iOS PWA Push Notifications**: Progressive Web App implementation with service worker, push notifications, and iOS-specific optimizations.
 - **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based location picker.
