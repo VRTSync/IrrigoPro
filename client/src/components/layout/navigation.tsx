@@ -22,7 +22,8 @@ import {
   MapPin,
   UserCog,
   Building2,
-  ChevronDown
+  ChevronDown,
+  DollarSign
 } from "lucide-react";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { NotificationSystem } from "@/components/notifications/notification-system";
@@ -82,9 +83,9 @@ export default function Navigation({ user }: NavigationProps) {
     if (user.role === 'company_admin') {
       return [
         { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-        { path: "/estimates", label: "Estimates", icon: FileText },
-        { path: "/work-orders", label: "Work Orders", icon: ClipboardList },
-        { path: "/billing-sheets", label: "Billing Sheets", icon: FileText },
+        { path: "/customers", label: "Customers", icon: Users },
+        { path: "/quickbooks", label: "QuickBooks", icon: DollarSign },
+        { path: "/operations", label: "Operations", icon: ClipboardList },
         { 
           path: "/admin", 
           label: "Admin", 
