@@ -83,9 +83,9 @@ export default function Navigation({ user }: NavigationProps) {
     if (user.role === 'company_admin') {
       return [
         { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-        { path: "/customers", label: "Customers", icon: Users },
-        { path: "/quickbooks", label: "QuickBooks", icon: DollarSign },
-        { path: "/operations", label: "Operations", icon: ClipboardList },
+        { path: "/estimates", label: "Estimates", icon: FileText },
+        { path: "/work-orders", label: "Work Orders", icon: ClipboardList },
+        { path: "/billing-sheets", label: "Billing Sheets", icon: FileText },
         { 
           path: "/admin", 
           label: "Admin", 
@@ -93,7 +93,8 @@ export default function Navigation({ user }: NavigationProps) {
           isDropdown: true,
           dropdownItems: [
             { path: "/team-management", label: "Team", icon: UserCog },
-            { path: "/company-profile", label: "Company", icon: Building2 }
+            { path: "/company-profile", label: "Company", icon: Building2 },
+            { path: "/quickbooks", label: "QuickBooks", icon: DollarSign }
           ]
         }
       ];
