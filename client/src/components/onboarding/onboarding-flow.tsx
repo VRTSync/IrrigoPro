@@ -24,7 +24,7 @@ import {
   Zap
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import irrigoproLogo from "@assets/irrigopro - logo-01_1754798633907.png";
+import irrigoproLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 
 const companySetupSchema = z.object({
   name: z.string().min(1, "Company name is required"),

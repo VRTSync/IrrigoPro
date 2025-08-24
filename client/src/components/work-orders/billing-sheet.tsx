@@ -28,7 +28,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, WorkOrderItem } from "@shared/schema";
-import logoPath from "@assets/LOGO - SPREAD-05_1752764989944.png";
+import logoPath from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 
 const billingItemSchema = z.object({
   description: z.string().min(1, "Description is required"),

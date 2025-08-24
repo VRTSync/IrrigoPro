@@ -51,8 +51,8 @@ self.addEventListener('push', (event) => {
       notificationData = {
         title: payload.title || 'Irrigation Management',
         body: payload.message || payload.body || 'You have new updates',
-        icon: '/LOGO - SPREAD-05_1752764989944.png',
-        badge: '/LOGO - SPREAD-05_1752764989944.png',
+        icon: '/irrigopro - logo - BLUE - FINAL_1756061385150.png',
+        badge: '/irrigopro - logo - BLUE - FINAL_1756061385150.png',
         vibrate: [200, 100, 200],
         data: {
           ...payload,
@@ -62,7 +62,7 @@ self.addEventListener('push', (event) => {
           {
             action: 'view',
             title: 'View',
-            icon: '/LOGO - SPREAD-05_1752764989944.png'
+            icon: '/irrigopro - logo - BLUE - FINAL_1756061385150.png'
           }
         ]
       };
