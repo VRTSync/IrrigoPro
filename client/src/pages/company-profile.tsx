@@ -34,14 +34,14 @@ export default function CompanyProfile() {
   const [requiresSetup, setRequiresSetup] = useState(false);
 
   // Get current user info from session (production-safe)
-  const { data: currentUser } = useQuery({
+  const { data: currentUser } = useQuery<any>({
     queryKey: ['/api/auth/user'],
     retry: false,
   });
   const companyId = currentUser?.companyId;
 
   // Fetch company profile
-  const { data: company, isLoading, error } = useQuery({
+  const { data: company, isLoading, error } = useQuery<Company>({
     queryKey: [`/api/company/${companyId}/profile`],
     enabled: !!companyId,
     retry: false,
@@ -49,7 +49,7 @@ export default function CompanyProfile() {
 
   // Check if setup is required based on error response
   useEffect(() => {
-    if (error && error.message.includes('404')) {
+    if (error && (error.message.includes('404') || error.message.includes('not found'))) {
       setRequiresSetup(true);
     }
   }, [error]);
@@ -133,13 +133,17 @@ export default function CompanyProfile() {
     );
   }
 
-  if (!company) {
+  if (error) {
+    console.log("Company profile error:", error);
+  }
+
+  if (!company && !isLoading && !error) {
     return (
       <div className="p-8">
         <Card>
           <CardContent className="p-6">
             <div className="text-center text-muted-foreground">
-              Company profile not found
+              Company profile not found. CompanyId: {companyId}, CurrentUser: {JSON.stringify(currentUser)}
             </div>
           </CardContent>
         </Card>
@@ -313,9 +317,7 @@ export default function CompanyProfile() {
                         accept="image/*"
                         maxSizeMB={2}
                         onGetUploadParameters={async () => {
-                          const response = await apiRequest('/api/company/logo/upload', {
-                            method: 'POST',
-                          });
+                          const response = await apiRequest('/api/company/logo/upload', 'POST');
                           return response;
                         }}
                         onComplete={(uploadUrl) => {
