@@ -290,7 +290,7 @@ export default function CompanyProfile() {
                   </Label>
                   
                   {/* Current logo display */}
-                  {company?.logo ? (
+                  {company?.logo && company.logo.trim() !== '' ? (
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
                       <img
                         src={`${company.logo}?v=${Date.now()}`}
@@ -334,12 +334,23 @@ export default function CompanyProfile() {
                                 queryKey: [`/api/company/${companyId}/profile`] 
                               });
 
-                              // Small delay to ensure cache is cleared before refetch
+                              // Force immediate state reset and multiple refetches
+                              await queryClient.resetQueries({ 
+                                queryKey: [`/api/company/${companyId}/profile`] 
+                              });
+                              
+                              // Multiple refetches with delays to ensure UI updates
                               setTimeout(async () => {
                                 await queryClient.refetchQueries({ 
                                   queryKey: [`/api/company/${companyId}/profile`] 
                                 });
                               }, 100);
+                              
+                              setTimeout(async () => {
+                                await queryClient.refetchQueries({ 
+                                  queryKey: [`/api/company/${companyId}/profile`] 
+                                });
+                              }, 300);
 
                               toast({
                                 title: "Logo removed",
