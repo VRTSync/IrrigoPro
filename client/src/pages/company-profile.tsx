@@ -313,12 +313,23 @@ export default function CompanyProfile() {
                           onClick={async () => {
                             try {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
-                              queryClient.invalidateQueries({ 
+                              
+                              // Force refresh all company profile queries across the app
+                              await queryClient.invalidateQueries({ 
                                 predicate: (query) => {
                                   const key = query.queryKey[0]?.toString() || '';
                                   return key.includes('/api/company') && key.includes('/profile');
                                 }
                               });
+
+                              // Invalidate auth user query for consistent state
+                              await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+
+                              // Force refetch current data to ensure UI updates immediately
+                              await queryClient.refetchQueries({ 
+                                queryKey: [`/api/company/${companyId}/profile`] 
+                              });
+
                               toast({
                                 title: "Logo removed",
                                 description: "Company logo has been removed successfully",
