@@ -106,6 +106,8 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   });
 
   const onSubmit = (data: CustomerFormData) => {
+    console.log('Form submission data:', data);
+    console.log('Form errors:', form.formState.errors);
     mutation.mutate(data);
   };
 
@@ -421,7 +423,15 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={mutation.isPending}>
+              <Button 
+                type="submit" 
+                disabled={mutation.isPending}
+                onClick={() => {
+                  console.log('Submit button clicked');
+                  console.log('Form is valid:', form.formState.isValid);
+                  console.log('Form errors:', form.formState.errors);
+                }}
+              >
                 {mutation.isPending ? "Saving..." : customer ? "Update Customer" : "Create Customer"}
               </Button>
             </div>
