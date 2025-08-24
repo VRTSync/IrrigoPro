@@ -949,15 +949,8 @@ export default function PartsCatalog() {
         <div>
           <h1 className="text-3xl font-bold">Parts Catalog</h1>
           <p className="text-muted-foreground">
-            Manage your irrigation parts inventory with categorized organization
+            Manage your irrigation parts inventory and pre-configured assemblies
           </p>
-        </div>
-        
-        <div className="flex gap-2">
-          <Button onClick={handleAddPart} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Add Part
-          </Button>
         </div>
       </div>
 
