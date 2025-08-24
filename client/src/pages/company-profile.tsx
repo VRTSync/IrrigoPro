@@ -367,6 +367,70 @@ export default function CompanyProfile() {
             </CardContent>
           </Card>
 
+          {/* Email Templates */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5" />
+                Email Templates
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="p-4 border rounded-lg">
+                  <h4 className="font-semibold text-gray-900 mb-2">Estimate Approval Email</h4>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Template used when sending estimate approval requests to customers
+                  </p>
+                  <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 font-mono">
+                    <div className="space-y-2">
+                      <div><strong>Subject:</strong> Estimate #{`{estimateNumber}`} - Approval Required</div>
+                      <div><strong>Header:</strong> IRRIGATION ESTIMATE - APPROVAL REQUIRED</div>
+                      <div><strong>Content:</strong> Estimate details, project information, work zones</div>
+                      <div><strong>Actions:</strong> Approve/Decline links</div>
+                      <div><strong>Footer:</strong> Company information and contact details</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 text-xs text-gray-500">
+                    Templates automatically include your company logo, name, phone, email, and website
+                  </div>
+                </div>
+
+                <div className="p-4 border rounded-lg">
+                  <h4 className="font-semibold text-gray-900 mb-2">Approval Confirmation Email</h4>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Template sent to customers after they approve or decline an estimate
+                  </p>
+                  <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 font-mono">
+                    <div className="space-y-2">
+                      <div><strong>Subject:</strong> Estimate Approved/Declined - #{`{estimateNumber}`}</div>
+                      <div><strong>Content:</strong> Confirmation message with next steps</div>
+                      <div><strong>Approved:</strong> "We will begin scheduling your irrigation work..."</div>
+                      <div><strong>Declined:</strong> "Thank you for your time. Please feel free to contact us..."</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <div className="text-blue-600 mt-0.5">
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h5 className="font-medium text-blue-900">Professional Email Branding</h5>
+                      <p className="text-sm text-blue-800 mt-1">
+                        All emails automatically include your company logo and information from this profile. 
+                        Update your company details above to customize how your emails appear to customers.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Company Stats */}
           <Card>
             <CardHeader>
