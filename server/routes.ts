@@ -66,15 +66,15 @@ const createEstimateWithZonesSchema = z.object({
   }))
 });
 
-// Middleware to check if user has admin permissions for site map creation/editing
-const requireAdminAccess = (req: Request, res: any, next: any) => {
+// Middleware to check if user has company admin permissions for site map operations
+const requireCompanyAdminAccess = (req: Request, res: any, next: any) => {
   // For now, we'll add a simple header check
   // In a production app, this would check a proper session or JWT token
   const userRole = req.headers['x-user-role'];
   
-  if (userRole !== 'company_admin' && userRole !== 'super_admin') {
+  if (userRole !== 'company_admin') {
     return res.status(403).json({ 
-      message: "Access denied. Site map creation is restricted to administrators only." 
+      message: "Access denied. Site map operations are restricted to company administrators only." 
     });
   }
   
@@ -94,13 +94,13 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
-// Middleware to check if user has permission to view site maps
-const requireViewAccess = (req: Request, res: any, next: any) => {
+// Middleware to check if user has permission to view site maps (company admin only)
+const requireCompanyAdminViewAccess = (req: Request, res: any, next: any) => {
   const userRole = req.headers['x-user-role'];
   
-  if (!userRole || !['company_admin', 'super_admin', 'irrigation_manager', 'field_tech'].includes(userRole)) {
+  if (userRole !== 'company_admin') {
     return res.status(403).json({ 
-      message: "Access denied. You don't have permission to view site maps." 
+      message: "Access denied. Site map access is restricted to company administrators only." 
     });
   }
   
@@ -973,7 +973,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin endpoint to resend verification for company users
-  app.post("/api/company/:companyId/users/:userId/resend-verification", requireAdminAccess, async (req, res) => {
+  app.post("/api/company/:companyId/users/:userId/resend-verification", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const { companyId, userId } = req.params;
       const user = await storage.getUser(parseInt(userId));
@@ -1257,7 +1257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Customer site maps routes
   // Get all site maps (for overview display)
-  app.get("/api/site-maps", requireViewAccess, async (req, res) => {
+  app.get("/api/site-maps", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const siteMaps = await storage.getAllSiteMaps();
       res.json(siteMaps);
@@ -1267,7 +1267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:customerId/site-maps", requireViewAccess, async (req, res) => {
+  app.get("/api/customers/:customerId/site-maps", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
       const siteMaps = await storage.getCustomerSiteMaps(customerId);
@@ -1278,7 +1278,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/controllers", requireViewAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/controllers", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const controllers = await storage.getSiteMapControllers(siteMapId);
@@ -1289,7 +1289,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/zones", requireViewAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/zones", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const zones = await storage.getSiteMapZones(siteMapId);
@@ -1300,7 +1300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers/:customerId/site-maps", requireAdminAccess, async (req: any, res) => {
+  app.post("/api/customers/:customerId/site-maps", requireCompanyAdminAccess, async (req: any, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
       
@@ -1339,7 +1339,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/site-maps/:siteMapId", requireAdminAccess, async (req, res) => {
+  app.put("/api/site-maps/:siteMapId", requireCompanyAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       
@@ -1364,7 +1364,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/site-maps/:siteMapId", requireAdminAccess, async (req, res) => {
+  app.delete("/api/site-maps/:siteMapId", requireCompanyAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const success = await storage.deleteSiteMap(siteMapId);
@@ -1380,7 +1380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/controllers", requireAdminAccess, async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/controllers", requireCompanyAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const controllers = req.body.controllers;
@@ -1397,7 +1397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/zones", requireAdminAccess, async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/zones", requireCompanyAdminAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const zones = req.body.zones;
@@ -2018,7 +2018,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers", requireAdminAccess, async (req, res) => {
+  app.post("/api/customers", requireCompanyAdminAccess, async (req, res) => {
     try {
       const customerData = insertCustomerSchema.parse(req.body);
       const customer = await storage.createCustomer(customerData);
@@ -2031,7 +2031,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/customers/:id", requireAdminAccess, async (req, res) => {
+  app.put("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customerData = insertCustomerSchema.partial().parse(req.body);
@@ -2065,7 +2065,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/customers/:id", requireAdminAccess, async (req, res) => {
+  app.delete("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.deleteCustomer(id);
@@ -2109,7 +2109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/customers/import-csv", requireAdminAccess, async (req, res) => {
+  app.post("/api/customers/import-csv", requireCompanyAdminAccess, async (req, res) => {
     try {
       const file = (req as any).files?.file;
       if (!file) {

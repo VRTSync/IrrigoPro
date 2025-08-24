@@ -73,8 +73,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   const [newSiteMapName, setNewSiteMapName] = useState("");
   const [newSiteMapDescription, setNewSiteMapDescription] = useState("");
 
-  const isAdmin = userRole === "company_admin" || userRole === "super_admin";
-  const canEdit = isAdmin;
+  const isCompanyAdmin = userRole === "company_admin";
+  const canEdit = isCompanyAdmin;
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
