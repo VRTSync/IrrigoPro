@@ -2033,22 +2033,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/customers", requireCompanyAdminAccess, async (req, res) => {
     try {
-      console.log('Customer creation request received');
-      console.log('Request body:', req.body);
-      console.log('User role:', req.headers['x-user-role']);
-      console.log('User ID:', req.headers['x-user-id']);
-      
       const customerData = insertCustomerSchema.parse(req.body);
-      console.log('Parsed customer data:', customerData);
-      
       const customer = await storage.createCustomer(customerData);
-      console.log('Customer created successfully:', customer);
-      
       res.status(201).json(customer);
     } catch (error) {
       console.error('Customer creation error:', error);
       if (error instanceof z.ZodError) {
-        console.error('Validation errors:', error.errors);
         return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to create customer" });

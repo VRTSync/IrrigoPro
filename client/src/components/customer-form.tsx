@@ -73,7 +73,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
-      companyId: companyId || 3, // Use the user's company ID (3) not default 1
+      companyId: companyId || currentUser?.companyId || 3,
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -124,32 +124,24 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   });
 
   const onSubmit = (data: CustomerFormData) => {
-    console.log('Submit button clicked');
-    console.log('Form is valid:', form.formState.isValid);
-    console.log('Form errors:', form.formState.errors);
-    console.log('Current user:', currentUser);
-    console.log('CompanyId from user:', companyId);
-    console.log('Form data companyId:', data.companyId);
-    
-    // Ensure companyId is set for new customers - use the user's actual company ID
+    // Ensure companyId is set for new customers
     const submissionData = {
       ...data,
-      companyId: companyId || 3 // Fallback to company 3 since that's the user's company
+      companyId: companyId || currentUser?.companyId
     };
     
     if (!submissionData.companyId || submissionData.companyId < 1) {
       toast({
         title: "Error",
-        description: `Unable to determine company. User: ${!!currentUser}, CompanyId: ${companyId}`,
+        description: "Unable to determine company. Please refresh and try again.",
         variant: "destructive",
       });
       return;
     }
     
-    console.log('Submitting with data:', submissionData);
     mutation.mutate({
       ...submissionData,
-      companyId: submissionData.companyId as number // Type assertion since we validated above
+      companyId: submissionData.companyId as number
     });
   };
 
@@ -476,11 +468,6 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
               <Button 
                 type="submit" 
                 disabled={mutation.isPending}
-                onClick={() => {
-                  console.log('Submit button clicked');
-                  console.log('Form is valid:', form.formState.isValid);
-                  console.log('Form errors:', form.formState.errors);
-                }}
               >
                 {mutation.isPending ? "Saving..." : customer ? "Update Customer" : "Create Customer"}
               </Button>
