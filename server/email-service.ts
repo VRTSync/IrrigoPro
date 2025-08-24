@@ -29,7 +29,7 @@ export class EmailService {
     ? (process.env.REPLIT_DOMAINS?.includes('irrigopro.com') 
         ? 'https://irrigopro.com' 
         : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.replit.app`)
-    : 'http://localhost:5000';
+    : `https://${process.env.REPL_SLUG || 'irrigopro'}.${process.env.REPL_OWNER || 'rangerrmangel'}.replit.app`;
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
     if (!process.env.POSTMARK_API_TOKEN) {

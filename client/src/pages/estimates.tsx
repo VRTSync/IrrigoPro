@@ -250,6 +250,15 @@ export default function Estimates() {
                                   >
                                     <Edit2 className="w-4 h-4" />
                                   </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="text-green-600 hover:text-green-800"
+                                    onClick={() => handleRefresh()}
+                                    title="Check Status"
+                                  >
+                                    <RefreshCw className="w-4 h-4" />
+                                  </Button>
                                   <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
                                     <Mail className="w-4 h-4" />
                                   </Button>
@@ -360,6 +369,15 @@ export default function Estimates() {
                             }}
                           >
                             <Edit2 className="w-4 h-4" />
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            className="text-green-600 hover:text-green-800"
+                            onClick={() => handleRefresh()}
+                            title="Check Status"
+                          >
+                            <RefreshCw className="w-4 h-4" />
                           </Button>
                           <Button variant="outline" size="sm">
                             <Mail className="w-4 h-4" />
