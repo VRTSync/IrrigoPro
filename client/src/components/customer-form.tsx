@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +17,7 @@ import { insertCustomerSchema } from "@shared/schema";
 import type { Customer } from "@shared/schema";
 
 const customerFormSchema = insertCustomerSchema.extend({
+  companyId: z.number().min(1, "Company ID is required"),
   totalControllers: z.coerce.number().min(1, "Must have at least 1 controller").max(10, "Maximum 10 controllers").default(1),
   contractType: z.enum(["standard", "premium", "commercial", "residential"]).default("standard"),
   laborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("45.00"),
@@ -72,7 +73,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
-      companyId: companyId,
+      companyId: companyId || 0,
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -85,6 +86,13 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       notes: "",
     },
   });
+
+  // Update companyId when user data loads
+  useEffect(() => {
+    if (companyId && !customer) {
+      form.setValue('companyId', companyId);
+    }
+  }, [companyId, customer, form]);
 
   const mutation = useMutation({
     mutationFn: async (data: CustomerFormData) => {
@@ -116,17 +124,15 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   });
 
   const onSubmit = (data: CustomerFormData) => {
-    console.log('Form submission data:', data);
+    console.log('Submit button clicked');
+    console.log('Form is valid:', form.formState.isValid);
     console.log('Form errors:', form.formState.errors);
-    console.log('Current user companyId:', companyId);
     
     // Ensure companyId is set for new customers
     const submissionData = {
       ...data,
-      companyId: data.companyId || companyId
+      companyId: data.companyId || companyId || 0
     };
-    
-    console.log('Final submission data:', submissionData);
     
     if (!submissionData.companyId) {
       toast({
