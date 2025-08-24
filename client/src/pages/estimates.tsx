@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { EstimateListSkeleton } from "@/components/ui/loading-skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +44,11 @@ export default function Estimates() {
   const { data: estimates, isLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
   });
+
+  // Show full page skeleton while loading
+  if (isLoading) {
+    return <EstimateListSkeleton />;
+  }
 
   const handleRefresh = async () => {
     setRefreshing(true);

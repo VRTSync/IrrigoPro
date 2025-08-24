@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CustomerListSkeleton } from "@/components/ui/loading-skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -52,6 +53,11 @@ export default function Customers() {
   const { data: customers, isLoading } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
   });
+
+  // Show full page skeleton while loading
+  if (isLoading) {
+    return <CustomerListSkeleton />;
+  }
 
   // Delete customer mutation
   const deleteCustomerMutation = useMutation({
@@ -179,20 +185,7 @@ export default function Customers() {
           {/* Customers List - Responsive Design */}
           {/* Mobile Card View */}
           <div className="lg:hidden space-y-3">
-            {isLoading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <Card key={i} className="p-4">
-                  <div className="flex items-center space-x-3">
-                    <Skeleton className="h-10 w-10 rounded-lg" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-4 w-32" />
-                      <Skeleton className="h-3 w-24" />
-                    </div>
-                  </div>
-                </Card>
-              ))
-            ) : (
-              filteredCustomers?.map((customer) => (
+            {filteredCustomers?.map((customer) => (
                 <Card key={customer.id} className="p-4 hover:shadow-md transition-shadow">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
@@ -236,7 +229,7 @@ export default function Customers() {
                   )}
                 </Card>
               ))
-            )}
+            }
           </div>
 
           {/* Desktop Table View */}
@@ -267,31 +260,7 @@ export default function Customers() {
                       </tr>
                     </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {isLoading ? (
-                    Array.from({ length: 5 }).map((_, i) => (
-                      <tr key={i}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <Skeleton className="h-8 w-8 rounded-lg mr-3" />
-                            <Skeleton className="h-4 w-32" />
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <Skeleton className="h-4 w-40" />
-                            <Skeleton className="h-4 w-24" />
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <Skeleton className="h-4 w-48" />
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <Skeleton className="h-8 w-16" />
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    filteredCustomers?.map((customer) => (
+                  {filteredCustomers?.map((customer) => (
                       <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
@@ -394,7 +363,7 @@ export default function Customers() {
                         </td>
                       </tr>
                     ))
-                  )}
+                  }
                   </tbody>
                   </table>
                 </div>

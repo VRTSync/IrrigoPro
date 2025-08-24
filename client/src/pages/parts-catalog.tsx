@@ -1,4 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { PartsListSkeleton } from "@/components/ui/loading-skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -933,6 +934,11 @@ export default function PartsCatalog() {
   const { data: assemblies, isLoading: isLoadingAssemblies } = useQuery<AssemblyWithParts[]>({
     queryKey: ["/api/assemblies"],
   });
+
+  // Show full page skeleton while loading
+  if (isLoading || isLoadingAssemblies) {
+    return <PartsListSkeleton />;
+  }
 
 
 

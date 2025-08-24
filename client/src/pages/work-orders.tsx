@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { WorkOrderListSkeleton } from "@/components/ui/loading-skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,6 +99,11 @@ export default function WorkOrders() {
     refetchOnMount: true,
     enabled: !!currentUser,
   });
+
+  // Show full page skeleton while loading
+  if (isLoading || !currentUser) {
+    return <WorkOrderListSkeleton />;
+  }
 
   // Fetch notifications for assignment dates (field techs only)
   const { data: notifications } = useQuery({
