@@ -896,6 +896,13 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
               <Button 
                 type="submit" 
                 disabled={createAssemblyMutation.isPending || updateAssemblyMutation.isPending || selectedParts.length === 0}
+                onClick={(e) => {
+                  console.log("Create Assembly button clicked");
+                  console.log("Form errors:", form.formState.errors);
+                  console.log("Form values:", form.getValues());
+                  console.log("Selected parts count:", selectedParts.length);
+                  console.log("Button disabled:", createAssemblyMutation.isPending || updateAssemblyMutation.isPending || selectedParts.length === 0);
+                }}
               >
                 {createAssemblyMutation.isPending || updateAssemblyMutation.isPending ? "Saving..." : assembly ? "Update Assembly" : "Create Assembly"}
               </Button>
