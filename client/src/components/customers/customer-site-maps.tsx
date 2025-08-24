@@ -654,8 +654,64 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             <div className="grid gap-4">
               {siteMaps.map((siteMap) => (
                 <Card key={siteMap.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
+                  <CardContent className="p-4 lg:p-6">
+                    {/* Mobile Layout */}
+                    <div className="lg:hidden space-y-4">
+                      <div className="flex items-start space-x-3">
+                        <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <MapPin className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-base font-semibold text-gray-900 truncate">
+                            {siteMap.name}
+                          </h3>
+                          <p className="text-gray-600 text-sm mt-1">
+                            {siteMap.description || "No description"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => {
+                            setSelectedProject({
+                              id: siteMap.id,
+                              name: siteMap.name,
+                              controllers: [],
+                              zones: [],
+                              zonesByController: {}
+                            });
+                            setActiveTab("maps");
+                          }}
+                        >
+                          <Eye className="w-4 h-4 mr-2" />
+                          View
+                        </Button>
+                        {canEdit && (
+                          <>
+                            <Button variant="outline" size="sm" className="flex-1">
+                              <Edit className="w-4 h-4 mr-2" />
+                              Edit
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-red-600 hover:text-red-700 flex-1"
+                              onClick={() => handleDeleteSiteMap(siteMap.id, siteMap.name)}
+                              disabled={deleteSiteMapMutation.isPending}
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Desktop Layout */}
+                    <div className="hidden lg:flex items-center justify-between">
                       <div className="flex items-center space-x-4">
                         <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                           <MapPin className="w-6 h-6 text-blue-600" />
@@ -674,7 +730,6 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            // Set the selected project to trigger data loading
                             setSelectedProject({
                               id: siteMap.id,
                               name: siteMap.name,
@@ -682,7 +737,6 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                               zones: [],
                               zonesByController: {}
                             });
-                            // Switch to map view tab immediately
                             setActiveTab("maps");
                           }}
                         >
