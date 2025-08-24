@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -41,13 +41,12 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get current user's company ID
-  const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
-    return savedUser ? JSON.parse(savedUser) : null;
-  };
+  // Get current user from API (production-safe)
+  const { data: currentUser } = useQuery({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
 
-  const currentUser = getCurrentUser();
   const companyId = currentUser?.companyId;
 
   const form = useForm<CustomerFormData>({
@@ -73,7 +72,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
-      companyId: companyId || 0,
+      companyId: companyId,
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -119,14 +118,25 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const onSubmit = (data: CustomerFormData) => {
     console.log('Form submission data:', data);
     console.log('Form errors:', form.formState.errors);
+    console.log('Current user companyId:', companyId);
     
     // Ensure companyId is set for new customers
     const submissionData = {
       ...data,
-      companyId: data.companyId || companyId || 0
+      companyId: data.companyId || companyId
     };
     
     console.log('Final submission data:', submissionData);
+    
+    if (!submissionData.companyId) {
+      toast({
+        title: "Error",
+        description: "Unable to determine company. Please refresh and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     mutation.mutate(submissionData);
   };
 
