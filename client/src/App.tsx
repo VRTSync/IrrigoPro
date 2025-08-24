@@ -34,6 +34,7 @@ import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
 import SwitchUser from "@/pages/switch-user";
 import CustomerProfile from "@/pages/customer-profile";
+import EstimateApproval from "@/pages/estimate-approval";
 
 import SiteMapsPage from "@/pages/site-maps";
 import FieldTechMaps from "@/pages/field-tech-maps";
@@ -136,6 +137,7 @@ function Router() {
 
             <Route path="/forgot-password" component={ForgotPassword} />
             <Route path="/reset-password" component={ResetPassword} />
+            <Route path="/estimate-approval/:token" component={EstimateApproval} />
             <Route path="/license-agreement" component={LicenseAgreement} />
             <Route path="/" component={Login} />
             <Route component={Login} />

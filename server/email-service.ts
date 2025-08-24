@@ -44,7 +44,7 @@ export class EmailService {
       return;
     }
 
-    const approveUrl = `${this.baseUrl}/api/estimates/approve-via-token/${data.approvalToken}`;
+    const approveUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
     const rejectUrl = `${this.baseUrl}/api/estimates/reject-via-token/${data.approvalToken}`;
     const viewUrl = `${this.baseUrl}/api/estimates/view-via-token/${data.approvalToken}`;
 
