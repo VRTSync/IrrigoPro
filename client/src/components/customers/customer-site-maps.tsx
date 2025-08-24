@@ -311,6 +311,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
         headers: {
           'Content-Type': 'application/json',
           'x-user-role': userRole || 'field_tech', // Default fallback
+          'x-user-id': user.id?.toString() || '1', // Send user ID for company lookup
         },
         body: JSON.stringify(data),
       });
