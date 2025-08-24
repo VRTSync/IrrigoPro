@@ -163,10 +163,15 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
     try {
       // Save controllers to database
+      // Get user role from localStorage to send as header
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const userRole = user.role;
+      
       const response = await fetch(`/api/site-maps/${selectedProject.id}/controllers`, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json',
+          'x-user-role': userRole || 'field_tech', // Default fallback
         },
         body: JSON.stringify({ controllers: data.controllers }),
       });
@@ -236,10 +241,15 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
       }));
 
       // Save zones to database
+      // Get user role from localStorage to send as header
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const userRole = user.role;
+      
       const response = await fetch(`/api/site-maps/${selectedProject.id}/zones`, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json',
+          'x-user-role': userRole || 'field_tech', // Default fallback
         },
         body: JSON.stringify({ zones: zonesWithController }),
       });
@@ -292,15 +302,22 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   // Create site map mutation
   const createSiteMapMutation = useMutation({
     mutationFn: async (data: { name: string; description: string }) => {
+      // Get user role from localStorage to send as header
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const userRole = user.role;
+      
       const response = await fetch(`/api/customers/${customer.id}/site-maps`, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json',
+          'x-user-role': userRole || 'field_tech', // Default fallback
         },
         body: JSON.stringify(data),
       });
       
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Site map creation error:", errorText);
         throw new Error(`Failed to create site map: ${response.statusText}`);
       }
       
