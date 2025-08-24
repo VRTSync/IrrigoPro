@@ -442,18 +442,24 @@ export default function Navigation() {
                             : "text-gray-600 hover:text-blue-600 hover:bg-gradient-to-br hover:from-gray-50 hover:to-gray-100 hover:shadow-md"
                           }
                         `}>
-                          <Icon className={`h-5 w-5 mb-1 transition-transform duration-200 ${active ? 'scale-110' : ''}`} />
+                          <Icon className={`h-4 w-4 transition-transform duration-200 ${active ? 'scale-110' : ''}`} />
                           {item.label === "Work Orders" ? (
-                            <div className="text-xs font-semibold text-center leading-tight">
+                            <div className="text-xs font-semibold text-center leading-none mt-1">
                               <div>Work</div>
                               <div>Orders</div>
                             </div>
+                          ) : item.label === "Parts Catalog" ? (
+                            <div className="text-xs font-semibold text-center leading-none mt-1">
+                              <div>Parts</div>
+                            </div>
                           ) : item.label === "Onsite" ? (
-                            <span className="text-xs font-semibold">Onsite</span>
+                            <span className="text-xs font-semibold text-center mt-1">Onsite</span>
                           ) : item.label === "Maps" ? (
-                            <span className="text-xs font-semibold">Maps</span>
+                            <span className="text-xs font-semibold text-center mt-1">Maps</span>
+                          ) : item.label === "Billing" ? (
+                            <span className="text-xs font-semibold text-center mt-1">Billing</span>
                           ) : (
-                            <span className="text-xs font-semibold">{item.label}</span>
+                            <span className="text-xs font-semibold text-center mt-1">{item.label}</span>
                           )}
                         </div>
                       </Link>
