@@ -59,18 +59,10 @@ export default function Navigation() {
         ];
       case "irrigation_manager":
         return [
-          { 
-            path: "/billing", 
-            label: "Billing", 
-            icon: Calculator, 
-            isDropdown: true,
-            dropdownItems: [
-              { path: "/estimates", label: "Estimates", icon: FileText },
-              { path: "/work-orders", label: "Work Orders", icon: Wrench },
-              { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
-            ]
-          },
+          { path: "/work-orders", label: "Work Orders", icon: Wrench },
+          { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           { path: "/customers", label: "Customers", icon: Users },
+          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { 
             path: "/parts", 
             label: "Parts", 
@@ -81,8 +73,6 @@ export default function Navigation() {
               { path: "/parts-list", label: "Parts List", icon: Package },
             ]
           },
-          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
-          { path: "/site-maps", label: "Site Maps", icon: MapIcon },
         ];
       case "field_tech":
         return [
