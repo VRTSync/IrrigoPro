@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Building, Mail, Phone, Globe, MapPin, Image } from "lucide-react";
+import { Loader2, Building, Mail, Phone, Globe, MapPin, Image, Upload } from "lucide-react";
 import type { Company, InsertCompany } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import CompanySetup from "@/components/company/company-setup";
@@ -311,22 +311,44 @@ export default function CompanyProfile() {
                   {isEditing && (
                     <div className="border rounded-lg p-4">
                       <ObjectUploader
-                        accept="image/*"
-                        maxSizeMB={2}
+                        maxNumberOfFiles={1}
+                        maxFileSize={2097152}
                         onGetUploadParameters={async () => {
                           const response = await apiRequest('/api/company/logo/upload', 'POST');
                           return response;
                         }}
-                        onComplete={(uploadUrl) => {
-                          // Update the form with the new logo URL
-                          form.setValue('logo', uploadUrl);
-                          toast({
-                            title: "Logo uploaded",
-                            description: "Your company logo has been uploaded successfully",
-                          });
+                        onComplete={async (result) => {
+                          if (result.successful && result.successful.length > 0) {
+                            const uploadUrl = result.successful[0].uploadURL;
+                            
+                            try {
+                              // Save the logo URL to the company profile
+                              await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
+                                logoUrl: uploadUrl
+                              });
+                              
+                              // Invalidate and refetch company data
+                              queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+                              
+                              toast({
+                                title: "Logo uploaded",
+                                description: "Your company logo has been uploaded and saved successfully",
+                              });
+                            } catch (error) {
+                              console.error('Error saving logo:', error);
+                              toast({
+                                title: "Upload error", 
+                                description: "Logo uploaded but failed to save. Please try again.",
+                                variant: "destructive",
+                              });
+                            }
+                          }
                         }}
                       >
-                        Upload New Logo
+                        <div className="flex items-center gap-2">
+                          <Upload className="h-4 w-4" />
+                          Upload New Logo
+                        </div>
                       </ObjectUploader>
                       <p className="text-sm text-muted-foreground mt-2">
                         Upload a high-quality logo image (PNG, JPG, or SVG). Maximum size: 2MB.

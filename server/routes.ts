@@ -298,6 +298,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update company logo after upload
+  app.put("/api/company/:companyId/logo", async (req, res) => {
+    try {
+      const userRole = req.headers['x-user-role'];
+      const companyId = parseInt(req.params.companyId);
+      const { logoUrl } = req.body;
+      
+      // Only company admins can update logos
+      if (userRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied. Only company admins can update logos." });
+      }
+
+      if (!logoUrl) {
+        return res.status(400).json({ message: "Logo URL is required" });
+      }
+
+      // Normalize the logo path and get public URL
+      const objectStorageService = new ObjectStorageService();
+      const logoPath = objectStorageService.normalizeLogoPath(logoUrl);
+      const publicUrl = objectStorageService.getCompanyLogoPublicURL(logoPath);
+
+      // Update company with logo URL
+      const updatedCompany = await storage.updateCompany(companyId, { 
+        logo: publicUrl 
+      });
+
+      if (!updatedCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+
+      res.json({ 
+        message: "Logo updated successfully", 
+        logoUrl: publicUrl 
+      });
+    } catch (error) {
+      console.error('Error updating company logo:', error);
+      res.status(500).json({ message: "Failed to update company logo" });
+    }
+  });
+
   // Serve public objects (including company logos)
   app.get("/public-objects/:filePath(*)", async (req, res) => {
     const filePath = req.params.filePath;
