@@ -29,7 +29,12 @@ export class EmailService {
     if (process.env.NODE_ENV === 'production') {
       return 'https://irrigopro.com';
     }
-    // For development, use the current browser domain
+    // For development, use the current Replit domain from REPLIT_DOMAINS
+    const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
+    if (replitDomain) {
+      return `https://${replitDomain}`;
+    }
+    // Fallback to standard Replit format
     return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
   }
 
