@@ -614,7 +614,6 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
       quantity: sp.quantity
     }));
     form.setValue("parts", partsData);
-    console.log("Parts added to form:", partsData);
   };
 
   const removePart = (partId: number) => {
@@ -627,7 +626,6 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
       quantity: sp.quantity
     }));
     form.setValue("parts", partsData);
-    console.log("Part removed, form updated:", partsData);
   };
 
   const updateQuantity = (partId: number, quantity: number) => {
@@ -642,7 +640,6 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
       quantity: sp.quantity
     }));
     form.setValue("parts", partsData);
-    console.log("Parts quantity updated:", partsData);
   };
 
   const calculateTotals = () => {
@@ -660,17 +657,12 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
   };
 
   const onSubmit = async (data: z.infer<typeof AssemblyFormSchema>) => {
-    console.log("Assembly form submitted with data:", data);
-    console.log("Selected parts:", selectedParts);
-    
     const getCurrentUser = () => {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
       return user;
     };
 
     const user = getCurrentUser();
-    console.log("Current user:", user);
-    
     const assemblyData = {
       name: data.name,
       description: data.description || null,
@@ -685,9 +677,6 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
       assemblyId: 0, // Will be set by the server
       sortOrder: index
     }));
-    
-    console.log("Sending assembly data:", assemblyData);
-    console.log("Sending parts data:", partsData);
 
     if (assembly) {
       updateAssemblyMutation.mutate({ assembly: assemblyData, parts: partsData });
