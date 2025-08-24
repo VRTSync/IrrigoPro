@@ -74,52 +74,42 @@ export function ObjectUploader({
 
     try {
       // Get upload parameters
-      const { url, method } = await onGetUploadParameters();
-
-      // Create XMLHttpRequest for upload progress tracking
-      const xhr = new XMLHttpRequest();
+      const uploadParams = await onGetUploadParameters();
       
-      // Track upload progress
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          const progress = (event.loaded / event.total) * 100;
-          setUploadProgress(progress);
-        }
+      // Upload the file directly to the signed URL
+      const response = await fetch(uploadParams.url, {
+        method: uploadParams.method,
+        body: selectedFile,
+        headers: {
+          'Content-Type': selectedFile.type,
+        },
       });
 
-      // Handle upload completion
-      xhr.addEventListener('load', () => {
-        if (xhr.status === 200 || xhr.status === 204) {
-          toast({
-            title: "Upload successful",
-            description: "Your file has been uploaded successfully",
-          });
-          onComplete?.(url);
-          setSelectedFile(null);
-          setUploadProgress(0);
-        } else {
-          throw new Error(`Upload failed with status ${xhr.status}`);
-        }
-        setIsUploading(false);
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+
+      setUploadProgress(100);
+      
+      // Call the completion callback with the upload URL
+      onComplete?.(uploadParams.url);
+      
+      toast({
+        title: "Upload successful",
+        description: "File uploaded successfully",
       });
-
-      // Handle upload errors
-      xhr.addEventListener('error', () => {
-        throw new Error('Upload failed');
-      });
-
-      // Start the upload
-      xhr.open(method, url);
-      xhr.setRequestHeader('Content-Type', selectedFile.type);
-      xhr.send(selectedFile);
-
+      
+      // Reset state
+      setSelectedFile(null);
+      
     } catch (error) {
       console.error('Upload error:', error);
       toast({
         title: "Upload failed",
-        description: "There was an error uploading your file. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to upload file",
         variant: "destructive",
       });
+    } finally {
       setIsUploading(false);
       setUploadProgress(0);
     }

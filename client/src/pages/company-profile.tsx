@@ -317,31 +317,27 @@ export default function CompanyProfile() {
                           const response = await apiRequest('/api/company/logo/upload', 'POST');
                           return response;
                         }}
-                        onComplete={async (result) => {
-                          if (result.successful && result.successful.length > 0) {
-                            const uploadUrl = result.successful[0].uploadURL;
+                        onComplete={async (uploadUrl) => {
+                          try {
+                            // Save the logo URL to the company profile
+                            await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
+                              logoUrl: uploadUrl
+                            });
                             
-                            try {
-                              // Save the logo URL to the company profile
-                              await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
-                                logoUrl: uploadUrl
-                              });
-                              
-                              // Invalidate and refetch company data
-                              queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
-                              
-                              toast({
-                                title: "Logo uploaded",
-                                description: "Your company logo has been uploaded and saved successfully",
-                              });
-                            } catch (error) {
-                              console.error('Error saving logo:', error);
-                              toast({
-                                title: "Upload error", 
-                                description: "Logo uploaded but failed to save. Please try again.",
-                                variant: "destructive",
-                              });
-                            }
+                            // Invalidate and refetch company data
+                            queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
+                            
+                            toast({
+                              title: "Logo uploaded",
+                              description: "Your company logo has been uploaded and saved successfully",
+                            });
+                          } catch (error) {
+                            console.error('Error saving logo:', error);
+                            toast({
+                              title: "Upload error", 
+                              description: "Logo uploaded but failed to save. Please try again.",
+                              variant: "destructive",
+                            });
                           }
                         }}
                       >
