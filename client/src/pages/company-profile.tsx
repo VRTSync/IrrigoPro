@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Building, Mail, Phone, Globe, MapPin } from "lucide-react";
+import { Loader2, Building, Mail, Phone, Globe, MapPin, Image } from "lucide-react";
 import type { Company, InsertCompany } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import CompanySetup from "@/components/company/company-setup";
+import { ObjectUploader } from "@/components/ObjectUploader";
 
 const companyProfileSchema = z.object({
   name: z.string().min(1, "Company name is required"),
@@ -32,9 +33,12 @@ export default function CompanyProfile() {
   const [isEditing, setIsEditing] = useState(false);
   const [requiresSetup, setRequiresSetup] = useState(false);
 
-  // Get current user info from session/localStorage
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const companyId = currentUser.companyId;
+  // Get current user info from session (production-safe)
+  const { data: currentUser } = useQuery({
+    queryKey: ['/api/auth/user'],
+    retry: false,
+  });
+  const companyId = currentUser?.companyId;
 
   // Fetch company profile
   const { data: company, isLoading, error } = useQuery({
@@ -277,20 +281,60 @@ export default function CompanyProfile() {
                   </select>
                 </div>
 
-                {/* Logo URL */}
-                <div className="space-y-2">
-                  <Label htmlFor="logo">Company Logo (URL)</Label>
-                  <Input
-                    id="logo"
-                    type="url"
-                    {...form.register("logo")}
-                    disabled={!isEditing}
-                    className={!isEditing ? "bg-muted" : ""}
-                    placeholder="https://www.company.com/logo.png"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Enter a URL to your company logo image
-                  </p>
+                {/* Company Logo */}
+                <div className="space-y-4">
+                  <Label className="flex items-center gap-2">
+                    <Image className="h-4 w-4" />
+                    Company Logo
+                  </Label>
+                  
+                  {/* Current logo display */}
+                  {company?.logo && (
+                    <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
+                      <img
+                        src={company.logo}
+                        alt="Company Logo"
+                        className="h-16 w-16 object-contain rounded border"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                      <div>
+                        <p className="text-sm font-medium">Current Logo</p>
+                        <p className="text-xs text-muted-foreground">Used in emails and documents</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upload new logo when editing */}
+                  {isEditing && (
+                    <div className="border rounded-lg p-4">
+                      <ObjectUploader
+                        accept="image/*"
+                        maxSizeMB={2}
+                        onGetUploadParameters={async () => {
+                          const response = await apiRequest('/api/company/logo/upload', {
+                            method: 'POST',
+                          });
+                          return response;
+                        }}
+                        onComplete={(uploadUrl) => {
+                          // Update the form with the new logo URL
+                          form.setValue('logo', uploadUrl);
+                          toast({
+                            title: "Logo uploaded",
+                            description: "Your company logo has been uploaded successfully",
+                          });
+                        }}
+                      >
+                        Upload New Logo
+                      </ObjectUploader>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Upload a high-quality logo image (PNG, JPG, or SVG). Maximum size: 2MB.
+                        This logo will appear in customer emails and documents.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {isEditing && (

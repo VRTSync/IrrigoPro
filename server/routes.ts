@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "./email-service";
+import { ObjectStorageService } from "./objectStorage";
 
 // Extend Express Request type to include session
 declare module 'express' {
@@ -257,6 +258,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const updates = insertCompanySchema.partial().parse(req.body);
+      
+      // If logo is being updated, normalize the path
+      if (updates.logo) {
+        const objectStorageService = new ObjectStorageService();
+        updates.logo = objectStorageService.normalizeLogoPath(updates.logo);
+      }
+      
       const updatedCompany = await storage.updateCompanyProfile(companyId, updates);
       res.json(updatedCompany);
     } catch (error) {
@@ -264,6 +272,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid company data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to update company profile" });
+    }
+  });
+
+  // Company logo upload endpoint
+  app.post("/api/company/logo/upload", async (req, res) => {
+    try {
+      const userRole = req.headers['x-user-role'];
+      
+      // Only company admins can upload logos
+      if (userRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied. Only company admins can upload logos." });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getCompanyLogoUploadURL();
+      
+      res.json({ 
+        method: 'PUT' as const,
+        url: uploadURL 
+      });
+    } catch (error) {
+      console.error('Error generating logo upload URL:', error);
+      res.status(500).json({ message: "Failed to generate upload URL" });
+    }
+  });
+
+  // Serve public objects (including company logos)
+  app.get("/public-objects/:filePath(*)", async (req, res) => {
+    const filePath = req.params.filePath;
+    const objectStorageService = new ObjectStorageService();
+    try {
+      const file = await objectStorageService.searchPublicObject(filePath);
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      objectStorageService.downloadObject(file, res);
+    } catch (error) {
+      console.error("Error searching for public object:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -4268,6 +4315,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvalToken,
         estimateDate: new Date(estimate.estimateDate).toLocaleDateString(),
         createdBy: estimate.createdBy,
+        companyId: estimate.companyId,
         zones: zones?.map(zone => ({
           zoneName: zone.zoneName,
           workDescription: zone.workDescription,

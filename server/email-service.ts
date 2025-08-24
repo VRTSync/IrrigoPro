@@ -1,4 +1,6 @@
 import { Client } from 'postmark';
+import { ObjectStorageService } from './objectStorage';
+import { storage } from './storage';
 
 // Initialize Postmark client
 const client = new Client(process.env.POSTMARK_API_TOKEN || '');
@@ -14,6 +16,7 @@ export interface EstimateEmailData {
   approvalToken: string;
   estimateDate: string;
   createdBy: string;
+  companyId: number;
   zones?: Array<{
     zoneName: string;
     workDescription: string;
@@ -48,12 +51,22 @@ export class EmailService {
     const rejectUrl = `${this.baseUrl}/api/estimates/reject-via-token/${data.approvalToken}`;
     const viewUrl = `${this.baseUrl}/api/estimates/view-via-token/${data.approvalToken}`;
 
-    const htmlContent = this.generateEstimateEmailHTML(data, approveUrl, rejectUrl, viewUrl);
-    const textContent = this.generateEstimateEmailText(data, approveUrl, rejectUrl);
+    // Get company information including logo
+    const company = await storage.getCompanyProfile(data.companyId);
+    const companyInfo = {
+      name: company?.name || 'IrrigoPro',
+      logo: company?.logo ? this.getCompanyLogoUrl(company.logo) : null,
+      email: company?.email || process.env.FROM_EMAIL || 'estimates@irrigopro.com',
+      phone: company?.phone || '',
+      website: company?.website || ''
+    };
+
+    const htmlContent = this.generateEstimateEmailHTML(data, approveUrl, rejectUrl, viewUrl, companyInfo);
+    const textContent = this.generateEstimateEmailText(data, approveUrl, rejectUrl, companyInfo);
 
     try {
       await client.sendEmail({
-        From: process.env.FROM_EMAIL || 'estimates@irrigationcompany.com',
+        From: companyInfo.email,
         To: data.customerEmail,
         Subject: `Estimate Approval Required - ${data.estimateNumber}`,
         HtmlBody: htmlContent,
@@ -61,7 +74,8 @@ export class EmailService {
         Tag: 'estimate-approval',
         Metadata: {
           estimateId: data.estimateId.toString(),
-          estimateNumber: data.estimateNumber
+          estimateNumber: data.estimateNumber,
+          companyId: data.companyId.toString()
         }
       });
 
@@ -72,11 +86,28 @@ export class EmailService {
     }
   }
 
+  private static getCompanyLogoUrl(logoPath: string): string {
+    if (logoPath.startsWith('http')) {
+      return logoPath; // Already a full URL
+    }
+    
+    // Convert stored path to public URL
+    const baseUrl = this.baseUrl;
+    return `${baseUrl}/public-objects/company-logos/${logoPath}`;
+  }
+
   private static generateEstimateEmailHTML(
     data: EstimateEmailData, 
     approveUrl: string, 
     rejectUrl: string, 
-    viewUrl: string
+    viewUrl: string,
+    companyInfo: {
+      name: string;
+      logo: string | null;
+      email: string;
+      phone: string;
+      website: string;
+    }
   ): string {
     const zonesHTML = data.zones?.map(zone => `
       <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 8px 0;">
@@ -100,6 +131,11 @@ export class EmailService {
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+    ${companyInfo.logo ? `
+    <div style="margin-bottom: 20px;">
+      <img src="${companyInfo.logo}" alt="${companyInfo.name} Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;">
+    </div>
+    ` : ''}
     <h1 style="margin: 0; font-size: 28px;">Irrigation Estimate</h1>
     <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">Your Approval Required</p>
   </div>
@@ -167,6 +203,12 @@ export class EmailService {
       <p style="color: #6b7280; font-size: 14px; margin: 0;">
         Need to review the full details? <a href="${viewUrl}" style="color: #3b82f6;">View Complete Estimate</a>
       </p>
+      <div style="margin: 20px 0; color: #6b7280; font-size: 14px;">
+        <p style="margin: 4px 0; font-weight: 600; color: #374151;">${companyInfo.name}</p>
+        ${companyInfo.phone ? `<p style="margin: 4px 0;">📞 ${companyInfo.phone}</p>` : ''}
+        ${companyInfo.email ? `<p style="margin: 4px 0;">✉️ ${companyInfo.email}</p>` : ''}
+        ${companyInfo.website ? `<p style="margin: 4px 0;">🌐 <a href="${companyInfo.website}" style="color: #3b82f6;">${companyInfo.website}</a></p>` : ''}
+      </div>
       <p style="color: #6b7280; font-size: 12px; margin: 8px 0 0 0;">
         Questions? Reply to this email or call us directly.
       </p>
@@ -180,7 +222,14 @@ export class EmailService {
   private static generateEstimateEmailText(
     data: EstimateEmailData, 
     approveUrl: string, 
-    rejectUrl: string
+    rejectUrl: string,
+    companyInfo: {
+      name: string;
+      logo: string | null;
+      email: string;
+      phone: string;
+      website: string;
+    }
   ): string {
     const zonesText = data.zones?.map(zone => 
       `${zone.zoneName}: ${zone.workDescription} - Labor: ${zone.laborHours}h ($${zone.laborCost.toFixed(2)}) + Parts: $${zone.partsCost.toFixed(2)} = $${zone.zoneTotal.toFixed(2)}`
@@ -207,13 +256,17 @@ ${zonesText}
 
 TOTAL ESTIMATE: ${data.totalAmount}
 
-TO RESPOND:
-- Approve: ${approveUrl}
-- Decline: ${rejectUrl}
+ACTIONS:
+- To approve this estimate, visit: ${approveUrl}
+- To decline this estimate, visit: ${rejectUrl}
+
+---
+${companyInfo.name}
+${companyInfo.phone ? `Phone: ${companyInfo.phone}` : ''}
+${companyInfo.email ? `Email: ${companyInfo.email}` : ''}
+${companyInfo.website ? `Website: ${companyInfo.website}` : ''}
 
 Questions? Reply to this email or call us directly.
-
-Thank you for choosing our irrigation services!
     `;
   }
 
