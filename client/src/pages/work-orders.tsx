@@ -101,7 +101,7 @@ export default function WorkOrders() {
   });
 
   // Show full page skeleton while loading
-  if (isLoading || !currentUser) {
+  if (isLoading) {
     return <WorkOrderListSkeleton />;
   }
 

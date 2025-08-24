@@ -935,11 +935,6 @@ export default function PartsCatalog() {
     queryKey: ["/api/assemblies"],
   });
 
-  // Show full page skeleton while loading
-  if (isLoading || isLoadingAssemblies) {
-    return <PartsListSkeleton />;
-  }
-
 
 
   const deletePartMutation = useMutation({
@@ -1040,6 +1035,11 @@ export default function PartsCatalog() {
     }
     setCollapsedSections(newCollapsed);
   };
+
+  // Show full page skeleton while loading (after all hooks)
+  if (isLoading || isLoadingAssemblies) {
+    return <PartsListSkeleton />;
+  }
 
   return (
     <div className="p-6 space-y-6">
