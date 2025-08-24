@@ -123,13 +123,9 @@ export default function Navigation() {
               <Link href="/">
                 <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
-                    src={logoToUse} 
-                    alt={company?.name ? `${company.name} Logo` : "IrrigoPro Logo"}
+                    src={irrigoProLogo} 
+                    alt="IrrigoPro Logo"
                     className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
-                    onError={(e) => {
-                      // Fallback to default logo if company logo fails to load
-                      e.currentTarget.src = irrigoProLogo;
-                    }}
                   />
                 </div>
               </Link>
@@ -258,13 +254,9 @@ export default function Navigation() {
             {/* Logo */}
             <div className="flex items-center">
               <img 
-                src={logoToUse} 
-                alt={company?.name ? `${company.name} Logo` : "IrrigoPro Logo"}
+                src={irrigoProLogo} 
+                alt="IrrigoPro Logo"
                 className="h-10 w-auto"
-                onError={(e) => {
-                  // Fallback to default logo if company logo fails to load
-                  e.currentTarget.src = irrigoProLogo;
-                }}
               />
             </div>
 

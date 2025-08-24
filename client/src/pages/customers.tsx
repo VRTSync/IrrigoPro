@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerListSkeleton } from "@/components/ui/loading-skeleton";
+import { CompanyLogoBanner } from "@/components/ui/company-logo-banner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
