@@ -293,12 +293,16 @@ export default function CompanyProfile() {
                   {company?.logo ? (
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
                       <img
-                        src={company.logo}
+                        src={`${company.logo}?v=${Date.now()}`}
                         alt="Company Logo"
                         className="h-16 w-16 object-contain rounded border"
                         onError={(e) => {
                           // Hide broken logo images gracefully in production
+                          console.error('Logo image failed to load:', company.logo);
                           e.currentTarget.style.display = 'none';
+                        }}
+                        onLoad={() => {
+                          console.log('Logo image loaded successfully:', company.logo);
                         }}
                       />
                       <div className="flex-1">
@@ -329,6 +333,13 @@ export default function CompanyProfile() {
                               await queryClient.refetchQueries({ 
                                 queryKey: [`/api/company/${companyId}/profile`] 
                               });
+
+                              // Small delay to ensure cache is cleared before refetch
+                              setTimeout(async () => {
+                                await queryClient.refetchQueries({ 
+                                  queryKey: [`/api/company/${companyId}/profile`] 
+                                });
+                              }, 100);
 
                               toast({
                                 title: "Logo removed",
@@ -411,6 +422,13 @@ export default function CompanyProfile() {
                             await queryClient.refetchQueries({ 
                               queryKey: [`/api/company/${companyId}/profile`] 
                             });
+
+                            // Additional refetch to ensure fresh data
+                            setTimeout(async () => {
+                              await queryClient.refetchQueries({ 
+                                queryKey: [`/api/company/${companyId}/profile`] 
+                              });
+                            }, 200);
                             
                             toast({
                               title: "Logo uploaded",
