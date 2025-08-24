@@ -33,12 +33,9 @@ export default function CompanyProfile() {
   const [isEditing, setIsEditing] = useState(false);
   const [requiresSetup, setRequiresSetup] = useState(false);
 
-  // Get current user info from session (production-safe)
-  const { data: currentUser } = useQuery<any>({
-    queryKey: ['/api/auth/user'],
-    retry: false,
-  });
-  const companyId = currentUser?.companyId;
+  // Get current user info from localStorage for now (working solution)
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const companyId = user?.companyId;
 
   // Fetch company profile
   const { data: company, isLoading, error } = useQuery<Company>({
@@ -143,7 +140,7 @@ export default function CompanyProfile() {
         <Card>
           <CardContent className="p-6">
             <div className="text-center text-muted-foreground">
-              Company profile not found. CompanyId: {companyId}, CurrentUser: {JSON.stringify(currentUser)}
+              Company profile not found. CompanyId: {companyId}, User: {JSON.stringify(user)}
             </div>
           </CardContent>
         </Card>

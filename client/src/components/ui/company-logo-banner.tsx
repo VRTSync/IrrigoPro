@@ -5,11 +5,8 @@ interface CompanyLogoBannerProps {
 }
 
 export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
-  // Get current user from session
-  const { data: user } = useQuery({
-    queryKey: ["/api/auth/user"],
-    retry: false,
-  });
+  // Get current user from localStorage  
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   // Fetch company profile to get company logo
   const { data: company } = useQuery({
