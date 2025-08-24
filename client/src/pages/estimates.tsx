@@ -55,6 +55,17 @@ export default function Estimates() {
     }
   };
 
+  const handleCheckStatus = async (estimateId: number) => {
+    try {
+      // Invalidate and refetch specific estimate and all estimates
+      await queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+      await queryClient.refetchQueries({ queryKey: ["/api/estimates"] });
+    } catch (error) {
+      console.error("Error checking estimate status:", error);
+    }
+  };
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -254,7 +265,7 @@ export default function Estimates() {
                                     variant="ghost" 
                                     size="sm" 
                                     className="text-green-600 hover:text-green-800"
-                                    onClick={() => handleRefresh()}
+                                    onClick={() => handleCheckStatus(estimate.id)}
                                     title="Check Status"
                                   >
                                     <RefreshCw className="w-4 h-4" />
@@ -374,7 +385,7 @@ export default function Estimates() {
                             variant="outline" 
                             size="sm"
                             className="text-green-600 hover:text-green-800"
-                            onClick={() => handleRefresh()}
+                            onClick={() => handleCheckStatus(estimate.id)}
                             title="Check Status"
                           >
                             <RefreshCw className="w-4 h-4" />

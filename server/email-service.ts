@@ -25,9 +25,13 @@ export interface EstimateEmailData {
 }
 
 export class EmailService {
-  private static baseUrl = process.env.NODE_ENV === 'production' 
-    ? 'https://irrigopro.com'
-    : `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
+  private static get baseUrl() {
+    if (process.env.NODE_ENV === 'production') {
+      return 'https://irrigopro.com';
+    }
+    // For development, use the current browser domain
+    return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
+  }
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
     if (!process.env.POSTMARK_API_TOKEN) {
