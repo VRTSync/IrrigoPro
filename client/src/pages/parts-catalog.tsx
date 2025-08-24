@@ -13,7 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight, Layers, X } from "lucide-react";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight, Layers, X, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
@@ -602,22 +602,26 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
     const newSelectedParts = [...selectedParts, { partId: part.id, part, quantity: 1 }];
     setSelectedParts(newSelectedParts);
     
-    // Update form
-    form.setValue("parts", newSelectedParts.map(sp => ({
+    // Update form with validation
+    const partsData = newSelectedParts.map(sp => ({
       partId: sp.partId,
       quantity: sp.quantity
-    })));
+    }));
+    form.setValue("parts", partsData);
+    console.log("Parts added to form:", partsData);
   };
 
   const removePart = (partId: number) => {
     const newSelectedParts = selectedParts.filter(sp => sp.partId !== partId);
     setSelectedParts(newSelectedParts);
     
-    // Update form
-    form.setValue("parts", newSelectedParts.map(sp => ({
+    // Update form with validation
+    const partsData = newSelectedParts.map(sp => ({
       partId: sp.partId,
       quantity: sp.quantity
-    })));
+    }));
+    form.setValue("parts", partsData);
+    console.log("Part removed, form updated:", partsData);
   };
 
   const updateQuantity = (partId: number, quantity: number) => {
@@ -626,11 +630,13 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
     );
     setSelectedParts(newSelectedParts);
     
-    // Update form
-    form.setValue("parts", newSelectedParts.map(sp => ({
+    // Update form with validation
+    const partsData = newSelectedParts.map(sp => ({
       partId: sp.partId,
       quantity: sp.quantity
-    })));
+    }));
+    form.setValue("parts", partsData);
+    console.log("Parts quantity updated:", partsData);
   };
 
   const calculateTotals = () => {
@@ -648,12 +654,17 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
   };
 
   const onSubmit = async (data: z.infer<typeof AssemblyFormSchema>) => {
+    console.log("Assembly form submitted with data:", data);
+    console.log("Selected parts:", selectedParts);
+    
     const getCurrentUser = () => {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
       return user;
     };
 
     const user = getCurrentUser();
+    console.log("Current user:", user);
+    
     const assemblyData = {
       name: data.name,
       description: data.description || null,
@@ -664,9 +675,13 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
 
     const partsData = data.parts.map((part, index) => ({
       partId: part.partId,
-      quantity: part.quantity.toString(),
+      quantity: part.quantity,
+      assemblyId: 0, // Will be set by the server
       sortOrder: index
     }));
+    
+    console.log("Sending assembly data:", assemblyData);
+    console.log("Sending parts data:", partsData);
 
     if (assembly) {
       updateAssemblyMutation.mutate({ assembly: assemblyData, parts: partsData });
