@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight, Layers, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -457,10 +457,37 @@ interface AssemblyFormDialogProps {
 function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialogProps) {
   const { toast } = useToast();
   const [selectedParts, setSelectedParts] = useState<Array<{ partId: number; part: Part; quantity: number }>>([]);
+  const [partSearchQuery, setPartSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
   
   const { data: parts } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
   });
+
+  // Filter parts for selection (exclude already selected parts)
+  const filteredPartsForSelection = useMemo(() => {
+    if (!parts) return [];
+    
+    let filtered = parts.filter(part => 
+      !selectedParts.some(sp => sp.partId === part.id)
+    );
+    
+    if (partSearchQuery) {
+      const query = partSearchQuery.toLowerCase();
+      filtered = filtered.filter(part =>
+        part.name.toLowerCase().includes(query) ||
+        part.category.toLowerCase().includes(query) ||
+        part.sku.toLowerCase().includes(query) ||
+        part.brand?.toLowerCase().includes(query)
+      );
+    }
+    
+    if (selectedCategory !== "all") {
+      filtered = filtered.filter(part => part.category === selectedCategory);
+    }
+    
+    return filtered.slice(0, 20); // Limit to 20 results for performance
+  }, [parts, selectedParts, partSearchQuery, selectedCategory]);
   
   const form = useForm<z.infer<typeof AssemblyFormSchema>>({
     resolver: zodResolver(AssemblyFormSchema),
@@ -506,6 +533,14 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
         parts: []
       });
       setSelectedParts([]);
+      setPartSearchQuery("");
+      setSelectedCategory("all");
+    }
+    
+    if (!open) {
+      // Reset search state when dialog closes
+      setPartSearchQuery("");
+      setSelectedCategory("all");
     }
   }, [assembly, open, form, parts]);
 
@@ -751,26 +786,73 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
                 </div>
               )}
 
-              {/* Add Parts */}
-              <div className="space-y-2">
-                <Label>Add Parts to Assembly</Label>
-                <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto border rounded-md p-2">
-                  {parts?.filter(part => !selectedParts.find(sp => sp.partId === part.id)).map(part => (
-                    <div key={part.id} className="flex items-center justify-between p-2 hover:bg-muted/50 rounded">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{part.name}</p>
-                        <p className="text-xs text-muted-foreground">${parseFloat(part.price.toString()).toFixed(2)} • {part.category}</p>
+              {/* Part Search and Selection - Enhanced UI */}
+              <div className="space-y-3 p-4 border rounded-lg bg-gray-50">
+                <Label className="text-sm font-medium">Add Parts to Assembly</Label>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Input
+                      placeholder="Search parts by name, category, brand, or SKU..."
+                      value={partSearchQuery}
+                      onChange={(e) => setPartSearchQuery(e.target.value)}
+                      className="w-full"
+                    />
+                  </div>
+                  <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Filter by category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {PART_CATEGORIES.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                {/* Filtered Parts List */}
+                <div className="max-h-48 overflow-y-auto space-y-2">
+                  {filteredPartsForSelection.map((part) => (
+                    <div
+                      key={part.id}
+                      className="flex items-center justify-between p-3 bg-white rounded border cursor-pointer hover:bg-blue-50 hover:border-blue-200 transition-colors"
+                      onClick={() => addPart(part)}
+                    >
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{part.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {part.category} • ${parseFloat(part.price.toString()).toFixed(2)} • {parseFloat(part.laborHours.toString()).toFixed(1)}h labor
+                        </div>
+                        {part.brand && (
+                          <div className="text-xs text-blue-600 mt-1">{part.brand}</div>
+                        )}
                       </div>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        onClick={() => addPart(part)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addPart(part);
+                        }}
                       >
-                        Add
+                        <Plus className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}
+                  {filteredPartsForSelection.length === 0 && partSearchQuery && (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      No parts found matching "{partSearchQuery}"
+                    </div>
+                  )}
+                  {filteredPartsForSelection.length === 0 && !partSearchQuery && selectedParts.length < (parts?.length || 0) && (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      Use search or category filter to find parts
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
