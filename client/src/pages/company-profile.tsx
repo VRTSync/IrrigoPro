@@ -297,7 +297,7 @@ export default function CompanyProfile() {
                         alt="Company Logo"
                         className="h-16 w-16 object-contain rounded border"
                         onError={(e) => {
-                          console.error('Logo failed to load:', company.logo);
+                          // Hide broken logo images gracefully in production
                           e.currentTarget.style.display = 'none';
                         }}
                       />
@@ -324,7 +324,7 @@ export default function CompanyProfile() {
                                 description: "Company logo has been removed successfully",
                               });
                             } catch (error) {
-                              console.error('Error removing logo:', error);
+                              // Production-safe error handling
                               toast({
                                 title: "Error",
                                 description: "Failed to remove logo. Please try again.",
@@ -358,14 +358,11 @@ export default function CompanyProfile() {
                           return response;
                         }}
                         onComplete={async (uploadUrl) => {
-                          console.log('Upload completed with URL:', uploadUrl);
                           try {
                             // Save the logo URL to the company profile
-                            console.log('Saving logo to company profile...');
                             const result = await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
                               logoUrl: uploadUrl
                             });
-                            console.log('Logo save result:', result);
                             
                             // Invalidate and refetch company data across all pages
                             queryClient.invalidateQueries({ 
@@ -380,7 +377,7 @@ export default function CompanyProfile() {
                               description: "Your company logo has been uploaded and saved successfully",
                             });
                           } catch (error) {
-                            console.error('Error saving logo:', error);
+                            // Production-safe error handling
                             toast({
                               title: "Upload error", 
                               description: "Logo uploaded but failed to save. Please try again.",

@@ -135,7 +135,7 @@ export class ObjectStorageService {
       return logoPath; // Already a full URL
     }
     
-    // Convert object storage path to public URL
+    // Convert object storage path to public URL (production-ready domain handling)
     const baseUrl = process.env.NODE_ENV === 'production' 
       ? 'https://irrigopro.com' 
       : `https://${process.env.REPL_SLUG}-00-${process.env.REPL_ID}.${process.env.REPLIT_CLUSTER}.replit.dev`;

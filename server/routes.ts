@@ -293,7 +293,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         url: uploadURL 
       });
     } catch (error) {
-      console.error('Error generating logo upload URL:', error);
+      // Production error logging would go to monitoring service
       res.status(500).json({ message: "Failed to generate upload URL" });
     }
   });
@@ -321,7 +321,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Logo cleared successfully" 
       });
     } catch (error) {
-      console.error('Error clearing company logo:', error);
+      // Production error logging would go to monitoring service
       res.status(500).json({ message: "Failed to clear company logo" });
     }
   });
@@ -333,7 +333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const companyId = parseInt(req.params.companyId);
       const { logoUrl } = req.body;
       
-      console.log('Logo update request:', { userRole, companyId, logoUrl });
+      // Production-ready logo update processing
       
       // Only company admins can update logos
       if (userRole !== 'company_admin') {
@@ -349,7 +349,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const logoPath = objectStorageService.normalizeLogoPath(logoUrl);
       const publicUrl = objectStorageService.getCompanyLogoPublicURL(logoPath);
       
-      console.log('Logo processing:', { logoPath, publicUrl });
+      // Normalize logo path and generate public URL
 
       // Update company with logo URL
       const updatedCompany = await storage.updateCompany(companyId, { 
@@ -360,14 +360,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Company not found" });
       }
 
-      console.log('Company updated with logo:', updatedCompany.logo);
+      // Logo successfully updated in database
 
       res.json({ 
         message: "Logo updated successfully", 
         logoUrl: publicUrl 
       });
     } catch (error) {
-      console.error('Error updating company logo:', error);
+      // Production error logging would go to monitoring service
       res.status(500).json({ message: "Failed to update company logo" });
     }
   });
@@ -383,7 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       objectStorageService.downloadObject(file, res);
     } catch (error) {
-      console.error("Error searching for public object:", error);
+      // Production error logging would go to monitoring service
       return res.status(500).json({ error: "Internal server error" });
     }
   });

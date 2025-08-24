@@ -5,8 +5,11 @@ interface CompanyLogoBannerProps {
 }
 
 export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
-  // Get current user from localStorage  
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  // Get current user from session API (production-safe)
+  const { data: user } = useQuery<{ companyId: number }>({
+    queryKey: ["/api/auth/user"],
+    retry: false,
+  });
 
   // Fetch company profile to get company logo
   const { data: company } = useQuery({
@@ -38,7 +41,7 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
             alt={`${company.name} Logo`}
             className="h-12 max-w-48 object-contain"
             onError={(e) => {
-              console.error('Company logo failed to load:', company.logo);
+              // Hide broken logo images gracefully in production
               e.currentTarget.style.display = 'none';
             }}
           />
