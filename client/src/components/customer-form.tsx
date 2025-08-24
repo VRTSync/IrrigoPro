@@ -41,6 +41,15 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Get current user's company ID
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  };
+
+  const currentUser = getCurrentUser();
+  const companyId = currentUser?.companyId;
+
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: customer ? {
@@ -48,6 +57,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: customer.email,
       phone: customer.phone || "",
       address: customer.address || "",
+      companyId: customer.companyId,
       totalControllers: customer.totalControllers || 1,
       contractType: customer.contractType as any || "standard",
       laborRate: customer.laborRate || "45.00",
@@ -63,6 +73,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
+      companyId: companyId || 0,
       totalControllers: 1,
       contractType: "standard",
       laborRate: "45.00",
@@ -108,7 +119,15 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const onSubmit = (data: CustomerFormData) => {
     console.log('Form submission data:', data);
     console.log('Form errors:', form.formState.errors);
-    mutation.mutate(data);
+    
+    // Ensure companyId is set for new customers
+    const submissionData = {
+      ...data,
+      companyId: data.companyId || companyId || 0
+    };
+    
+    console.log('Final submission data:', submissionData);
+    mutation.mutate(submissionData);
   };
 
   return (
