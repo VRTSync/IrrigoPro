@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, X, Check } from "lucide-react";
+import { Upload, X, Check, Loader2 } from "lucide-react";
 
 interface ObjectUploaderProps {
   onGetUploadParameters: () => Promise<{
@@ -90,6 +90,8 @@ export function ObjectUploader({
       }
 
       setUploadProgress(100);
+      
+      console.log('File uploaded successfully to:', uploadParams.url);
       
       // Call the completion callback with the upload URL
       onComplete?.(uploadParams.url);
@@ -180,7 +182,7 @@ export function ObjectUploader({
           >
             {isUploading ? (
               <>
-                <Upload className="h-4 w-4 mr-2 animate-spin" />
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Uploading...
               </>
             ) : (

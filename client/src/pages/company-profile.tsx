@@ -318,11 +318,14 @@ export default function CompanyProfile() {
                           return response;
                         }}
                         onComplete={async (uploadUrl) => {
+                          console.log('Upload completed with URL:', uploadUrl);
                           try {
                             // Save the logo URL to the company profile
-                            await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
+                            console.log('Saving logo to company profile...');
+                            const result = await apiRequest(`/api/company/${companyId}/logo`, 'PUT', {
                               logoUrl: uploadUrl
                             });
+                            console.log('Logo save result:', result);
                             
                             // Invalidate and refetch company data
                             queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });

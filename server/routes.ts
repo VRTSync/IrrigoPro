@@ -305,6 +305,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const companyId = parseInt(req.params.companyId);
       const { logoUrl } = req.body;
       
+      console.log('Logo update request:', { userRole, companyId, logoUrl });
+      
       // Only company admins can update logos
       if (userRole !== 'company_admin') {
         return res.status(403).json({ message: "Access denied. Only company admins can update logos." });
@@ -318,6 +320,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const objectStorageService = new ObjectStorageService();
       const logoPath = objectStorageService.normalizeLogoPath(logoUrl);
       const publicUrl = objectStorageService.getCompanyLogoPublicURL(logoPath);
+      
+      console.log('Logo processing:', { logoPath, publicUrl });
 
       // Update company with logo URL
       const updatedCompany = await storage.updateCompany(companyId, { 
@@ -327,6 +331,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updatedCompany) {
         return res.status(404).json({ message: "Company not found" });
       }
+
+      console.log('Company updated with logo:', updatedCompany.logo);
 
       res.json({ 
         message: "Logo updated successfully", 
