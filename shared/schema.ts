@@ -213,11 +213,37 @@ export const billingSheetItems = pgTable("billing_sheet_items", {
   notes: text("notes"),
 });
 
-// Part usage tracking for frequently used parts
+// Part assemblies - pre-configured bundles of parts for common repairs
+export const assemblies = pgTable("assemblies", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"), // Same categories as parts for consistency
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  totalLaborHours: decimal("total_labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
+  usageCount: integer("usage_count").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Junction table for parts within assemblies
+export const assemblyParts = pgTable("assembly_parts", {
+  id: serial("id").primaryKey(),
+  assemblyId: integer("assembly_id").references(() => assemblies.id).notNull(),
+  partId: integer("part_id").references(() => parts.id).notNull(),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull().default("1.00"),
+  sortOrder: integer("sort_order").default(0),
+});
+
+// Part usage tracking for frequently used parts and assemblies
 export const partUsage = pgTable("part_usage", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").references(() => companies.id).notNull(),
-  partId: integer("part_id").references(() => parts.id).notNull(),
+  partId: integer("part_id").references(() => parts.id),
+  assemblyId: integer("assembly_id").references(() => assemblies.id),
   usageCount: integer("usage_count").notNull().default(0),
   lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -496,6 +522,24 @@ export const insertPartSchema = createInsertSchema(parts).omit({
     return isNaN(num) ? 1.0 : num;
   }),
 });
+export const insertAssemblySchema = createInsertSchema(assemblies).omit({ 
+  id: true, 
+  totalPrice: true,
+  totalLaborHours: true,
+  usageCount: true,
+  createdAt: true, 
+  updatedAt: true 
+});
+
+export const insertAssemblyPartSchema = createInsertSchema(assemblyParts).omit({ 
+  id: true 
+}).extend({
+  quantity: z.union([z.string(), z.number()]).transform(val => {
+    const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]/g, '')) : val;
+    return isNaN(num) ? 1.0 : num;
+  }),
+});
+
 export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true });
 export const insertEstimateZoneSchema = createInsertSchema(estimateZones).omit({ id: true });
 export const insertEstimateItemSchema = createInsertSchema(estimateItems).omit({ id: true });
@@ -524,6 +568,8 @@ export type Company = typeof companies.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
+export type Assembly = typeof assemblies.$inferSelect;
+export type AssemblyPart = typeof assemblyParts.$inferSelect;
 export type Estimate = typeof estimates.$inferSelect;
 export type EstimateZone = typeof estimateZones.$inferSelect;
 export type EstimateItem = typeof estimateItems.$inferSelect;
@@ -546,6 +592,8 @@ export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type InsertPart = z.infer<typeof insertPartSchema>;
+export type InsertAssembly = z.infer<typeof insertAssemblySchema>;
+export type InsertAssemblyPart = z.infer<typeof insertAssemblyPartSchema>;
 export type InsertEstimate = z.infer<typeof insertEstimateSchema>;
 export type InsertEstimateZone = z.infer<typeof insertEstimateZoneSchema>;
 export type InsertEstimateItem = z.infer<typeof insertEstimateItemSchema>;
@@ -593,4 +641,8 @@ export type InvoiceWithItems = Invoice & {
 
 export type BillingSheetWithItems = BillingSheet & {
   items: BillingSheetItem[];
+};
+
+export type AssemblyWithParts = Assembly & {
+  parts: (AssemblyPart & { part: Part })[];
 };

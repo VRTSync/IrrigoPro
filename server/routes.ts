@@ -27,7 +27,9 @@ import {
   insertWorkOrderItemSchema,
   insertNotificationSchema,
   insertSiteMapSchema,
-  insertCompanySchema
+  insertCompanySchema,
+  insertAssemblySchema,
+  insertAssemblyPartSchema
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -2609,6 +2611,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Assembly routes
+  app.get("/api/assemblies", async (req, res) => {
+    try {
+      const userCompanyId = req.headers['x-user-company-id'];
+      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      const assemblies = await storage.getAssemblies(companyId);
+      res.json(assemblies);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch assemblies" });
+    }
+  });
+
+  app.get("/api/assemblies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assembly = await storage.getAssembly(id);
+      if (!assembly) {
+        return res.status(404).json({ message: "Assembly not found" });
+      }
+      res.json(assembly);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch assembly" });
+    }
+  });
+
+  app.post("/api/assemblies", async (req, res) => {
+    try {
+      const { assembly: assemblyData, parts: partsData } = req.body;
+      
+      // Validate assembly data
+      const validatedAssembly = insertAssemblySchema.parse(assemblyData);
+      
+      // Validate parts data
+      const validatedParts = z.array(insertAssemblyPartSchema.omit({ assemblyId: true })).parse(partsData);
+      
+      const assembly = await storage.createAssembly(validatedAssembly, validatedParts);
+      res.status(201).json(assembly);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create assembly" });
+    }
+  });
+
+  app.put("/api/assemblies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { assembly: assemblyData, parts: partsData } = req.body;
+      
+      // Validate assembly data (partial update)
+      const validatedAssembly = insertAssemblySchema.partial().parse(assemblyData);
+      
+      // Validate parts data if provided
+      let validatedParts;
+      if (partsData) {
+        validatedParts = z.array(insertAssemblyPartSchema.omit({ assemblyId: true })).parse(partsData);
+      }
+      
+      const assembly = await storage.updateAssembly(id, validatedAssembly, validatedParts);
+      if (!assembly) {
+        return res.status(404).json({ message: "Assembly not found" });
+      }
+      res.json(assembly);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update assembly" });
+    }
+  });
+
+  app.delete("/api/assemblies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const success = await storage.deleteAssembly(id);
+      if (!success) {
+        return res.status(404).json({ message: "Assembly not found" });
+      }
+      res.json({ message: "Assembly deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete assembly" });
+    }
+  });
+
+  app.post("/api/assemblies/:id/track-usage", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userCompanyId = req.headers['x-user-company-id'];
+      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      
+      await storage.trackAssemblyUsage(companyId, id);
+      res.json({ message: "Assembly usage tracked successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to track assembly usage" });
+    }
+  });
+
   app.post("/api/parts/import/google-sheets", async (req, res) => {
     try {
       const { sheetsUrl } = req.body;
@@ -2731,6 +2831,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Parts synced from Google Docs successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to sync parts from Google Docs" });
+    }
+  });
+
+  // Assembly routes - parts assemblies management
+  app.get("/api/assemblies", async (req, res) => {
+    try {
+      const userCompanyId = req.headers['x-user-company-id'];
+      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      const assemblies = await storage.getAssemblies(companyId);
+      res.json(assemblies);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch assemblies" });
+    }
+  });
+
+  app.get("/api/assemblies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assembly = await storage.getAssembly(id);
+      if (!assembly) {
+        return res.status(404).json({ message: "Assembly not found" });
+      }
+      res.json(assembly);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch assembly" });
+    }
+  });
+
+  app.post("/api/assemblies", async (req, res) => {
+    try {
+      const { assembly, parts } = req.body;
+      const userCompanyId = req.headers['x-user-company-id'];
+      const userId = req.headers['x-user-id'];
+      
+      const assemblyData = insertAssemblySchema.parse({
+        ...assembly,
+        companyId: userCompanyId ? parseInt(userCompanyId as string) : 1,
+        createdBy: userId ? parseInt(userId as string) : 1,
+      });
+      
+      const partsData = parts.map((p: any) => insertAssemblyPartSchema.parse(p));
+      const createdAssembly = await storage.createAssembly(assemblyData, partsData);
+      res.status(201).json(createdAssembly);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create assembly" });
+    }
+  });
+
+  app.put("/api/assemblies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { assembly, parts } = req.body;
+      
+      const assemblyData = insertAssemblySchema.partial().parse(assembly);
+      const partsData = parts ? parts.map((p: any) => insertAssemblyPartSchema.parse(p)) : undefined;
+      
+      const updatedAssembly = await storage.updateAssembly(id, assemblyData, partsData);
+      if (!updatedAssembly) {
+        return res.status(404).json({ message: "Assembly not found" });
+      }
+      res.json(updatedAssembly);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update assembly" });
+    }
+  });
+
+  app.delete("/api/assemblies/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const success = await storage.deleteAssembly(id);
+      if (!success) {
+        return res.status(404).json({ message: "Assembly not found" });
+      }
+      res.json({ message: "Assembly deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete assembly" });
+    }
+  });
+
+  // Track assembly usage (called when an assembly is used in work order or billing sheet)
+  app.post("/api/assemblies/:id/track-usage", async (req, res) => {
+    try {
+      const assemblyId = parseInt(req.params.id);
+      const userCompanyId = req.headers['x-user-company-id'];
+      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      await storage.trackAssemblyUsage(companyId, assemblyId);
+      res.json({ message: "Assembly usage tracked successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to track assembly usage" });
     }
   });
 

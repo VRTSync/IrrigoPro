@@ -3,6 +3,8 @@ import {
   users,
   customers, 
   parts, 
+  assemblies,
+  assemblyParts,
   estimates, 
   estimateZones,
   estimateItems,
@@ -25,7 +27,9 @@ import {
   type Company,
   type User,
   type Customer, 
-  type Part, 
+  type Part,
+  type Assembly,
+  type AssemblyPart, 
   type Estimate, 
   type EstimateZone,
   type EstimateItem,
@@ -47,7 +51,9 @@ import {
   type InsertCompany,
   type InsertUser,
   type InsertCustomer, 
-  type InsertPart, 
+  type InsertPart,
+  type InsertAssembly,
+  type InsertAssemblyPart, 
   type InsertEstimate, 
   type InsertEstimateZone,
   type InsertEstimateItem,
@@ -71,7 +77,8 @@ import {
   type PropertyZoneWithZones,
   type FieldWorkSessionWithItems,
   type InvoiceWithItems,
-  type BillingSheetWithItems
+  type BillingSheetWithItems,
+  type AssemblyWithParts
 } from "@shared/schema";
 import { db } from "./db";
 import { sql, eq, like, desc, and, gte, lte, or } from "drizzle-orm";
@@ -130,6 +137,14 @@ export interface IStorage {
   syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
   syncCustomersFromQuickBooks(): Promise<{ customersAdded: number }>;
   getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }>;
+
+  // Parts Assemblies
+  getAssemblies(companyId: number): Promise<AssemblyWithParts[]>;
+  getAssembly(id: number): Promise<AssemblyWithParts | undefined>;
+  createAssembly(assembly: InsertAssembly, parts: InsertAssemblyPart[]): Promise<AssemblyWithParts>;
+  updateAssembly(id: number, assembly: Partial<InsertAssembly>, parts?: InsertAssemblyPart[]): Promise<AssemblyWithParts | undefined>;
+  deleteAssembly(id: number): Promise<boolean>;
+  trackAssemblyUsage(companyId: number, assemblyId: number): Promise<void>;
   getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }>;
   connectGoogleSheetsCustomers(sheetUrl: string): Promise<void>;
   disconnectGoogleSheetsCustomers(): Promise<void>;
@@ -636,6 +651,203 @@ export class DatabaseStorage implements IStorage {
   async deletePart(id: number): Promise<boolean> {
     const result = await db.delete(parts).where(eq(parts.id, id));
     return (result.rowCount || 0) > 0;
+  }
+
+  // Assembly methods
+  async getAssemblies(companyId: number): Promise<AssemblyWithParts[]> {
+    const assemblyResults = await db
+      .select()
+      .from(assemblies)
+      .where(and(eq(assemblies.companyId, companyId), eq(assemblies.isActive, true)))
+      .orderBy(assemblies.name);
+
+    const assembliesWithParts: AssemblyWithParts[] = [];
+    
+    for (const assembly of assemblyResults) {
+      const partsResults = await db
+        .select({
+          id: assemblyParts.id,
+          assemblyId: assemblyParts.assemblyId,
+          partId: assemblyParts.partId,
+          quantity: assemblyParts.quantity,
+          sortOrder: assemblyParts.sortOrder,
+          part: parts
+        })
+        .from(assemblyParts)
+        .innerJoin(parts, eq(assemblyParts.partId, parts.id))
+        .where(eq(assemblyParts.assemblyId, assembly.id))
+        .orderBy(assemblyParts.sortOrder);
+
+      assembliesWithParts.push({
+        ...assembly,
+        parts: partsResults
+      });
+    }
+
+    return assembliesWithParts;
+  }
+
+  async getAssembly(id: number): Promise<AssemblyWithParts | undefined> {
+    const [assembly] = await db.select().from(assemblies).where(eq(assemblies.id, id));
+    if (!assembly) return undefined;
+
+    const partsResults = await db
+      .select({
+        id: assemblyParts.id,
+        assemblyId: assemblyParts.assemblyId,
+        partId: assemblyParts.partId,
+        quantity: assemblyParts.quantity,
+        sortOrder: assemblyParts.sortOrder,
+        part: parts
+      })
+      .from(assemblyParts)
+      .innerJoin(parts, eq(assemblyParts.partId, parts.id))
+      .where(eq(assemblyParts.assemblyId, assembly.id))
+      .orderBy(assemblyParts.sortOrder);
+
+    return {
+      ...assembly,
+      parts: partsResults
+    };
+  }
+
+  async createAssembly(assembly: InsertAssembly, partsList: InsertAssemblyPart[]): Promise<AssemblyWithParts> {
+    // Calculate totals from parts
+    let totalPrice = 0;
+    let totalLaborHours = 0;
+
+    for (const assemblyPart of partsList) {
+      const [part] = await db.select().from(parts).where(eq(parts.id, assemblyPart.partId));
+      if (part) {
+        const quantity = parseFloat(assemblyPart.quantity.toString());
+        const partPrice = parseFloat(part.price.toString());
+        const partLaborHours = parseFloat(part.laborHours.toString());
+        
+        totalPrice += partPrice * quantity;
+        totalLaborHours += partLaborHours * quantity;
+      }
+    }
+
+    const [newAssembly] = await db
+      .insert(assemblies)
+      .values({
+        ...assembly,
+        totalPrice: totalPrice.toFixed(2),
+        totalLaborHours: totalLaborHours.toFixed(2)
+      })
+      .returning();
+
+    // Add parts to assembly
+    const assemblyPartsWithId = partsList.map((part, index) => ({
+      ...part,
+      assemblyId: newAssembly.id,
+      quantity: part.quantity.toString(),
+      sortOrder: index
+    }));
+
+    await db.insert(assemblyParts).values(assemblyPartsWithId);
+
+    // Return the complete assembly with parts
+    return this.getAssembly(newAssembly.id) as Promise<AssemblyWithParts>;
+  }
+
+  async updateAssembly(id: number, assembly: Partial<InsertAssembly>, partsList?: InsertAssemblyPart[]): Promise<AssemblyWithParts | undefined> {
+    const existing = await this.getAssembly(id);
+    if (!existing) return undefined;
+
+    // If parts list is provided, recalculate totals
+    if (partsList) {
+      let totalPrice = 0;
+      let totalLaborHours = 0;
+
+      for (const assemblyPart of partsList) {
+        const [part] = await db.select().from(parts).where(eq(parts.id, assemblyPart.partId));
+        if (part) {
+          const quantity = parseFloat(assemblyPart.quantity.toString());
+          const partPrice = parseFloat(part.price.toString());
+          const partLaborHours = parseFloat(part.laborHours.toString());
+          
+          totalPrice += partPrice * quantity;
+          totalLaborHours += partLaborHours * quantity;
+        }
+      }
+
+      (assembly as any).totalPrice = totalPrice.toFixed(2);
+      (assembly as any).totalLaborHours = totalLaborHours.toFixed(2);
+
+      // Remove existing parts
+      await db.delete(assemblyParts).where(eq(assemblyParts.assemblyId, id));
+
+      // Add new parts
+      const assemblyPartsWithId = partsList.map((part, index) => ({
+        ...part,
+        assemblyId: id,
+        quantity: part.quantity.toString(),
+        sortOrder: index
+      }));
+
+      await db.insert(assemblyParts).values(assemblyPartsWithId);
+    }
+
+    // Update assembly
+    const [updatedAssembly] = await db
+      .update(assemblies)
+      .set({ ...assembly, updatedAt: new Date() })
+      .where(eq(assemblies.id, id))
+      .returning();
+
+    return this.getAssembly(updatedAssembly.id) as Promise<AssemblyWithParts>;
+  }
+
+  async deleteAssembly(id: number): Promise<boolean> {
+    // Delete assembly parts first (foreign key constraint)
+    await db.delete(assemblyParts).where(eq(assemblyParts.assemblyId, id));
+    
+    // Then delete assembly
+    const result = await db.delete(assemblies).where(eq(assemblies.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  async trackAssemblyUsage(companyId: number, assemblyId: number): Promise<void> {
+    // Update assembly usage count
+    await db
+      .update(assemblies)
+      .set({ 
+        usageCount: sql`${assemblies.usageCount} + 1`,
+        updatedAt: new Date()
+      })
+      .where(eq(assemblies.id, assemblyId));
+
+    // Track in part usage table
+    const existingUsage = await db
+      .select()
+      .from(partUsage)
+      .where(and(
+        eq(partUsage.companyId, companyId),
+        eq(partUsage.assemblyId, assemblyId)
+      ));
+
+    if (existingUsage.length > 0) {
+      await db
+        .update(partUsage)
+        .set({
+          usageCount: sql`${partUsage.usageCount} + 1`,
+          lastUsedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(and(
+          eq(partUsage.companyId, companyId),
+          eq(partUsage.assemblyId, assemblyId)
+        ));
+    } else {
+      await db.insert(partUsage).values({
+        companyId,
+        assemblyId,
+        usageCount: 1,
+        lastUsedAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
   }
 
   async getPartByQuickBooksId(quickbooksId: string): Promise<Part | undefined> {

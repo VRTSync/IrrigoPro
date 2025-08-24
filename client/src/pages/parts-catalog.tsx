@@ -11,15 +11,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings, Calculator, Filter, DollarSign, Clock, ChevronDown, ChevronRight, Layers, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import type { Part } from "@shared/schema";
-import { insertPartSchema } from "@shared/schema";
+import type { Part, Assembly, AssemblyWithParts, InsertAssembly, InsertAssemblyPart } from "@shared/schema";
+import { insertPartSchema, insertAssemblySchema } from "@shared/schema";
 
 import { BulkImport } from "@/components/parts/bulk-import";
 
@@ -439,6 +440,376 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   );
 }
 
+// Assembly form schema
+const AssemblyFormSchema = insertAssemblySchema.extend({
+  parts: z.array(z.object({
+    partId: z.number(),
+    quantity: z.number().min(0.01).default(1),
+  })).min(1, "Assembly must have at least one part")
+});
+
+interface AssemblyFormDialogProps {
+  assembly?: AssemblyWithParts;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialogProps) {
+  const { toast } = useToast();
+  const [selectedParts, setSelectedParts] = useState<Array<{ partId: number; part: Part; quantity: number }>>([]);
+  
+  const { data: parts } = useQuery<Part[]>({
+    queryKey: ["/api/parts"],
+  });
+  
+  const form = useForm<z.infer<typeof AssemblyFormSchema>>({
+    resolver: zodResolver(AssemblyFormSchema),
+    defaultValues: {
+      name: "",
+      description: "",
+      category: "",
+      parts: []
+    }
+  });
+
+  // Set default values when editing
+  useEffect(() => {
+    if (assembly && open) {
+      form.reset({
+        name: assembly.name,
+        description: assembly.description || "",
+        category: assembly.category || "",
+        parts: assembly.parts.map(p => ({
+          partId: p.partId,
+          quantity: parseFloat(p.quantity.toString())
+        }))
+      });
+      
+      // Update selected parts for display
+      if (parts) {
+        const assemblyParts = assembly.parts.map(ap => {
+          const part = parts.find(p => p.id === ap.partId);
+          return part ? {
+            partId: ap.partId,
+            part,
+            quantity: parseFloat(ap.quantity.toString())
+          } : null;
+        }).filter(Boolean) as Array<{ partId: number; part: Part; quantity: number }>;
+        
+        setSelectedParts(assemblyParts);
+      }
+    } else if (!assembly && open) {
+      form.reset({
+        name: "",
+        description: "",
+        category: "",
+        parts: []
+      });
+      setSelectedParts([]);
+    }
+  }, [assembly, open, form, parts]);
+
+  const createAssemblyMutation = useMutation({
+    mutationFn: async (data: { assembly: InsertAssembly; parts: InsertAssemblyPart[] }) => {
+      return await apiRequest("/api/assemblies", "POST", data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Assembly Created",
+        description: "Your parts assembly has been added to the catalog",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/assemblies"] });
+      onOpenChange(false);
+      form.reset();
+      setSelectedParts([]);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create assembly",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateAssemblyMutation = useMutation({
+    mutationFn: async (data: { assembly: Partial<InsertAssembly>; parts: InsertAssemblyPart[] }) => {
+      return await apiRequest(`/api/assemblies/${assembly?.id}`, "PUT", data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Assembly Updated",
+        description: "Assembly has been updated successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/assemblies"] });
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update assembly",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const addPart = (part: Part) => {
+    const existing = selectedParts.find(sp => sp.partId === part.id);
+    if (existing) {
+      toast({
+        title: "Part Already Added",
+        description: "This part is already in the assembly. Adjust the quantity if needed.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newSelectedParts = [...selectedParts, { partId: part.id, part, quantity: 1 }];
+    setSelectedParts(newSelectedParts);
+    
+    // Update form
+    form.setValue("parts", newSelectedParts.map(sp => ({
+      partId: sp.partId,
+      quantity: sp.quantity
+    })));
+  };
+
+  const removePart = (partId: number) => {
+    const newSelectedParts = selectedParts.filter(sp => sp.partId !== partId);
+    setSelectedParts(newSelectedParts);
+    
+    // Update form
+    form.setValue("parts", newSelectedParts.map(sp => ({
+      partId: sp.partId,
+      quantity: sp.quantity
+    })));
+  };
+
+  const updateQuantity = (partId: number, quantity: number) => {
+    const newSelectedParts = selectedParts.map(sp => 
+      sp.partId === partId ? { ...sp, quantity } : sp
+    );
+    setSelectedParts(newSelectedParts);
+    
+    // Update form
+    form.setValue("parts", newSelectedParts.map(sp => ({
+      partId: sp.partId,
+      quantity: sp.quantity
+    })));
+  };
+
+  const calculateTotals = () => {
+    let totalPrice = 0;
+    let totalLaborHours = 0;
+
+    selectedParts.forEach(sp => {
+      const partPrice = parseFloat(sp.part.price.toString());
+      const partLabor = parseFloat(sp.part.laborHours.toString());
+      totalPrice += partPrice * sp.quantity;
+      totalLaborHours += partLabor * sp.quantity;
+    });
+
+    return { totalPrice, totalLaborHours };
+  };
+
+  const onSubmit = async (data: z.infer<typeof AssemblyFormSchema>) => {
+    const getCurrentUser = () => {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      return user;
+    };
+
+    const user = getCurrentUser();
+    const assemblyData = {
+      name: data.name,
+      description: data.description || null,
+      category: data.category || null,
+      companyId: user.companyId || 1,
+      createdBy: user.id || 1,
+    };
+
+    const partsData = data.parts.map((part, index) => ({
+      partId: part.partId,
+      quantity: part.quantity.toString(),
+      sortOrder: index
+    }));
+
+    if (assembly) {
+      updateAssemblyMutation.mutate({ assembly: assemblyData, parts: partsData });
+    } else {
+      createAssemblyMutation.mutate({ assembly: assemblyData, parts: partsData });
+    }
+  };
+
+  const { totalPrice, totalLaborHours } = calculateTotals();
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{assembly ? "Edit Assembly" : "Create Parts Assembly"}</DialogTitle>
+          <DialogDescription>
+            {assembly ? "Update the assembly details and parts list" : "Create a pre-configured bundle of parts for common repairs"}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            {/* Assembly Details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Assembly Name *</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="e.g., Sprinkler Head Replacement Kit" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="category"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {PART_CATEGORIES.map((category) => (
+                          <SelectItem key={category} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description</FormLabel>
+                  <FormControl>
+                    <Textarea {...field} placeholder="Describe what this assembly is used for..." rows={2} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Parts Selection */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Assembly Parts</h3>
+                <Badge variant="outline" className="text-xs">
+                  {selectedParts.length} part{selectedParts.length !== 1 ? 's' : ''}
+                </Badge>
+              </div>
+
+              {/* Selected Parts List */}
+              {selectedParts.length > 0 && (
+                <div className="space-y-2 max-h-40 overflow-y-auto border rounded-md p-3">
+                  {selectedParts.map(sp => (
+                    <div key={sp.partId} className="flex items-center justify-between gap-2 p-2 bg-muted/50 rounded">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{sp.part.name}</p>
+                        <p className="text-xs text-muted-foreground">${parseFloat(sp.part.price.toString()).toFixed(2)} each</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={sp.quantity}
+                          onChange={(e) => updateQuantity(sp.partId, parseFloat(e.target.value) || 1)}
+                          className="w-20 text-center"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removePart(sp.partId)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add Parts */}
+              <div className="space-y-2">
+                <Label>Add Parts to Assembly</Label>
+                <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                  {parts?.filter(part => !selectedParts.find(sp => sp.partId === part.id)).map(part => (
+                    <div key={part.id} className="flex items-center justify-between p-2 hover:bg-muted/50 rounded">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{part.name}</p>
+                        <p className="text-xs text-muted-foreground">${parseFloat(part.price.toString()).toFixed(2)} • {part.category}</p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addPart(part)}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Totals */}
+            {selectedParts.length > 0 && (
+              <div className="space-y-2 p-4 bg-muted/30 rounded-md">
+                <h4 className="font-semibold text-sm">Assembly Totals</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Total Price:</span>
+                    <span className="ml-2 font-medium">${totalPrice.toFixed(2)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Total Labor:</span>
+                    <span className="ml-2 font-medium">{totalLaborHours.toFixed(2)} hrs</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button 
+                type="submit" 
+                disabled={createAssemblyMutation.isPending || updateAssemblyMutation.isPending || selectedParts.length === 0}
+              >
+                {createAssemblyMutation.isPending || updateAssemblyMutation.isPending ? "Saving..." : assembly ? "Update Assembly" : "Create Assembly"}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function PartsCatalog() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
@@ -446,6 +817,12 @@ export default function PartsCatalog() {
   const [selectedPart, setSelectedPart] = useState<Part | undefined>();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  
+  // Assembly state
+  const [selectedAssembly, setSelectedAssembly] = useState<AssemblyWithParts | undefined>();
+  const [isAssemblyFormOpen, setIsAssemblyFormOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("individual");
+  
   const { toast } = useToast();
 
   // Get current user role to determine permissions
@@ -459,6 +836,10 @@ export default function PartsCatalog() {
 
   const { data: parts, isLoading } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
+  });
+
+  const { data: assemblies, isLoading: isLoadingAssemblies } = useQuery<AssemblyWithParts[]>({
+    queryKey: ["/api/assemblies"],
   });
 
 
@@ -522,6 +903,36 @@ export default function PartsCatalog() {
     setIsFormOpen(true);
   };
 
+  const handleEditAssembly = (assembly: AssemblyWithParts) => {
+    setSelectedAssembly(assembly);
+    setIsAssemblyFormOpen(true);
+  };
+
+  const handleAddAssembly = () => {
+    setSelectedAssembly(undefined);
+    setIsAssemblyFormOpen(true);
+  };
+
+  const deleteAssemblyMutation = useMutation({
+    mutationFn: async (assemblyId: number) => {
+      return await apiRequest(`/api/assemblies/${assemblyId}`, "DELETE");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Assembly Deleted",
+        description: "Assembly has been removed from your catalog",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/assemblies"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete assembly",
+        variant: "destructive",
+      });
+    },
+  });
+
   const toggleSection = (category: string) => {
     const newCollapsed = new Set(collapsedSections);
     if (newCollapsed.has(category)) {
@@ -550,13 +961,26 @@ export default function PartsCatalog() {
         </div>
       </div>
 
-      <Tabs defaultValue="catalog" className="w-full">
-        <TabsList>
-          <TabsTrigger value="catalog">Parts Catalog</TabsTrigger>
-          {canImport && <TabsTrigger value="import">Bulk Import</TabsTrigger>}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid grid-cols-2 w-full md:w-auto">
+          <TabsTrigger value="individual" className="gap-2">
+            <Package className="h-4 w-4" />
+            Individual Parts
+          </TabsTrigger>
+          <TabsTrigger value="assemblies" className="gap-2">
+            <Layers className="h-4 w-4" />
+            Assemblies
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="catalog" className="space-y-6">
+        <TabsContent value="individual" className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold">Individual Parts</h2>
+            <Button onClick={handleAddPart} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Part
+            </Button>
+          </div>
           {/* Search and Filters */}
           <div className="flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
@@ -825,6 +1249,215 @@ export default function PartsCatalog() {
           )}
         </TabsContent>
 
+        <TabsContent value="assemblies" className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-semibold">Parts Assemblies</h2>
+              <p className="text-muted-foreground text-sm">Pre-configured bundles for common repairs</p>
+            </div>
+            <Button onClick={handleAddAssembly} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Create Assembly
+            </Button>
+          </div>
+
+          {/* Assemblies Display */}
+          {isLoadingAssemblies ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-48" />
+              ))}
+            </div>
+          ) : !assemblies?.length ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Layers className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Assemblies Found</h3>
+                <p className="text-muted-foreground text-center mb-4">
+                  Create pre-configured part bundles for common irrigation repairs
+                </p>
+                <Button onClick={handleAddAssembly} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create Your First Assembly
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {/* Desktop Table View */}
+              <div className="hidden md:block border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="font-semibold">Assembly Name</TableHead>
+                      <TableHead className="font-semibold">Parts Count</TableHead>
+                      <TableHead className="font-semibold text-right">Total Price</TableHead>
+                      <TableHead className="font-semibold text-center">Labor Hours</TableHead>
+                      <TableHead className="font-semibold text-center">Usage Count</TableHead>
+                      <TableHead className="font-semibold text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {assemblies.map((assembly, index) => (
+                      <TableRow 
+                        key={assembly.id} 
+                        className={`${
+                          index % 2 === 0 
+                            ? 'bg-white dark:bg-gray-950 hover:bg-blue-50 dark:hover:bg-blue-950/30' 
+                            : 'bg-gray-50 dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-blue-950/30'
+                        }`}
+                      >
+                        <TableCell className="py-3">
+                          <div>
+                            <div className="font-medium text-sm leading-tight">{assembly.name}</div>
+                            {assembly.description && (
+                              <div className="text-xs text-muted-foreground mt-1 max-w-md">
+                                {assembly.description}
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <Badge variant="outline" className="text-xs">
+                            {assembly.parts.length} part{assembly.parts.length !== 1 ? 's' : ''}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <DollarSign className="h-3 w-3 text-green-600" />
+                            <span className="font-semibold text-sm text-green-700 dark:text-green-400">
+                              {formatCurrency(assembly.totalPrice)}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Clock className="h-3 w-3 text-blue-600" />
+                            <span className="font-medium text-xs text-blue-700 dark:text-blue-400">
+                              {assembly.totalLaborHours}h
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-center">
+                          <Badge variant="secondary" className="text-xs">
+                            {assembly.usageCount || 0}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-3 text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900 dark:hover:text-blue-300 h-7 px-2"
+                              onClick={() => handleEditAssembly(assembly)}
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900 dark:hover:text-red-300 h-7 px-2"
+                              onClick={() => deleteAssemblyMutation.mutate(assembly.id)}
+                              disabled={deleteAssemblyMutation.isPending}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden space-y-3">
+                {assemblies.map((assembly) => (
+                  <Card key={assembly.id} className="p-4 shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-blue-500">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-base leading-tight">{assembly.name}</h3>
+                        {assembly.description && (
+                          <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                            {assembly.description}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-1 ml-3">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900 dark:hover:text-blue-300"
+                          onClick={() => handleEditAssembly(assembly)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900 dark:hover:text-red-300"
+                          onClick={() => deleteAssemblyMutation.mutate(assembly.id)}
+                          disabled={deleteAssemblyMutation.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          {assembly.parts.length} part{assembly.parts.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          Used {assembly.usageCount || 0} times
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 pt-2 border-t border-muted/30">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-green-600" />
+                        <span className="font-semibold text-green-700 dark:text-green-400 text-base">
+                          {formatCurrency(assembly.totalPrice)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-blue-600" />
+                        <span className="font-medium text-blue-700 dark:text-blue-400">
+                          {assembly.totalLaborHours}h
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Parts Preview */}
+                    <div className="mt-3 pt-3 border-t border-muted/30">
+                      <h4 className="text-xs font-medium text-muted-foreground mb-2">Parts Included:</h4>
+                      <div className="space-y-1">
+                        {assembly.parts.slice(0, 3).map((part) => (
+                          <div key={part.id} className="flex justify-between text-xs">
+                            <span className="text-muted-foreground truncate">{part.part.name}</span>
+                            <span className="text-muted-foreground ml-2">×{part.quantity}</span>
+                          </div>
+                        ))}
+                        {assembly.parts.length > 3 && (
+                          <div className="text-xs text-muted-foreground">
+                            +{assembly.parts.length - 3} more parts...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
         {canImport && (
           <TabsContent value="import" className="space-y-6">
             <BulkImport onImportComplete={() => {
@@ -838,6 +1471,12 @@ export default function PartsCatalog() {
         part={selectedPart}
         open={isFormOpen}
         onOpenChange={setIsFormOpen}
+      />
+
+      <AssemblyFormDialog
+        assembly={selectedAssembly}
+        open={isAssemblyFormOpen}
+        onOpenChange={setIsAssemblyFormOpen}
       />
     </div>
   );
