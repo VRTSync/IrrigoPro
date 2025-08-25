@@ -34,6 +34,8 @@ export default function Navigation() {
     retry: false,
     staleTime: 0, // Always refetch for logo changes
     cacheTime: 0, // Don't cache for immediate updates
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
   // Company logo for banner (separate from navigation logo)
