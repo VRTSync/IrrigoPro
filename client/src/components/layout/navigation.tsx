@@ -356,21 +356,6 @@ export default function Navigation() {
             </div>
           </div>
         </div>
-        
-        {/* Company Logo Banner - Below Header */}
-        {companyLogoUrl && (
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-b border-gray-200 shadow-sm">
-            <div className="flex items-center justify-center py-3 px-4">
-              <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm border">
-                <img 
-                  src={signedLogoUrl || companyLogoUrl} 
-                  alt="Company Logo"
-                  className="h-12 max-w-48 w-auto object-contain"
-                />
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 mobile-nav-gradient border-t border-gray-100/50 shadow-xl z-50 pb-safe">
