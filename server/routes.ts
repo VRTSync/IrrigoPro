@@ -308,8 +308,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
       }
 
-      // Clear the logo
-      const updatedCompany = await storage.updateCompany(companyId, { 
+      // Clear the logo using the company profile update method
+      const updatedCompany = await storage.updateCompanyProfile(companyId, { 
         logo: null 
       });
 

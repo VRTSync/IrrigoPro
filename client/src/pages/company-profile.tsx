@@ -293,7 +293,7 @@ export default function CompanyProfile() {
                   </Label>
                   
                   {/* Current logo display */}
-                  {company?.logo && company.logo.trim() !== '' ? (
+                  {company?.logo && company.logo.trim() !== '' && company.logo !== null && company.logo !== 'null' ? (
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
                       <img
                         src={`${company.logo}?v=${Date.now()}`}
@@ -320,39 +320,10 @@ export default function CompanyProfile() {
                             try {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
                               
-                              // Force refresh all company profile queries across the app
+                              // Invalidate and refetch company profile
                               await queryClient.invalidateQueries({ 
-                                predicate: (query) => {
-                                  const key = query.queryKey[0]?.toString() || '';
-                                  return key.includes('/api/company') && key.includes('/profile');
-                                }
-                              });
-
-                              // Invalidate auth user query for consistent state
-                              await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-
-                              // Force refetch current data to ensure UI updates immediately
-                              await queryClient.refetchQueries({ 
                                 queryKey: [`/api/company/${companyId}/profile`] 
                               });
-
-                              // Force immediate state reset and multiple refetches
-                              await queryClient.resetQueries({ 
-                                queryKey: [`/api/company/${companyId}/profile`] 
-                              });
-                              
-                              // Multiple refetches with delays to ensure UI updates
-                              setTimeout(async () => {
-                                await queryClient.refetchQueries({ 
-                                  queryKey: [`/api/company/${companyId}/profile`] 
-                                });
-                              }, 100);
-                              
-                              setTimeout(async () => {
-                                await queryClient.refetchQueries({ 
-                                  queryKey: [`/api/company/${companyId}/profile`] 
-                                });
-                              }, 300);
 
                               toast({
                                 title: "Logo removed",
