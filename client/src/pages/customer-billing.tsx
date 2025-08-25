@@ -131,7 +131,7 @@ export default function CustomerBilling() {
   });
 
   // Create a map for easy lookup of preview data by customer ID
-  const previewMap = customerPreviews.reduce((map, preview) => {
+  const previewMap = (customerPreviews || []).reduce((map, preview) => {
     map[preview.id] = preview;
     return map;
   }, {} as Record<number, any>);
