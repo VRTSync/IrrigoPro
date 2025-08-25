@@ -933,11 +933,11 @@ export function ColorCodedMapViewer({
             </div>
           </div>
 
-          {/* Mobile-optimized Map with better height */}
+          {/* Mobile-optimized Map with proper height */}
           <div className={`relative bg-gray-100 rounded-lg overflow-hidden border mobile-map-container ${
             isFullscreen 
-              ? 'mobile-fullscreen-map h-[calc(100vh-120px)] sm:h-[calc(100vh-150px)]' 
-              : 'h-[65vh] sm:h-[500px] min-h-[350px] max-h-[80vh]'
+              ? 'mobile-fullscreen-map h-[calc(100vh-100px)] sm:h-[calc(100vh-140px)]' 
+              : 'h-[75vh] sm:h-[600px] min-h-[500px] max-h-[85vh]'
           }`}>
             <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             

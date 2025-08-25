@@ -145,7 +145,18 @@
   
   /* Mobile viewport height optimization */
   .mobile-map-container {
-    min-height: 60vh !important;
+    min-height: 70vh !important;
+  }
+  
+  /* Ensure proper height on mobile devices */
+  @supports (-webkit-touch-callout: none) {
+    .mobile-map-container {
+      min-height: 75vh !important;
+    }
+    
+    .mobile-fullscreen-map {
+      height: calc(100vh - 80px) !important;
+    }
   }
 }
 
