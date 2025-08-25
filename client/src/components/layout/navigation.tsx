@@ -265,9 +265,20 @@ export default function Navigation() {
                 src={companyLogoUrl} 
                 alt="Company Logo"
                 className="h-16 w-auto object-contain"
+                onLoad={() => console.log('Desktop logo loaded successfully')}
+                onError={(e) => console.error('Desktop logo failed to load:', e)}
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Debug info for logo visibility */}
+      {companyLogoUrl && (
+        <div className="hidden lg:block bg-red-100 border border-red-300 p-2 text-xs">
+          <strong>DEBUG - Desktop Logo Banner Active:</strong><br />
+          Logo URL: {companyLogoUrl}<br />
+          Company: {company?.name}
         </div>
       )}
 
@@ -340,8 +351,19 @@ export default function Navigation() {
                 src={companyLogoUrl} 
                 alt="Company Logo"
                 className="h-12 w-auto object-contain"
+                onLoad={() => console.log('Mobile logo loaded successfully')}
+                onError={(e) => console.error('Mobile logo failed to load:', e)}
               />
             </div>
+          </div>
+        )}
+
+        {/* Debug info for mobile logo visibility */}
+        {companyLogoUrl && (
+          <div className="bg-yellow-100 border border-yellow-300 p-2 text-xs">
+            <strong>DEBUG - Mobile Logo Banner Active:</strong><br />
+            Logo URL: {companyLogoUrl}<br />
+            Company: {company?.name}
           </div>
         )}
 

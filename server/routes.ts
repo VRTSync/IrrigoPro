@@ -381,15 +381,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve public objects (including company logos)
   app.get("/public-objects/:filePath(*)", async (req, res) => {
     const filePath = req.params.filePath;
+    console.log(`[PUBLIC-OBJECTS] Serving file: ${filePath}`);
+    
     const objectStorageService = new ObjectStorageService();
     try {
       const file = await objectStorageService.searchPublicObject(filePath);
+      console.log(`[PUBLIC-OBJECTS] File found: ${file ? 'yes' : 'no'}`);
+      
       if (!file) {
+        console.log(`[PUBLIC-OBJECTS] File not found: ${filePath}`);
         return res.status(404).json({ error: "File not found" });
       }
+      
+      console.log(`[PUBLIC-OBJECTS] Downloading file: ${filePath}`);
       objectStorageService.downloadObject(file, res);
     } catch (error) {
-      // Production error logging would go to monitoring service
+      console.error(`[PUBLIC-OBJECTS] Error serving ${filePath}:`, error);
       return res.status(500).json({ error: "Internal server error" });
     }
   });
