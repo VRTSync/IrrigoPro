@@ -37,9 +37,12 @@ export default function CompanyProfile() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const companyId = user?.companyId;
 
-  // Fetch company profile
+  // Fetch company profile with proper authentication
   const { data: company, isLoading, error } = useQuery<Company>({
     queryKey: [`/api/company/${companyId}/profile`],
+    queryFn: async () => {
+      return await apiRequest(`/api/company/${companyId}/profile`, 'GET');
+    },
     enabled: !!companyId,
     retry: false,
   });
@@ -298,11 +301,10 @@ export default function CompanyProfile() {
                         className="h-16 w-16 object-contain rounded border"
                         onError={(e) => {
                           // Hide broken logo images gracefully in production
-                          console.error('Logo image failed to load:', company.logo);
                           e.currentTarget.style.display = 'none';
                         }}
                         onLoad={() => {
-                          console.log('Logo image loaded successfully:', company.logo);
+                          // Logo loaded successfully
                         }}
                       />
                       <div className="flex-1">
