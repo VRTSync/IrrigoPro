@@ -71,12 +71,17 @@ const createEstimateWithZonesSchema = z.object({
 });
 
 // Middleware to check if user has company admin permissions for site map operations
-const requireCompanyAdminAccess = (req: Request, res: any, next: any) => {
-  // For now, we'll add a simple header check
-  // In a production app, this would check a proper session or JWT token
-  const userRole = req.headers['x-user-role'];
+const requireCompanyAdminAccess = (req: any, res: any, next: any) => {
+  // Use session-based authentication like other routes
+  const user = req.user as any;
   
-  if (userRole !== 'company_admin') {
+  if (!user) {
+    return res.status(401).json({ 
+      message: "Authentication required" 
+    });
+  }
+  
+  if (user.role !== 'company_admin') {
     return res.status(403).json({ 
       message: "Access denied. Site map operations are restricted to company administrators only." 
     });
@@ -99,10 +104,17 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
 };
 
 // Middleware to check if user has permission to view site maps (company admin only)
-const requireCompanyAdminViewAccess = (req: Request, res: any, next: any) => {
-  const userRole = req.headers['x-user-role'];
+const requireCompanyAdminViewAccess = (req: any, res: any, next: any) => {
+  // Use session-based authentication like other routes
+  const user = req.user as any;
   
-  if (userRole !== 'company_admin') {
+  if (!user) {
+    return res.status(401).json({ 
+      message: "Authentication required" 
+    });
+  }
+  
+  if (user.role !== 'company_admin') {
     return res.status(403).json({ 
       message: "Access denied. Site map access is restricted to company administrators only." 
     });
@@ -1463,18 +1475,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const customerId = parseInt(req.params.customerId);
       
-      // Get user's company ID from session/auth (more efficient than DB lookup)
-      // In production, this would come from JWT token or session
-      const userRole = req.headers['x-user-role'];
-      const userId = req.headers['x-user-id']; // We'll need to add this header too
+      // Get user's company ID from session (proper session-based auth)
+      const user = req.user as any;
+      const companyId = user?.companyId;
       
-      // For now, get company ID from user lookup (TODO: optimize with session/JWT in production)
-      let companyId = 1; // Default fallback
-      if (userId) {
-        const user = await storage.getUser(parseInt(userId));
-        if (user) {
-          companyId = user.companyId;
-        }
+      if (!companyId) {
+        return res.status(400).json({ 
+          message: "User company information not available" 
+        });
       }
       
       // Validate the request body
