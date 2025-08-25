@@ -97,36 +97,54 @@ export function MinimalMapViewer({
       }
     });
 
-    // Add controller markers (circles only for simplicity)
+    // Add controller markers with proper styling
     project.controllers.forEach(controller => {
       if (!mapInstanceRef.current) return;
 
-      L.circleMarker([controller.latitude, controller.longitude], {
-        radius: 8,
-        fillColor: controller.color,
-        color: 'white',
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.8
-      }).addTo(mapInstanceRef.current)
-        .bindPopup(`<strong>${controller.name}</strong><br/>Stations: ${controller.stationCount || 0}`);
+      const marker = L.marker([controller.latitude, controller.longitude], {
+        icon: L.divIcon({
+          html: `<div style="background-color: ${controller.color}; width: 24px; height: 24px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" class="rounded-full flex items-center justify-center text-white font-bold text-xs">${controller.name.charAt(0)}</div>`,
+          className: 'custom-div-icon',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        })
+      }).addTo(mapInstanceRef.current);
+
+      // Enhanced popup with better formatting
+      const zoneCount = project.zonesByController[controller.id]?.length || 0;
+      marker.bindPopup(`
+        <div class="p-2">
+          <div class="font-semibold text-base mb-1">${controller.name}</div>
+          <div class="text-sm text-gray-600 mb-1">Stations: ${controller.stationCount || 0}</div>
+          <div class="text-sm text-gray-600">Zones: ${zoneCount}</div>
+        </div>
+      `);
     });
 
-    // Add zone boundaries
+    // Add zone boundaries with zone numbers
     project.allZones.forEach(zone => {
       if (!zone.boundaries || !mapInstanceRef.current) return;
 
       zone.boundaries.forEach(boundary => {
         if (boundary && boundary.length >= 2) {
-          L.circleMarker([boundary[0], boundary[1]], {
-            radius: 4,
-            fillColor: zone.color || '#0066cc',
-            color: 'white',
-            weight: 1,
-            opacity: 1,
-            fillOpacity: 0.6
-          }).addTo(mapInstanceRef.current!)
-            .bindPopup(`<strong>${zone.name}</strong><br/>Type: ${zone.zoneType || 'Unknown'}`);
+          const zoneMarker = L.marker([boundary[0], boundary[1]], {
+            icon: L.divIcon({
+              html: `<div style="background-color: ${zone.color || '#0066cc'}; width: 20px; height: 20px; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3);" class="rounded-full flex items-center justify-center text-white font-bold text-xs">${zone.stationNumber || '?'}</div>`,
+              className: 'custom-zone-icon',
+              iconSize: [20, 20],
+              iconAnchor: [10, 10]
+            })
+          }).addTo(mapInstanceRef.current!);
+
+          // Enhanced zone popup
+          zoneMarker.bindPopup(`
+            <div class="p-2">
+              <div class="font-semibold text-base mb-1">${zone.name}</div>
+              <div class="text-sm text-gray-600 mb-1">Station: ${zone.stationNumber || 'Unknown'}</div>
+              <div class="text-sm text-gray-600 mb-1">Type: ${zone.zoneType || 'Unknown'}</div>
+              ${zone.coverage ? `<div class="text-sm text-gray-600">Coverage: ${zone.coverage}</div>` : ''}
+            </div>
+          `);
         }
       });
     });

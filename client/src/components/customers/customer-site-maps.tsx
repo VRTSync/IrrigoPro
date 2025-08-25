@@ -461,6 +461,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
                         controllerId,
                         zones.map(zone => ({
+                          id: zone.id?.toString() || '',
                           name: zone.name || 'Unknown Zone',
                           controllerId: controllerId,
                           color: `hsl(${(parseInt(controllerId) * 137.5) % 360}, 70%, 50%)`,
@@ -473,6 +474,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       ])
                     ),
                     allZones: (project?.zones || []).map(zone => ({
+                      id: zone.id?.toString() || '',
                       name: zone.name || 'Unknown Zone',
                       controllerId: zone.controllerId?.toString() || 'unassigned',
                       color: `hsl(${((zone.controllerId || 0) * 137.5) % 360}, 70%, 50%)`,
