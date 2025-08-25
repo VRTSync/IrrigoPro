@@ -33,6 +33,9 @@ import {
   insertAssemblyPartSchema
 } from "@shared/schema";
 import { z } from "zod";
+import { db } from "./db";
+import { companies } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const createEstimateWithZonesSchema = z.object({
   estimate: insertEstimateSchema.extend({
@@ -308,20 +311,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
       }
 
-      // Clear the logo using the company profile update method
-      const updatedCompany = await storage.updateCompanyProfile(companyId, { 
-        logo: null 
-      });
+      // Direct database update to ensure logo is cleared
+      const result = await db
+        .update(companies)
+        .set({ logo: null, updatedAt: new Date() })
+        .where(eq(companies.id, companyId))
+        .returning();
 
-      if (!updatedCompany) {
+      if (!result || result.length === 0) {
         return res.status(404).json({ message: "Company not found" });
       }
 
       res.json({ 
-        message: "Logo cleared successfully" 
+        message: "Logo cleared successfully",
+        company: result[0]
       });
     } catch (error) {
-      // Production error logging would go to monitoring service
+      console.error('Logo reset error:', error);
       res.status(500).json({ message: "Failed to clear company logo" });
     }
   });
