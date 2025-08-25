@@ -199,8 +199,8 @@ export function MinimalMapViewer({
         >
           <div ref={mapRef} className="w-full h-full" />
           
-          {/* Floating controls - minimal */}
-          <div className="absolute top-2 right-2 flex flex-col gap-1">
+          {/* Map controls - restored original size */}
+          <div className="absolute top-2 right-2 flex flex-col gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -210,10 +210,10 @@ export function MinimalMapViewer({
                   mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
                 }
               }}
-              className="h-8 w-8 p-0 bg-white/90 hover:bg-white"
+              className="h-10 w-10 p-0 bg-white/95 hover:bg-white shadow-lg"
               title="Zoom In"
             >
-              <span className="text-sm font-bold">+</span>
+              <span className="text-lg font-bold">+</span>
             </Button>
             
             <Button
@@ -225,30 +225,32 @@ export function MinimalMapViewer({
                   mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
                 }
               }}
-              className="h-8 w-8 p-0 bg-white/90 hover:bg-white"
+              className="h-10 w-10 p-0 bg-white/95 hover:bg-white shadow-lg"
               title="Zoom Out"
             >
-              <span className="text-sm font-bold">-</span>
+              <span className="text-lg font-bold">-</span>
             </Button>
             
             <Button
               variant="outline"
               size="sm"
               onClick={toggleFullscreen}
-              className="h-8 w-8 p-0 bg-white/90 hover:bg-white"
+              className="h-10 w-10 p-0 bg-white/95 hover:bg-white shadow-lg"
               title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
             >
               {isFullscreen ? (
-                <Minimize className="w-4 h-4" />
+                <Minimize className="w-5 h-5" />
               ) : (
-                <Maximize className="w-4 h-4" />
+                <Maximize className="w-5 h-5" />
               )}
             </Button>
           </div>
 
-          {/* Simple info overlay */}
-          <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm rounded px-2 py-1 text-xs">
-            {project.controllers.length} Controllers • {project.allZones.length} Zones
+          {/* Map info overlay */}
+          <div className="absolute bottom-3 right-3 bg-white/95 backdrop-blur-sm rounded-lg p-3 shadow-lg">
+            <div className="text-sm font-medium text-gray-800">
+              {project.controllers.length} Controllers • {project.allZones.length} Zones
+            </div>
           </div>
         </div>
       </div>
