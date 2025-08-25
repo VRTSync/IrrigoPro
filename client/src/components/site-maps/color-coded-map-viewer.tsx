@@ -780,18 +780,21 @@ export function ColorCodedMapViewer({
                   variant={isFullscreen ? "default" : "outline"}
                   size="sm"
                   onClick={toggleFullscreen}
-                  className="h-7 sm:h-8 px-2"
-                  title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Map"}
+                  className="h-7 sm:h-8 px-3 sm:px-2"
+                  title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
                 >
                   {isFullscreen ? (
                     <>
-                      <Minimize className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                      <Minimize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
                       <span className="text-xs sm:text-sm">Exit</span>
                     </>
                   ) : (
                     <>
-                      <Maximize className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                      <span className="text-xs sm:text-sm">Full</span>
+                      <Maximize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
+                      <span className="text-xs sm:text-sm">
+                        <span className="hidden sm:inline">View Map</span>
+                        <span className="sm:hidden">Map</span>
+                      </span>
                     </>
                   )}
                 </Button>
