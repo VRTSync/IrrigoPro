@@ -320,9 +320,19 @@ export default function CompanyProfile() {
                             try {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
                               
-                              // Invalidate and refetch company profile
+                              // Force invalidate all related queries
                               await queryClient.invalidateQueries({ 
                                 queryKey: [`/api/company/${companyId}/profile`] 
+                              });
+                              
+                              // Also clear query cache to force immediate refetch
+                              queryClient.removeQueries({
+                                queryKey: [`/api/company/${companyId}/profile`]
+                              });
+                              
+                              // Refetch immediately
+                              await queryClient.refetchQueries({
+                                queryKey: [`/api/company/${companyId}/profile`]
                               });
 
                               toast({
@@ -330,7 +340,6 @@ export default function CompanyProfile() {
                                 description: "Company logo has been removed successfully",
                               });
                             } catch (error) {
-                              // Production-safe error handling
                               toast({
                                 title: "Error",
                                 description: "Failed to remove logo. Please try again.",
