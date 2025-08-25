@@ -760,11 +760,15 @@ export function ColorCodedMapViewer({
 
   const totalZones = project.allZones.length;
   const visibleZones = project.allZones.filter(z => visibleControllers.has(z.controllerId)).length;
+  
+  // Calculate dynamic height based on controller count
+  const mapHeight = Math.max(500, project.controllers.length * 80 + 200);
+  console.log(`Map height calculation: ${project.controllers.length} controllers = ${mapHeight}px`);
 
   return (
     <div className={`space-y-4 sm:space-y-6 ${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : ''}`}>
       {/* Mobile-optimized Map Controls */}
-      <Card className="site-map-card h-auto">
+      <Card className="site-map-card" style={{ minHeight: isFullscreen ? 'auto' : `${mapHeight + 300}px` }}>
         <CardHeader className={`${isFullscreen ? 'pb-2' : 'pb-4'}`}>
           <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
             <div className="flex items-center gap-2 min-w-0">
@@ -980,7 +984,7 @@ export function ColorCodedMapViewer({
               ? 'mobile-fullscreen-map h-[calc(100vh-100px)] sm:h-[calc(100vh-140px)]' 
               : 'w-full'
           }`} style={{
-            height: isFullscreen ? undefined : `${Math.max(500, project.controllers.length * 80 + 200)}px`,
+            height: isFullscreen ? undefined : `${mapHeight}px`,
           }}>
             <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             
