@@ -375,14 +375,7 @@ export default function Navigation() {
           </div>
         )}
 
-        {/* Debug info for mobile logo visibility - ALWAYS VISIBLE */}
-        {companyLogoUrl && (
-          <div className="bg-yellow-100 border border-yellow-300 p-2 text-xs">
-            <strong>DEBUG - Mobile Logo Banner Active:</strong><br />
-            Logo URL: {companyLogoUrl}<br />
-            Company: {company?.name}
-          </div>
-        )}
+
 
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 mobile-nav-gradient border-t border-gray-100/50 shadow-xl z-50 pb-safe">
