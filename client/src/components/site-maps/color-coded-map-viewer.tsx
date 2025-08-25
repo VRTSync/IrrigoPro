@@ -87,7 +87,7 @@ export function ColorCodedMapViewer({
       touchZoom: true,
       dragging: true,
       // Mobile-specific optimizations
-      tap: true,
+      tap: true as any,
       tapTolerance: 15,
       bounceAtZoomLimits: true,
       zoomAnimation: true,
@@ -697,8 +697,12 @@ export function ColorCodedMapViewer({
         });
 
         project.allZones.forEach(zone => {
-          if (visibleControllers.has(zone.controllerId)) {
-            allCoordinates.push([zone.latitude, zone.longitude]);
+          if (visibleControllers.has(zone.controllerId) && zone.boundaries && zone.boundaries.length > 0) {
+            zone.boundaries.forEach(coord => {
+              if (coord && coord.length >= 2) {
+                allCoordinates.push([coord[0], coord[1]]);
+              }
+            });
           }
         });
 
@@ -933,11 +937,11 @@ export function ColorCodedMapViewer({
             </div>
           </div>
 
-          {/* Mobile-optimized Map with proper height */}
-          <div className={`relative bg-gray-100 rounded-lg overflow-hidden border mobile-map-container ${
+          {/* Content-aware Map with fixed height */}
+          <div className={`relative bg-gray-100 rounded-lg overflow-hidden border ${
             isFullscreen 
               ? 'mobile-fullscreen-map h-[calc(100vh-100px)] sm:h-[calc(100vh-140px)]' 
-              : 'h-[75vh] sm:h-[600px] min-h-[500px] max-h-[85vh]'
+              : 'h-[600px] sm:h-[700px]'
           }`}>
             <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             
