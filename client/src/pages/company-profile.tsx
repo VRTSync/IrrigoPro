@@ -320,22 +320,28 @@ export default function CompanyProfile() {
                             try {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
                               
-                              // Optimistically update the UI first
+                              // Immediately update UI optimistically
                               queryClient.setQueryData([`/api/company/${companyId}/profile`], (oldData: any) => {
                                 return oldData ? { ...oldData, logo: null } : oldData;
                               });
                               
-                              // Then clear cache and refetch
+                              // Clear ALL related caches
                               queryClient.removeQueries({
                                 queryKey: [`/api/company/${companyId}/profile`]
                               });
                               
-                              // Force immediate refetch
-                              setTimeout(() => {
-                                queryClient.invalidateQueries({ 
-                                  queryKey: [`/api/company/${companyId}/profile`] 
+                              // Invalidate all company queries to refresh navigation
+                              queryClient.invalidateQueries({ 
+                                queryKey: [`/api/company`] 
+                              });
+                              
+                              // Force refetch with no cache
+                              setTimeout(async () => {
+                                await queryClient.refetchQueries({
+                                  queryKey: [`/api/company/${companyId}/profile`],
+                                  type: 'active'
                                 });
-                              }, 50);
+                              }, 100);
 
                               toast({
                                 title: "Logo removed",
