@@ -974,18 +974,15 @@ export function ColorCodedMapViewer({
             </div>
           </div>
 
-          {/* Dynamic Map container that adapts to content */}
+          {/* Truly dynamic Map container based on controller count */}
           <div className={`relative bg-gray-100 rounded-lg overflow-hidden border ${
             isFullscreen 
               ? 'mobile-fullscreen-map h-[calc(100vh-100px)] sm:h-[calc(100vh-140px)]' 
-              : 'min-h-[400px] w-full'
+              : 'w-full'
           }`} style={{
-            height: isFullscreen ? undefined : 'auto',
-            aspectRatio: isFullscreen ? undefined : '16/10'
+            height: isFullscreen ? undefined : `${Math.max(500, project.controllers.length * 80 + 200)}px`,
           }}>
-            <div className={isFullscreen ? "w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" : "dynamic-map-container"}>
-              <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
-            </div>
+            <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             
             {/* Mobile-optimized Map Info Overlay */}
             <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-white/95 backdrop-blur-sm rounded-lg p-2 sm:p-3 shadow-lg max-w-[150px] sm:max-w-none">
