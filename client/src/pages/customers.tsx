@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerListSkeleton } from "@/components/ui/loading-skeleton";
-import { CompanyLogoBanner } from "@/components/ui/company-logo-banner";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -137,7 +137,7 @@ export default function Customers() {
 
   return (
     <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
-      <CompanyLogoBanner className="mb-6" />
+
       
       {/* Header */}
       <div className="mb-8">
