@@ -142,7 +142,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve public objects (including company logos) - USING API PREFIX TO AVOID VITE CATCH-ALL
   app.get("/api/public-objects/:filePath(*)", async (req, res) => {
     const filePath = req.params.filePath;
-    console.log(`[PUBLIC-OBJECTS] Serving file: ${filePath}`);
+    console.log(`[PUBLIC-OBJECTS] *** ROUTE CALLED *** Serving file: ${filePath}`);
+    console.log(`[PUBLIC-OBJECTS] Request URL: ${req.url}`);
+    console.log(`[PUBLIC-OBJECTS] Request headers: ${JSON.stringify(req.headers, null, 2)}`);
     
     const objectStorageService = new ObjectStorageService();
     try {
