@@ -766,20 +766,23 @@ export function ColorCodedMapViewer({
   console.log(`Map height calculation: ${project.controllers.length} controllers = ${mapHeight}px`);
 
   return (
-    <div className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
-      {/* Compact header with essential info only */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <MapIcon className="w-4 h-4 text-green-600 flex-shrink-0" />
-          <span className="text-sm font-semibold truncate">
-            {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
-          </span>
-          <Badge variant="outline" className="text-xs whitespace-nowrap ml-auto">
-            {project.controllers.length} Controllers • {totalZones} Zones
-          </Badge>
-        </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          {/* Essential control buttons only */}
+    <div className={`space-y-4 sm:space-y-6 ${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : ''}`}>
+      {/* Mobile-optimized Map Controls */}
+      <Card className="site-map-card" style={{ minHeight: isFullscreen ? 'auto' : `${mapHeight + 300}px` }}>
+        <CardHeader className={`${isFullscreen ? 'pb-2' : 'pb-4'}`}>
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <MapIcon className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
+              <span className="text-sm sm:text-base font-semibold truncate">
+                {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
+              </span>
+            </div>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+              <Badge variant="outline" className="text-xs sm:text-sm whitespace-nowrap">
+                {project.controllers.length} Controllers • {totalZones} Zones
+              </Badge>
+              {/* Mobile-optimized control buttons */}
+              <div className="flex items-center gap-1 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"

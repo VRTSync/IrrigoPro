@@ -5,7 +5,7 @@ IrrigoPro is a comprehensive full-stack irrigation business management system de
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
-Site Map Display Preferences: Default display mode set to solid markers with zone/controller identifiers in the center, enhanced popups with detailed information. Maintain original styling and functionality unless explicitly requested to change.
+Site Map Display Preferences: Default display mode set to circles with small marker size for cleaner mobile viewing and better performance on properties with many controllers.
 App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details. Complete visual rebrand implemented across all interfaces, icons, and PWA assets. Production-ready company logo upload system with secure file storage, production domain handling (irrigopro.com), session-based authentication, comprehensive branding integration throughout pages (below header), customer approval emails, and email template management in company profile for professional communications.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request).
 Customer Approval System: Complete email approval workflow with individual estimate status check buttons, proper production domain URLs (irrigopro.com/estimate-approval), and professional customer-facing success pages that avoid admin interface confusion.

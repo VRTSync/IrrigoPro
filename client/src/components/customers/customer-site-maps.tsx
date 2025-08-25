@@ -12,7 +12,7 @@ import { ArrowLeft, MapPin, Upload, Eye, Edit, Trash2, Plus } from "lucide-react
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@shared/schema";
-import { MinimalMapViewer } from "@/components/site-maps/minimal-map-viewer";
+import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";
 import { ZoneUpload } from "@/components/site-maps/zone-upload";
 import { ZonesDataView } from "@/components/site-maps/zones-data-view";
@@ -444,7 +444,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             <TabsContent value="maps" className="space-y-6 mt-6">
               {/* Mobile-optimized map container */}
               <div className="w-full h-[75vh] min-h-[500px] sm:h-[60vh] lg:h-[70vh] rounded-lg overflow-hidden border border-gray-200 bg-white shadow-sm">
-                <MinimalMapViewer 
+                <ColorCodedMapViewer 
                   project={{
                     controllers: (project?.controllers || []).map(c => ({
                       id: c.id.toString(),
@@ -461,7 +461,6 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       Object.entries(project?.zonesByController || {}).map(([controllerId, zones]) => [
                         controllerId,
                         zones.map(zone => ({
-                          id: zone.id?.toString() || '',
                           name: zone.name || 'Unknown Zone',
                           controllerId: controllerId,
                           color: `hsl(${(parseInt(controllerId) * 137.5) % 360}, 70%, 50%)`,
@@ -474,7 +473,6 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       ])
                     ),
                     allZones: (project?.zones || []).map(zone => ({
-                      id: zone.id?.toString() || '',
                       name: zone.name || 'Unknown Zone',
                       controllerId: zone.controllerId?.toString() || 'unassigned',
                       color: `hsl(${((zone.controllerId || 0) * 137.5) % 360}, 70%, 50%)`,
