@@ -764,7 +764,7 @@ export function ColorCodedMapViewer({
   return (
     <div className={`space-y-4 sm:space-y-6 ${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : ''}`}>
       {/* Mobile-optimized Map Controls */}
-      <Card>
+      <Card className="site-map-card">
         <CardHeader className={`${isFullscreen ? 'pb-2' : 'pb-4'}`}>
           <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
             <div className="flex items-center gap-2 min-w-0">
@@ -974,11 +974,11 @@ export function ColorCodedMapViewer({
             </div>
           </div>
 
-          {/* Content-aware Map with fixed height */}
+          {/* Content-aware Map with increased height */}
           <div className={`relative bg-gray-100 rounded-lg overflow-hidden border ${
             isFullscreen 
               ? 'mobile-fullscreen-map h-[calc(100vh-100px)] sm:h-[calc(100vh-140px)]' 
-              : 'h-[600px] sm:h-[700px]'
+              : 'h-[800px] sm:h-[900px]'
           }`}>
             <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             

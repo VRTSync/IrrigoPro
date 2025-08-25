@@ -149,10 +149,19 @@
     width: 100% !important;
   }
   
+  /* Ensure site map cards are tall enough */
+  .site-map-card {
+    min-height: 900px !important;
+  }
+  
   /* Mobile fullscreen optimization */
   @supports (-webkit-touch-callout: none) {
     .mobile-fullscreen-map {
       height: calc(100vh - 80px) !important;
+    }
+    
+    .site-map-card {
+      min-height: 800px !important;
     }
   }
 }
