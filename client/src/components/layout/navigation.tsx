@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon } from "lucide-react";
@@ -26,6 +27,9 @@ export default function Navigation() {
   // Fetch company profile to get company logo
   const { data: company } = useQuery({
     queryKey: [`/api/company/${companyId}/profile`],
+    queryFn: async () => {
+      return await apiRequest(`/api/company/${companyId}/profile`, 'GET');
+    },
     enabled: !!companyId,
     retry: false,
   });

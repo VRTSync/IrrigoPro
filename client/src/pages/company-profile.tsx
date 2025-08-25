@@ -82,7 +82,6 @@ export default function CompanyProfile() {
   // Reset form when company data changes
   useEffect(() => {
     if (company) {
-      console.log("Company data updated:", company);
       form.reset({
         name: company.name,
         address: company.address || "",
@@ -294,15 +293,7 @@ export default function CompanyProfile() {
                   </Label>
                   
                   {/* Current logo display */}
-                  {(() => {
-                    console.log("Checking logo display:", {
-                      hasCompany: !!company,
-                      logo: company?.logo,
-                      logoTrimmed: company?.logo?.trim(),
-                      shouldShow: company?.logo && company.logo.trim() !== '' && company.logo !== null && company.logo !== 'null'
-                    });
-                    return company?.logo && company.logo.trim() !== '' && company.logo !== null && company.logo !== 'null';
-                  })() ? (
+                  {company?.logo && company.logo.trim() !== '' && company.logo !== null && company.logo !== 'null' ? (
                     <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
                       <img
                         src={`${company.logo}?v=${Date.now()}`}
