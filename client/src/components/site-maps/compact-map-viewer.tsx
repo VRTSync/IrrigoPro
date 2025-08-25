@@ -135,8 +135,11 @@ export function CompactMapViewer({
         }).addTo(mapInstanceRef.current)
           .bindPopup(`
             <div class="bg-white rounded-lg shadow-lg border-2 overflow-hidden min-w-[200px]" style="border-color: ${controller.color}">
-              <div class="px-3 py-2" style="background: linear-gradient(135deg, ${controller.color}ee, ${controller.color})">
-                <h3 class="font-bold text-white text-sm">${controller.name}</h3>
+              <div class="px-3 py-3" style="background: ${controller.color}">
+                <div class="text-center">
+                  <h3 class="font-bold text-white text-base">${controller.name}</h3>
+                  <p class="text-white text-opacity-90 text-xs">Controller</p>
+                </div>
               </div>
               <div class="p-3">
                 <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${controller.color}08"><strong>Stations:</strong> ${controller.stationCount || 0}</div>
@@ -154,8 +157,11 @@ export function CompactMapViewer({
         }).addTo(mapInstanceRef.current)
           .bindPopup(`
             <div class="bg-white rounded-lg shadow-lg border-2 overflow-hidden min-w-[200px]" style="border-color: ${controller.color}">
-              <div class="px-3 py-2" style="background: linear-gradient(135deg, ${controller.color}ee, ${controller.color})">
-                <h3 class="font-bold text-white text-sm">${controller.name}</h3>
+              <div class="px-3 py-3" style="background: ${controller.color}">
+                <div class="text-center">
+                  <h3 class="font-bold text-white text-base">${controller.name}</h3>
+                  <p class="text-white text-opacity-90 text-xs">Controller</p>
+                </div>
               </div>
               <div class="p-3">
                 <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${controller.color}08"><strong>Stations:</strong> ${controller.stationCount || 0}</div>
@@ -181,8 +187,11 @@ export function CompactMapViewer({
           }).addTo(mapInstanceRef.current!)
             .bindPopup(`
               <div class="bg-white rounded-lg shadow-lg border-2 overflow-hidden min-w-[180px]" style="border-color: ${zone.color || '#0066cc'}">
-                <div class="px-3 py-2" style="background: linear-gradient(135deg, ${(zone.color || '#0066cc')}ee, ${zone.color || '#0066cc'})">
-                  <h4 class="font-bold text-white text-sm">${zone.name}</h4>
+                <div class="px-3 py-3" style="background: ${zone.color || '#0066cc'}">
+                  <div class="text-center">
+                    <h4 class="font-bold text-white text-sm">${zone.name}</h4>
+                    <p class="text-white text-opacity-90 text-xs">Zone</p>
+                  </div>
                 </div>
                 <div class="p-3">
                   <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${(zone.color || '#0066cc')}08"><strong>Type:</strong> ${zone.zoneType || 'Unknown'}</div>

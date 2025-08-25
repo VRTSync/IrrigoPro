@@ -114,12 +114,10 @@ export function MinimalMapViewer({
       const zoneCount = project.zonesByController[controller.id]?.length || 0;
       marker.bindPopup(`
         <div class="bg-white rounded-lg shadow-lg border-2 overflow-hidden min-w-[240px]" style="border-color: ${controller.color}">
-          <div class="px-3 py-2" style="background: linear-gradient(135deg, ${controller.color}ee, ${controller.color})">
-            <div class="flex items-center gap-2">
-              <div class="w-6 h-6 rounded border border-white bg-white flex items-center justify-center" style="color: ${controller.color}">
-                <span class="font-bold text-xs">${controller.name.charAt(0)}</span>
-              </div>
-              <h3 class="font-bold text-white text-base">${controller.name}</h3>
+          <div class="px-3 py-3" style="background: ${controller.color}">
+            <div class="text-center">
+              <h3 class="font-bold text-white text-lg">${controller.name}</h3>
+              <p class="text-white text-opacity-90 text-xs">Controller</p>
             </div>
           </div>
           <div class="p-3 space-y-2">
@@ -156,12 +154,10 @@ export function MinimalMapViewer({
           // Enhanced zone popup
           zoneMarker.bindPopup(`
             <div class="bg-white rounded-lg shadow-lg border-2 overflow-hidden min-w-[220px]" style="border-color: ${zone.color || '#0066cc'}">
-              <div class="px-3 py-2" style="background: linear-gradient(135deg, ${(zone.color || '#0066cc')}ee, ${zone.color || '#0066cc'})">
-                <div class="flex items-center gap-2">
-                  <div class="w-5 h-5 rounded border border-white bg-white flex items-center justify-center" style="color: ${zone.color || '#0066cc'}">
-                    <span class="font-bold text-xs">${zone.stationNumber || '?'}</span>
-                  </div>
-                  <h4 class="font-bold text-white text-sm">${zone.name}</h4>
+              <div class="px-3 py-3" style="background: ${zone.color || '#0066cc'}">
+                <div class="text-center">
+                  <h4 class="font-bold text-white text-base">${zone.name}</h4>
+                  <p class="text-white text-opacity-90 text-xs">Zone</p>
                 </div>
               </div>
               <div class="p-3 space-y-2">

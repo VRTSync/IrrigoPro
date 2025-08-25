@@ -262,15 +262,10 @@ export function ColorCodedMapViewer({
       // Create enhanced popup content for controller
       const controllerPopupContent = `
         <div class="bg-white rounded-lg shadow-xl border-2 overflow-hidden min-w-[280px] max-w-[320px]" style="border-color: ${controller.color}">
-          <div class="px-4 py-3" style="background: linear-gradient(135deg, ${controller.color}ee, ${controller.color})">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg border-2 border-white shadow-lg flex items-center justify-center bg-white">
-                <span class="font-bold text-lg" style="color: ${controller.color}">${controller.name.split(' ')[1] || 'C'}</span>
-              </div>
-              <div>
-                <h3 class="font-bold text-white text-lg leading-tight">${controller.name}</h3>
-                <p class="text-white text-opacity-90 text-sm">Controller</p>
-              </div>
+          <div class="px-4 py-4" style="background: ${controller.color}">
+            <div class="text-center">
+              <h3 class="font-bold text-white text-xl mb-1">${controller.name}</h3>
+              <p class="text-white text-opacity-90 text-sm">Irrigation Controller</p>
             </div>
           </div>
           <div class="p-4 space-y-3">
@@ -541,17 +536,12 @@ export function ColorCodedMapViewer({
       const zoneController = project.controllers.find(c => c.id === zone.controllerId);
       const zonePopupContent = `
         <div class="bg-white rounded-lg shadow-xl border-2 overflow-hidden min-w-[260px] max-w-[300px]" style="border-color: ${zone.color}">
-          <div class="px-4 py-3" style="background: linear-gradient(135deg, ${zone.color}ee, ${zone.color})">
-            <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-lg border-2 border-white shadow-lg flex items-center justify-center bg-white">
-                <span class="font-bold text-sm" style="color: ${zone.color}">${zone.stationNumber || 'Z'}</span>
-              </div>
-              <div>
-                <h3 class="font-bold text-white text-base leading-tight">${zone.name}</h3>
-                <p class="text-white text-opacity-90 text-sm">
-                  ${zone.zoneType ? zone.zoneType.charAt(0).toUpperCase() + zone.zoneType.slice(1) + ' Zone' : 'Zone'}
-                </p>
-              </div>
+          <div class="px-4 py-4" style="background: ${zone.color}">
+            <div class="text-center">
+              <h3 class="font-bold text-white text-lg mb-1">${zone.name}</h3>
+              <p class="text-white text-opacity-90 text-sm">
+                ${zone.zoneType ? zone.zoneType.charAt(0).toUpperCase() + zone.zoneType.slice(1) + ' Zone' : 'Zone'}
+              </p>
             </div>
           </div>
           <div class="p-4 space-y-3">
