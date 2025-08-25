@@ -73,6 +73,60 @@
   }
 }
 
+/* Mobile map touch optimization */
+.leaflet-container {
+  touch-action: pan-x pan-y;
+}
+
+/* Improve mobile touch targets */
+.leaflet-control-zoom a {
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 30px !important;
+  font-size: 18px !important;
+}
+
+/* Mobile-optimized popup styles */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+}
+
+.leaflet-popup-content {
+  margin: 8px 12px !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+
+/* Better mobile marker visibility */
+.custom-div-icon {
+  cursor: pointer !important;
+  transition: transform 0.2s ease !important;
+}
+
+.custom-div-icon:hover {
+  transform: scale(1.1) !important;
+  z-index: 1000 !important;
+}
+
+/* Mobile-specific touch improvements */
+@media (max-width: 768px) {
+  .leaflet-popup-content {
+    font-size: 12px !important;
+    margin: 6px 10px !important;
+  }
+  
+  .leaflet-popup-content-wrapper {
+    min-width: 200px !important;
+    max-width: 280px !important;
+  }
+  
+  /* Larger touch targets on mobile */
+  .custom-div-icon {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2)) !important;
+  }
+}
+
 @layer utilities {
   .border-pulse {
     animation: border-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;

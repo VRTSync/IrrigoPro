@@ -355,26 +355,28 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   if (selectedProject && project) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
-          {/* Header */}
-          <div className="mb-6">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-2 sm:py-4 lg:py-6">
+          {/* Mobile-optimized Header */}
+          <div className="mb-4 sm:mb-6">
             <Button
               variant="outline"
               onClick={() => setSelectedProject(null)}
-              className="mb-4"
+              className="mb-3 sm:mb-4"
+              size="sm"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Site Maps
+              <span className="hidden sm:inline">Back to Site Maps</span>
+              <span className="sm:hidden">Back</span>
             </Button>
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">{project.name}</h1>
-                <p className="text-gray-600 mt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 truncate">{project.name}</h1>
+                <p className="text-gray-600 text-sm sm:text-base mt-1 truncate">
                   Site map for {customer.name}
                 </p>
               </div>
               {!canEdit && (
-                <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                <Badge variant="secondary" className="bg-blue-100 text-blue-800 self-start sm:self-center">
                   View Only
                 </Badge>
               )}
@@ -382,12 +384,22 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className={`grid w-full ${canEdit ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {/* Mobile-optimized tabs */}
+            <TabsList className={`grid w-full ${canEdit ? 'grid-cols-3' : 'grid-cols-2'} h-auto p-1`}>
               {canEdit && (
-                <TabsTrigger value="upload" className="text-xs sm:text-sm">Upload KML</TabsTrigger>
+                <TabsTrigger value="upload" className="text-xs sm:text-sm py-2 px-2 sm:px-3">
+                  <span className="hidden sm:inline">Upload KML</span>
+                  <span className="sm:hidden">Upload</span>
+                </TabsTrigger>
               )}
-              <TabsTrigger value="maps" className="text-xs sm:text-sm">Map View</TabsTrigger>
-              <TabsTrigger value="data" className="text-xs sm:text-sm">Data Review</TabsTrigger>
+              <TabsTrigger value="maps" className="text-xs sm:text-sm py-2 px-2 sm:px-3">
+                <span className="hidden sm:inline">Map View</span>
+                <span className="sm:hidden">Map</span>
+              </TabsTrigger>
+              <TabsTrigger value="data" className="text-xs sm:text-sm py-2 px-2 sm:px-3">
+                <span className="hidden sm:inline">Data Review</span>
+                <span className="sm:hidden">Data</span>
+              </TabsTrigger>
             </TabsList>
 
             {canEdit && (
@@ -430,7 +442,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             )}
 
             <TabsContent value="maps" className="space-y-6 mt-6">
-              <div className="w-full h-[60vh] min-h-[400px] lg:h-[70vh] rounded-lg overflow-hidden border border-gray-200">
+              {/* Mobile-optimized map container */}
+              <div className="w-full h-[75vh] min-h-[500px] sm:h-[60vh] lg:h-[70vh] rounded-lg overflow-hidden border border-gray-200 bg-white shadow-sm">
                 <ColorCodedMapViewer 
                   project={{
                     controllers: (project?.controllers || []).map(c => ({

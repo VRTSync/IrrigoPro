@@ -70,7 +70,7 @@ export function ColorCodedMapViewer({
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
-    // Initialize map with enhanced zoom capabilities
+    // Initialize map with mobile-optimized zoom capabilities
     const map = L.map(mapRef.current, {
       maxZoom: 25,
       zoomSnap: 0.25,
@@ -80,7 +80,14 @@ export function ColorCodedMapViewer({
       scrollWheelZoom: true,
       doubleClickZoom: true,
       touchZoom: true,
-      dragging: true
+      dragging: true,
+      // Mobile-specific optimizations
+      tap: true,
+      tapTolerance: 15,
+      bounceAtZoomLimits: true,
+      zoomAnimation: true,
+      fadeAnimation: true,
+      markerZoomAnimation: true
     }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
@@ -529,20 +536,21 @@ export function ColorCodedMapViewer({
   const visibleZones = project.allZones.filter(z => visibleControllers.has(z.controllerId)).length;
 
   return (
-    <div className={`space-y-6 ${isFullscreen ? 'fixed inset-0 z-50 bg-white p-6' : ''}`}>
-      {/* Map Controls */}
+    <div className={`space-y-6 ${isFullscreen ? 'fixed inset-0 z-50 bg-white p-2 sm:p-6' : ''}`}>
+      {/* Mobile-optimized Map Controls */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MapIcon className="w-5 h-5 text-green-600" />
-              Color-Coded Site Map
+        <CardHeader className="pb-4">
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <MapIcon className="w-5 h-5 text-green-600 flex-shrink-0" />
+              <span className="text-sm sm:text-base font-semibold truncate">Site Map View</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <Badge variant="outline" className="text-xs sm:text-sm whitespace-nowrap">
                 {project.controllers.length} Controllers • {totalZones} Zones
               </Badge>
-              <div className="flex items-center gap-2">
+              {/* Mobile-optimized control buttons */}
+              <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
@@ -552,7 +560,8 @@ export function ColorCodedMapViewer({
                       mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
                     }
                   }}
-                  title="Zoom In More"
+                  title="Zoom In"
+                  className="h-8 w-8 p-0"
                 >
                   <span className="text-lg font-bold">+</span>
                 </Button>
@@ -565,7 +574,8 @@ export function ColorCodedMapViewer({
                       mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
                     }
                   }}
-                  title="Zoom Out More"
+                  title="Zoom Out"
+                  className="h-8 w-8 p-0"
                 >
                   <span className="text-lg font-bold">-</span>
                 </Button>
@@ -577,7 +587,8 @@ export function ColorCodedMapViewer({
                       mapInstanceRef.current.setZoom(23);
                     }
                   }}
-                  title="Maximum Detail Zoom"
+                  title="Max Detail"
+                  className="h-8 w-8 p-0 hidden sm:flex"
                 >
                   <Eye className="w-4 h-4" />
                 </Button>
@@ -585,16 +596,17 @@ export function ColorCodedMapViewer({
                   variant="outline"
                   size="sm"
                   onClick={toggleFullscreen}
+                  className="text-xs sm:text-sm px-2 sm:px-3"
                 >
                   {isFullscreen ? (
                     <>
-                      <Minimize className="w-4 h-4 mr-1" />
-                      Exit Fullscreen
+                      <Minimize className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                      <span className="hidden sm:inline">Exit</span>
                     </>
                   ) : (
                     <>
-                      <Maximize className="w-4 h-4 mr-1" />
-                      Fullscreen
+                      <Maximize className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                      <span className="hidden sm:inline">Fullscreen</span>
                     </>
                   )}
                 </Button>
@@ -602,63 +614,67 @@ export function ColorCodedMapViewer({
             </div>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          {/* Display Options */}
-          <div className="mb-4 space-y-4">
-            <div className="flex flex-wrap gap-4 items-center">
+        <CardContent className="pt-4">
+          {/* Mobile-optimized Display Options */}
+          <div className="mb-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">Display Style:</label>
+                <label className="text-xs sm:text-sm font-medium flex-shrink-0">Display:</label>
                 <select 
                   value={displayMode} 
                   onChange={(e) => setDisplayMode(e.target.value as any)}
-                  className="px-2 py-1 border rounded text-sm"
+                  className="px-2 py-1 border rounded text-xs sm:text-sm flex-1"
                 >
-                  <option value="markers">Classic Markers</option>
-                  <option value="circles">Colored Circles</option>
-                  <option value="badges">Name Badges</option>
-                  <option value="minimal">Minimal Dots</option>
+                  <option value="markers">Markers</option>
+                  <option value="circles">Circles</option>
+                  <option value="badges">Badges</option>
+                  <option value="minimal">Minimal</option>
                   <option value="heatmap">Heat Map</option>
-                  <option value="clusters">Zone Clusters</option>
+                  <option value="clusters">Clusters</option>
                 </select>
               </div>
               
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">Size:</label>
+                <label className="text-xs sm:text-sm font-medium flex-shrink-0">Size:</label>
                 <select 
                   value={markerSize} 
                   onChange={(e) => setMarkerSize(e.target.value as any)}
-                  className="px-2 py-1 border rounded text-sm"
+                  className="px-2 py-1 border rounded text-xs sm:text-sm flex-1"
                 >
                   <option value="small">Small</option>
                   <option value="medium">Medium</option>
                   <option value="large">Large</option>
                 </select>
               </div>
+            </div>
 
-              <label className="flex items-center gap-2 text-sm">
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-xs sm:text-sm">
                 <input
                   type="checkbox"
                   checked={showZoneConnections}
                   onChange={(e) => setShowZoneConnections(e.target.checked)}
                   className="rounded"
                 />
-                Show Zone Connections
+                <span className="hidden sm:inline">Zone Connections</span>
+                <span className="sm:hidden">Connections</span>
               </label>
 
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex items-center gap-2 text-xs sm:text-sm">
                 <input
                   type="checkbox"
                   checked={showControllerAreas}
                   onChange={(e) => setShowControllerAreas(e.target.checked)}
                   className="rounded"
                 />
-                Show Controller Areas
+                <span className="hidden sm:inline">Controller Areas</span>
+                <span className="sm:hidden">Areas</span>
               </label>
             </div>
           </div>
-          {/* Controller Legend & Controls */}
+          {/* Mobile-optimized Controller Legend & Controls */}
           <div className="mb-4">
-            <h4 className="font-medium text-gray-900 mb-3">Controller Visibility:</h4>
+            <h4 className="font-medium text-gray-900 text-sm sm:text-base mb-2 sm:mb-3">Controllers:</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {project.controllers.map((controller) => {
                 const isVisible = visibleControllers.has(controller.id);
@@ -667,25 +683,25 @@ export function ColorCodedMapViewer({
                 return (
                   <div
                     key={controller.id}
-                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
+                    className={`flex items-center justify-between p-2 sm:p-3 rounded-lg border cursor-pointer transition-all ${
                       isVisible 
                         ? 'border-gray-300 bg-white shadow-sm' 
                         : 'border-gray-200 bg-gray-50 opacity-60'
                     }`}
                     onClick={() => toggleControllerVisibility(controller.id)}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                       <div
-                        className="w-4 h-4 rounded-full border-2 border-white shadow-sm"
+                        className="w-3 h-3 sm:w-4 sm:h-4 rounded-full border-2 border-white shadow-sm flex-shrink-0"
                         style={{ backgroundColor: controller.color }}
                       />
-                      <div>
-                        <div className="font-medium text-sm text-gray-900">{controller.name}</div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-xs sm:text-sm text-gray-900 truncate">{controller.name}</div>
                         <div className="text-xs text-gray-500">{zoneCount} zones</div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Eye className={`w-4 h-4 ${isVisible ? 'text-green-600' : 'text-gray-400'}`} />
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Eye className={`w-3 h-3 sm:w-4 sm:h-4 ${isVisible ? 'text-green-600' : 'text-gray-400'}`} />
                     </div>
                   </div>
                 );
@@ -693,22 +709,28 @@ export function ColorCodedMapViewer({
             </div>
           </div>
 
-          {/* Map */}
+          {/* Mobile-optimized Map */}
           <div className={`relative bg-gray-100 rounded-lg overflow-hidden border ${
-            isFullscreen ? 'h-[calc(100vh-300px)]' : 'h-[500px]'
+            isFullscreen ? 'h-[calc(100vh-200px)] sm:h-[calc(100vh-300px)]' : 'h-[400px] sm:h-[500px]'
           }`}>
-            <div ref={mapRef} className="w-full h-full" />
+            <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             
-            {/* Map Info Overlay */}
-            <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg">
-              <div className="text-sm space-y-1">
-                <div className="flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-blue-600" />
-                  <span className="font-medium">Controllers: {visibleControllers.size}/{project.controllers.length}</span>
+            {/* Mobile-optimized Map Info Overlay */}
+            <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-white/95 backdrop-blur-sm rounded-lg p-2 sm:p-3 shadow-lg max-w-[150px] sm:max-w-none">
+              <div className="text-xs sm:text-sm space-y-1">
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <Settings className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
+                  <span className="font-medium truncate">
+                    <span className="hidden sm:inline">Controllers: </span>
+                    {visibleControllers.size}/{project.controllers.length}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Droplets className="w-4 h-4 text-green-600" />
-                  <span className="font-medium">Zones: {visibleZones}/{totalZones}</span>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <Droplets className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                  <span className="font-medium truncate">
+                    <span className="hidden sm:inline">Zones: </span>
+                    {visibleZones}/{totalZones}
+                  </span>
                 </div>
               </div>
             </div>
@@ -723,20 +745,26 @@ export function ColorCodedMapViewer({
             )}
           </div>
 
-          {/* Legend */}
-          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          {/* Mobile-optimized Legend */}
+          <div className="mt-4 p-3 sm:p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
-              <Info className="w-4 h-4 text-blue-600" />
-              <span className="font-medium text-blue-800">Map Legend</span>
+              <Info className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
+              <span className="font-medium text-blue-800 text-sm sm:text-base">Map Legend</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-blue-700">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm text-blue-700">
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-white border-2 border-blue-600 rounded-full flex items-center justify-center text-xs font-bold">C</div>
-                <span>Controllers (colored border)</span>
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-white border-2 border-blue-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">C</div>
+                <span className="truncate">
+                  <span className="hidden sm:inline">Controllers (colored border)</span>
+                  <span className="sm:hidden">Controllers</span>
+                </span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white">Z</div>
-                <span>Zones (controller color)</span>
+                <div className="w-4 h-4 sm:w-5 sm:h-5 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0">Z</div>
+                <span className="truncate">
+                  <span className="hidden sm:inline">Zones (controller color)</span>
+                  <span className="sm:hidden">Zones</span>
+                </span>
               </div>
             </div>
           </div>
