@@ -316,10 +316,19 @@ export default function CompanyProfile() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={async () => {
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            
                             try {
                               // Make the API call to remove logo
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
+                              
+                              // Show success toast
+                              toast({
+                                title: "Success",
+                                description: "Company logo removed successfully",
+                              });
                               
                               // Clear all query cache and reload page for immediate update
                               queryClient.clear();
