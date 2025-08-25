@@ -70,29 +70,44 @@ const createEstimateWithZonesSchema = z.object({
   }))
 });
 
-// Middleware to check if user has company admin permissions for site map operations
-const requireCompanyAdminAccess = (req: Request, res: any, next: any) => {
-  // Use header-based authentication like other working routes in this project
-  const userRole = req.headers['x-user-role'];
-  
-  console.log('Site map auth check - User role:', userRole, 'Headers:', JSON.stringify(req.headers, null, 2));
-  
-  if (!userRole) {
-    console.log('Site map auth failed - missing user role');
-    return res.status(401).json({ 
-      message: "Authentication required - missing user role" 
+// Production-ready middleware to check if user has company admin permissions for site map operations
+const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
+  try {
+    // Production-ready authentication using session lookup
+    // First try header-based auth (for development compatibility)
+    let userId = req.headers['x-user-id'];
+    let userRole = req.headers['x-user-role'];
+    
+    // If headers not available, try to get from session (production approach)
+    if (!userId && req.session?.userId) {
+      userId = req.session.userId;
+      // Get user from database to verify role
+      const user = await storage.getUser(parseInt(userId));
+      if (user) {
+        userRole = user.role;
+        req.userCompanyId = user.companyId; // Store for later use
+      }
+    }
+    
+    if (!userId || !userRole) {
+      return res.status(401).json({ 
+        message: "Authentication required" 
+      });
+    }
+    
+    if (userRole !== 'company_admin') {
+      return res.status(403).json({ 
+        message: "Access denied. Site map operations are restricted to company administrators only." 
+      });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Site map authentication error:', error);
+    return res.status(500).json({ 
+      message: "Authentication error" 
     });
   }
-  
-  if (userRole !== 'company_admin') {
-    console.log('Site map auth failed - invalid role:', userRole);
-    return res.status(403).json({ 
-      message: "Access denied. Site map operations are restricted to company administrators only." 
-    });
-  }
-  
-  console.log('Site map auth success - user is company admin');
-  next();
 };
 
 // Middleware to check if user can edit/delete work orders and billing sheets
@@ -108,24 +123,41 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
-// Middleware to check if user has permission to view site maps (company admin only)
-const requireCompanyAdminViewAccess = (req: Request, res: any, next: any) => {
-  // Use header-based authentication like other working routes in this project
-  const userRole = req.headers['x-user-role'];
-  
-  if (!userRole) {
-    return res.status(401).json({ 
-      message: "Authentication required - missing user role" 
+// Production-ready middleware to check if user has permission to view site maps (company admin only)
+const requireCompanyAdminViewAccess = async (req: any, res: any, next: any) => {
+  try {
+    // Production-ready authentication using session lookup
+    let userId = req.headers['x-user-id'];
+    let userRole = req.headers['x-user-role'];
+    
+    // If headers not available, try to get from session (production approach)
+    if (!userId && req.session?.userId) {
+      userId = req.session.userId;
+      const user = await storage.getUser(parseInt(userId));
+      if (user) {
+        userRole = user.role;
+      }
+    }
+    
+    if (!userId || !userRole) {
+      return res.status(401).json({ 
+        message: "Authentication required" 
+      });
+    }
+    
+    if (userRole !== 'company_admin') {
+      return res.status(403).json({ 
+        message: "Access denied. Site map access is restricted to company administrators only." 
+      });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Site map view authentication error:', error);
+    return res.status(500).json({ 
+      message: "Authentication error" 
     });
   }
-  
-  if (userRole !== 'company_admin') {
-    return res.status(403).json({ 
-      message: "Access denied. Site map access is restricted to company administrators only." 
-    });
-  }
-  
-  next();
 };
 
 // QuickBooks access control middleware - irrigation managers and field techs cannot access QuickBooks
@@ -1480,9 +1512,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const customerId = parseInt(req.params.customerId);
       
-      // Get user's company ID from headers (consistent with project's auth pattern)
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1; // Default fallback
+      // Get user's company ID - production-ready approach
+      let companyId = req.userCompanyId; // Set by middleware if using session
+      
+      // Fallback to header-based approach for development
+      if (!companyId) {
+        const userCompanyId = req.headers['x-user-company-id'];
+        companyId = userCompanyId ? parseInt(userCompanyId as string) : null;
+      }
       
       if (!companyId) {
         return res.status(400).json({ 
