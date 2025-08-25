@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { WorkOrderListSkeleton } from "@/components/ui/loading-skeleton";
-import { CompanyLogoBanner } from "@/components/ui/company-logo-banner";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -323,7 +323,7 @@ export default function WorkOrders() {
   return (
     <div className="min-h-screen bg-gray-50/30 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
-        <CompanyLogoBanner className="mb-6" />
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
           <div>

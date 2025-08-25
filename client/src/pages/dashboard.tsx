@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
-import { CompanyLogoBanner } from "@/components/ui/company-logo-banner";
+
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
@@ -104,8 +104,7 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {/* Company Logo Banner */}
-      <CompanyLogoBanner className="mb-6" />
+
 
       {/* Header */}
       <div className="mb-8">
