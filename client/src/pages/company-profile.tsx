@@ -320,20 +320,22 @@ export default function CompanyProfile() {
                             try {
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
                               
-                              // Force invalidate all related queries
-                              await queryClient.invalidateQueries({ 
-                                queryKey: [`/api/company/${companyId}/profile`] 
+                              // Optimistically update the UI first
+                              queryClient.setQueryData([`/api/company/${companyId}/profile`], (oldData: any) => {
+                                return oldData ? { ...oldData, logo: null } : oldData;
                               });
                               
-                              // Also clear query cache to force immediate refetch
+                              // Then clear cache and refetch
                               queryClient.removeQueries({
                                 queryKey: [`/api/company/${companyId}/profile`]
                               });
                               
-                              // Refetch immediately
-                              await queryClient.refetchQueries({
-                                queryKey: [`/api/company/${companyId}/profile`]
-                              });
+                              // Force immediate refetch
+                              setTimeout(() => {
+                                queryClient.invalidateQueries({ 
+                                  queryKey: [`/api/company/${companyId}/profile`] 
+                                });
+                              }, 50);
 
                               toast({
                                 title: "Logo removed",
