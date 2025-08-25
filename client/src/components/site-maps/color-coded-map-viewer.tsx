@@ -292,19 +292,32 @@ export function ColorCodedMapViewer({
         if (!visibleControllers.has(zone.controllerId)) return;
 
         if (zone.boundaries && zone.boundaries.length > 0) {
-          const lats = zone.boundaries.map(coord => coord[0]).filter(lat => !isNaN(lat));
-          const lngs = zone.boundaries.map(coord => coord[1]).filter(lng => !isNaN(lng));
+          // Filter and validate coordinate pairs for heatmap
+          const validCoords = zone.boundaries.filter(coord => 
+            coord && Array.isArray(coord) && coord.length >= 2 && 
+            !isNaN(coord[0]) && !isNaN(coord[1]) &&
+            coord[0] !== null && coord[1] !== null &&
+            coord[0] !== undefined && coord[1] !== undefined
+          );
           
-          if (lats.length === 0 || lngs.length === 0) {
-            console.error(`Invalid zone boundaries for ${zone.name}`);
+          if (validCoords.length === 0) {
+            console.warn(`No valid zone boundaries for ${zone.name} in heatmap`);
             return;
           }
+          
+          const lats = validCoords.map(coord => coord[0]);
+          const lngs = validCoords.map(coord => coord[1]);
           
           const zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
           const zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
           
-          if (!isNaN(zoneLat) && !isNaN(zoneLng)) {
+          if (!isNaN(zoneLat) && !isNaN(zoneLng) && 
+              zoneLat !== null && zoneLng !== null &&
+              zoneLat !== undefined && zoneLng !== undefined) {
             allCoordinates.push([zoneLat, zoneLng]);
+          } else {
+            console.error(`Invalid calculated coordinates for ${zone.name} in heatmap`);
+            return;
           }
 
           L.circle([zoneLat, zoneLng], {
@@ -338,19 +351,32 @@ export function ColorCodedMapViewer({
       clusterGroups.forEach((zones, controllerId) => {
         zones.forEach((zone, index) => {
           if (zone.boundaries && zone.boundaries.length > 0) {
-            const lats = zone.boundaries.map(coord => coord[0]).filter(lat => !isNaN(lat));
-            const lngs = zone.boundaries.map(coord => coord[1]).filter(lng => !isNaN(lng));
+            // Filter and validate coordinate pairs for clusters
+            const validCoords = zone.boundaries.filter(coord => 
+              coord && Array.isArray(coord) && coord.length >= 2 && 
+              !isNaN(coord[0]) && !isNaN(coord[1]) &&
+              coord[0] !== null && coord[1] !== null &&
+              coord[0] !== undefined && coord[1] !== undefined
+            );
             
-            if (lats.length === 0 || lngs.length === 0) {
-              console.error(`Invalid zone boundaries for ${zone.name} in cluster mode`);
+            if (validCoords.length === 0) {
+              console.warn(`No valid zone boundaries for ${zone.name} in cluster mode`);
               return;
             }
+            
+            const lats = validCoords.map(coord => coord[0]);
+            const lngs = validCoords.map(coord => coord[1]);
             
             const zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
             const zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
             
-            if (!isNaN(zoneLat) && !isNaN(zoneLng)) {
+            if (!isNaN(zoneLat) && !isNaN(zoneLng) && 
+                zoneLat !== null && zoneLng !== null &&
+                zoneLat !== undefined && zoneLng !== undefined) {
               allCoordinates.push([zoneLat, zoneLng]);
+            } else {
+              console.error(`Invalid calculated coordinates for ${zone.name} in cluster mode`);
+              return;
             }
 
             // Create cluster marker showing zone count
@@ -385,23 +411,34 @@ export function ColorCodedMapViewer({
         let zoneLat: number, zoneLng: number;
         
         if (zone.boundaries && zone.boundaries.length > 0) {
-          const lats = zone.boundaries.map(coord => coord[0]).filter(lat => !isNaN(lat));
-          const lngs = zone.boundaries.map(coord => coord[1]).filter(lng => !isNaN(lng));
+          // Filter and validate coordinate pairs
+          const validCoords = zone.boundaries.filter(coord => 
+            coord && Array.isArray(coord) && coord.length >= 2 && 
+            !isNaN(coord[0]) && !isNaN(coord[1]) &&
+            coord[0] !== null && coord[1] !== null &&
+            coord[0] !== undefined && coord[1] !== undefined
+          );
           
-          if (lats.length === 0 || lngs.length === 0) {
-            console.error(`Invalid zone boundaries for ${zone.name} in regular mode`);
+          if (validCoords.length === 0) {
+            console.warn(`No valid zone boundaries for ${zone.name}`);
             return;
           }
+          
+          const lats = validCoords.map(coord => coord[0]);
+          const lngs = validCoords.map(coord => coord[1]);
           
           zoneLat = lats.reduce((sum, lat) => sum + lat, 0) / lats.length;
           zoneLng = lngs.reduce((sum, lng) => sum + lng, 0) / lngs.length;
           
-          if (!isNaN(zoneLat) && !isNaN(zoneLng)) {
-            allCoordinates.push([zoneLat, zoneLng]);
-          } else {
-            console.error(`Calculated invalid coordinates for ${zone.name}: lat=${zoneLat}, lng=${zoneLng}`);
+          // Final validation of calculated center
+          if (isNaN(zoneLat) || isNaN(zoneLng) || 
+              zoneLat === null || zoneLng === null ||
+              zoneLat === undefined || zoneLng === undefined) {
+            console.error(`Failed to calculate valid center for ${zone.name}`);
             return;
           }
+          
+          allCoordinates.push([zoneLat, zoneLng]);
         } else {
           return; // Skip zones without boundaries
         }
