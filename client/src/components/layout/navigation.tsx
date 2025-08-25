@@ -33,7 +33,6 @@ export default function Navigation() {
     enabled: !!companyId,
     retry: false,
     staleTime: 0, // Always refetch for logo changes
-    cacheTime: 0, // Don't cache for immediate updates
     refetchOnMount: true,
     refetchOnWindowFocus: true,
   });
@@ -276,25 +275,22 @@ export default function Navigation() {
             </div>
           </div>
         </div>
-      </nav>
-
-      {/* Company Logo Banner - Desktop (ALWAYS VISIBLE FOR TESTING) */}
-      {companyLogoUrl && (
-        <div className="bg-white border-b border-gray-200 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-center items-center py-3">
-              <img 
-                src={signedLogoUrl || companyLogoUrl} 
-                alt="Company Logo"
-                className="h-16 w-auto object-contain"
-
-              />
+        
+        {/* Company Logo Banner - Below IrrigoPro Header */}
+        {companyLogoUrl && (
+          <div className="border-b border-gray-200 bg-gray-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex justify-center items-center py-3">
+                <img 
+                  src={signedLogoUrl || companyLogoUrl} 
+                  alt="Company Logo"
+                  className="h-16 w-auto object-contain"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-
+        )}
+      </nav>
 
       {/* Mobile Navigation - Bottom */}
       <div className="lg:hidden m-0 p-0">
