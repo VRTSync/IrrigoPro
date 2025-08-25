@@ -682,27 +682,62 @@ export function ColorCodedMapViewer({
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
+    
+    // Force map resize after fullscreen toggle
+    setTimeout(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+        // Re-fit bounds to ensure map displays properly
+        const allCoordinates: [number, number][] = [];
+        
+        project.controllers.forEach(controller => {
+          if (visibleControllers.has(controller.id)) {
+            allCoordinates.push([controller.latitude, controller.longitude]);
+          }
+        });
+
+        project.allZones.forEach(zone => {
+          if (visibleControllers.has(zone.controllerId)) {
+            allCoordinates.push([zone.latitude, zone.longitude]);
+          }
+        });
+
+        if (allCoordinates.length > 0) {
+          if (allCoordinates.length === 1) {
+            mapInstanceRef.current.setView(allCoordinates[0], 22);
+          } else {
+            const bounds = L.latLngBounds(allCoordinates);
+            mapInstanceRef.current.fitBounds(bounds, { 
+              padding: [20, 20],
+              maxZoom: 20
+            });
+          }
+        }
+      }
+    }, 300); // Give time for DOM to update
   };
 
   const totalZones = project.allZones.length;
   const visibleZones = project.allZones.filter(z => visibleControllers.has(z.controllerId)).length;
 
   return (
-    <div className={`space-y-6 ${isFullscreen ? 'fixed inset-0 z-50 bg-white p-2 sm:p-6' : ''}`}>
+    <div className={`space-y-4 sm:space-y-6 ${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : ''}`}>
       {/* Mobile-optimized Map Controls */}
       <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <CardHeader className={`${isFullscreen ? 'pb-2' : 'pb-4'}`}>
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
             <div className="flex items-center gap-2 min-w-0">
-              <MapIcon className="w-5 h-5 text-green-600 flex-shrink-0" />
-              <span className="text-sm sm:text-base font-semibold truncate">Site Map View</span>
+              <MapIcon className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
+              <span className="text-sm sm:text-base font-semibold truncate">
+                {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
+              </span>
             </div>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
               <Badge variant="outline" className="text-xs sm:text-sm whitespace-nowrap">
                 {project.controllers.length} Controllers • {totalZones} Zones
               </Badge>
               {/* Mobile-optimized control buttons */}
-              <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+              <div className="flex items-center gap-1 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
@@ -713,9 +748,9 @@ export function ColorCodedMapViewer({
                     }
                   }}
                   title="Zoom In"
-                  className="h-8 w-8 p-0"
+                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
                 >
-                  <span className="text-lg font-bold">+</span>
+                  <span className="text-sm sm:text-lg font-bold">+</span>
                 </Button>
                 <Button
                   variant="outline"
@@ -727,48 +762,36 @@ export function ColorCodedMapViewer({
                     }
                   }}
                   title="Zoom Out"
-                  className="h-8 w-8 p-0"
+                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
                 >
-                  <span className="text-lg font-bold">-</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (mapInstanceRef.current) {
-                      mapInstanceRef.current.setZoom(23);
-                    }
-                  }}
-                  title="Max Detail"
-                  className="h-8 w-8 p-0 hidden sm:flex"
-                >
-                  <Eye className="w-4 h-4" />
+                  <span className="text-sm sm:text-lg font-bold">-</span>
                 </Button>
                 <Button
                   variant={showUserLocation ? "default" : "outline"}
                   size="sm"
                   onClick={getUserLocation}
                   title="Show My Location"
-                  className="h-8 px-2 sm:px-3"
+                  className="h-7 sm:h-8 px-2"
                 >
                   <Navigation className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                  <span className="hidden sm:inline">Location</span>
+                  <span className="text-xs sm:text-sm">GPS</span>
                 </Button>
                 <Button
-                  variant="outline"
+                  variant={isFullscreen ? "default" : "outline"}
                   size="sm"
                   onClick={toggleFullscreen}
-                  className="text-xs sm:text-sm px-2 sm:px-3"
+                  className="h-7 sm:h-8 px-2"
+                  title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Map"}
                 >
                   {isFullscreen ? (
                     <>
                       <Minimize className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                      <span className="hidden sm:inline">Exit</span>
+                      <span className="text-xs sm:text-sm">Exit</span>
                     </>
                   ) : (
                     <>
                       <Maximize className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                      <span className="hidden sm:inline">Fullscreen</span>
+                      <span className="text-xs sm:text-sm">Full</span>
                     </>
                   )}
                 </Button>
@@ -776,9 +799,9 @@ export function ColorCodedMapViewer({
             </div>
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-4">
-          {/* Mobile-optimized Display Options */}
-          <div className="mb-4 space-y-3">
+        <CardContent className={`${isFullscreen ? 'pt-2 pb-2' : 'pt-4'}`}>
+          {/* Mobile-optimized Display Options - Collapsible in fullscreen */}
+          <div className={`${isFullscreen ? 'mb-2 space-y-2' : 'mb-4 space-y-3'} ${isFullscreen ? 'hidden sm:block' : ''}`}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
                 <label className="text-xs sm:text-sm font-medium flex-shrink-0">Display:</label>
@@ -870,9 +893,9 @@ export function ColorCodedMapViewer({
               </div>
             )}
           </div>
-          {/* Mobile-optimized Controller Legend & Controls */}
-          <div className="mb-4">
-            <h4 className="font-medium text-gray-900 text-sm sm:text-base mb-2 sm:mb-3">Controllers:</h4>
+          {/* Mobile-optimized Controller Legend & Controls - Collapsible in fullscreen */}
+          <div className={`${isFullscreen ? 'mb-2 hidden sm:block' : 'mb-4'}`}>
+            <h4 className="font-medium text-gray-900 text-xs sm:text-base mb-1 sm:mb-3">Controllers:</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {project.controllers.map((controller) => {
                 const isVisible = visibleControllers.has(controller.id);
@@ -907,9 +930,11 @@ export function ColorCodedMapViewer({
             </div>
           </div>
 
-          {/* Mobile-optimized Map */}
-          <div className={`relative bg-gray-100 rounded-lg overflow-hidden border ${
-            isFullscreen ? 'h-[calc(100vh-200px)] sm:h-[calc(100vh-300px)]' : 'h-[400px] sm:h-[500px]'
+          {/* Mobile-optimized Map with better height */}
+          <div className={`relative bg-gray-100 rounded-lg overflow-hidden border mobile-map-container ${
+            isFullscreen 
+              ? 'mobile-fullscreen-map h-[calc(100vh-120px)] sm:h-[calc(100vh-150px)]' 
+              : 'h-[65vh] sm:h-[500px] min-h-[350px] max-h-[80vh]'
           }`}>
             <div ref={mapRef} className="w-full h-full touch-pan-x touch-pan-y touch-pinch-zoom" />
             
@@ -943,8 +968,8 @@ export function ColorCodedMapViewer({
             )}
           </div>
 
-          {/* Mobile-optimized Legend */}
-          <div className="mt-4 p-3 sm:p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          {/* Mobile-optimized Legend - Hidden in mobile fullscreen */}
+          <div className={`${isFullscreen ? 'mt-2 p-2 hidden sm:block' : 'mt-4 p-3 sm:p-4'} bg-blue-50 border border-blue-200 rounded-lg`}>
             <div className="flex items-center gap-2 mb-2">
               <Info className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
               <span className="font-medium text-blue-800 text-sm sm:text-base">Map Legend</span>

@@ -125,6 +125,28 @@
   .custom-div-icon {
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2)) !important;
   }
+  
+  /* Ensure mobile fullscreen maps use full viewport */
+  .mobile-fullscreen-map {
+    height: 100vh !important;
+    max-height: 100vh !important;
+  }
+  
+  /* Hide mobile browser UI in fullscreen */
+  .mobile-fullscreen-container {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 9999 !important;
+    background: white !important;
+  }
+  
+  /* Mobile viewport height optimization */
+  .mobile-map-container {
+    min-height: 60vh !important;
+  }
 }
 
 @layer utilities {
