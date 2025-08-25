@@ -11,7 +11,9 @@ import {
   Settings, 
   Droplets,
   Info,
-  Eye
+  Eye,
+  Navigation,
+  MapPin
 } from "lucide-react";
 
 interface ColoredController {
@@ -66,6 +68,9 @@ export function ColorCodedMapViewer({
   const [showZoneConnections, setShowZoneConnections] = useState(false);
   const [markerSize, setMarkerSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [showControllerAreas, setShowControllerAreas] = useState(false);
+  const [showUserLocation, setShowUserLocation] = useState(false);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
@@ -516,6 +521,153 @@ export function ColorCodedMapViewer({
     }
   }, [project, visibleControllers, displayMode, markerSize, showZoneConnections, showControllerAreas, onControllerClick, onZoneClick]);
 
+  // Live location functionality
+  const getUserLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported by this browser");
+      return;
+    }
+
+    setLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const location: [number, number] = [latitude, longitude];
+        setUserLocation(location);
+        setShowUserLocation(true);
+        
+        // Add user location marker to map
+        if (mapInstanceRef.current) {
+          const userIcon = L.divIcon({
+            html: `
+              <div class="relative">
+                <div class="w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow-lg animate-pulse"></div>
+                <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-white rounded-full"></div>
+              </div>
+            `,
+            className: 'user-location-icon',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+          });
+
+          const userMarker = L.marker(location, { icon: userIcon }).addTo(mapInstanceRef.current);
+          
+          userMarker.bindPopup(`
+            <div class="p-2">
+              <div class="flex items-center gap-2 mb-2">
+                <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+                <h3 class="font-bold text-red-600">Your Location</h3>
+              </div>
+              <p class="text-xs text-gray-600">
+                <strong>Coordinates:</strong><br>
+                ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+              </p>
+              <p class="text-xs text-gray-500 mt-1">
+                Accuracy: ±${position.coords.accuracy?.toFixed(0) || 'Unknown'}m
+              </p>
+            </div>
+          `);
+
+          // Optionally center map on user location
+          mapInstanceRef.current.setView(location, Math.max(mapInstanceRef.current.getZoom(), 18));
+        }
+      },
+      (error) => {
+        switch(error.code) {
+          case error.PERMISSION_DENIED:
+            setLocationError("Location access denied by user");
+            break;
+          case error.POSITION_UNAVAILABLE:
+            setLocationError("Location information is unavailable");
+            break;
+          case error.TIMEOUT:
+            setLocationError("Location request timed out");
+            break;
+          default:
+            setLocationError("An unknown error occurred while retrieving location");
+            break;
+        }
+        setShowUserLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000 // Cache location for 1 minute
+      }
+    );
+  };
+
+  const watchUserLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported by this browser");
+      return;
+    }
+
+    setLocationError(null);
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const location: [number, number] = [latitude, longitude];
+        setUserLocation(location);
+        
+        // Update user location marker on map
+        if (mapInstanceRef.current && showUserLocation) {
+          // Remove existing user location markers
+          mapInstanceRef.current.eachLayer((layer: any) => {
+            if (layer.options?.icon?.options?.className === 'user-location-icon') {
+              mapInstanceRef.current?.removeLayer(layer);
+            }
+          });
+          
+          // Add updated user location marker
+          const userIcon = L.divIcon({
+            html: `
+              <div class="relative">
+                <div class="w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow-lg animate-pulse"></div>
+                <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-white rounded-full"></div>
+              </div>
+            `,
+            className: 'user-location-icon',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+          });
+
+          L.marker(location, { icon: userIcon }).addTo(mapInstanceRef.current)
+            .bindPopup(`
+              <div class="p-2">
+                <div class="flex items-center gap-2 mb-2">
+                  <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                  <h3 class="font-bold text-red-600">Your Live Location</h3>
+                </div>
+                <p class="text-xs text-gray-600">
+                  <strong>Coordinates:</strong><br>
+                  ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+                </p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Accuracy: ±${position.coords.accuracy?.toFixed(0) || 'Unknown'}m
+                </p>
+                <p class="text-xs text-blue-600 mt-1">
+                  🔄 Live tracking active
+                </p>
+              </div>
+            `);
+        }
+      },
+      (error) => {
+        console.error("Location tracking error:", error);
+        setLocationError("Failed to track location continuously");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 30000
+      }
+    );
+
+    // Store watch ID for cleanup
+    return watchId;
+  };
+
   const toggleControllerVisibility = (controllerId: string) => {
     setVisibleControllers(prev => {
       const newSet = new Set(prev);
@@ -591,6 +743,16 @@ export function ColorCodedMapViewer({
                   className="h-8 w-8 p-0 hidden sm:flex"
                 >
                   <Eye className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant={showUserLocation ? "default" : "outline"}
+                  size="sm"
+                  onClick={getUserLocation}
+                  title="Show My Location"
+                  className="h-8 px-2 sm:px-3"
+                >
+                  <Navigation className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                  <span className="hidden sm:inline">Location</span>
                 </Button>
                 <Button
                   variant="outline"
@@ -670,7 +832,43 @@ export function ColorCodedMapViewer({
                 <span className="hidden sm:inline">Controller Areas</span>
                 <span className="sm:hidden">Areas</span>
               </label>
+              
+              <label className="flex items-center gap-2 text-xs sm:text-sm">
+                <input
+                  type="checkbox"
+                  checked={showUserLocation}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      getUserLocation();
+                    } else {
+                      setShowUserLocation(false);
+                      setUserLocation(null);
+                      // Remove user location markers from map
+                      if (mapInstanceRef.current) {
+                        mapInstanceRef.current.eachLayer((layer: any) => {
+                          if (layer.options?.icon?.options?.className === 'user-location-icon') {
+                            mapInstanceRef.current?.removeLayer(layer);
+                          }
+                        });
+                      }
+                    }
+                  }}
+                  className="rounded"
+                />
+                <span className="hidden sm:inline">My Location</span>
+                <span className="sm:hidden">Location</span>
+              </label>
             </div>
+            
+            {/* Location Error Display */}
+            {locationError && (
+              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs sm:text-sm text-red-700">
+                <div className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3 flex-shrink-0" />
+                  <span>{locationError}</span>
+                </div>
+              </div>
+            )}
           </div>
           {/* Mobile-optimized Controller Legend & Controls */}
           <div className="mb-4">
@@ -751,19 +949,26 @@ export function ColorCodedMapViewer({
               <Info className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
               <span className="font-medium text-blue-800 text-sm sm:text-base">Map Legend</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm text-blue-700">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-xs sm:text-sm text-blue-700">
               <div className="flex items-center gap-2">
                 <div className="w-5 h-5 sm:w-6 sm:h-6 bg-white border-2 border-blue-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">C</div>
                 <span className="truncate">
-                  <span className="hidden sm:inline">Controllers (colored border)</span>
+                  <span className="hidden sm:inline">Controllers</span>
                   <span className="sm:hidden">Controllers</span>
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 sm:w-5 sm:h-5 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0">Z</div>
                 <span className="truncate">
-                  <span className="hidden sm:inline">Zones (controller color)</span>
+                  <span className="hidden sm:inline">Zones</span>
                   <span className="sm:hidden">Zones</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-red-500 rounded-full border border-white shadow-sm flex-shrink-0 animate-pulse"></div>
+                <span className="truncate">
+                  <span className="hidden sm:inline">Your Location</span>
+                  <span className="sm:hidden">You</span>
                 </span>
               </div>
             </div>
