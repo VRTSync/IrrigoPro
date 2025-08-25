@@ -129,13 +129,11 @@ export default function CustomerBilling() {
       try {
         const response = await fetch(`/api/customers/billing-preview?${params.toString()}`);
         if (!response.ok) {
-          console.error('Billing preview API error:', response.status);
           return [];
         }
         const data = await response.json();
         return Array.isArray(data) ? data : [];
       } catch (error) {
-        console.error('Failed to fetch billing preview:', error);
         return [];
       }
     }
