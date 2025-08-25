@@ -39,11 +39,13 @@ export default function Navigation() {
   });
 
   // Company logo for banner (separate from navigation logo)
-  const companyLogoUrl = company?.logo 
-    ? (company.logo.startsWith('http') 
-        ? `${company.logo}?v=${Date.now()}` 
-        : `/public-objects/company-logos/${company.logo}?v=${Date.now()}`)
+  const companyLogoUrl = company?.logo && company.logo.trim() !== '' && company.logo !== 'null' 
+    ? `${company.logo}${company.logo.includes('?') ? '&' : '?'}v=${Date.now()}` 
     : null;
+
+  // Debug log for company logo
+  console.log('Navigation - Company data:', company);
+  console.log('Navigation - Company logo URL:', companyLogoUrl);
 
   // Define navigation items based on user role
   const getNavItems = () => {
