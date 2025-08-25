@@ -256,9 +256,9 @@ export default function Navigation() {
         </div>
       </nav>
 
-      {/* Company Logo Banner - Desktop */}
+      {/* Company Logo Banner - Desktop (ALWAYS VISIBLE FOR TESTING) */}
       {companyLogoUrl && (
-        <div className="hidden lg:block bg-white border-b border-gray-200 shadow-sm">
+        <div className="bg-white border-b border-gray-200 shadow-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center items-center py-3">
               <img 
@@ -275,7 +275,7 @@ export default function Navigation() {
 
       {/* Debug info for logo visibility */}
       {companyLogoUrl && (
-        <div className="hidden lg:block bg-red-100 border border-red-300 p-2 text-xs">
+        <div className="bg-red-100 border border-red-300 p-2 text-xs">
           <strong>DEBUG - Desktop Logo Banner Active:</strong><br />
           Logo URL: {companyLogoUrl}<br />
           Company: {company?.name}
@@ -358,7 +358,7 @@ export default function Navigation() {
           </div>
         )}
 
-        {/* Debug info for mobile logo visibility */}
+        {/* Debug info for mobile logo visibility - ALWAYS VISIBLE */}
         {companyLogoUrl && (
           <div className="bg-yellow-100 border border-yellow-300 p-2 text-xs">
             <strong>DEBUG - Mobile Logo Banner Active:</strong><br />
