@@ -1140,6 +1140,5 @@ export function ColorCodedMapViewer({
           </div>
         </CardContent>
     </Card>
-    </div>
   );
 }
