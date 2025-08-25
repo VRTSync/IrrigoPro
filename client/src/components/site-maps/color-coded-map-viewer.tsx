@@ -64,9 +64,9 @@ export function ColorCodedMapViewer({
   const [visibleControllers, setVisibleControllers] = useState<Set<string>>(
     new Set(project.controllers.map(c => c.id))
   );
-  const [displayMode, setDisplayMode] = useState<'markers' | 'circles' | 'badges' | 'minimal' | 'heatmap' | 'clusters'>('markers');
+  const [displayMode, setDisplayMode] = useState<'markers' | 'circles' | 'badges' | 'minimal' | 'heatmap' | 'clusters'>('circles');
   const [showZoneConnections, setShowZoneConnections] = useState(false);
-  const [markerSize, setMarkerSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [markerSize, setMarkerSize] = useState<'small' | 'medium' | 'large'>('small');
   const [showControllerAreas, setShowControllerAreas] = useState(false);
   const [showUserLocation, setShowUserLocation] = useState(false);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
