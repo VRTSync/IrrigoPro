@@ -154,7 +154,7 @@ export class ObjectStorageService {
       ? 'https://irrigopro.com' 
       : `https://${process.env.REPL_SLUG}-00-${process.env.REPL_ID}.${process.env.REPLIT_CLUSTER}.replit.dev`;
     
-    return `${baseUrl}/public-objects/company-logos/${logoPath}`;
+    return `${baseUrl}/api/public-objects/company-logos/${logoPath}`;
   }
 
   // Normalizes a logo upload URL to a storable path

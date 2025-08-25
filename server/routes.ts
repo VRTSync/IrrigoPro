@@ -133,6 +133,35 @@ import {
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Test route for logo serving debugging
+  app.get("/api/test-logo", (req, res) => {
+    console.log("[TEST-LOGO] Route called successfully", req.headers['user-agent']);
+    res.json({ message: "Test route working", timestamp: Date.now() });
+  });
+
+  // Serve public objects (including company logos) - USING API PREFIX TO AVOID VITE CATCH-ALL
+  app.get("/api/public-objects/:filePath(*)", async (req, res) => {
+    const filePath = req.params.filePath;
+    console.log(`[PUBLIC-OBJECTS] Serving file: ${filePath}`);
+    
+    const objectStorageService = new ObjectStorageService();
+    try {
+      const file = await objectStorageService.searchPublicObject(filePath);
+      console.log(`[PUBLIC-OBJECTS] File found: ${file ? 'yes' : 'no'}`);
+      
+      if (!file) {
+        console.log(`[PUBLIC-OBJECTS] File not found: ${filePath}`);
+        return res.status(404).json({ error: "File not found" });
+      }
+      
+      console.log(`[PUBLIC-OBJECTS] Downloading file: ${filePath}`);
+      objectStorageService.downloadObject(file, res);
+    } catch (error) {
+      console.error(`[PUBLIC-OBJECTS] Error serving ${filePath}:`, error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Company routes
   app.get("/api/companies", async (req, res) => {
     try {
@@ -378,28 +407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Serve public objects (including company logos)
-  app.get("/public-objects/:filePath(*)", async (req, res) => {
-    const filePath = req.params.filePath;
-    console.log(`[PUBLIC-OBJECTS] Serving file: ${filePath}`);
-    
-    const objectStorageService = new ObjectStorageService();
-    try {
-      const file = await objectStorageService.searchPublicObject(filePath);
-      console.log(`[PUBLIC-OBJECTS] File found: ${file ? 'yes' : 'no'}`);
-      
-      if (!file) {
-        console.log(`[PUBLIC-OBJECTS] File not found: ${filePath}`);
-        return res.status(404).json({ error: "File not found" });
-      }
-      
-      console.log(`[PUBLIC-OBJECTS] Downloading file: ${filePath}`);
-      objectStorageService.downloadObject(file, res);
-    } catch (error) {
-      console.error(`[PUBLIC-OBJECTS] Error serving ${filePath}:`, error);
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  });
+  // Removed - moved to top of registerRoutes function
 
   // Middleware to check if company profile setup is complete
   const requireCompanySetup = async (req: any, res: any, next: any) => {
