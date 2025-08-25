@@ -360,20 +360,7 @@ export default function Navigation() {
           </div>
         </div>
 
-        {/* Company Logo Banner - Mobile */}
-        {companyLogoUrl && (
-          <div className="bg-white border-b border-gray-200 shadow-sm">
-            <div className="flex justify-center items-center py-2 px-4">
-              <img 
-                src={signedLogoUrl || companyLogoUrl} 
-                alt="Company Logo"
-                className="h-12 w-auto object-contain"
-                onLoad={() => console.log('Mobile logo loaded successfully')}
-                onError={(e) => console.error('Mobile logo failed to load:', e)}
-              />
-            </div>
-          </div>
-        )}
+
 
 
 
