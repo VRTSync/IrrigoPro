@@ -120,21 +120,32 @@ export default function CustomerBilling() {
   // Get comprehensive customer billing data including work orders, estimates, and billing sheets
   const { data: customerPreviews = [], isLoading: loadingPreviews } = useQuery<any[]>({
     queryKey: ["/api/customers/billing-preview", dateFilter, selectedMonth],
-    queryFn: () => {
+    queryFn: async () => {
       const params = new URLSearchParams();
       params.append('dateFilter', dateFilter);
       if (selectedMonth) {
         params.append('selectedMonth', selectedMonth);
       }
-      return fetch(`/api/customers/billing-preview?${params.toString()}`).then(res => res.json());
+      try {
+        const response = await fetch(`/api/customers/billing-preview?${params.toString()}`);
+        if (!response.ok) {
+          console.error('Billing preview API error:', response.status);
+          return [];
+        }
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.error('Failed to fetch billing preview:', error);
+        return [];
+      }
     }
   });
 
   // Create a map for easy lookup of preview data by customer ID
-  const previewMap = (customerPreviews || []).reduce((map, preview) => {
+  const previewMap = Array.isArray(customerPreviews) ? customerPreviews.reduce((map, preview) => {
     map[preview.id] = preview;
     return map;
-  }, {} as Record<number, any>);
+  }, {} as Record<number, any>) : {};
 
   const getCustomerPreview = (customer: Customer) => {
     return previewMap[customer.id] || {
