@@ -1589,7 +1589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/controllers", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/controllers", requireCompanyAdminAccess, async (req: any, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const controllers = req.body.controllers;
@@ -1598,7 +1598,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Controllers must be an array" });
       }
       
-      const savedControllers = await storage.saveControllers(siteMapId, controllers);
+      // Get user's company ID - production-ready approach
+      let companyId = req.userCompanyId; // Set by middleware if using session
+      
+      // Fallback to header-based approach for development
+      if (!companyId) {
+        const userCompanyId = req.headers['x-user-company-id'];
+        companyId = userCompanyId ? parseInt(userCompanyId as string) : null;
+      }
+      
+      if (!companyId) {
+        return res.status(400).json({ 
+          message: "User company information not available" 
+        });
+      }
+      
+      const savedControllers = await storage.saveControllers(siteMapId, controllers, companyId);
       res.json(savedControllers);
     } catch (error) {
       console.error("Error saving controllers:", error);
@@ -1606,7 +1621,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/site-maps/:siteMapId/zones", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/site-maps/:siteMapId/zones", requireCompanyAdminAccess, async (req: any, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const zones = req.body.zones;
@@ -1615,7 +1630,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Zones must be an array" });
       }
       
-      const savedZones = await storage.saveZones(siteMapId, zones);
+      // Get user's company ID - production-ready approach
+      let companyId = req.userCompanyId; // Set by middleware if using session
+      
+      // Fallback to header-based approach for development
+      if (!companyId) {
+        const userCompanyId = req.headers['x-user-company-id'];
+        companyId = userCompanyId ? parseInt(userCompanyId as string) : null;
+      }
+      
+      if (!companyId) {
+        return res.status(400).json({ 
+          message: "User company information not available" 
+        });
+      }
+      
+      const savedZones = await storage.saveZones(siteMapId, zones, companyId);
       res.json(savedZones);
     } catch (error) {
       console.error("Error saving zones:", error);

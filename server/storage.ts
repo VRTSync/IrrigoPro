@@ -2136,22 +2136,22 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
-  async saveControllers(siteMapId: number, controllersData: InsertController[]): Promise<Controller[]> {
+  async saveControllers(siteMapId: number, controllersData: InsertController[], companyId: number): Promise<Controller[]> {
     // First, delete existing controllers for this site map
     await db.delete(controllers).where(eq(controllers.siteMapId, siteMapId));
     
-    // Insert new controllers
+    // Insert new controllers with proper company ID
     const controllersWithSiteMapId = controllersData.map(controller => ({
       ...controller,
       siteMapId,
-      companyId: 1 // Default company ID
+      companyId // Use provided company ID
     }));
     
     const result = await db.insert(controllers).values(controllersWithSiteMapId).returning();
     return result;
   }
 
-  async saveZones(siteMapId: number, zonesData: InsertIrrigationZone[]): Promise<IrrigationZone[]> {
+  async saveZones(siteMapId: number, zonesData: InsertIrrigationZone[], companyId: number): Promise<IrrigationZone[]> {
     if (zonesData.length === 0) return [];
     
     // Get the controller ID from the first zone (they should all be for the same controller)
@@ -2169,11 +2169,11 @@ export class DatabaseStorage implements IStorage {
       await db.delete(irrigationZones).where(eq(irrigationZones.siteMapId, siteMapId));
     }
     
-    // Insert new zones
+    // Insert new zones with proper company ID
     const zonesWithSiteMapId = zonesData.map(zone => ({
       ...zone,
       siteMapId,
-      companyId: 1 // Default company ID
+      companyId // Use provided company ID
     }));
     
     const result = await db.insert(irrigationZones).values(zonesWithSiteMapId).returning();
