@@ -834,83 +834,98 @@ export function ColorCodedMapViewer({
   const mapHeight = Math.max(500, project.controllers.length * 80 + 200);
   console.log(`Map height calculation: ${project.controllers.length} controllers = ${mapHeight}px`);
 
-  return (
-    <Card className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
-      <CardHeader className="pb-4 space-y-4">
-        {/* Title and Badge Row */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MapIcon className="w-5 h-5 text-green-600" />
-            <span className="text-lg font-semibold">
-              {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
-            </span>
-          </div>
-          <Badge variant="outline" className="text-sm">
-            {project.controllers.length} Controllers • {totalZones} Zones
-          </Badge>
-        </div>
+  console.log("ColorCodedMapViewer rendering with", project.controllers.length, "controllers");
 
-        {/* Control Buttons Row */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (mapInstanceRef.current) {
-                const currentZoom = mapInstanceRef.current.getZoom();
-                mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
-              }
-            }}
-            title="Zoom In"
-            className="h-9 w-9 p-0"
-          >
-            <span className="text-lg font-bold">+</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (mapInstanceRef.current) {
-                const currentZoom = mapInstanceRef.current.getZoom();
-                mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
-              }
-            }}
-            title="Zoom Out"
-            className="h-9 w-9 p-0"
-          >
-            <span className="text-lg font-bold">-</span>
-          </Button>
-          <Button
-            variant={showUserLocation ? "default" : "outline"}
-            size="sm"
-            onClick={getUserLocation}
-            title="Show My Location"
-            className="h-9 px-3"
-          >
-            <Navigation className="w-4 h-4 mr-1" />
-            <span className="text-sm">GPS</span>
-          </Button>
-          <Button
-            variant={isFullscreen ? "default" : "outline"}
-            size="sm"
-            onClick={toggleFullscreen}
-            className="h-9 px-3"
-            title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
-          >
-            {isFullscreen ? (
-              <>
-                <Minimize className="w-4 h-4 mr-1" />
-                <span className="text-sm">Exit</span>
-              </>
-            ) : (
-              <>
-                <Maximize className="w-4 h-4 mr-1" />
-                <span className="text-sm">Fullscreen</span>
-              </>
-            )}
-          </Button>
+  return (
+    <div className="w-full space-y-4">
+      {/* DEBUG: Visible header section */}
+      <div className="bg-white border rounded-lg p-4 shadow-sm">
+        <div className="space-y-4">
+          {/* Title and Badge Row */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MapIcon className="w-5 h-5 text-green-600" />
+              <span className="text-lg font-semibold">
+                {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
+              </span>
+            </div>
+            <Badge variant="outline" className="text-sm">
+              {project.controllers.length} Controllers • {totalZones} Zones
+            </Badge>
+          </div>
+
+          {/* Control Buttons Row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                console.log("Zoom in clicked");
+                if (mapInstanceRef.current) {
+                  const currentZoom = mapInstanceRef.current.getZoom();
+                  mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
+                }
+              }}
+              title="Zoom In"
+              className="h-9 w-9 p-0 bg-white border-gray-300"
+            >
+              <span className="text-lg font-bold">+</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                console.log("Zoom out clicked");
+                if (mapInstanceRef.current) {
+                  const currentZoom = mapInstanceRef.current.getZoom();
+                  mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
+                }
+              }}
+              title="Zoom Out"
+              className="h-9 w-9 p-0 bg-white border-gray-300"
+            >
+              <span className="text-lg font-bold">-</span>
+            </Button>
+            <Button
+              variant={showUserLocation ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                console.log("GPS clicked");
+                getUserLocation();
+              }}
+              title="Show My Location"
+              className="h-9 px-3 bg-white border-gray-300"
+            >
+              <Navigation className="w-4 h-4 mr-1" />
+              <span className="text-sm">GPS</span>
+            </Button>
+            <Button
+              variant={isFullscreen ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                console.log("Fullscreen clicked");
+                toggleFullscreen();
+              }}
+              className="h-9 px-3 bg-white border-gray-300"
+              title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize className="w-4 h-4 mr-1" />
+                  <span className="text-sm">Exit</span>
+                </>
+              ) : (
+                <>
+                  <Maximize className="w-4 h-4 mr-1" />
+                  <span className="text-sm">Fullscreen</span>
+                </>
+              )}
+            </Button>
+          </div>
         </div>
-      </CardHeader>
+      </div>
+
+    <Card className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
         <CardContent className={`${isFullscreen ? 'pt-2 pb-2' : 'pt-4'}`}>
           {/* Mobile-optimized Display Options */}
           <div className={`${isFullscreen ? 'mb-2 space-y-2' : 'mb-4 space-y-3'}`}>
@@ -1114,5 +1129,6 @@ export function ColorCodedMapViewer({
           </div>
         </CardContent>
     </Card>
+    </div>
   );
 }
