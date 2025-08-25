@@ -261,51 +261,50 @@ export function ColorCodedMapViewer({
 
       // Create enhanced popup content for controller
       const controllerPopupContent = `
-        <div class="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[280px] max-w-[320px]">
-          <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3">
+        <div class="bg-white rounded-lg shadow-xl border-2 overflow-hidden min-w-[280px] max-w-[320px]" style="border-color: ${controller.color}">
+          <div class="px-4 py-3" style="background: linear-gradient(135deg, ${controller.color}ee, ${controller.color})">
             <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center" 
-                   style="background-color: ${controller.color}">
-                <span class="text-white font-bold text-sm">${controller.name.split(' ')[1] || 'C'}</span>
+              <div class="w-10 h-10 rounded-lg border-2 border-white shadow-lg flex items-center justify-center bg-white">
+                <span class="font-bold text-lg" style="color: ${controller.color}">${controller.name.split(' ')[1] || 'C'}</span>
               </div>
               <div>
                 <h3 class="font-bold text-white text-lg leading-tight">${controller.name}</h3>
-                <p class="text-blue-100 text-sm">Irrigation Controller</p>
+                <p class="text-white text-opacity-90 text-sm">Controller</p>
               </div>
             </div>
           </div>
           <div class="p-4 space-y-3">
             <div class="grid grid-cols-2 gap-4">
-              <div class="bg-gray-50 rounded-lg p-3 text-center">
-                <div class="text-2xl font-bold text-blue-600">${controller.stationCount || 0}</div>
+              <div class="rounded-lg p-3 text-center border-2" style="background-color: ${controller.color}15; border-color: ${controller.color}30">
+                <div class="text-2xl font-bold" style="color: ${controller.color}">${controller.stationCount || 0}</div>
                 <div class="text-xs text-gray-600 font-medium">STATIONS</div>
               </div>
-              <div class="bg-gray-50 rounded-lg p-3 text-center">
-                <div class="text-2xl font-bold text-green-600">${project.zonesByController[controller.id]?.length || 0}</div>
+              <div class="rounded-lg p-3 text-center border-2" style="background-color: ${controller.color}15; border-color: ${controller.color}30">
+                <div class="text-2xl font-bold" style="color: ${controller.color}">${project.zonesByController[controller.id]?.length || 0}</div>
                 <div class="text-xs text-gray-600 font-medium">ZONES</div>
               </div>
             </div>
             ${controller.model ? `
-              <div class="flex items-center gap-2 text-sm">
-                <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span class="text-gray-600"><strong>Model:</strong> ${controller.model}</span>
+              <div class="flex items-center gap-3 p-2 rounded" style="background-color: ${controller.color}08">
+                <div class="w-2 h-2 rounded-full" style="background-color: ${controller.color}"></div>
+                <span class="text-gray-700 text-sm"><strong>Model:</strong> ${controller.model}</span>
               </div>
             ` : ''}
             ${controller.serialNumber ? `
-              <div class="flex items-center gap-2 text-sm">
-                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span class="text-gray-600"><strong>Serial:</strong> ${controller.serialNumber}</span>
+              <div class="flex items-center gap-3 p-2 rounded" style="background-color: ${controller.color}08">
+                <div class="w-2 h-2 rounded-full" style="background-color: ${controller.color}"></div>
+                <span class="text-gray-700 text-sm"><strong>Serial:</strong> ${controller.serialNumber}</span>
               </div>
             ` : ''}
             ${controller.description ? `
-              <div class="mt-3 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-400">
+              <div class="mt-3 p-3 rounded-lg border-l-4" style="background-color: ${controller.color}10; border-color: ${controller.color}">
                 <p class="text-sm text-gray-700 italic">${controller.description}</p>
               </div>
             ` : ''}
           </div>
-          <div class="bg-gray-50 px-4 py-2 border-t border-gray-200">
-            <div class="flex items-center justify-between text-xs text-gray-500">
-              <span>📍 Controller Location</span>
+          <div class="px-4 py-2 border-t" style="background-color: ${controller.color}08; border-color: ${controller.color}30">
+            <div class="flex items-center justify-between text-xs text-gray-600">
+              <span>Location</span>
               <span class="font-mono">${controller.latitude.toFixed(6)}, ${controller.longitude.toFixed(6)}</span>
             </div>
           </div>
@@ -540,63 +539,60 @@ export function ColorCodedMapViewer({
 
       // Create enhanced popup content for zone
       const zoneController = project.controllers.find(c => c.id === zone.controllerId);
-      const zoneTypeIcon = zone.zoneType === 'drip' ? '💧' : zone.zoneType === 'popup' ? '🌊' : zone.zoneType === 'sprinkler' ? '💦' : '🚿';
       const zonePopupContent = `
-        <div class="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[260px] max-w-[300px]">
-          <div class="bg-gradient-to-r from-green-500 to-green-600 px-4 py-3">
+        <div class="bg-white rounded-lg shadow-xl border-2 overflow-hidden min-w-[260px] max-w-[300px]" style="border-color: ${zone.color}">
+          <div class="px-4 py-3" style="background: linear-gradient(135deg, ${zone.color}ee, ${zone.color})">
             <div class="flex items-center gap-3">
-              <div class="w-7 h-7 rounded-full border-2 border-white shadow-lg flex items-center justify-center" 
-                   style="background-color: ${zone.color}">
-                <span class="text-white font-bold text-xs">${zone.stationNumber || 'Z'}</span>
+              <div class="w-8 h-8 rounded-lg border-2 border-white shadow-lg flex items-center justify-center bg-white">
+                <span class="font-bold text-sm" style="color: ${zone.color}">${zone.stationNumber || 'Z'}</span>
               </div>
               <div>
                 <h3 class="font-bold text-white text-base leading-tight">${zone.name}</h3>
-                <p class="text-green-100 text-sm flex items-center gap-1">
-                  <span>${zoneTypeIcon}</span>
-                  <span>${zone.zoneType ? zone.zoneType.charAt(0).toUpperCase() + zone.zoneType.slice(1) : 'Zone'}</span>
+                <p class="text-white text-opacity-90 text-sm">
+                  ${zone.zoneType ? zone.zoneType.charAt(0).toUpperCase() + zone.zoneType.slice(1) + ' Zone' : 'Zone'}
                 </p>
               </div>
             </div>
           </div>
           <div class="p-4 space-y-3">
             ${zoneController ? `
-              <div class="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div class="flex items-center gap-3 p-3 rounded-lg border-2" style="background-color: ${zoneController.color}10; border-color: ${zoneController.color}30">
                 <div class="w-6 h-6 rounded-full" style="background-color: ${zoneController.color}"></div>
                 <div>
                   <div class="font-medium text-gray-900 text-sm">${zoneController.name}</div>
-                  <div class="text-xs text-gray-600">Parent Controller</div>
+                  <div class="text-xs" style="color: ${zoneController.color}">Parent Controller</div>
                 </div>
               </div>
             ` : ''}
             <div class="grid grid-cols-2 gap-3">
               ${zone.stationNumber ? `
-                <div class="bg-gray-50 rounded-lg p-3 text-center">
-                  <div class="text-xl font-bold text-blue-600">#${zone.stationNumber}</div>
+                <div class="rounded-lg p-3 text-center border-2" style="background-color: ${zone.color}15; border-color: ${zone.color}30">
+                  <div class="text-xl font-bold" style="color: ${zone.color}">#${zone.stationNumber}</div>
                   <div class="text-xs text-gray-600 font-medium">STATION</div>
                 </div>
               ` : ''}
               ${zone.zoneType ? `
-                <div class="bg-gray-50 rounded-lg p-3 text-center">
-                  <div class="text-lg">${zoneTypeIcon}</div>
-                  <div class="text-xs text-gray-600 font-medium mt-1">${zone.zoneType.toUpperCase()}</div>
+                <div class="rounded-lg p-3 text-center border-2" style="background-color: ${zone.color}15; border-color: ${zone.color}30">
+                  <div class="font-bold" style="color: ${zone.color}">${zone.zoneType.toUpperCase()}</div>
+                  <div class="text-xs text-gray-600 font-medium">TYPE</div>
                 </div>
               ` : ''}
             </div>
             ${zone.coverage ? `
-              <div class="flex items-center gap-2 text-sm">
-                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span class="text-gray-600"><strong>Coverage:</strong> ${zone.coverage}</span>
+              <div class="flex items-center gap-3 p-2 rounded" style="background-color: ${zone.color}08">
+                <div class="w-2 h-2 rounded-full" style="background-color: ${zone.color}"></div>
+                <span class="text-gray-700 text-sm"><strong>Coverage:</strong> ${zone.coverage}</span>
               </div>
             ` : ''}
             ${zone.description ? `
-              <div class="mt-3 p-3 bg-green-50 rounded-lg border-l-4 border-green-400">
+              <div class="mt-3 p-3 rounded-lg border-l-4" style="background-color: ${zone.color}10; border-color: ${zone.color}">
                 <p class="text-sm text-gray-700 italic">${zone.description}</p>
               </div>
             ` : ''}
           </div>
-          <div class="bg-gray-50 px-4 py-2 border-t border-gray-200">
-            <div class="text-xs text-gray-500 text-center">
-              <span>💧 Irrigation Zone • Click for details</span>
+          <div class="px-4 py-2 border-t" style="background-color: ${zone.color}08; border-color: ${zone.color}30">
+            <div class="text-xs text-gray-600 text-center">
+              <span>Irrigation Zone</span>
             </div>
           </div>
         </div>
