@@ -836,81 +836,80 @@ export function ColorCodedMapViewer({
 
   return (
     <Card className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
-      <CardHeader className="pb-4">
-        <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <MapIcon className="w-4 h-4 text-green-600 flex-shrink-0" />
-            <span className="text-sm font-semibold truncate">
+      <CardHeader className="pb-4 space-y-4">
+        {/* Title and Badge Row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MapIcon className="w-5 h-5 text-green-600" />
+            <span className="text-lg font-semibold">
               {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
             </span>
-            <Badge variant="outline" className="text-xs whitespace-nowrap ml-auto">
-              {project.controllers.length} Controllers • {totalZones} Zones
-            </Badge>
           </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            {/* Essential control buttons only */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (mapInstanceRef.current) {
-                  const currentZoom = mapInstanceRef.current.getZoom();
-                  mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
-                }
-              }}
-              title="Zoom In"
-              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
-            >
-              <span className="text-sm sm:text-lg font-bold">+</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (mapInstanceRef.current) {
-                  const currentZoom = mapInstanceRef.current.getZoom();
-                  mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
-                }
-              }}
-              title="Zoom Out"
-              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
-            >
-              <span className="text-sm sm:text-lg font-bold">-</span>
-            </Button>
-            <Button
-              variant={showUserLocation ? "default" : "outline"}
-              size="sm"
-              onClick={getUserLocation}
-              title="Show My Location"
-              className="h-7 sm:h-8 px-2"
-            >
-              <Navigation className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-              <span className="text-xs sm:text-sm">GPS</span>
-            </Button>
-            <Button
-              variant={isFullscreen ? "default" : "outline"}
-              size="sm"
-              onClick={toggleFullscreen}
-              className="h-7 sm:h-8 px-3 sm:px-2"
-              title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
-            >
-              {isFullscreen ? (
-                <>
-                  <Minimize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
-                  <span className="text-xs sm:text-sm">Exit</span>
-                </>
-              ) : (
-                <>
-                  <Maximize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
-                  <span className="text-xs sm:text-sm">
-                    <span className="hidden sm:inline">View Map</span>
-                    <span className="sm:hidden">Map</span>
-                  </span>
-                </>
-              )}
-            </Button>
-          </div>
-        </CardTitle>
+          <Badge variant="outline" className="text-sm">
+            {project.controllers.length} Controllers • {totalZones} Zones
+          </Badge>
+        </div>
+
+        {/* Control Buttons Row */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                const currentZoom = mapInstanceRef.current.getZoom();
+                mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
+              }
+            }}
+            title="Zoom In"
+            className="h-9 w-9 p-0"
+          >
+            <span className="text-lg font-bold">+</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                const currentZoom = mapInstanceRef.current.getZoom();
+                mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
+              }
+            }}
+            title="Zoom Out"
+            className="h-9 w-9 p-0"
+          >
+            <span className="text-lg font-bold">-</span>
+          </Button>
+          <Button
+            variant={showUserLocation ? "default" : "outline"}
+            size="sm"
+            onClick={getUserLocation}
+            title="Show My Location"
+            className="h-9 px-3"
+          >
+            <Navigation className="w-4 h-4 mr-1" />
+            <span className="text-sm">GPS</span>
+          </Button>
+          <Button
+            variant={isFullscreen ? "default" : "outline"}
+            size="sm"
+            onClick={toggleFullscreen}
+            className="h-9 px-3"
+            title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize className="w-4 h-4 mr-1" />
+                <span className="text-sm">Exit</span>
+              </>
+            ) : (
+              <>
+                <Maximize className="w-4 h-4 mr-1" />
+                <span className="text-sm">Fullscreen</span>
+              </>
+            )}
+          </Button>
+        </div>
       </CardHeader>
         <CardContent className={`${isFullscreen ? 'pt-2 pb-2' : 'pt-4'}`}>
           {/* Mobile-optimized Display Options */}
