@@ -297,14 +297,7 @@ export default function Navigation() {
         </div>
       )}
 
-      {/* Debug info for logo visibility */}
-      {companyLogoUrl && (
-        <div className="bg-red-100 border border-red-300 p-2 text-xs">
-          <strong>DEBUG - Desktop Logo Banner Active:</strong><br />
-          Logo URL: {companyLogoUrl}<br />
-          Company: {company?.name}
-        </div>
-      )}
+
 
       {/* Mobile Navigation - Bottom */}
       <div className="lg:hidden m-0 p-0">
