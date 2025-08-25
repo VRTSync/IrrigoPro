@@ -431,15 +431,42 @@ export class DatabaseStorage implements IStorage {
   async createUser(user: InsertUser): Promise<User> {
     // Hash the password before storing
     const hashedPassword = await bcrypt.hash(user.password, 10);
+    
+    // Generate email verification token if user has email and isn't already verified
+    let emailVerificationToken: string | undefined;
+    let emailVerificationExpires: Date | undefined;
+    
+    if (user.email && !user.emailVerified) {
+      const crypto = await import('crypto');
+      emailVerificationToken = crypto.randomBytes(32).toString('hex');
+      emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    }
+    
     const [newUser] = await db.insert(users).values({
       ...user,
-      password: hashedPassword
+      password: hashedPassword,
+      emailVerificationToken,
+      emailVerificationExpires
     }).returning();
+    
+    // Send verification email if user has email and token was generated
+    if (newUser.email && emailVerificationToken && !newUser.emailVerified) {
+      try {
+        const { EmailService } = await import('./email-service');
+        await EmailService.sendEmailVerification(newUser.email, emailVerificationToken, newUser.name);
+        console.log(`Verification email sent to ${newUser.email} for new user`);
+      } catch (emailError) {
+        console.error('Failed to send verification email for new user:', emailError);
+        // Don't fail user creation if email fails, just log it
+      }
+    }
+    
     return newUser;
   }
 
   async updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined> {
-    const [updatedUser] = await db.update(users).set(user).where(eq(users.id, id)).returning();
+    const updateData = { ...user, updatedAt: new Date() };
+    const [updatedUser] = await db.update(users).set(updateData).where(eq(users.id, id)).returning();
     return updatedUser || undefined;
   }
 

@@ -1266,41 +1266,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Resend email verification
-  app.post("/api/auth/resend-verification", async (req, res) => {
-    try {
-      const { email } = req.body;
-      const user = await storage.getUserByEmail(email);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      if (user.emailVerified) {
-        return res.json({ message: "Email is already verified" });
-      }
-      
-      // Generate new verification token
-      const crypto = await import('crypto');
-      const verificationToken = crypto.randomBytes(32).toString('hex');
-      const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-      
-      // Update user with verification token
-      await storage.updateUser(user.id, {
-        emailVerificationToken: verificationToken,
-        emailVerificationExpires: verificationExpires
-      });
-      
-      // Send verification email
-      const { EmailService } = await import('./email-service');
-      await EmailService.sendEmailVerification(user.email!, verificationToken, user.name);
-      
-      res.json({ message: "Verification email sent" });
-    } catch (error) {
-      console.error('Resend verification error:', error);
-      res.status(500).json({ message: "Failed to send verification email" });
-    }
-  });
 
   // Dashboard stats
   app.get("/api/dashboard/stats", async (req, res) => {
