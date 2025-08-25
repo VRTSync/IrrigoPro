@@ -37,8 +37,8 @@ export default function Navigation() {
   // Determine which logo to use
   const logoToUse = company?.logo 
     ? (company.logo.startsWith('http') 
-        ? company.logo 
-        : `/public-objects/company-logos/${company.logo}`)
+        ? `${company.logo}?v=${Date.now()}` 
+        : `/public-objects/company-logos/${company.logo}?v=${Date.now()}`)
     : irrigoProLogo;
 
   // Define navigation items based on user role
@@ -127,8 +127,8 @@ export default function Navigation() {
               <Link href="/">
                 <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
-                    src={irrigoProLogo} 
-                    alt="IrrigoPro Logo"
+                    src={logoToUse} 
+                    alt="Company Logo"
                     className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
                   />
                 </div>
@@ -258,8 +258,8 @@ export default function Navigation() {
             {/* Logo */}
             <div className="flex items-center">
               <img 
-                src={irrigoProLogo} 
-                alt="IrrigoPro Logo"
+                src={logoToUse} 
+                alt="Company Logo"
                 className="h-10 w-auto"
               />
             </div>
