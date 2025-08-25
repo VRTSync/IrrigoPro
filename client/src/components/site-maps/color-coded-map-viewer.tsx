@@ -832,7 +832,6 @@ export function ColorCodedMapViewer({
   
   // Calculate dynamic height based on controller count
   const mapHeight = Math.max(500, project.controllers.length * 80 + 200);
-  console.log(`Map height calculation: ${project.controllers.length} controllers = ${mapHeight}px`);
 
   return (
     <Card className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>

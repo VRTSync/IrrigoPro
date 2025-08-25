@@ -481,8 +481,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                     description: zone.notes || undefined
                   }))
                 }}
-                onControllerClick={(controller) => console.log('Controller clicked:', controller)}
-                onZoneClick={(zone) => console.log('Zone clicked:', zone)}
+                onControllerClick={(controller) => {}}
+                onZoneClick={(zone) => {}}
               />
             </TabsContent>
 
