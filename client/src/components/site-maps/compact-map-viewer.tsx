@@ -133,7 +133,16 @@ export function CompactMapViewer({
           opacity: 1,
           fillOpacity: 0.8
         }).addTo(mapInstanceRef.current)
-          .bindPopup(`<strong>${controller.name}</strong><br/>Stations: ${controller.stationCount || 0}`);
+          .bindPopup(`
+            <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden min-w-[200px]">
+              <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2">
+                <h3 class="font-bold text-white text-sm">${controller.name}</h3>
+              </div>
+              <div class="p-3">
+                <div class="text-sm text-gray-600"><strong>Stations:</strong> ${controller.stationCount || 0}</div>
+              </div>
+            </div>
+          `);
       } else {
         const marker = L.marker([controller.latitude, controller.longitude], {
           icon: L.divIcon({
@@ -143,7 +152,16 @@ export function CompactMapViewer({
             iconAnchor: [size, size]
           })
         }).addTo(mapInstanceRef.current)
-          .bindPopup(`<strong>${controller.name}</strong><br/>Stations: ${controller.stationCount || 0}`);
+          .bindPopup(`
+            <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden min-w-[200px]">
+              <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2">
+                <h3 class="font-bold text-white text-sm">${controller.name}</h3>
+              </div>
+              <div class="p-3">
+                <div class="text-sm text-gray-600"><strong>Stations:</strong> ${controller.stationCount || 0}</div>
+              </div>
+            </div>
+          `);
       }
     });
 
@@ -161,7 +179,16 @@ export function CompactMapViewer({
             opacity: 1,
             fillOpacity: 0.6
           }).addTo(mapInstanceRef.current!)
-            .bindPopup(`<strong>${zone.name}</strong><br/>Type: ${zone.zoneType || 'Unknown'}`);
+            .bindPopup(`
+              <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden min-w-[180px]">
+                <div class="bg-gradient-to-r from-green-500 to-green-600 px-3 py-2">
+                  <h4 class="font-bold text-white text-sm">${zone.name}</h4>
+                </div>
+                <div class="p-3">
+                  <div class="text-sm text-gray-600"><strong>Type:</strong> ${zone.zoneType || 'Unknown'}</div>
+                </div>
+              </div>
+            `);
         }
       });
     });

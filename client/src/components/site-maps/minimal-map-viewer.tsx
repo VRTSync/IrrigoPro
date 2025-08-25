@@ -113,10 +113,27 @@ export function MinimalMapViewer({
       // Enhanced popup with better formatting
       const zoneCount = project.zonesByController[controller.id]?.length || 0;
       marker.bindPopup(`
-        <div class="p-2">
-          <div class="font-semibold text-base mb-1">${controller.name}</div>
-          <div class="text-sm text-gray-600 mb-1">Stations: ${controller.stationCount || 0}</div>
-          <div class="text-sm text-gray-600">Zones: ${zoneCount}</div>
+        <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden min-w-[240px]">
+          <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2">
+            <div class="flex items-center gap-2">
+              <div class="w-6 h-6 rounded-full border border-white" style="background-color: ${controller.color}">
+                <span class="text-white font-bold text-xs flex items-center justify-center w-full h-full">${controller.name.charAt(0)}</span>
+              </div>
+              <h3 class="font-bold text-white text-base">${controller.name}</h3>
+            </div>
+          </div>
+          <div class="p-3 space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div class="bg-gray-50 rounded p-2 text-center">
+                <div class="text-lg font-bold text-blue-600">${controller.stationCount || 0}</div>
+                <div class="text-xs text-gray-600">STATIONS</div>
+              </div>
+              <div class="bg-gray-50 rounded p-2 text-center">
+                <div class="text-lg font-bold text-green-600">${zoneCount}</div>
+                <div class="text-xs text-gray-600">ZONES</div>
+              </div>
+            </div>
+          </div>
         </div>
       `);
     });
@@ -137,12 +154,26 @@ export function MinimalMapViewer({
           }).addTo(mapInstanceRef.current!);
 
           // Enhanced zone popup
+          const zoneTypeIcon = zone.zoneType === 'drip' ? '💧' : zone.zoneType === 'popup' ? '🌊' : zone.zoneType === 'sprinkler' ? '💦' : '🚿';
           zoneMarker.bindPopup(`
-            <div class="p-2">
-              <div class="font-semibold text-base mb-1">${zone.name}</div>
-              <div class="text-sm text-gray-600 mb-1">Station: ${zone.stationNumber || 'Unknown'}</div>
-              <div class="text-sm text-gray-600 mb-1">Type: ${zone.zoneType || 'Unknown'}</div>
-              ${zone.coverage ? `<div class="text-sm text-gray-600">Coverage: ${zone.coverage}</div>` : ''}
+            <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden min-w-[220px]">
+              <div class="bg-gradient-to-r from-green-500 to-green-600 px-3 py-2">
+                <div class="flex items-center gap-2">
+                  <div class="w-5 h-5 rounded-full border border-white" style="background-color: ${zone.color || '#0066cc'}">
+                    <span class="text-white font-bold text-xs flex items-center justify-center w-full h-full">${zone.stationNumber || '?'}</span>
+                  </div>
+                  <h4 class="font-bold text-white text-sm">${zone.name}</h4>
+                </div>
+              </div>
+              <div class="p-3 space-y-2">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-lg">${zoneTypeIcon}</span>
+                  <span class="text-gray-600"><strong>Station:</strong> #${zone.stationNumber || 'Unknown'}</span>
+                </div>
+                <div class="text-sm text-gray-600">
+                  <strong>Type:</strong> ${zone.zoneType ? zone.zoneType.charAt(0).toUpperCase() + zone.zoneType.slice(1) : 'Unknown'}
+                </div>
+              </div>
             </div>
           `);
         }

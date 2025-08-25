@@ -87,7 +87,6 @@ export function ColorCodedMapViewer({
       touchZoom: true,
       dragging: true,
       // Mobile-specific optimizations
-      tap: true as any,
       tapTolerance: 15,
       bounceAtZoomLimits: true,
       zoomAnimation: true,
@@ -260,20 +259,56 @@ export function ColorCodedMapViewer({
         icon: controllerIcon
       }).addTo(map);
 
-      // Create popup content for controller
+      // Create enhanced popup content for controller
       const controllerPopupContent = `
-        <div class="p-3">
-          <div class="flex items-center gap-2 mb-2">
-            <div class="w-4 h-4 rounded-full" style="background-color: ${controller.color}"></div>
-            <h3 class="font-bold text-lg" style="color: ${controller.color}">${controller.name}</h3>
+        <div class="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[280px] max-w-[320px]">
+          <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-3">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center" 
+                   style="background-color: ${controller.color}">
+                <span class="text-white font-bold text-sm">${controller.name.split(' ')[1] || 'C'}</span>
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-lg leading-tight">${controller.name}</h3>
+                <p class="text-blue-100 text-sm">Irrigation Controller</p>
+              </div>
+            </div>
           </div>
-          ${controller.model ? `<p><strong>Model:</strong> ${controller.model}</p>` : ''}
-          ${controller.serialNumber ? `<p><strong>Serial:</strong> ${controller.serialNumber}</p>` : ''}
-          ${controller.stationCount ? `<p><strong>Stations:</strong> ${controller.stationCount}</p>` : ''}
-          ${controller.description ? `<p class="text-sm text-gray-600 mt-2">${controller.description}</p>` : ''}
-          <p class="text-xs text-gray-500 mt-2">
-            <strong>Zones:</strong> ${project.zonesByController[controller.id]?.length || 0}
-          </p>
+          <div class="p-4 space-y-3">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <div class="text-2xl font-bold text-blue-600">${controller.stationCount || 0}</div>
+                <div class="text-xs text-gray-600 font-medium">STATIONS</div>
+              </div>
+              <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <div class="text-2xl font-bold text-green-600">${project.zonesByController[controller.id]?.length || 0}</div>
+                <div class="text-xs text-gray-600 font-medium">ZONES</div>
+              </div>
+            </div>
+            ${controller.model ? `
+              <div class="flex items-center gap-2 text-sm">
+                <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                <span class="text-gray-600"><strong>Model:</strong> ${controller.model}</span>
+              </div>
+            ` : ''}
+            ${controller.serialNumber ? `
+              <div class="flex items-center gap-2 text-sm">
+                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span class="text-gray-600"><strong>Serial:</strong> ${controller.serialNumber}</span>
+              </div>
+            ` : ''}
+            ${controller.description ? `
+              <div class="mt-3 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-400">
+                <p class="text-sm text-gray-700 italic">${controller.description}</p>
+              </div>
+            ` : ''}
+          </div>
+          <div class="bg-gray-50 px-4 py-2 border-t border-gray-200">
+            <div class="flex items-center justify-between text-xs text-gray-500">
+              <span>📍 Controller Location</span>
+              <span class="font-mono">${controller.latitude.toFixed(6)}, ${controller.longitude.toFixed(6)}</span>
+            </div>
+          </div>
         </div>
       `;
 
@@ -503,19 +538,67 @@ export function ColorCodedMapViewer({
         icon: zoneIcon
       }).addTo(map);
 
-      // Create popup content for zone
+      // Create enhanced popup content for zone
       const zoneController = project.controllers.find(c => c.id === zone.controllerId);
+      const zoneTypeIcon = zone.zoneType === 'drip' ? '💧' : zone.zoneType === 'popup' ? '🌊' : zone.zoneType === 'sprinkler' ? '💦' : '🚿';
       const zonePopupContent = `
-        <div class="p-2">
-          <div class="flex items-center gap-2 mb-2">
-            <div class="w-3 h-3 rounded-full" style="background-color: ${zone.color}"></div>
-            <h3 class="font-bold" style="color: ${zone.color}">${zone.name}</h3>
+        <div class="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[260px] max-w-[300px]">
+          <div class="bg-gradient-to-r from-green-500 to-green-600 px-4 py-3">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-full border-2 border-white shadow-lg flex items-center justify-center" 
+                   style="background-color: ${zone.color}">
+                <span class="text-white font-bold text-xs">${zone.stationNumber || 'Z'}</span>
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-base leading-tight">${zone.name}</h3>
+                <p class="text-green-100 text-sm flex items-center gap-1">
+                  <span>${zoneTypeIcon}</span>
+                  <span>${zone.zoneType ? zone.zoneType.charAt(0).toUpperCase() + zone.zoneType.slice(1) : 'Zone'}</span>
+                </p>
+              </div>
+            </div>
           </div>
-          ${zoneController ? `<p><strong>Controller:</strong> ${zoneController.name}</p>` : ''}
-          ${zone.stationNumber ? `<p><strong>Station:</strong> ${zone.stationNumber}</p>` : ''}
-          ${zone.zoneType ? `<p><strong>Type:</strong> ${zone.zoneType}</p>` : ''}
-          ${zone.coverage ? `<p><strong>Coverage:</strong> ${zone.coverage}</p>` : ''}
-          ${zone.description ? `<p class="text-sm text-gray-600 mt-2">${zone.description}</p>` : ''}
+          <div class="p-4 space-y-3">
+            ${zoneController ? `
+              <div class="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <div class="w-6 h-6 rounded-full" style="background-color: ${zoneController.color}"></div>
+                <div>
+                  <div class="font-medium text-gray-900 text-sm">${zoneController.name}</div>
+                  <div class="text-xs text-gray-600">Parent Controller</div>
+                </div>
+              </div>
+            ` : ''}
+            <div class="grid grid-cols-2 gap-3">
+              ${zone.stationNumber ? `
+                <div class="bg-gray-50 rounded-lg p-3 text-center">
+                  <div class="text-xl font-bold text-blue-600">#${zone.stationNumber}</div>
+                  <div class="text-xs text-gray-600 font-medium">STATION</div>
+                </div>
+              ` : ''}
+              ${zone.zoneType ? `
+                <div class="bg-gray-50 rounded-lg p-3 text-center">
+                  <div class="text-lg">${zoneTypeIcon}</div>
+                  <div class="text-xs text-gray-600 font-medium mt-1">${zone.zoneType.toUpperCase()}</div>
+                </div>
+              ` : ''}
+            </div>
+            ${zone.coverage ? `
+              <div class="flex items-center gap-2 text-sm">
+                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span class="text-gray-600"><strong>Coverage:</strong> ${zone.coverage}</span>
+              </div>
+            ` : ''}
+            ${zone.description ? `
+              <div class="mt-3 p-3 bg-green-50 rounded-lg border-l-4 border-green-400">
+                <p class="text-sm text-gray-700 italic">${zone.description}</p>
+              </div>
+            ` : ''}
+          </div>
+          <div class="bg-gray-50 px-4 py-2 border-t border-gray-200">
+            <div class="text-xs text-gray-500 text-center">
+              <span>💧 Irrigation Zone • Click for details</span>
+            </div>
+          </div>
         </div>
       `;
 
@@ -766,84 +849,83 @@ export function ColorCodedMapViewer({
   console.log(`Map height calculation: ${project.controllers.length} controllers = ${mapHeight}px`);
 
   return (
-    <div className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
-      {/* Compact header with essential info only */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <MapIcon className="w-4 h-4 text-green-600 flex-shrink-0" />
-          <span className="text-sm font-semibold truncate">
-            {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
-          </span>
-          <Badge variant="outline" className="text-xs whitespace-nowrap ml-auto">
-            {project.controllers.length} Controllers • {totalZones} Zones
-          </Badge>
-        </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          {/* Essential control buttons only */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (mapInstanceRef.current) {
-                      const currentZoom = mapInstanceRef.current.getZoom();
-                      mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
-                    }
-                  }}
-                  title="Zoom In"
-                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
-                >
-                  <span className="text-sm sm:text-lg font-bold">+</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (mapInstanceRef.current) {
-                      const currentZoom = mapInstanceRef.current.getZoom();
-                      mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
-                    }
-                  }}
-                  title="Zoom Out"
-                  className="h-7 w-7 sm:h-8 sm:w-8 p-0"
-                >
-                  <span className="text-sm sm:text-lg font-bold">-</span>
-                </Button>
-                <Button
-                  variant={showUserLocation ? "default" : "outline"}
-                  size="sm"
-                  onClick={getUserLocation}
-                  title="Show My Location"
-                  className="h-7 sm:h-8 px-2"
-                >
-                  <Navigation className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
-                  <span className="text-xs sm:text-sm">GPS</span>
-                </Button>
-                <Button
-                  variant={isFullscreen ? "default" : "outline"}
-                  size="sm"
-                  onClick={toggleFullscreen}
-                  className="h-7 sm:h-8 px-3 sm:px-2"
-                  title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
-                >
-                  {isFullscreen ? (
-                    <>
-                      <Minimize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
-                      <span className="text-xs sm:text-sm">Exit</span>
-                    </>
-                  ) : (
-                    <>
-                      <Maximize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
-                      <span className="text-xs sm:text-sm">
-                        <span className="hidden sm:inline">View Map</span>
-                        <span className="sm:hidden">Map</span>
-                      </span>
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </CardTitle>
-        </CardHeader>
+    <Card className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <MapIcon className="w-4 h-4 text-green-600 flex-shrink-0" />
+            <span className="text-sm font-semibold truncate">
+              {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
+            </span>
+            <Badge variant="outline" className="text-xs whitespace-nowrap ml-auto">
+              {project.controllers.length} Controllers • {totalZones} Zones
+            </Badge>
+          </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Essential control buttons only */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (mapInstanceRef.current) {
+                  const currentZoom = mapInstanceRef.current.getZoom();
+                  mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
+                }
+              }}
+              title="Zoom In"
+              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
+            >
+              <span className="text-sm sm:text-lg font-bold">+</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (mapInstanceRef.current) {
+                  const currentZoom = mapInstanceRef.current.getZoom();
+                  mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
+                }
+              }}
+              title="Zoom Out"
+              className="h-7 w-7 sm:h-8 sm:w-8 p-0"
+            >
+              <span className="text-sm sm:text-lg font-bold">-</span>
+            </Button>
+            <Button
+              variant={showUserLocation ? "default" : "outline"}
+              size="sm"
+              onClick={getUserLocation}
+              title="Show My Location"
+              className="h-7 sm:h-8 px-2"
+            >
+              <Navigation className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+              <span className="text-xs sm:text-sm">GPS</span>
+            </Button>
+            <Button
+              variant={isFullscreen ? "default" : "outline"}
+              size="sm"
+              onClick={toggleFullscreen}
+              className="h-7 sm:h-8 px-3 sm:px-2"
+              title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
+                  <span className="text-xs sm:text-sm">Exit</span>
+                </>
+              ) : (
+                <>
+                  <Maximize className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-1" />
+                  <span className="text-xs sm:text-sm">
+                    <span className="hidden sm:inline">View Map</span>
+                    <span className="sm:hidden">Map</span>
+                  </span>
+                </>
+              )}
+            </Button>
+          </div>
+        </CardTitle>
+      </CardHeader>
         <CardContent className={`${isFullscreen ? 'pt-2 pb-2' : 'pt-4'}`}>
           {/* Mobile-optimized Display Options - Collapsible in fullscreen */}
           <div className={`${isFullscreen ? 'mb-2 space-y-2' : 'mb-4 space-y-3'} ${isFullscreen ? 'hidden sm:block' : ''}`}>
@@ -1046,7 +1128,6 @@ export function ColorCodedMapViewer({
             </div>
           </div>
         </CardContent>
-      </Card>
-    </div>
+    </Card>
   );
 }
