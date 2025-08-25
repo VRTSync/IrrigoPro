@@ -282,8 +282,7 @@ export function CompactMapViewer({
       </div>
 
       {/* Compact display controls */}
-      {!isFullscreen && (
-        <div className="flex items-center gap-2 text-xs">
+      <div className="flex items-center gap-2 text-xs">
           <select 
             value={displayMode} 
             onChange={(e) => setDisplayMode(e.target.value as any)}
@@ -303,7 +302,6 @@ export function CompactMapViewer({
             <option value="large">Large</option>
           </select>
         </div>
-      )}
 
       {/* Map container */}
       <div 
@@ -343,7 +341,7 @@ export function CompactMapViewer({
       </div>
 
       {/* Compact controller list */}
-      {!isFullscreen && project.controllers.length > 0 && (
+      {project.controllers.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 text-xs">
           {project.controllers.slice(0, 6).map((controller) => {
             const isVisible = visibleControllers.has(controller.id);

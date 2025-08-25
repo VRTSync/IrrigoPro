@@ -913,8 +913,8 @@ export function ColorCodedMapViewer({
         </CardTitle>
       </CardHeader>
         <CardContent className={`${isFullscreen ? 'pt-2 pb-2' : 'pt-4'}`}>
-          {/* Mobile-optimized Display Options - Collapsible in fullscreen */}
-          <div className={`${isFullscreen ? 'mb-2 space-y-2' : 'mb-4 space-y-3'} ${isFullscreen ? 'hidden sm:block' : ''}`}>
+          {/* Mobile-optimized Display Options */}
+          <div className={`${isFullscreen ? 'mb-2 space-y-2' : 'mb-4 space-y-3'}`}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex items-center gap-2">
                 <label className="text-xs sm:text-sm font-medium flex-shrink-0">Display:</label>
@@ -1006,8 +1006,8 @@ export function ColorCodedMapViewer({
               </div>
             )}
           </div>
-          {/* Mobile-optimized Controller Legend & Controls - Collapsible in fullscreen */}
-          <div className={`${isFullscreen ? 'mb-2 hidden sm:block' : 'mb-4'}`}>
+          {/* Mobile-optimized Controller Legend & Controls */}
+          <div className={`${isFullscreen ? 'mb-2' : 'mb-4'}`}>
             <h4 className="font-medium text-gray-900 text-xs sm:text-base mb-1 sm:mb-3">Controllers:</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {project.controllers.map((controller) => {
