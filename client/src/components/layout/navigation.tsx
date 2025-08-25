@@ -34,12 +34,12 @@ export default function Navigation() {
     retry: false,
   });
 
-  // Determine which logo to use
-  const logoToUse = company?.logo 
+  // Company logo for banner (separate from navigation logo)
+  const companyLogoUrl = company?.logo 
     ? (company.logo.startsWith('http') 
         ? `${company.logo}?v=${Date.now()}` 
         : `/public-objects/company-logos/${company.logo}?v=${Date.now()}`)
-    : irrigoProLogo;
+    : null;
 
   // Define navigation items based on user role
   const getNavItems = () => {
@@ -127,8 +127,8 @@ export default function Navigation() {
               <Link href="/">
                 <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
                   <img 
-                    src={logoToUse} 
-                    alt="Company Logo"
+                    src={irrigoProLogo} 
+                    alt="IrrigoPro Logo"
                     className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
                   />
                 </div>
@@ -250,6 +250,21 @@ export default function Navigation() {
         </div>
       </nav>
 
+      {/* Company Logo Banner - Desktop */}
+      {companyLogoUrl && (
+        <div className="hidden lg:block bg-white border-b border-gray-200 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-center items-center py-3">
+              <img 
+                src={companyLogoUrl} 
+                alt="Company Logo"
+                className="h-16 w-auto object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Navigation - Bottom */}
       <div className="lg:hidden m-0 p-0">
         {/* Top Bar with Logo and Notifications */}
@@ -258,8 +273,8 @@ export default function Navigation() {
             {/* Logo */}
             <div className="flex items-center">
               <img 
-                src={logoToUse} 
-                alt="Company Logo"
+                src={irrigoProLogo} 
+                alt="IrrigoPro Logo"
                 className="h-10 w-auto"
               />
             </div>
@@ -310,6 +325,19 @@ export default function Navigation() {
             </div>
           </div>
         </div>
+
+        {/* Company Logo Banner - Mobile */}
+        {companyLogoUrl && (
+          <div className="bg-white border-b border-gray-200 shadow-sm">
+            <div className="flex justify-center items-center py-2 px-4">
+              <img 
+                src={companyLogoUrl} 
+                alt="Company Logo"
+                className="h-12 w-auto object-contain"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 mobile-nav-gradient border-t border-gray-100/50 shadow-xl z-50 pb-safe">
