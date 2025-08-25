@@ -834,109 +834,83 @@ export function ColorCodedMapViewer({
   const mapHeight = Math.max(500, project.controllers.length * 80 + 200);
   console.log(`Map height calculation: ${project.controllers.length} controllers = ${mapHeight}px`);
 
-  console.log("ColorCodedMapViewer rendering with", project.controllers.length, "controllers");
-
   return (
     <Card className={`${isFullscreen ? 'mobile-fullscreen-container fixed inset-0 z-50 bg-white p-2 sm:p-4 overflow-y-auto' : 'space-y-2'}`}>
-      {/* CRITICAL: Ultra-simple visible control bar */}
-      <div style={{
-        backgroundColor: '#3B82F6', 
-        color: 'white', 
-        padding: '16px', 
-        borderRadius: '8px',
-        marginBottom: '16px',
-        border: '2px solid #1E40AF',
-        fontSize: '16px',
-        fontWeight: 'bold'
-      }}>
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-          <span>SITE MAP CONTROLS - {project.controllers.length} Controllers</span>
-          <div style={{display: 'flex', gap: '8px'}}>
-            <button 
-              style={{
-                backgroundColor: 'white', 
-                color: '#3B82F6', 
-                padding: '8px 12px', 
-                border: 'none', 
-                borderRadius: '4px',
-                fontSize: '20px',
-                fontWeight: 'bold',
-                cursor: 'pointer'
-              }}
-              onClick={() => {
-                console.log("Zoom in clicked");
-                if (mapInstanceRef.current) {
-                  const currentZoom = mapInstanceRef.current.getZoom();
-                  mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
-                }
-              }}
-              title="Zoom In"
-            >
-              +
-            </button>
-            <button 
-              style={{
-                backgroundColor: 'white', 
-                color: '#3B82F6', 
-                padding: '8px 12px', 
-                border: 'none', 
-                borderRadius: '4px',
-                fontSize: '20px',
-                fontWeight: 'bold',
-                cursor: 'pointer'
-              }}
-              onClick={() => {
-                console.log("Zoom out clicked");
-                if (mapInstanceRef.current) {
-                  const currentZoom = mapInstanceRef.current.getZoom();
-                  mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
-                }
-              }}
-              title="Zoom Out"
-            >
-              -
-            </button>
-            <button 
-              style={{
-                backgroundColor: showUserLocation ? '#10B981' : 'white', 
-                color: showUserLocation ? 'white' : '#3B82F6', 
-                padding: '8px 12px', 
-                border: 'none', 
-                borderRadius: '4px',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                cursor: 'pointer'
-              }}
-              onClick={() => {
-                console.log("GPS clicked");
-                getUserLocation();
-              }}
-              title="Show My Location"
-            >
-              GPS
-            </button>
-            <button 
-              style={{
-                backgroundColor: isFullscreen ? '#EF4444' : 'white', 
-                color: isFullscreen ? 'white' : '#3B82F6', 
-                padding: '8px 12px', 
-                border: 'none', 
-                borderRadius: '4px',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                cursor: 'pointer'
-              }}
-              onClick={() => {
-                console.log("Fullscreen clicked");
-                toggleFullscreen();
-              }}
-              title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
-            >
-              {isFullscreen ? "Exit" : "Full"}
-            </button>
+      <CardHeader className="pb-4 space-y-4">
+        {/* Title and Badge Row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MapIcon className="w-5 h-5 text-green-600" />
+            <span className="text-lg font-semibold">
+              {isFullscreen ? 'Fullscreen Site Map' : 'Site Map View'}
+            </span>
           </div>
+          <Badge variant="outline" className="text-sm">
+            {project.controllers.length} Controllers • {totalZones} Zones
+          </Badge>
         </div>
-      </div>
+
+        {/* Control Buttons Row */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                const currentZoom = mapInstanceRef.current.getZoom();
+                mapInstanceRef.current.setZoom(Math.min(currentZoom + 2, 25));
+              }
+            }}
+            title="Zoom In"
+            className="h-9 w-9 p-0"
+          >
+            <span className="text-lg font-bold">+</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (mapInstanceRef.current) {
+                const currentZoom = mapInstanceRef.current.getZoom();
+                mapInstanceRef.current.setZoom(Math.max(currentZoom - 2, 1));
+              }
+            }}
+            title="Zoom Out"
+            className="h-9 w-9 p-0"
+          >
+            <span className="text-lg font-bold">-</span>
+          </Button>
+          <Button
+            variant={showUserLocation ? "default" : "outline"}
+            size="sm"
+            onClick={getUserLocation}
+            title="Show My Location"
+            className="h-9 px-3"
+          >
+            <Navigation className="w-4 h-4 mr-1" />
+            <span className="text-sm">GPS</span>
+          </Button>
+          <Button
+            variant={isFullscreen ? "default" : "outline"}
+            size="sm"
+            onClick={toggleFullscreen}
+            className="h-9 px-3"
+            title={isFullscreen ? "Exit Map View" : "View Map Fullscreen"}
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize className="w-4 h-4 mr-1" />
+                <span className="text-sm">Exit</span>
+              </>
+            ) : (
+              <>
+                <Maximize className="w-4 h-4 mr-1" />
+                <span className="text-sm">Fullscreen</span>
+              </>
+            )}
+          </Button>
+        </div>
+      </CardHeader>
         <CardContent className={`${isFullscreen ? 'pt-2 pb-2' : 'pt-4'}`}>
           {/* Mobile-optimized Display Options */}
           <div className={`${isFullscreen ? 'mb-2 space-y-2' : 'mb-4 space-y-3'}`}>
