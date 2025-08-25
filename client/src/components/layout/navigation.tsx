@@ -353,6 +353,19 @@ export default function Navigation() {
           </div>
         </div>
 
+        {/* Mobile Company Logo Banner */}
+        {companyLogoUrl && (
+          <div className="border-b border-gray-200 bg-gray-50">
+            <div className="flex justify-center items-center py-2 px-4">
+              <img 
+                src={signedLogoUrl || companyLogoUrl} 
+                alt="Company Logo"
+                className="h-12 w-auto object-contain"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Bottom Navigation Bar */}
         <div className="fixed bottom-0 left-0 right-0 mobile-nav-gradient border-t border-gray-100/50 shadow-xl z-50 pb-safe">
           <div className="relative py-3 px-4 pb-4">
