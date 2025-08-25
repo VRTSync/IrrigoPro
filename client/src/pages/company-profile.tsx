@@ -318,38 +318,15 @@ export default function CompanyProfile() {
                           size="sm"
                           onClick={async () => {
                             try {
+                              // Make the API call to remove logo
                               await apiRequest(`/api/company/${companyId}/logo-reset`, 'PUT');
                               
-                              // Immediately update UI optimistically
-                              queryClient.setQueryData([`/api/company/${companyId}/profile`], (oldData: any) => {
-                                return oldData ? { ...oldData, logo: null } : oldData;
-                              });
-                              
-                              // Clear ALL related caches
-                              queryClient.removeQueries({
-                                queryKey: [`/api/company/${companyId}/profile`]
-                              });
-                              
-                              // Invalidate all company queries to refresh navigation
-                              queryClient.invalidateQueries({ 
-                                queryKey: [`/api/company`] 
-                              });
-                              
-                              // Force refetch with no cache
-                              setTimeout(async () => {
-                                await queryClient.refetchQueries({
-                                  queryKey: [`/api/company/${companyId}/profile`],
-                                  type: 'active'
-                                });
-                              }, 100);
-
-                              toast({
-                                title: "Logo removed",
-                                description: "Company logo has been removed successfully",
-                              });
+                              // Clear all query cache and reload page for immediate update
+                              queryClient.clear();
+                              window.location.reload();
                             } catch (error) {
                               toast({
-                                title: "Error",
+                                title: "Error", 
                                 description: "Failed to remove logo. Please try again.",
                                 variant: "destructive",
                               });
