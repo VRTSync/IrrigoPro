@@ -46,9 +46,7 @@ export default function Navigation() {
     ? `${company.logo}${company.logo.includes('?') ? '&' : '?'}v=${Date.now()}` 
     : null;
 
-  // Debug log for company logo
-  console.log('Navigation - Company data:', company);
-  console.log('Navigation - Company logo URL:', companyLogoUrl);
+
 
   // Generate direct API URL for the company logo when company data changes
   useEffect(() => {
@@ -61,7 +59,7 @@ export default function Navigation() {
           // Use the direct API endpoint that serves the image binary
           const directUrl = `/api/company-logo/${logoId}`;
           setSignedLogoUrl(directUrl);
-          console.log('Navigation - Direct logo URL generated:', directUrl);
+
         }
       } else {
         setSignedLogoUrl(null);
@@ -289,8 +287,7 @@ export default function Navigation() {
                 src={signedLogoUrl || companyLogoUrl} 
                 alt="Company Logo"
                 className="h-16 w-auto object-contain"
-                onLoad={() => console.log('Desktop logo loaded successfully')}
-                onError={(e) => console.error('Desktop logo failed to load:', e)}
+
               />
             </div>
           </div>
