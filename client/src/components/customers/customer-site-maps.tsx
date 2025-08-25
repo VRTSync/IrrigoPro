@@ -162,23 +162,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     }
 
     try {
-      // Save controllers to database
-      // Get user role from localStorage to send as header
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const userRole = user.role;
-      
-      const response = await fetch(`/api/site-maps/${selectedProject.id}/controllers`, {
-        method: "POST",
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': userRole || 'field_tech', // Default fallback
-        },
-        body: JSON.stringify({ controllers: data.controllers }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to save controllers: ${response.statusText}`);
-      }
+      // Save controllers to database using proper authentication
+      await apiRequest(`/api/site-maps/${selectedProject.id}/controllers`, "POST", { controllers: data.controllers });
 
       // Refetch controllers data after upload
       queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/controllers`] });
@@ -240,23 +225,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
         controllerId: parseInt(controllerId)
       }));
 
-      // Save zones to database
-      // Get user role from localStorage to send as header
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const userRole = user.role;
-      
-      const response = await fetch(`/api/site-maps/${selectedProject.id}/zones`, {
-        method: "POST",
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': userRole || 'field_tech', // Default fallback
-        },
-        body: JSON.stringify({ zones: zonesWithController }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to save zones: ${response.statusText}`);
-      }
+      // Save zones to database using proper authentication
+      await apiRequest(`/api/site-maps/${selectedProject.id}/zones`, "POST", { zones: zonesWithController });
 
       // Refetch zones data after upload
       queryClient.invalidateQueries({ queryKey: [`/api/site-maps/${selectedProject.id}/zones`] });
@@ -302,27 +272,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   // Create site map mutation
   const createSiteMapMutation = useMutation({
     mutationFn: async (data: { name: string; description: string }) => {
-      // Get user role from localStorage to send as header
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const userRole = user.role;
-      
-      const response = await fetch(`/api/customers/${customer.id}/site-maps`, {
-        method: "POST",
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': userRole || 'field_tech', // Default fallback
-          'x-user-id': user.id?.toString() || '1', // Send user ID for company lookup
-        },
-        body: JSON.stringify(data),
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Site map creation error:", errorText);
-        throw new Error(`Failed to create site map: ${response.statusText}`);
-      }
-      
-      return response.json();
+      // Use the standard apiRequest function which handles authentication via session cookies
+      return await apiRequest(`/api/customers/${customer.id}/site-maps`, "POST", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/customers/${customer.id}/site-maps`] });
