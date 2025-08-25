@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Button } from "@/components/ui/button";
-import { Maximize, Minimize } from "lucide-react";
+import { Maximize, Minimize, Navigation, MapPin } from "lucide-react";
 
 interface ColoredZone {
   id: string;
@@ -44,6 +44,7 @@ export function MinimalMapViewer({
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showUserLocation, setShowUserLocation] = useState(false);
 
   // Calculate height based on controller count - more compact for mobile
   const mapHeight = Math.max(300, project.controllers.length * 40 + 100);
@@ -55,6 +56,47 @@ export function MinimalMapViewer({
         mapInstanceRef.current.invalidateSize();
       }
     }, 100);
+  };
+
+  const getUserLocation = () => {
+    if (!mapInstanceRef.current) return;
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const { latitude, longitude } = position.coords;
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.setView([latitude, longitude], 18);
+          setShowUserLocation(true);
+          
+          // Add user location marker
+          const userIcon = L.divIcon({
+            html: '<div style="background-color: #EF4444; width: 16px; height: 16px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" class="rounded-full animate-pulse"></div>',
+            className: 'user-location-icon',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+          });
+
+          L.marker([latitude, longitude], { icon: userIcon }).addTo(mapInstanceRef.current)
+            .bindPopup(`
+              <div class="p-2">
+                <div class="flex items-center gap-2 mb-2">
+                  <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                  <h3 class="font-bold text-red-600">Your Location</h3>
+                </div>
+                <p class="text-xs text-gray-600">
+                  <strong>Coordinates:</strong><br>
+                  ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+                </p>
+              </div>
+            `);
+        }
+      }, (error) => {
+        console.error("Location error:", error);
+        alert("Unable to get your location. Please check your location settings.");
+      });
+    } else {
+      alert("Geolocation is not supported by this browser.");
+    }
   };
 
   useEffect(() => {
@@ -257,6 +299,16 @@ export function MinimalMapViewer({
               <span className="text-lg font-bold">-</span>
             </Button>
             
+            <Button
+              variant={showUserLocation ? "default" : "outline"}
+              size="sm"
+              onClick={getUserLocation}
+              className="h-10 w-10 p-0 bg-white/95 hover:bg-white shadow-lg"
+              title="Show My Location"
+            >
+              <Navigation className="w-4 h-4" />
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
