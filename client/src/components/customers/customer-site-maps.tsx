@@ -12,7 +12,7 @@ import { ArrowLeft, MapPin, Upload, Eye, Edit, Trash2, Plus } from "lucide-react
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@shared/schema";
-import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
+import { CompactMapViewer } from "@/components/site-maps/compact-map-viewer";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";
 import { ZoneUpload } from "@/components/site-maps/zone-upload";
 import { ZonesDataView } from "@/components/site-maps/zones-data-view";
@@ -444,7 +444,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             <TabsContent value="maps" className="space-y-6 mt-6">
               {/* Mobile-optimized map container */}
               <div className="w-full h-[75vh] min-h-[500px] sm:h-[60vh] lg:h-[70vh] rounded-lg overflow-hidden border border-gray-200 bg-white shadow-sm">
-                <ColorCodedMapViewer 
+                <CompactMapViewer 
                   project={{
                     controllers: (project?.controllers || []).map(c => ({
                       id: c.id.toString(),
