@@ -139,28 +139,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ message: "Test route working", timestamp: Date.now() });
   });
 
-  // Serve public objects (including company logos) - USING API PREFIX TO AVOID VITE CATCH-ALL
-  app.get("/api/public-objects/:filePath(*)", async (req, res) => {
-    const filePath = req.params.filePath;
-    console.log(`[PUBLIC-OBJECTS] *** ROUTE CALLED *** Serving file: ${filePath}`);
-    console.log(`[PUBLIC-OBJECTS] Request URL: ${req.url}`);
-    console.log(`[PUBLIC-OBJECTS] Request headers: ${JSON.stringify(req.headers, null, 2)}`);
+  // Serve company logo images directly (binary response)
+  app.get("/api/company-logo/:logoId", async (req, res) => {
+    const logoId = req.params.logoId;
+    console.log(`[LOGO-SERVE] Serving logo directly: ${logoId}`);
     
-    const objectStorageService = new ObjectStorageService();
     try {
-      const file = await objectStorageService.searchPublicObject(filePath);
-      console.log(`[PUBLIC-OBJECTS] File found: ${file ? 'yes' : 'no'}`);
+      const objectStorageService = new ObjectStorageService();
+      
+      // Search for the file
+      const file = await objectStorageService.searchPublicObject(`company-logos/${logoId}`);
       
       if (!file) {
-        console.log(`[PUBLIC-OBJECTS] File not found: ${filePath}`);
-        return res.status(404).json({ error: "File not found" });
+        console.log(`[LOGO-SERVE] Logo file not found: ${logoId}`);
+        return res.status(404).json({ error: "Logo not found" });
       }
       
-      console.log(`[PUBLIC-OBJECTS] Downloading file: ${filePath}`);
+      console.log(`[LOGO-SERVE] Logo file found, downloading...`);
+      
+      // Serve the image directly
       objectStorageService.downloadObject(file, res);
+      
     } catch (error) {
-      console.error(`[PUBLIC-OBJECTS] Error serving ${filePath}:`, error);
-      return res.status(500).json({ error: "Internal server error" });
+      console.error(`[LOGO-SERVE] Error serving logo ${logoId}:`, error);
+      return res.status(500).json({ error: "Failed to serve logo" });
     }
   });
 

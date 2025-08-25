@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 
@@ -38,6 +38,9 @@ export default function Navigation() {
     refetchOnWindowFocus: true,
   });
 
+  // State for signed logo URL
+  const [signedLogoUrl, setSignedLogoUrl] = useState<string | null>(null);
+
   // Company logo for banner (separate from navigation logo)
   const companyLogoUrl = company?.logo && company.logo.trim() !== '' && company.logo !== 'null' 
     ? `${company.logo}${company.logo.includes('?') ? '&' : '?'}v=${Date.now()}` 
@@ -46,6 +49,27 @@ export default function Navigation() {
   // Debug log for company logo
   console.log('Navigation - Company data:', company);
   console.log('Navigation - Company logo URL:', companyLogoUrl);
+
+  // Generate direct API URL for the company logo when company data changes
+  useEffect(() => {
+    const generateDirectLogoUrl = () => {
+      if (company?.logo) {
+        // Extract logo ID from the stored logo URL
+        const logoIdMatch = company.logo.match(/company-logos\/([^?]+)/);
+        if (logoIdMatch) {
+          const logoId = logoIdMatch[1];
+          // Use the direct API endpoint that serves the image binary
+          const directUrl = `/api/company-logo/${logoId}`;
+          setSignedLogoUrl(directUrl);
+          console.log('Navigation - Direct logo URL generated:', directUrl);
+        }
+      } else {
+        setSignedLogoUrl(null);
+      }
+    };
+
+    generateDirectLogoUrl();
+  }, [company]);
 
   // Define navigation items based on user role
   const getNavItems = () => {
@@ -262,7 +286,7 @@ export default function Navigation() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-center items-center py-3">
               <img 
-                src={companyLogoUrl} 
+                src={signedLogoUrl || companyLogoUrl} 
                 alt="Company Logo"
                 className="h-16 w-auto object-contain"
                 onLoad={() => console.log('Desktop logo loaded successfully')}
@@ -348,7 +372,7 @@ export default function Navigation() {
           <div className="bg-white border-b border-gray-200 shadow-sm">
             <div className="flex justify-center items-center py-2 px-4">
               <img 
-                src={companyLogoUrl} 
+                src={signedLogoUrl || companyLogoUrl} 
                 alt="Company Logo"
                 className="h-12 w-auto object-contain"
                 onLoad={() => console.log('Mobile logo loaded successfully')}
