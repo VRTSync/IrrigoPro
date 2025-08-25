@@ -67,17 +67,46 @@ const createEstimateWithZonesSchema = z.object({
   }))
 });
 
-// Import authentication middleware
-import { 
-  authenticateToken, 
-  requireRole, 
-  requireCompanyAccess, 
-  requireAdminAccess, 
-  requireCompanyAdminAccess, 
-  requireWorkOrderBillingAccess,
-  developmentAuthFallback 
-} from './auth';
-import { configureSecurityMiddleware } from './security';
+// Middleware to check if user has company admin permissions for site map operations
+const requireCompanyAdminAccess = (req: Request, res: any, next: any) => {
+  // For now, we'll add a simple header check
+  // In a production app, this would check a proper session or JWT token
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole !== 'company_admin') {
+    return res.status(403).json({ 
+      message: "Access denied. Site map operations are restricted to company administrators only." 
+    });
+  }
+  
+  next();
+};
+
+// Middleware to check if user can edit/delete work orders and billing sheets
+const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole !== 'company_admin' && userRole !== 'billing_manager') {
+    return res.status(403).json({ 
+      message: "Access denied. Only company administrators and billing managers can edit or delete work orders and billing sheets." 
+    });
+  }
+  
+  next();
+};
+
+// Middleware to check if user has permission to view site maps (company admin only)
+const requireCompanyAdminViewAccess = (req: Request, res: any, next: any) => {
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole !== 'company_admin') {
+    return res.status(403).json({ 
+      message: "Access denied. Site map access is restricted to company administrators only." 
+    });
+  }
+  
+  next();
+};
 
 // QuickBooks access control middleware - irrigation managers and field techs cannot access QuickBooks
 const requireQuickBooksAccess = (req: Request, res: any, next: any) => {
@@ -101,11 +130,6 @@ import {
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Configure security middleware for production
-  configureSecurityMiddleware(app);
-  
-  // Authentication middleware - JWT tokens with development fallback
-  app.use(developmentAuthFallback);
   // Company routes
   app.get("/api/companies", async (req, res) => {
     try {
@@ -284,9 +308,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
       }
 
-      // Clear the logo - set to empty string, not null, for proper frontend handling
+      // Clear the logo
       const updatedCompany = await storage.updateCompany(companyId, { 
-        logo: "" 
+        logo: null 
       });
 
       if (!updatedCompany) {
@@ -294,8 +318,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json({ 
-        message: "Logo cleared successfully",
-        logo: ""
+        message: "Logo cleared successfully" 
       });
     } catch (error) {
       // Production error logging would go to monitoring service
@@ -1368,7 +1391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Customer site maps routes
   // Get all site maps (for overview display)
-  app.get("/api/site-maps", requireCompanyAdminAccess, async (req, res) => {
+  app.get("/api/site-maps", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const siteMaps = await storage.getAllSiteMaps();
       res.json(siteMaps);
@@ -1378,7 +1401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:customerId/site-maps", requireCompanyAdminAccess, async (req, res) => {
+  app.get("/api/customers/:customerId/site-maps", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
       const siteMaps = await storage.getCustomerSiteMaps(customerId);
@@ -1389,7 +1412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/controllers", requireCompanyAdminAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/controllers", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const controllers = await storage.getSiteMapControllers(siteMapId);
@@ -1400,7 +1423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/zones", requireCompanyAdminAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/zones", requireCompanyAdminViewAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const zones = await storage.getSiteMapZones(siteMapId);

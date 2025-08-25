@@ -29,11 +29,10 @@ import SystemUserManagement from "@/pages/system-user-management";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import UserProfile from "@/pages/user-profile";
-import SwitchUser from "@/pages/switch-user";
 import UserManager from "@/pages/UserManager";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
-
+import SwitchUser from "@/pages/switch-user";
 import CustomerProfile from "@/pages/customer-profile";
 import EstimateApproval from "@/pages/estimate-approval";
 
@@ -155,7 +154,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation user={user} />
+            <Navigation />
             <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={FieldTechDashboard} />
@@ -167,8 +166,8 @@ function Router() {
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
-                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/switch-user" component={SwitchUser} />
+                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -189,7 +188,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation user={user} />
+            <Navigation />
             <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={ManagerDashboard} />
@@ -201,8 +200,8 @@ function Router() {
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/billing-sheets" component={BillingSheets} />
-                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/switch-user" component={SwitchUser} />
+                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -223,7 +222,7 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation user={user} />
+            <Navigation />
             <div className="px-4 flex-1">
               <Switch>
                 <Route path="/" component={CustomerBilling} />
@@ -232,8 +231,8 @@ function Router() {
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
-                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/switch-user" component={SwitchUser} />
+                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -254,15 +253,15 @@ function Router() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-            <Navigation user={user} />
+            <Navigation />
             <div className="px-4 bg-gray-50 flex-1">
               <Switch>
                 <Route path="/" component={SuperAdminDashboard} />
                 <Route path="/super-admin" component={SuperAdminDashboard} />
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-manager" component={UserManager} />
-                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/switch-user" component={SwitchUser} />
+                <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
                 <Route path="/privacy-policy" component={PrivacyPolicy} />
                 <Route path="/login" component={Login} />
@@ -294,7 +293,7 @@ function Router() {
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>
         <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-          <Navigation user={user} />
+          <Navigation />
           <div className="px-4 bg-gray-50 flex-1">
             <Switch>
               <Route path="/" component={AdminDashboard} />
@@ -308,7 +307,6 @@ function Router() {
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
-              <Route path="/switch-user" component={SwitchUser} />
               <Route path="/license-agreement" component={LicenseAgreement} />
               <Route path="/privacy-policy" component={PrivacyPolicy} />
               <Route path="/login" component={Login} />

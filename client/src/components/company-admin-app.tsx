@@ -15,10 +15,9 @@ import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 
 import UserProfile from "@/pages/user-profile";
-import SwitchUser from "@/pages/switch-user";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
-
+import SwitchUser from "@/pages/switch-user";
 import Login from "@/pages/login";
 import ForgotPassword from "@/pages/forgot-password";
 import ResetPassword from "@/pages/reset-password";
@@ -103,13 +102,13 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
   // Regular company admin app
   return (
     <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-      <Navigation user={user} />
+      <Navigation />
       <div className="px-4 bg-gray-50 flex-1">
         <Switch>
           <Route path="/" component={AdminDashboard} />
           <Route path="/admin" component={AdminDashboard} />
           <Route path="/operations" component={Operations} />
-          <Route path="/team-management" component={CompanyUserManagement} />
+          <Route path="/users" component={CompanyUserManagement} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/quickbooks" component={QuickBooksPage} />
           <Route path="/parts" component={PartsCatalog} />
@@ -120,7 +119,6 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/user-profile" component={UserProfile} />
           <Route path="/switch-user" component={SwitchUser} />
-
           <Route path="/license-agreement" component={LicenseAgreement} />
           <Route path="/privacy-policy" component={PrivacyPolicy} />
           <Route path="/login" component={Login} />
