@@ -402,7 +402,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-4xl lg:max-w-6xl h-[95vh] max-h-[95vh] overflow-y-auto p-2 sm:p-4 lg:p-6">
+      <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
         <DialogHeader>
           <DialogTitle>
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
@@ -584,7 +584,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Add New Zone Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
                     <Select
                       value={newZoneForm.controllerId}
                       onValueChange={(value) => setNewZoneForm(prev => ({ ...prev, controllerId: value }))}
@@ -611,7 +611,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                       placeholder="Work Description"
                       value={newZoneForm.workDescription}
                       onChange={(e) => setNewZoneForm(prev => ({ ...prev, workDescription: e.target.value }))}
-                      className="col-span-1"
+                      className="col-span-1 sm:col-span-1"
                     />
 
                     <Button
@@ -643,7 +643,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-3">
-                          <div className="flex items-center justify-between">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <h4 className="font-medium">Parts Required</h4>
                             <Button
                               type="button"
@@ -652,6 +652,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                                 setSelectedZoneId(zone.id);
                                 setShowPartsModal(true);
                               }}
+                              className="w-full sm:w-auto"
                             >
                               <Plus className="w-4 h-4 mr-1" />
                               Add Parts
@@ -663,20 +664,20 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                           ) : (
                             <div className="space-y-2">
                               {zone.items.map((item) => (
-                                <div key={item.part.id} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                                  <div className="flex-1">
-                                    <p className="font-medium">{item.part.name}</p>
-                                    <p className="text-sm text-gray-600">{item.part.description}</p>
+                                <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium truncate">{item.part.name}</p>
+                                    <p className="text-sm text-gray-600 truncate">{item.part.description}</p>
                                   </div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-shrink-0">
                                     <Input
                                       type="number"
                                       min="1"
                                       value={item.quantity}
                                       onChange={(e) => updatePartQuantity(zone.id, item.part.id, parseInt(e.target.value) || 1)}
-                                      className="w-20"
+                                      className="w-16 sm:w-20"
                                     />
-                                    <span className="text-sm text-gray-600 w-16">${item.totalPrice.toFixed(2)}</span>
+                                    <span className="text-sm text-gray-600 min-w-[60px] text-right">${item.totalPrice.toFixed(2)}</span>
                                     <Button
                                       type="button"
                                       variant="destructive"
@@ -749,24 +750,24 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 </div>
 
                 {/* Estimate Summary */}
-                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                <div className="bg-gray-50 p-3 sm:p-4 rounded-lg space-y-2">
                   <h4 className="font-medium text-gray-900">Estimate Summary</h4>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Parts Subtotal:</span>
+                    <span className="text-gray-600 text-sm sm:text-base">Parts Subtotal:</span>
                     <span className="font-medium">${totals.partsSubtotal.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">
-                      Labor ({totals.totalLaborHours.toFixed(1)} hours @ ${form.getValues("laborRate")}/hr):
+                    <span className="text-gray-600 text-sm sm:text-base">
+                      Labor ({totals.totalLaborHours.toFixed(1)}h @ ${form.getValues("laborRate")}/hr):
                     </span>
                     <span className="font-medium">${totals.laborSubtotal.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Markup ({form.getValues("markupPercent")}%):</span>
+                    <span className="text-gray-600 text-sm sm:text-base">Markup ({form.getValues("markupPercent")}%):</span>
                     <span className="font-medium">${totals.markupAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Tax ({form.getValues("taxPercent")}%):</span>
+                    <span className="text-gray-600 text-sm sm:text-base">Tax ({form.getValues("taxPercent")}%):</span>
                     <span className="font-medium">${totals.taxAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-gray-300">
