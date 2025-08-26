@@ -32,7 +32,7 @@ export function EstimateSummary({ items, laborRate, markupPercent, taxPercent }:
   };
 
   return (
-    <Card className="bg-gray-50">
+    <Card className="w-full bg-gray-50">
       <CardHeader>
         <CardTitle className="text-lg font-medium text-gray-900">Estimate Summary</CardTitle>
       </CardHeader>

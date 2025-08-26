@@ -122,7 +122,7 @@ export function CustomerSelector({
 
   return (
     <>
-      <div className={`${hideLabel ? '' : 'space-y-2'} ${className}`}>
+      <div className={`w-full ${hideLabel ? '' : 'space-y-2'} ${className}`}>
         {!hideLabel && <Label>Customer *</Label>}
         
         {selectedCustomer ? (

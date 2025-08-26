@@ -11,7 +11,7 @@ interface LocationFieldsProps {
 
 export function LocationFields({ control, prefix = "" }: LocationFieldsProps) {
   return (
-    <div className="space-y-4">
+    <div className="w-full space-y-4">
       <div className="flex items-center space-x-2 mb-2">
         <MapPin className="w-4 h-4 text-blue-600" />
         <h3 className="text-sm font-medium text-gray-900">Location Information</h3>
