@@ -334,7 +334,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl">
-          <DialogHeader>
+          <DialogHeader className="w-full">
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
               Create New Estimate
@@ -345,16 +345,16 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
           </DialogHeader>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 sm:space-y-4 md:space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="w-full space-y-3 sm:space-y-4 md:space-y-6">
               {/* Step 1: Customer Selection */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <User className="w-5 h-5 text-blue-600" />
                     Step 1: Select Customer
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="w-full">
                   <CustomerSelector
                     selectedCustomer={selectedCustomer}
                     onSelectCustomer={handleCustomerSelect}
@@ -364,12 +364,12 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 2: Project Information */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader>
                   <CardTitle className="text-lg">Project Information</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+                <CardContent className="w-full space-y-4">
+                  <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4">
                     <FormField
                       control={form.control}
                       name="projectName"
@@ -407,12 +407,12 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 3: Contract Terms */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader>
                   <CardTitle className="text-lg">Contract Terms</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4">
+                <CardContent className="w-full space-y-4">
+                  <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4">
                     <FormField
                       control={form.control}
                       name="laborRate"
@@ -485,7 +485,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 4: Work Zones */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader>
                   <CardTitle className="text-lg">Work Zones</CardTitle>
                 </CardHeader>
@@ -505,7 +505,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 </div>
 
                 {zones.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="w-full space-y-4">
                     {zones.map((zone) => (
                       <Card key={zone.id} className="bg-gray-50">
                         <CardHeader className="pb-3">
@@ -572,7 +572,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         </CardHeader>
                         {zone.items.length > 0 && (
                           <CardContent className="pt-0">
-                            <div className="space-y-3">
+                            <div className="w-full space-y-3">
                               {zone.items.map((item) => (
                                 <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
                                   <div className="flex-1 min-w-0">
@@ -619,14 +619,14 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 5: Photos and Attachments */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Image className="w-5 h-5 text-blue-600" />
                     Photos & Attachments
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4 sm:space-y-6">
+                <CardContent className="w-full space-y-4 sm:space-y-6">
                   <div>
                     <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
                       <Image className="w-4 h-4" />
@@ -664,11 +664,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 6: Estimate Summary */}
-              <Card>
+              <Card className="w-full">
                 <CardHeader>
                   <CardTitle className="text-lg">Estimate Summary</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="w-full">
                   <EstimateSummary
                     items={zones.flatMap(zone => zone.items)}
                     laborRate={form.watch("laborRate")}
@@ -680,7 +680,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Action Buttons */}
               <Separator />
-              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4">
+              <div className="w-full flex flex-col-reverse sm:flex-row gap-3 pt-4">
                 <Button
                   type="button"
                   variant="outline"
