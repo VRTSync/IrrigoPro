@@ -185,7 +185,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
+      <DialogContent className="w-[95vw] max-w-4xl max-h-[95vh] overflow-hidden p-0 flex flex-col sm:max-w-3xl md:max-w-4xl">
         <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
           <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
             <FileText className="w-5 h-5" />
@@ -238,7 +238,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
             <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               <div className="space-y-4 sm:space-y-6">
             {/* Header Information */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center space-x-2">
@@ -324,7 +324,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     <p className="text-gray-900 mt-1">{estimate.projectDescription}</p>
                   </div>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div className="bg-blue-50 p-4 rounded-lg">
                     <div className="flex items-center space-x-2">
                       <DollarSign className="w-5 h-5 text-blue-600" />
@@ -373,7 +373,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                         {zone.description && (
                           <p className="text-gray-600 mb-3">{zone.description}</p>
                         )}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-sm">
                           <div>
                             <span className="font-medium text-gray-700">Labor Hours:</span>
                             <p>{zone.laborHours}h</p>
