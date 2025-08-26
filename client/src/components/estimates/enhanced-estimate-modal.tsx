@@ -402,7 +402,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-sm sm:max-w-2xl md:max-w-4xl lg:max-w-6xl max-h-[90vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
+      <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-4xl lg:max-w-6xl h-[95vh] max-h-[95vh] overflow-y-auto p-2 sm:p-4 lg:p-6">
         <DialogHeader>
           <DialogTitle>
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
