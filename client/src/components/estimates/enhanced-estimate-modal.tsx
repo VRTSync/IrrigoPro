@@ -108,7 +108,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       projectName: "",
       projectAddress: "",
       estimateDate: new Date().toISOString().split('T')[0],
-      createdBy: currentUser?.username || "Irrigation Manager",
+      createdBy: (currentUser as any)?.username || "Irrigation Manager",
       laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
