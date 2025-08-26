@@ -333,7 +333,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
+        <DialogContent className="w-screen max-w-screen sm:max-w-2xl md:max-w-4xl lg:max-w-5xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -345,7 +345,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
           </DialogHeader>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 sm:space-y-4 md:space-y-6">
               {/* Step 1: Customer Selection */}
               <Card>
                 <CardHeader>
@@ -369,7 +369,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <CardTitle className="text-lg">Project Information</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4">
                     <FormField
                       control={form.control}
                       name="projectName"
@@ -412,7 +412,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <CardTitle className="text-lg">Contract Terms</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4">
                     <FormField
                       control={form.control}
                       name="laborRate"
