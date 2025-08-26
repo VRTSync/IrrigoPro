@@ -236,7 +236,7 @@ export default function ManagerDashboard() {
         {/* Modals for Quick Creation */}
         <EnhancedEstimateModal
           open={showEstimateModal}
-          onOpenChange={(open: boolean) => {
+          onOpenChange={(open) => {
             setShowEstimateModal(open);
             if (!open) {
               // Refresh dashboard data when closed after successful creation
