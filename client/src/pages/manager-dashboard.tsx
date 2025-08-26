@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Wrench, Clock, CheckCircle, Receipt, Plus } from "lucide-react";
 import { useState } from "react";
-import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import type { Estimate, WorkOrder } from "@shared/schema";
@@ -234,7 +234,7 @@ export default function ManagerDashboard() {
         </div>
 
         {/* Modals for Quick Creation */}
-        <EstimateModal
+        <EnhancedEstimateModal
           open={showEstimateModal}
           onOpenChange={(open) => {
             setShowEstimateModal(open);
