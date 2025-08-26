@@ -123,8 +123,8 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
-// Production-ready middleware to check if user has permission to view site maps (company admin only)
-const requireCompanyAdminViewAccess = async (req: any, res: any, next: any) => {
+// Middleware to check if user has permission to view site maps (company admin and irrigation manager)
+const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
   try {
     // Production-ready authentication using session lookup
     let userId = req.headers['x-user-id'];
@@ -145,9 +145,9 @@ const requireCompanyAdminViewAccess = async (req: any, res: any, next: any) => {
       });
     }
     
-    if (userRole !== 'company_admin') {
+    if (userRole !== 'company_admin' && userRole !== 'irrigation_manager') {
       return res.status(403).json({ 
-        message: "Access denied. Site map access is restricted to company administrators only." 
+        message: "Access denied. Site map viewing is restricted to company administrators and irrigation managers only." 
       });
     }
     
@@ -1430,7 +1430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Customer site maps routes
   // Get all site maps (for overview display)
-  app.get("/api/site-maps", requireCompanyAdminViewAccess, async (req, res) => {
+  app.get("/api/site-maps", requireSiteMapViewAccess, async (req, res) => {
     try {
       const siteMaps = await storage.getAllSiteMaps();
       res.json(siteMaps);
@@ -1440,7 +1440,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:customerId/site-maps", requireCompanyAdminViewAccess, async (req, res) => {
+  app.get("/api/customers/:customerId/site-maps", requireSiteMapViewAccess, async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
       const siteMaps = await storage.getCustomerSiteMaps(customerId);
@@ -1451,7 +1451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/controllers", requireCompanyAdminViewAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/controllers", requireSiteMapViewAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const controllers = await storage.getSiteMapControllers(siteMapId);
@@ -1462,7 +1462,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/site-maps/:siteMapId/zones", requireCompanyAdminViewAccess, async (req, res) => {
+  app.get("/api/site-maps/:siteMapId/zones", requireSiteMapViewAccess, async (req, res) => {
     try {
       const siteMapId = parseInt(req.params.siteMapId);
       const zones = await storage.getSiteMapZones(siteMapId);

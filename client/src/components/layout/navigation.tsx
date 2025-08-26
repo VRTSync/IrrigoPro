@@ -108,7 +108,16 @@ export default function Navigation() {
         return [
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
-          { path: "/customers", label: "Customers", icon: Users },
+          { 
+            path: "/customers", 
+            label: "Customers", 
+            icon: Users, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/customers", label: "Customers", icon: Users },
+              { path: "/site-maps", label: "Maps", icon: MapIcon },
+            ]
+          },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { 
             path: "/parts", 
