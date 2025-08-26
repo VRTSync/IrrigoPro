@@ -234,7 +234,7 @@ export default function ManagerDashboard() {
         </div>
 
         {/* Modals for Quick Creation */}
-        <EnhancedEstimateModal
+        <EstimateModal
           open={showEstimateModal}
           onOpenChange={(open) => {
             setShowEstimateModal(open);

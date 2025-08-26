@@ -358,7 +358,7 @@ export default function Dashboard() {
       </div>
 
       {/* Estimate Modal */}
-      <EnhancedEstimateModal
+      <EstimateModal
         open={showEstimateModal}
         onOpenChange={setShowEstimateModal}
       />
