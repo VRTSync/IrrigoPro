@@ -108,7 +108,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       projectName: "",
       projectAddress: "",
       estimateDate: new Date().toISOString().split('T')[0],
-      createdBy: currentUser?.username || "Irrigation Manager",
+      createdBy: currentUser?.name || "Irrigation Manager",
       laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
@@ -136,7 +136,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         customerPhone: estimate.customerPhone || "",
         projectName: estimate.projectName,
         projectAddress: estimate.projectAddress || "",
-        estimateDate: estimate.estimateDate ? new Date(estimate.estimateDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        estimateDate: new Date(estimate.estimateDate).toISOString().split('T')[0],
         createdBy: estimate.createdBy,
         laborRate: parseFloat(estimate.laborRate),
         markupPercent: parseFloat(estimate.markupPercent),
@@ -144,14 +144,14 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       });
 
       // Convert estimate zones to our zone format
-      const estimateZones: EstimateZone[] = (estimate.zones || []).map((zone, index) => ({
+      const estimateZones: EstimateZone[] = estimate.zones.map((zone, index) => ({
         id: `zone-${index}`,
         controllerId: zone.controllerId,
         zoneNumber: zone.zoneNumber,
         zoneName: zone.zoneName,
         workDescription: zone.workDescription,
         clockInTime: zone.clockInTime || "",
-        items: (zone.items || []).map(item => ({
+        items: zone.items.map(item => ({
           part: {
             id: item.partId,
             name: item.partName,
