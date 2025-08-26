@@ -108,7 +108,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       projectName: "",
       projectAddress: "",
       estimateDate: new Date().toISOString().split('T')[0],
-      createdBy: (currentUser as any)?.username || "Irrigation Manager",
+      createdBy: currentUser?.name || "Irrigation Manager",
       laborRate: 45,
       markupPercent: 20,
       taxPercent: 8.25,
@@ -136,7 +136,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         customerPhone: estimate.customerPhone || "",
         projectName: estimate.projectName,
         projectAddress: estimate.projectAddress || "",
-        estimateDate: estimate.estimateDate ? new Date(estimate.estimateDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        estimateDate: new Date(estimate.estimateDate).toISOString().split('T')[0],
         createdBy: estimate.createdBy,
         laborRate: parseFloat(estimate.laborRate),
         markupPercent: parseFloat(estimate.markupPercent),
@@ -144,14 +144,14 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       });
 
       // Convert estimate zones to our zone format
-      const estimateZones: EstimateZone[] = (estimate.zones || []).map((zone, index) => ({
+      const estimateZones: EstimateZone[] = estimate.zones.map((zone, index) => ({
         id: `zone-${index}`,
         controllerId: zone.controllerId,
         zoneNumber: zone.zoneNumber,
         zoneName: zone.zoneName,
         workDescription: zone.workDescription,
         clockInTime: zone.clockInTime || "",
-        items: (zone.items || []).map(item => ({
+        items: zone.items.map(item => ({
           part: {
             id: item.partId,
             name: item.partName,
@@ -402,12 +402,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
-        <DialogHeader className="space-y-2">
-          <DialogTitle className="text-lg sm:text-xl">
+      <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-4xl lg:max-w-6xl h-[95vh] max-h-[95vh] overflow-y-auto p-2 sm:p-4 lg:p-6">
+        <DialogHeader>
+          <DialogTitle>
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
           </DialogTitle>
-          <DialogDescription className="text-sm sm:text-base">
+          <DialogDescription>
             {estimateId 
               ? "Modify estimate details and adjust zones with required parts" 
               : "Create a comprehensive estimate with zone-based work descriptions and parts selection"
@@ -416,12 +416,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             {/* Customer Selection */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <User className="w-4 h-4 sm:w-5 sm:h-5" />
+                <CardTitle className="flex items-center gap-2">
+                  <User className="w-5 h-5" />
                   Customer Information
                 </CardTitle>
               </CardHeader>
@@ -500,8 +500,8 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             {/* Project Details */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="w-5 h-5" />
                   Project Details
                 </CardTitle>
               </CardHeader>
@@ -580,11 +580,11 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             {selectedCustomer && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base sm:text-lg">Zone Selection & Work Description</CardTitle>
+                  <CardTitle>Zone Selection & Work Description</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Add New Zone Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
                     <Select
                       value={newZoneForm.controllerId}
                       onValueChange={(value) => setNewZoneForm(prev => ({ ...prev, controllerId: value }))}
@@ -628,14 +628,13 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                   {zones.map((zone) => (
                     <Card key={zone.id} className="border-l-4 border-l-blue-500">
                       <CardHeader>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
+                        <div className="flex items-center justify-between">
                           <CardTitle className="text-lg">{zone.zoneName}</CardTitle>
                           <Button
                             type="button"
                             variant="destructive"
                             size="sm"
                             onClick={() => removeZone(zone.id)}
-                            className="self-start sm:self-auto"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -664,12 +663,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                           ) : (
                             <div className="space-y-2">
                               {zone.items.map((item) => (
-                                <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-2 p-3 bg-gray-50 rounded">
+                                <div key={item.part.id} className="flex items-center justify-between p-3 bg-gray-50 rounded">
                                   <div className="flex-1">
                                     <p className="font-medium">{item.part.name}</p>
                                     <p className="text-sm text-gray-600">{item.part.description}</p>
                                   </div>
-                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-2">
+                                  <div className="flex items-center gap-2">
                                     <Input
                                       type="number"
                                       min="1"
@@ -677,7 +676,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                                       onChange={(e) => updatePartQuantity(zone.id, item.part.id, parseInt(e.target.value) || 1)}
                                       className="w-20"
                                     />
-                                    <span className="text-sm text-gray-600 min-w-[4rem] text-right sm:text-left">${item.totalPrice.toFixed(2)}</span>
+                                    <span className="text-sm text-gray-600 w-16">${item.totalPrice.toFixed(2)}</span>
                                     <Button
                                       type="button"
                                       variant="destructive"
@@ -702,10 +701,10 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             {/* Pricing */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base sm:text-lg">Pricing Details</CardTitle>
+                <CardTitle>Pricing Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <FormField
                     control={form.control}
                     name="laborRate"
