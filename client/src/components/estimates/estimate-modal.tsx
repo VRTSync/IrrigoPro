@@ -334,6 +334,12 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-5xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
+          {/* BIG RED BOX TO IDENTIFY CORRECT MODAL */}
+          <div className="bg-red-600 text-white text-center py-4 px-6 mb-4 rounded-lg border-4 border-red-800">
+            <h2 className="text-3xl font-bold">KEEP</h2>
+            <p className="text-lg">Traditional Step-by-Step Estimate Modal</p>
+          </div>
+          
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
