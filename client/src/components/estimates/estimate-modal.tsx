@@ -333,7 +333,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] max-w-5xl h-[95vh] max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-5xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -369,7 +369,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <CardTitle className="text-lg">Project Information</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="projectName"
@@ -412,7 +412,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <CardTitle className="text-lg">Contract Terms</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="laborRate"
@@ -517,7 +517,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                                 onChange={(e) => updateZone(zone.id, { zoneName: e.target.value })}
                                 className="font-medium"
                               />
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                                 <Select 
                                   value={zone.controllerId} 
                                   onValueChange={(value) => updateZone(zone.id, { controllerId: value })}
@@ -546,7 +546,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                                     setSelectedZoneId(zone.id);
                                     setShowPartsModal(true);
                                   }}
-                                  className="text-blue-600 hover:text-blue-700"
+                                  className="text-blue-600 hover:text-blue-700 w-full sm:w-auto"
                                 >
                                   <Plus className="w-4 h-4 mr-1" />
                                   Add Parts
@@ -572,47 +572,37 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         </CardHeader>
                         {zone.items.length > 0 && (
                           <CardContent className="pt-0">
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="border-b border-gray-200">
-                                    <th className="text-left py-2">Part</th>
-                                    <th className="text-left py-2">Qty</th>
-                                    <th className="text-left py-2">Labor</th>
-                                    <th className="text-left py-2">Total</th>
-                                    <th className="text-left py-2"></th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {zone.items.map((item) => (
-                                    <tr key={item.part.id} className="border-b border-gray-200">
-                                      <td className="py-2">{item.part.name}</td>
-                                      <td className="py-2">
-                                        <Input
-                                          type="number"
-                                          min="1"
-                                          value={item.quantity}
-                                          onChange={(e) => updateQuantity(zone.id, item.part.id, parseInt(e.target.value) || 0)}
-                                          className="w-16 text-center"
-                                        />
-                                      </td>
-                                      <td className="py-2">{item.totalLaborHours.toFixed(2)}h</td>
-                                      <td className="py-2 font-medium">{formatCurrency(item.totalPrice)}</td>
-                                      <td className="py-2">
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => removePart(zone.id, item.part.id)}
-                                          className="text-red-600 hover:text-red-700"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                            <div className="space-y-3">
+                              {zone.items.map((item) => (
+                                <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium truncate">{item.part.name}</p>
+                                    <p className="text-sm text-gray-600">{item.totalLaborHours.toFixed(2)}h labor</p>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <div className="flex items-center gap-2">
+                                      <label className="text-sm font-medium text-gray-600 sm:hidden">Qty:</label>
+                                      <Input
+                                        type="number"
+                                        min="1"
+                                        value={item.quantity}
+                                        onChange={(e) => updateQuantity(zone.id, item.part.id, parseInt(e.target.value) || 0)}
+                                        className="w-16 text-center"
+                                      />
+                                    </div>
+                                    <span className="font-medium min-w-[60px] text-right">{formatCurrency(item.totalPrice)}</span>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => removePart(zone.id, item.part.id)}
+                                      className="text-red-600 hover:text-red-700"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </CardContent>
                         )}
@@ -636,12 +626,14 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                     Photos & Attachments
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
+                <CardContent className="space-y-4 sm:space-y-6">
                   <div>
                     <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
                       <Image className="w-4 h-4" />
                       Site Photos
                     </h4>
+                    <div className="text-sm text-gray-600 mb-2">Add Photos</div>
+                    <div className="text-xs text-gray-500 mb-3">Accepted: JPG, PNG, GIF</div>
                     <FileUpload
                       type="photo"
                       label="Photos"
@@ -657,6 +649,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                       <Paperclip className="w-4 h-4" />
                       Landscape Plans & Documents
                     </h4>
+                    <div className="text-sm text-gray-600 mb-2">Add Attachments</div>
+                    <div className="text-xs text-gray-500 mb-3">Landscape plans, documents, etc.</div>
                     <FileUpload
                       type="attachment"
                       label="Attachments"
@@ -686,21 +680,21 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Action Buttons */}
               <Separator />
-              <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                <Button
-                  type="submit"
-                  disabled={createEstimateMutation.isPending}
-                  className="flex-1 bg-primary text-white hover:bg-blue-700"
-                >
-                  {createEstimateMutation.isPending ? "Creating..." : "Create Estimate"}
-                </Button>
+              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => onOpenChange(false)}
-                  className="flex-1"
+                  className="w-full sm:flex-1"
                 >
                   Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createEstimateMutation.isPending}
+                  className="w-full sm:flex-1 bg-primary text-white hover:bg-blue-700"
+                >
+                  {createEstimateMutation.isPending ? "Creating..." : "Create Estimate"}
                 </Button>
               </div>
             </form>
