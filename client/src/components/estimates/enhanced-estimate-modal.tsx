@@ -402,12 +402,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-6xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6 sm:max-w-4xl md:max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="space-y-2">
+          <DialogTitle className="text-lg sm:text-xl">
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-sm sm:text-base">
             {estimateId 
               ? "Modify estimate details and adjust zones with required parts" 
               : "Create a comprehensive estimate with zone-based work descriptions and parts selection"
@@ -416,12 +416,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
             {/* Customer Selection */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <User className="w-5 h-5" />
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <User className="w-4 h-4 sm:w-5 sm:h-5" />
                   Customer Information
                 </CardTitle>
               </CardHeader>
@@ -500,8 +500,8 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             {/* Project Details */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
                   Project Details
                 </CardTitle>
               </CardHeader>
@@ -580,7 +580,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             {selectedCustomer && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Zone Selection & Work Description</CardTitle>
+                  <CardTitle className="text-base sm:text-lg">Zone Selection & Work Description</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Add New Zone Form */}
@@ -702,7 +702,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             {/* Pricing */}
             <Card>
               <CardHeader>
-                <CardTitle>Pricing Details</CardTitle>
+                <CardTitle className="text-base sm:text-lg">Pricing Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
