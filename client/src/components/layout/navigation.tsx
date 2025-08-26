@@ -106,6 +106,7 @@ export default function Navigation() {
         ];
       case "irrigation_manager":
         return [
+          { path: "/estimates", label: "Estimates", icon: FileText },
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           { 
