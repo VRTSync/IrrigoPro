@@ -145,9 +145,9 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
       });
     }
     
-    if (userRole !== 'company_admin' && userRole !== 'irrigation_manager') {
+    if (userRole !== 'company_admin' && userRole !== 'irrigation_manager' && userRole !== 'field_tech') {
       return res.status(403).json({ 
-        message: "Access denied. Site map viewing is restricted to company administrators and irrigation managers only." 
+        message: "Access denied. Site map viewing is restricted to company administrators, irrigation managers, and field technicians only." 
       });
     }
     
