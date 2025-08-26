@@ -333,7 +333,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-5xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
+        <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -345,7 +345,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
           </DialogHeader>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
               {/* Step 1: Customer Selection */}
               <Card>
                 <CardHeader>
@@ -489,7 +489,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 <CardHeader>
                   <CardTitle className="text-lg">Work Zones</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3 sm:space-y-4">
                   {/* Zones Section */}
                   <div>
                 <div className="flex items-center justify-between mb-4">
