@@ -100,7 +100,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
             <div className="text-2xl font-bold">
               {validControllers.reduce((sum, c) => sum + (c?.stationCount || 0), 0)}
             </div>
-            <div className="text-sm text-muted-foreground">Total Stations</div>
+            <div className="text-sm text-muted-foreground">Total Zones</div>
           </CardContent>
         </Card>
       </div>
@@ -135,7 +135,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
                     {controller.model && <span>Model: {controller.model}</span>}
                     {controller.model && controller.serialNumber && <span> • </span>}
                     {controller.serialNumber && <span>Serial: {controller.serialNumber}</span>}
-                    <span> • {controller.stationCount || 0} stations</span>
+                    <span> • {controller.stationCount || 0} zones</span>
                   </div>
                 )}
               </CardHeader>
@@ -157,7 +157,7 @@ export function ZonesDataView({ controllers, onZoneClick, onControllerClick }: Z
                               <div className="font-medium">{zone.name || 'Unknown Zone'}</div>
                               {zone.stationNumber && (
                                 <div className="text-sm text-muted-foreground">
-                                  Station {zone.stationNumber}
+                                  Zone #{zone.stationNumber}
                                 </div>
                               )}
                             </div>

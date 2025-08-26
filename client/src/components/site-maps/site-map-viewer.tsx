@@ -75,7 +75,7 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
           <h3 class="font-bold text-blue-800 mb-2">${controller.name}</h3>
           ${controller.model ? `<p><strong>Model:</strong> ${controller.model}</p>` : ''}
           ${controller.serialNumber ? `<p><strong>Serial:</strong> ${controller.serialNumber}</p>` : ''}
-          <p><strong>Stations:</strong> ${controller.stationCount || 8}</p>
+          <p><strong>Zones:</strong> ${controller.stationCount || 8}</p>
           ${controller.description ? `<p class="text-sm text-gray-600 mt-2">${controller.description}</p>` : ''}
         </div>
       `;
@@ -124,7 +124,7 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
         <div class="p-2">
           <h3 class="font-bold text-green-800 mb-2">${zone.name}</h3>
           ${zone.controllerName ? `<p><strong>Controller:</strong> ${zone.controllerName}</p>` : ''}
-          ${zone.stationNumber ? `<p><strong>Station:</strong> ${zone.stationNumber}</p>` : ''}
+          ${zone.stationNumber ? `<p><strong>Zone #:</strong> ${zone.stationNumber}</p>` : ''}
           ${zone.zoneType ? `<p><strong>Type:</strong> ${zone.zoneType}</p>` : ''}
           ${zone.coverage ? `<p><strong>Coverage:</strong> ${zone.coverage}</p>` : ''}
           ${zone.description ? `<p class="text-sm text-gray-600 mt-2">${zone.description}</p>` : ''}
@@ -246,7 +246,7 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
                   {selectedController.serialNumber && (
                     <div><span className="font-medium">Serial:</span> {selectedController.serialNumber}</div>
                   )}
-                  <div><span className="font-medium">Stations:</span> {selectedController.stationCount || 8}</div>
+                  <div><span className="font-medium">Zones:</span> {selectedController.stationCount || 8}</div>
                   <div><span className="font-medium">Location:</span> {selectedController.latitude.toFixed(6)}, {selectedController.longitude.toFixed(6)}</div>
                 </div>
               </div>
@@ -263,7 +263,7 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
                     <div><span className="font-medium">Controller:</span> {selectedZone.controllerName}</div>
                   )}
                   {selectedZone.stationNumber && (
-                    <div><span className="font-medium">Station:</span> {selectedZone.stationNumber}</div>
+                    <div><span className="font-medium">Zone #:</span> {selectedZone.stationNumber}</div>
                   )}
                   {selectedZone.zoneType && (
                     <div><span className="font-medium">Type:</span> {selectedZone.zoneType}</div>

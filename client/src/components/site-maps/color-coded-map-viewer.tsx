@@ -424,7 +424,7 @@ export function ColorCodedMapViewer({
             L.marker([zoneLat, zoneLng], { icon: clusterIcon }).addTo(map).bindPopup(`
               <div class="p-2">
                 <h4 class="font-bold text-sm">${zone.name}</h4>
-                <p class="text-xs">Station: ${zone.stationNumber || 'N/A'}</p>
+                <p class="text-xs">Station #${zone.stationNumber || 'N/A'}</p>
                 <p class="text-xs">Type: ${zone.zoneType || 'Unknown'}</p>
               </div>
             `);
@@ -558,7 +558,7 @@ export function ColorCodedMapViewer({
               ${zone.stationNumber ? `
                 <div class="rounded-lg p-3 text-center border-2" style="background-color: ${zone.color}15; border-color: ${zone.color}30">
                   <div class="text-xl font-bold" style="color: ${zone.color}">#${zone.stationNumber}</div>
-                  <div class="text-xs text-gray-600 font-medium">STATION</div>
+                  <div class="text-xs text-gray-600 font-medium">ZONE</div>
                 </div>
               ` : ''}
               ${zone.zoneType ? `
@@ -582,7 +582,7 @@ export function ColorCodedMapViewer({
           </div>
           <div class="px-4 py-2 border-t" style="background-color: ${zone.color}08; border-color: ${zone.color}30">
             <div class="text-xs text-gray-600 text-center">
-              <span>Irrigation Zone</span>
+              <span>Irrigation Zone/Station</span>
             </div>
           </div>
         </div>

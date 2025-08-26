@@ -142,7 +142,7 @@ export function CompactMapViewer({
                 </div>
               </div>
               <div class="p-3">
-                <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${controller.color}08"><strong>Stations:</strong> ${controller.stationCount || 0}</div>
+                <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${controller.color}08"><strong>Zones:</strong> ${controller.stationCount || 0}</div>
               </div>
             </div>
           `);
@@ -164,7 +164,7 @@ export function CompactMapViewer({
                 </div>
               </div>
               <div class="p-3">
-                <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${controller.color}08"><strong>Stations:</strong> ${controller.stationCount || 0}</div>
+                <div class="text-sm text-gray-700 p-2 rounded" style="background-color: ${controller.color}08"><strong>Zones:</strong> ${controller.stationCount || 0}</div>
               </div>
             </div>
           `);

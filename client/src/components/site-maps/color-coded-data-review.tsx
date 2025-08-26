@@ -72,7 +72,7 @@ export function ColorCodedDataReview({ project }: ColorCodedDataReviewProps) {
                     <div className="text-sm text-gray-600 space-y-1 ml-7">
                       {controller.model && <div><strong>Model:</strong> {controller.model}</div>}
                       {controller.serialNumber && <div><strong>Serial:</strong> {controller.serialNumber}</div>}
-                      <div><strong>Stations:</strong> {controller.stationCount || 8}</div>
+                      <div><strong>Zones:</strong> {controller.stationCount || 8}</div>
                       <div className="text-xs text-gray-500">
                         <strong>Location:</strong> {controller.latitude.toFixed(6)}, {controller.longitude.toFixed(6)}
                       </div>
@@ -120,7 +120,7 @@ export function ColorCodedDataReview({ project }: ColorCodedDataReviewProps) {
                     </div>
                     <div className="text-sm text-gray-600 space-y-1 ml-7">
                       {controller && <div><strong>Controller:</strong> {controller.name}</div>}
-                      {zone.stationNumber && <div><strong>Station:</strong> {zone.stationNumber}</div>}
+                      {zone.stationNumber && <div><strong>Zone #:</strong> {zone.stationNumber}</div>}
                       {zone.zoneType && <div><strong>Type:</strong> {zone.zoneType}</div>}
                       {zone.coverage && <div><strong>Coverage:</strong> {zone.coverage}</div>}
                       <div className="text-xs text-gray-500">
