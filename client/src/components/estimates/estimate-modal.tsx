@@ -360,6 +360,70 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                     onSelectCustomer={handleCustomerSelect}
                     placeholder="Search and select a customer for this estimate..."
                   />
+                  
+                  {selectedCustomer && (
+                    <div className="w-full overflow-hidden">
+                      <div className="grid grid-cols-1 gap-3 sm:gap-4">
+                        <FormField
+                          control={form.control}
+                          name="customerName"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-sm">Customer Name</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  {...field} 
+                                  readOnly 
+                                  className="bg-gray-50 text-sm w-full min-w-0" 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                          <FormField
+                            control={form.control}
+                            name="customerEmail"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-sm">Email</FormLabel>
+                                <FormControl>
+                                  <Input 
+                                    {...field} 
+                                    readOnly 
+                                    className="bg-gray-50 text-sm w-full min-w-0" 
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          
+                          <FormField
+                            control={form.control}
+                            name="customerPhone"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-sm">Phone</FormLabel>
+                                <FormControl>
+                                  <Input 
+                                    {...field} 
+                                    readOnly 
+                                    className="bg-gray-50 text-sm w-full min-w-0" 
+                                    placeholder="No phone number"
+                                    value={field.value || ""} 
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
