@@ -1314,6 +1314,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/:id", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
+      
+      // Validate customer ID is a valid number
+      if (isNaN(customerId) || customerId <= 0) {
+        return res.status(400).json({ message: "Invalid customer ID" });
+      }
+      
       const customer = await storage.getCustomerById(customerId);
       
       if (!customer) {
@@ -1331,6 +1337,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/:id/billing", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
+      
+      // Validate customer ID is a valid number
+      if (isNaN(customerId) || customerId <= 0) {
+        return res.status(400).json({ message: "Invalid customer ID" });
+      }
       
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
