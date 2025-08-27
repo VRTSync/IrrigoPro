@@ -27,7 +27,7 @@ export function LocationFields({ control, prefix = "" }: LocationFieldsProps) {
               <Input 
                 {...field} 
                 placeholder="123 Main St, City, State 12345"
-                className="w-full"
+                className="w-full min-w-0"
               />
             </FormControl>
             <FormMessage />
@@ -45,7 +45,7 @@ export function LocationFields({ control, prefix = "" }: LocationFieldsProps) {
               <Textarea 
                 {...field} 
                 placeholder="Additional location information, landmarks, or special notes..."
-                className="w-full min-h-[80px]"
+                className="w-full min-w-0 min-h-[80px]"
               />
             </FormControl>
             <FormMessage />
@@ -66,7 +66,7 @@ export function LocationFields({ control, prefix = "" }: LocationFieldsProps) {
               <Textarea 
                 {...field} 
                 placeholder="How to access the property (gate codes, key location, contact info, etc.)"
-                className="w-full min-h-[80px]"
+                className="w-full min-w-0 min-h-[80px]"
               />
             </FormControl>
             <FormMessage />
