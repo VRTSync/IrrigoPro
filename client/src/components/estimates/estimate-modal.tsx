@@ -369,8 +369,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <CardTitle className="text-lg">Project Information</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="w-full overflow-hidden">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="projectName"
@@ -378,7 +377,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         <FormItem>
                           <FormLabel>Project Name *</FormLabel>
                           <FormControl>
-                            <Input placeholder="Sprinkler System Installation" {...field} className="w-full min-w-0" />
+                            <Input 
+                              {...field} 
+                              placeholder="e.g., Backyard Irrigation System" 
+                              className="text-sm w-full min-w-0" 
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -392,13 +395,17 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         <FormItem>
                           <FormLabel>Project Address</FormLabel>
                           <FormControl>
-                            <Input placeholder="123 Oak Street, Springfield, IL" {...field} value={field.value || ""} className="w-full min-w-0" />
+                            <Input 
+                              {...field} 
+                              placeholder="123 Oak Street, Springfield, IL" 
+                              value={field.value || ""} 
+                              className="text-sm w-full min-w-0" 
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    </div>
                   </div>
                   
                   <Separator />
@@ -414,8 +421,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                   <CardTitle className="text-lg">Contract Terms</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="w-full overflow-hidden">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="laborRate"
@@ -429,7 +435,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                               min="0" 
                               {...field} 
                               readOnly={!!selectedCustomer}
-                              className={`w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
+                              className={`text-sm w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
                             />
                           </FormControl>
                           <FormMessage />
@@ -450,7 +456,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                               min="0" 
                               {...field} 
                               readOnly={!!selectedCustomer}
-                              className={`w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
+                              className={`text-sm w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
                             />
                           </FormControl>
                           <FormMessage />
@@ -471,14 +477,13 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                               min="0" 
                               {...field} 
                               readOnly={!!selectedCustomer}
-                              className={`w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
+                              className={`text-sm w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    </div>
                   </div>
                   {selectedCustomer && (
                     <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-md">
