@@ -334,7 +334,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6 border-4 border-red-500">
-          <DialogHeader className="w-[98%] mx-auto">
+          <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
               Create New Estimate
@@ -345,33 +345,32 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
           </DialogHeader>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="w-[98%] mx-auto space-y-3 sm:space-y-4 md:space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               {/* Step 1: Customer Selection */}
-              <Card className="w-[98%] mx-auto">
+              <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <User className="w-5 h-5 text-blue-600" />
                     Step 1: Select Customer
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="w-[98%] mx-auto">
-                  <div className="w-[98%] mx-auto">
-                    <CustomerSelector
-                      selectedCustomer={selectedCustomer}
-                      onSelectCustomer={handleCustomerSelect}
-                      placeholder="Search and select a customer for this estimate..."
-                    />
-                  </div>
+                <CardContent className="space-y-4">
+                  <CustomerSelector
+                    selectedCustomer={selectedCustomer}
+                    onSelectCustomer={handleCustomerSelect}
+                    placeholder="Search and select a customer for this estimate..."
+                  />
                 </CardContent>
               </Card>
 
               {/* Step 2: Project Information */}
-              <Card className="w-[98%] mx-auto">
+              <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Project Information</CardTitle>
                 </CardHeader>
-                <CardContent className="w-[98%] mx-auto space-y-4">
-                  <div className="w-[98%] mx-auto grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+                <CardContent className="space-y-4">
+                  <div className="w-full overflow-hidden">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="projectName"
@@ -379,7 +378,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         <FormItem>
                           <FormLabel>Project Name *</FormLabel>
                           <FormControl>
-                            <Input placeholder="Sprinkler System Installation" {...field} />
+                            <Input placeholder="Sprinkler System Installation" {...field} className="w-full min-w-0" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -393,30 +392,30 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         <FormItem>
                           <FormLabel>Project Address</FormLabel>
                           <FormControl>
-                            <Input placeholder="123 Oak Street, Springfield, IL" {...field} value={field.value || ""} />
+                            <Input placeholder="123 Oak Street, Springfield, IL" {...field} value={field.value || ""} className="w-full min-w-0" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
+                    </div>
                   </div>
                   
                   <Separator />
                   
                   {/* Location Fields */}
-                  <div className="w-[98%] mx-auto">
-                    <LocationFields control={form.control} />
-                  </div>
+                  <LocationFields control={form.control} />
                 </CardContent>
               </Card>
 
               {/* Step 3: Contract Terms */}
-              <Card className="w-[98%] mx-auto">
+              <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Contract Terms</CardTitle>
                 </CardHeader>
-                <CardContent className="w-[98%] mx-auto space-y-4">
-                  <div className="w-[98%] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 md:gap-4">
+                <CardContent className="space-y-4">
+                  <div className="w-full overflow-hidden">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="laborRate"
@@ -430,7 +429,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                               min="0" 
                               {...field} 
                               readOnly={!!selectedCustomer}
-                              className={selectedCustomer ? "bg-gray-50" : ""}
+                              className={`w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
                             />
                           </FormControl>
                           <FormMessage />
@@ -451,7 +450,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                               min="0" 
                               {...field} 
                               readOnly={!!selectedCustomer}
-                              className={selectedCustomer ? "bg-gray-50" : ""}
+                              className={`w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
                             />
                           </FormControl>
                           <FormMessage />
@@ -472,13 +471,14 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                               min="0" 
                               {...field} 
                               readOnly={!!selectedCustomer}
-                              className={selectedCustomer ? "bg-gray-50" : ""}
+                              className={`w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
+                    </div>
                   </div>
                   {selectedCustomer && (
                     <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-md">
@@ -489,7 +489,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 4: Work Zones */}
-              <Card className="w-[98%] mx-auto">
+              <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Work Zones</CardTitle>
                 </CardHeader>
@@ -509,7 +509,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 </div>
 
                 {zones.length > 0 ? (
-                  <div className="w-[98%] mx-auto space-y-4">
+                  <div className="w-full space-y-4">
                     {zones.map((zone) => (
                       <Card key={zone.id} className="bg-gray-50">
                         <CardHeader className="pb-3">
@@ -576,7 +576,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         </CardHeader>
                         {zone.items.length > 0 && (
                           <CardContent className="pt-0">
-                            <div className="w-[98%] mx-auto space-y-3">
+                            <div className="w-full space-y-3">
                               {zone.items.map((item) => (
                                 <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
                                   <div className="flex-1 min-w-0">
@@ -623,7 +623,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 5: Photos and Attachments */}
-              <Card className="w-[98%] mx-auto">
+              <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Image className="w-5 h-5 text-blue-600" />
@@ -668,11 +668,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
               </Card>
 
               {/* Step 6: Estimate Summary */}
-              <Card className="w-[98%] mx-auto">
+              <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Estimate Summary</CardTitle>
                 </CardHeader>
-                <CardContent className="w-[98%] mx-auto">
+                <CardContent className="space-y-4">
                   <div className="w-[98%] mx-auto">
                     <EstimateSummary
                       items={zones.flatMap(zone => zone.items)}
@@ -686,7 +686,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Action Buttons */}
               <Separator />
-              <div className="w-[98%] mx-auto flex flex-col-reverse sm:flex-row gap-3 pt-4">
+              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4">
                 <Button
                   type="button"
                   variant="outline"
