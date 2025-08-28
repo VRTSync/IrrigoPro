@@ -2458,6 +2458,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/parts/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate part ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid part ID" });
+      }
+      
       const part = await storage.getPart(id);
       if (!part) {
         return res.status(404).json({ message: "Part not found" });
@@ -2484,6 +2490,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/parts/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate part ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid part ID" });
+      }
+      
       const partData = insertPartSchema.partial().parse(req.body);
       const part = await storage.updatePart(id, partData);
       if (!part) {
@@ -2491,6 +2503,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(part);
     } catch (error) {
+      console.error("Error updating part (PUT):", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid part data", errors: error.errors });
       }
@@ -2502,6 +2515,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/parts/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate part ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid part ID" });
+      }
+      
       const partData = insertPartSchema.partial().parse(req.body);
       const part = await storage.updatePart(id, partData);
       if (!part) {
@@ -2509,6 +2528,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(part);
     } catch (error) {
+      console.error("Error updating part (PATCH):", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid part data", errors: error.errors });
       }
@@ -2819,6 +2839,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/parts/:id/track-usage", async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
+      
+      // Validate part ID is a valid number
+      if (isNaN(partId) || partId <= 0) {
+        return res.status(400).json({ message: "Invalid part ID" });
+      }
+      
       const userCompanyId = req.headers['x-user-company-id'];
       const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
       await storage.trackPartUsage(companyId, partId);
@@ -2831,6 +2857,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/parts/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate part ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid part ID" });
+      }
+      
       const success = await storage.deletePart(id);
       if (!success) {
         return res.status(404).json({ message: "Part not found" });
