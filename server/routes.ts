@@ -2521,15 +2521,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid part ID" });
       }
       
+      console.log("PATCH /api/parts/:id - Request data:", {
+        id,
+        body: req.body,
+        bodyType: typeof req.body,
+        bodyKeys: Object.keys(req.body || {})
+      });
+      
       const partData = insertPartSchema.partial().parse(req.body);
+      console.log("PATCH /api/parts/:id - Parsed data:", partData);
+      
       const part = await storage.updatePart(id, partData);
       if (!part) {
         return res.status(404).json({ message: "Part not found" });
       }
+      
+      console.log("PATCH /api/parts/:id - Success:", { id, updatedPart: part });
       res.json(part);
     } catch (error) {
-      console.error("Error updating part (PATCH):", error);
+      console.error("Error updating part (PATCH):", {
+        error: error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorStack: error instanceof Error ? error.stack : undefined,
+        requestId: id,
+        requestBody: req.body
+      });
       if (error instanceof z.ZodError) {
+        console.error("Zod validation errors:", error.errors);
         return res.status(400).json({ message: "Invalid part data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to update part" });
