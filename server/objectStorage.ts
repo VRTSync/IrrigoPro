@@ -47,10 +47,8 @@ export class ObjectStorageService {
       )
     );
     if (paths.length === 0) {
-      throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
-      );
+      console.warn("PUBLIC_OBJECT_SEARCH_PATHS not set, object storage features will be disabled");
+      return [];
     }
     return paths;
   }
