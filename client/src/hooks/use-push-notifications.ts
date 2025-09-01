@@ -16,14 +16,14 @@ export function usePushNotifications(userId: number | undefined) {
   const { data: notificationCount } = useQuery<{ count: number }>({
     queryKey: ["/api/notifications", userId, "count"],
     enabled: !!userId,
-    refetchInterval: 10000, // Check every 10 seconds
+    refetchInterval: 60000, // Check every 60 seconds
   });
 
   // Get all notifications to check for new ones
   const { data: notifications, dataUpdatedAt } = useQuery<NotificationData[]>({
     queryKey: ["/api/notifications", userId],
     enabled: !!userId,
-    refetchInterval: 15000, // Check every 15 seconds
+    refetchInterval: 120000, // Check every 2 minutes
   });
 
   // Update badge count when notification count changes
