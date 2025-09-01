@@ -130,31 +130,56 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
     let authenticatedUserId = req.headers['x-user-id'];
     
     // If headers not available, try to get from session (production approach)
-    if (!authenticatedUserId && req.session?.userId) {
+    if (!authenticatedUserId && req.session && req.session.userId) {
       authenticatedUserId = req.session.userId;
-    }
-    
-    if (!authenticatedUserId) {
-      return res.status(401).json({ 
-        message: "Authentication required" 
-      });
     }
     
     // Get requested user ID from URL params
     const requestedUserId = req.params.userId;
     
+    // Validate that we have authentication data
+    if (!authenticatedUserId) {
+      console.log(`Authentication failed for notification access - no user ID found for request to user ${requestedUserId}`);
+      return res.status(401).json({ 
+        message: "Authentication required" 
+      });
+    }
+    
+    // Parse user IDs safely
+    const authUserId = parseInt(authenticatedUserId);
+    const reqUserId = parseInt(requestedUserId);
+    
+    // Validate that both IDs are valid numbers
+    if (isNaN(authUserId) || isNaN(reqUserId)) {
+      console.log(`Invalid user ID format - auth: ${authenticatedUserId}, requested: ${requestedUserId}`);
+      return res.status(400).json({ 
+        message: "Invalid user ID format" 
+      });
+    }
+    
     // Validate that the authenticated user matches the requested user
-    if (parseInt(authenticatedUserId) !== parseInt(requestedUserId)) {
+    if (authUserId !== reqUserId) {
+      console.log(`Access denied - user ${authUserId} tried to access notifications for user ${reqUserId}`);
       return res.status(403).json({ 
         message: "Access denied. You can only access your own notifications." 
       });
     }
     
     // Store authenticated user ID for use in route handler
-    req.authenticatedUserId = parseInt(authenticatedUserId);
+    req.authenticatedUserId = authUserId;
     next();
   } catch (error) {
-    console.error('Notification authentication error:', error);
+    console.error('Notification authentication error:', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      requestedUserId: req.params.userId,
+      hasSession: !!req.session,
+      sessionUserId: req.session?.userId,
+      headers: {
+        'x-user-id': req.headers['x-user-id'],
+        'x-user-role': req.headers['x-user-role']
+      }
+    });
     return res.status(500).json({ 
       message: "Authentication error" 
     });
@@ -170,30 +195,66 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     let userCompanyId = req.headers['x-user-company-id'];
     
     // If headers not available, try to get from session (production approach)
-    if (!userId && req.session?.userId) {
+    if (!userId && req.session && req.session.userId) {
       userId = req.session.userId;
       // Get user from database to verify role and company
-      const user = await storage.getUser(parseInt(userId));
-      if (user) {
-        userRole = user.role;
-        userCompanyId = user.companyId;
+      try {
+        const user = await storage.getUser(parseInt(userId));
+        if (user) {
+          userRole = user.role;
+          userCompanyId = user.companyId;
+        } else {
+          console.log(`User not found in database: ${userId}`);
+          return res.status(401).json({ 
+            message: "Invalid user session" 
+          });
+        }
+      } catch (dbError) {
+        console.error(`Database error during user lookup:`, dbError);
+        return res.status(500).json({ 
+          message: "Authentication error" 
+        });
       }
     }
     
     if (!userId || !userRole) {
+      console.log(`Authentication failed - missing data:`, {
+        hasUserId: !!userId,
+        hasUserRole: !!userRole,
+        hasSession: !!req.session,
+        sessionUserId: req.session?.userId
+      });
       return res.status(401).json({ 
         message: "Authentication required" 
       });
     }
     
+    // Validate user ID is a number
+    const parsedUserId = parseInt(userId);
+    if (isNaN(parsedUserId)) {
+      console.log(`Invalid user ID format: ${userId}`);
+      return res.status(400).json({ 
+        message: "Invalid user ID format" 
+      });
+    }
+    
     // Store authenticated user data for use in route handlers
-    req.authenticatedUserId = parseInt(userId);
+    req.authenticatedUserId = parsedUserId;
     req.authenticatedUserRole = userRole;
     req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId) : null;
     
     next();
   } catch (error) {
-    console.error('Authentication error:', error);
+    console.error('Authentication error:', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      hasSession: !!req.session,
+      sessionUserId: req.session?.userId,
+      headers: {
+        'x-user-id': req.headers['x-user-id'],
+        'x-user-role': req.headers['x-user-role']
+      }
+    });
     return res.status(500).json({ 
       message: "Authentication error" 
     });
