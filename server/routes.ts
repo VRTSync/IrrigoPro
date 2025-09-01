@@ -10,6 +10,9 @@ import { ObjectStorageService } from "./objectStorage";
 declare module 'express' {
   interface Request {
     session: any;
+    authenticatedUserId?: number;
+    authenticatedUserRole?: string;
+    authenticatedUserCompanyId?: number | null;
   }
 }
 import type { UploadedFile } from "express-fileupload";
@@ -33,9 +36,6 @@ import {
   insertAssemblyPartSchema
 } from "@shared/schema";
 import { z } from "zod";
-import { db } from "./db";
-import { companies } from "@shared/schema";
-import { eq } from "drizzle-orm";
 
 const createEstimateWithZonesSchema = z.object({
   estimate: insertEstimateSchema.extend({
@@ -2987,20 +2987,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
         } catch (error) {
           console.error(`Row ${i + 1} validation error:`, error);
-          // Only log partData if it exists to avoid ReferenceError
-          if (typeof partData !== 'undefined') {
-            console.error(`Row ${i + 1} data:`, partData);
-          }
           
           if (error instanceof z.ZodError) {
             // Provide detailed validation errors
             const errorMessages = error.errors.map(e => {
               const field = e.path.join('.');
-              return `${field}: ${e.message} (received: ${JSON.stringify(e.input)})`;
+              return `${field}: ${e.message}`;
             });
             results.errors.push({
               row: i + 1,
-              field: error.errors[0]?.path[0] || 'general',
+              field: String(error.errors[0]?.path[0] || 'general'),
               message: errorMessages.join(', ')
             });
           } else {
