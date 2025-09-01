@@ -194,13 +194,6 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     let userRole = req.headers['x-user-role'];
     let userCompanyId = req.headers['x-user-company-id'];
     
-    console.log('Authentication middleware headers:', {
-      userId,
-      userRole,
-      userCompanyId,
-      hasSession: !!req.session,
-      sessionUserId: req.session?.userId
-    });
     
     // If headers not available, try to get from session (production approach)
     if (!userId && req.session && req.session.userId) {
@@ -2643,6 +2636,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid part ID" });
       }
       
+      // Check role-based access for parts editing
+      const userRole = req.authenticatedUserRole;
+      const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
+      if (!allowedRoles.includes(userRole)) {
+        console.error(`PUT /api/parts/:id - Access denied. Role ${userRole} cannot edit parts`);
+        return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
+      }
+      
+      // Check if part exists and belongs to user's company
+      const existingPart = await storage.getPart(id);
+      if (!existingPart) {
+        return res.status(404).json({ message: "Part not found" });
+      }
+      
+      const authenticatedCompanyId = req.authenticatedUserCompanyId;
+      if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
+        return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+      }
+      
       const partData = insertPartSchema.partial().parse(req.body);
       const part = await storage.updatePart(id, partData);
       if (!part) {
@@ -2668,13 +2680,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid part ID" });
       }
       
-      console.log("PATCH /api/parts/:id - Request data:", {
-        id,
-        body: req.body,
-        bodyType: typeof req.body,
-        bodyKeys: Object.keys(req.body || {}),
-        timestamp: new Date().toISOString()
-      });
+      // Check role-based access for parts editing
+      const userRole = req.authenticatedUserRole;
+      const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
+      if (!allowedRoles.includes(userRole)) {
+        console.error(`PATCH /api/parts/:id - Access denied. Role ${userRole} cannot edit parts`);
+        return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
+      }
+      
       
       // Check if part exists before updating
       const existingPart = await storage.getPart(id);
