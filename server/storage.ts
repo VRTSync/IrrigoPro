@@ -2090,15 +2090,30 @@ export class DatabaseStorage implements IStorage {
 
   // Notification methods
   async getNotifications(userId: number): Promise<Notification[]> {
-    return await db.select().from(notifications)
-      .where(eq(notifications.userId, userId))
-      .orderBy(desc(notifications.createdAt));
+    try {
+      console.log(`Storage: getNotifications called for userId ${userId}`);
+      const results = await db.select().from(notifications)
+        .where(eq(notifications.userId, userId))
+        .orderBy(desc(notifications.createdAt));
+      console.log(`Storage: getNotifications returned ${results.length} notifications`);
+      return results;
+    } catch (error) {
+      console.error(`Storage: getNotifications failed for userId ${userId}:`, error);
+      throw error;
+    }
   }
 
   async getUnreadNotificationCount(userId: number): Promise<number> {
-    const results = await db.select().from(notifications)
-      .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
-    return results.length;
+    try {
+      console.log(`Storage: getUnreadNotificationCount called for userId ${userId}`);
+      const results = await db.select().from(notifications)
+        .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
+      console.log(`Storage: getUnreadNotificationCount returned ${results.length} unread notifications`);
+      return results.length;
+    } catch (error) {
+      console.error(`Storage: getUnreadNotificationCount failed for userId ${userId}:`, error);
+      throw error;
+    }
   }
 
   async createNotification(notification: InsertNotification): Promise<Notification> {

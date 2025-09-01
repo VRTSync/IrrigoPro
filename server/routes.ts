@@ -2525,14 +2525,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id,
         body: req.body,
         bodyType: typeof req.body,
-        bodyKeys: Object.keys(req.body || {})
+        bodyKeys: Object.keys(req.body || {}),
+        timestamp: new Date().toISOString()
       });
+      
+      // Check if part exists before updating
+      const existingPart = await storage.getPartById(id);
+      if (!existingPart) {
+        console.error(`PATCH /api/parts/:id - Part not found: ${id}`);
+        return res.status(404).json({ message: "Part not found" });
+      }
       
       const partData = insertPartSchema.partial().parse(req.body);
       console.log("PATCH /api/parts/:id - Parsed data:", partData);
       
       const part = await storage.updatePart(id, partData);
       if (!part) {
+        console.error(`PATCH /api/parts/:id - Update failed for part: ${id}`);
         return res.status(404).json({ message: "Part not found" });
       }
       
@@ -5446,10 +5455,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/notifications/:userId", async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
+      
+      // Validate userId
+      if (isNaN(userId) || userId <= 0) {
+        console.error(`Invalid userId provided: ${req.params.userId}`);
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+      
+      // Check if user exists
+      const user = await storage.getUserById(userId);
+      if (!user) {
+        console.error(`User not found: ${userId}`);
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      console.log(`Fetching notifications for user ${userId}`);
       const notifications = await storage.getNotifications(userId);
+      console.log(`Found ${notifications.length} notifications for user ${userId}`);
       res.json(notifications);
     } catch (error) {
-      console.error("Error fetching notifications:", error);
+      console.error("Error fetching notifications:", {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        userId: req.params.userId,
+        timestamp: new Date().toISOString()
+      });
       res.status(500).json({ message: "Failed to fetch notifications" });
     }
   });
@@ -5457,10 +5487,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/notifications/:userId/count", async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
+      
+      // Validate userId
+      if (isNaN(userId) || userId <= 0) {
+        console.error(`Invalid userId provided for count: ${req.params.userId}`);
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+      
+      // Check if user exists
+      const user = await storage.getUserById(userId);
+      if (!user) {
+        console.error(`User not found for count check: ${userId}`);
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      console.log(`Fetching notification count for user ${userId}`);
       const count = await storage.getUnreadNotificationCount(userId);
+      console.log(`Found ${count} unread notifications for user ${userId}`);
       res.json({ count });
     } catch (error) {
-      console.error("Error fetching notification count:", error);
+      console.error("Error fetching notification count:", {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        userId: req.params.userId,
+        timestamp: new Date().toISOString()
+      });
       res.status(500).json({ message: "Failed to fetch notification count" });
     }
   });
