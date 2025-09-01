@@ -2906,6 +2906,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/assemblies/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate assembly ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid assembly ID" });
+      }
+      
       const assembly = await storage.getAssembly(id);
       if (!assembly) {
         return res.status(404).json({ message: "Assembly not found" });
@@ -2939,6 +2945,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/assemblies/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate assembly ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid assembly ID" });
+      }
+      
       const { assembly: assemblyData, parts: partsData } = req.body;
       
       // Validate assembly data (partial update)
@@ -2966,6 +2978,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/assemblies/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate assembly ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid assembly ID" });
+      }
+      
       const success = await storage.deleteAssembly(id);
       if (!success) {
         return res.status(404).json({ message: "Assembly not found" });
@@ -3129,6 +3147,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/assemblies/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate assembly ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid assembly ID" });
+      }
+      
       const assembly = await storage.getAssembly(id);
       if (!assembly) {
         return res.status(404).json({ message: "Assembly not found" });
@@ -3186,6 +3210,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/assemblies/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate assembly ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid assembly ID" });
+      }
+      
       const success = await storage.deleteAssembly(id);
       if (!success) {
         return res.status(404).json({ message: "Assembly not found" });
@@ -4334,6 +4364,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/quickbooks/sync-estimate/:id", requireQuickBooksAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate estimate ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
         return res.status(404).json({ message: "Estimate not found" });
@@ -4404,6 +4439,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/estimates/:id/approve", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate estimate ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
       const estimate = await storage.updateEstimate(id, { 
         status: "approved", 
         approvedAt: new Date() 
@@ -4420,6 +4460,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/estimates/:id/reject", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate estimate ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
       const estimate = await storage.updateEstimate(id, { 
         status: "rejected", 
         rejectedAt: new Date() 
@@ -4437,6 +4482,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.patch("/api/estimates/:id/approve", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate estimate ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
         return res.status(404).json({ message: "Estimate not found" });
@@ -4460,6 +4510,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.patch("/api/estimates/:id/reject", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate estimate ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
         return res.status(404).json({ message: "Estimate not found" });
@@ -5177,6 +5232,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.patch("/api/work-orders/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const workOrderData = insertWorkOrderSchema.partial().parse(req.body);
       const workOrder = await storage.updateWorkOrder(id, workOrderData);
       if (!workOrder) {
@@ -5194,6 +5254,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.delete("/api/work-orders/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const success = await storage.deleteWorkOrder(id);
       if (!success) {
         return res.status(404).json({ message: "Work order not found" });
@@ -5208,6 +5273,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/work-orders/:id/items", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const items = await storage.getWorkOrderItems(workOrderId);
       res.json(items);
     } catch (error) {
@@ -5218,6 +5288,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/work-orders/:id/items", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const itemData = insertWorkOrderItemSchema.parse({
         ...req.body,
         workOrderId
@@ -5236,6 +5311,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/work-orders/:id/assign", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const { technicianId, technicianName } = req.body;
       
       const success = await storage.assignWorkOrder(workOrderId, technicianId, technicianName);
@@ -5268,6 +5348,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/billing-sheets/:id/items", async (req, res) => {
     try {
       const billingSheetId = parseInt(req.params.id);
+      
+      // Validate billing sheet ID is a valid number
+      if (isNaN(billingSheetId) || billingSheetId <= 0) {
+        return res.status(400).json({ message: "Invalid billing sheet ID" });
+      }
       const items = await storage.getBillingSheetItems(billingSheetId);
       res.json(items);
     } catch (error) {
@@ -5279,6 +5364,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const billingData = req.body;
       await storage.createBillingSheet(workOrderId, billingData);
       res.json({ message: "Billing sheet saved successfully" });
@@ -5290,6 +5380,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/work-orders/:id/billing-sheet", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
+      
+      // Validate work order ID is a valid number
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
       const billingSheet = await storage.getBillingSheetById(workOrderId);
       if (!billingSheet) {
         return res.status(404).json({ message: "Billing sheet not found" });
