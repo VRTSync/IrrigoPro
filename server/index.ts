@@ -115,17 +115,8 @@ app.use((req, res, next) => {
     process.exit(1);
   }
   
-  // Start server with error handling
-  server.listen({
-    port,
-    host: "0.0.0.0"
-    // Removed reusePort option as it's not supported in Cloud Run environment
-  }, (err?: Error) => {
-    if (err) {
-      console.error('Failed to start server:', err);
-      logger.error('Failed to start server', err, 'Server Startup', { port, host: '0.0.0.0' });
-      process.exit(1);
-    }
+  // Start server with simplified listen call
+  server.listen(port, "0.0.0.0", () => {
     console.log(`Server successfully started on port ${port}`);
     log(`serving on port ${port}`);
     logger.info(`Server listening on port ${port}`, 'Server Startup', { port, host: '0.0.0.0', environment: process.env.NODE_ENV });
