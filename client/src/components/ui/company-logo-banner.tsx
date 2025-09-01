@@ -5,17 +5,19 @@ interface CompanyLogoBannerProps {
 }
 
 export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
-  // Get current user from session API (production-safe)
+  // Always get current user from session first (production-safe)
   const { data: user } = useQuery<{ companyId: number }>({
     queryKey: ["/api/auth/user"],
     retry: false,
+    staleTime: 30000, // Cache for 30 seconds to reduce API calls
   });
 
-  // Fetch company profile to get company logo
+  // Fetch company profile using the authenticated user's company ID
   const { data: company } = useQuery({
     queryKey: [`/api/company/${user?.companyId}/profile`],
-    enabled: !!user?.companyId,
+    enabled: !!user?.companyId, // Only fetch when we have a valid company ID from session
     retry: false,
+    staleTime: 60000, // Cache company profile for 1 minute
   });
 
   if (!company?.logo) {

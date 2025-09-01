@@ -12,13 +12,24 @@ export async function apiRequest(
   method: string = "GET",
   data?: unknown | undefined,
 ): Promise<any> {
-  // Get current user role from localStorage for access control
-  const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
-    return savedUser ? JSON.parse(savedUser) : null;
+  // Always get current user from session, not localStorage
+  const getCurrentUser = async () => {
+    try {
+      const response = await fetch("/api/auth/user", {
+        credentials: "include"
+      });
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (error) {
+      // Fallback to localStorage for development/transition
+      const savedUser = localStorage.getItem("user");
+      return savedUser ? JSON.parse(savedUser) : null;
+    }
+    return null;
   };
   
-  const user = getCurrentUser();
+  const user = await getCurrentUser();
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
   
   // Add user headers if user is logged in
@@ -46,13 +57,24 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Get current user role from localStorage for access control
-    const getCurrentUser = () => {
-      const savedUser = localStorage.getItem("user");
-      return savedUser ? JSON.parse(savedUser) : null;
+    // Always get current user from session, not localStorage
+    const getCurrentUser = async () => {
+      try {
+        const response = await fetch("/api/auth/user", {
+          credentials: "include"
+        });
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (error) {
+        // Fallback to localStorage for development/transition
+        const savedUser = localStorage.getItem("user");
+        return savedUser ? JSON.parse(savedUser) : null;
+      }
+      return null;
     };
     
-    const user = getCurrentUser();
+    const user = await getCurrentUser();
     const headers: Record<string, string> = {};
     
     // Add user headers if user is logged in
