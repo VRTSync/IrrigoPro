@@ -123,6 +123,44 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
+// Authentication middleware for notifications - ensures users can only access their own notifications
+const requireNotificationAccess = async (req: any, res: any, next: any) => {
+  try {
+    // Get authenticated user ID
+    let authenticatedUserId = req.headers['x-user-id'];
+    
+    // If headers not available, try to get from session (production approach)
+    if (!authenticatedUserId && req.session?.userId) {
+      authenticatedUserId = req.session.userId;
+    }
+    
+    if (!authenticatedUserId) {
+      return res.status(401).json({ 
+        message: "Authentication required" 
+      });
+    }
+    
+    // Get requested user ID from URL params
+    const requestedUserId = req.params.userId;
+    
+    // Validate that the authenticated user matches the requested user
+    if (parseInt(authenticatedUserId) !== parseInt(requestedUserId)) {
+      return res.status(403).json({ 
+        message: "Access denied. You can only access your own notifications." 
+      });
+    }
+    
+    // Store authenticated user ID for use in route handler
+    req.authenticatedUserId = parseInt(authenticatedUserId);
+    next();
+  } catch (error) {
+    console.error('Notification authentication error:', error);
+    return res.status(500).json({ 
+      message: "Authentication error" 
+    });
+  }
+};
+
 // Middleware to check if user has permission to view site maps (company admin and irrigation manager)
 const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
   try {
@@ -5452,24 +5490,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   const httpServer = createServer(app);
   // Notification routes
-  app.get("/api/notifications/:userId", async (req, res) => {
+  app.get("/api/notifications/:userId", requireNotificationAccess, async (req, res) => {
     try {
-      const userId = parseInt(req.params.userId);
+      const userId = req.authenticatedUserId; // Use the validated user ID from middleware
       
-      // Validate userId
-      if (isNaN(userId) || userId <= 0) {
-        console.error(`Invalid userId provided: ${req.params.userId}`);
-        return res.status(400).json({ message: "Invalid user ID" });
-      }
-      
-      // Check if user exists
-      const user = await storage.getUserById(userId);
-      if (!user) {
-        console.error(`User not found: ${userId}`);
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      console.log(`Fetching notifications for user ${userId}`);
+      console.log(`Fetching notifications for authenticated user ${userId}`);
       const notifications = await storage.getNotifications(userId);
       console.log(`Found ${notifications.length} notifications for user ${userId}`);
       res.json(notifications);
@@ -5477,31 +5502,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.error("Error fetching notifications:", {
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
-        userId: req.params.userId,
+        userId: req.authenticatedUserId,
         timestamp: new Date().toISOString()
       });
       res.status(500).json({ message: "Failed to fetch notifications" });
     }
   });
 
-  app.get("/api/notifications/:userId/count", async (req, res) => {
+  app.get("/api/notifications/:userId/count", requireNotificationAccess, async (req, res) => {
     try {
-      const userId = parseInt(req.params.userId);
+      const userId = req.authenticatedUserId; // Use the validated user ID from middleware
       
-      // Validate userId
-      if (isNaN(userId) || userId <= 0) {
-        console.error(`Invalid userId provided for count: ${req.params.userId}`);
-        return res.status(400).json({ message: "Invalid user ID" });
-      }
-      
-      // Check if user exists
-      const user = await storage.getUserById(userId);
-      if (!user) {
-        console.error(`User not found for count check: ${userId}`);
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      console.log(`Fetching notification count for user ${userId}`);
+      console.log(`Fetching notification count for authenticated user ${userId}`);
       const count = await storage.getUnreadNotificationCount(userId);
       console.log(`Found ${count} unread notifications for user ${userId}`);
       res.json({ count });
@@ -5509,7 +5521,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.error("Error fetching notification count:", {
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
-        userId: req.params.userId,
+        userId: req.authenticatedUserId,
         timestamp: new Date().toISOString()
       });
       res.status(500).json({ message: "Failed to fetch notification count" });
