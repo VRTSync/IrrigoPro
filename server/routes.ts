@@ -408,15 +408,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company Profile Management (Company Admin only)
-  app.get("/api/company/:companyId/profile", async (req, res) => {
+  app.get("/api/company/:companyId/profile", requireAuthentication, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userRole = req.headers['x-user-role'];
-      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
 
-      // Only company admins can access their own company profile
-      if (userRole !== 'company_admin' || userCompanyId !== companyId) {
-        return res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+      // Allow company admins and irrigation managers to view their own company profile
+      const allowedRoles = ['company_admin', 'irrigation_manager'];
+      if (!allowedRoles.includes(userRole) || userCompanyId !== companyId) {
+        return res.status(403).json({ message: "Access denied. You can only view your own company profile." });
       }
 
       const company = await storage.getCompanyProfile(companyId);
