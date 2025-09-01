@@ -145,9 +145,18 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
 
   const updatePartMutation = useMutation({
     mutationFn: async (data: z.infer<typeof PartFormSchema>) => {
-      return await apiRequest(`/api/parts/${part?.id}`, "PATCH", data);
+      console.log("updatePartMutation.mutationFn called with:", { 
+        partId: part?.id, 
+        url: `/api/parts/${part?.id}`,
+        data 
+      });
+      
+      const result = await apiRequest(`/api/parts/${part?.id}`, "PATCH", data);
+      console.log("updatePartMutation.mutationFn result:", result);
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      console.log("updatePartMutation.onSuccess called with:", result);
       toast({
         title: "Part Updated",
         description: "Part has been updated successfully",
@@ -156,6 +165,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
       onOpenChange(false);
     },
     onError: (error: any) => {
+      console.error("updatePartMutation.onError called with:", error);
       toast({
         title: "Error",
         description: error.message || "Failed to update part",
@@ -165,6 +175,13 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   });
 
   const onSubmit = (data: z.infer<typeof PartFormSchema>) => {
+    console.log("Parts form onSubmit called", { 
+      hasPartForEdit: !!part, 
+      partId: part?.id,
+      formData: data,
+      formErrors: form.formState.errors
+    });
+    
     // Transform "none" values to null for optional fields
     const processedData = {
       ...data,
@@ -175,9 +192,13 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
       detail: data.detail === "none" ? null : data.detail,
     };
     
+    console.log("Parts form processed data:", processedData);
+    
     if (part) {
+      console.log("Calling updatePartMutation with:", { partId: part.id, data: processedData });
       updatePartMutation.mutate(processedData);
     } else {
+      console.log("Calling createPartMutation with:", processedData);
       createPartMutation.mutate(processedData);
     }
   };
