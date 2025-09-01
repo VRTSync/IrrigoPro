@@ -161,6 +161,45 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
   }
 };
 
+// General authentication middleware that validates user identity and role
+const requireAuthentication = async (req: any, res: any, next: any) => {
+  try {
+    // Get authenticated user ID and role
+    let userId = req.headers['x-user-id'];
+    let userRole = req.headers['x-user-role'];
+    let userCompanyId = req.headers['x-user-company-id'];
+    
+    // If headers not available, try to get from session (production approach)
+    if (!userId && req.session?.userId) {
+      userId = req.session.userId;
+      // Get user from database to verify role and company
+      const user = await storage.getUser(parseInt(userId));
+      if (user) {
+        userRole = user.role;
+        userCompanyId = user.companyId;
+      }
+    }
+    
+    if (!userId || !userRole) {
+      return res.status(401).json({ 
+        message: "Authentication required" 
+      });
+    }
+    
+    // Store authenticated user data for use in route handlers
+    req.authenticatedUserId = parseInt(userId);
+    req.authenticatedUserRole = userRole;
+    req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId) : null;
+    
+    next();
+  } catch (error) {
+    console.error('Authentication error:', error);
+    return res.status(500).json({ 
+      message: "Authentication error" 
+    });
+  }
+};
+
 // Middleware to check if user has permission to view site maps (company admin and irrigation manager)
 const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
   try {
@@ -2525,7 +2564,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/parts/:id", async (req, res) => {
+  app.put("/api/parts/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -2550,7 +2589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PATCH alias for PUT (frontend expects PATCH for partial updates)
-  app.patch("/api/parts/:id", async (req, res) => {
+  app.patch("/api/parts/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -2602,7 +2641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bulk import parts from CSV
-  app.post("/api/parts/bulk-import", async (req, res) => {
+  app.post("/api/parts/bulk-import", requireAuthentication, async (req, res) => {
     try {
       const { csvData, columnMappings } = req.body;
       console.log('Bulk import request:', { hasCSV: !!csvData, mappingsLength: columnMappings?.length, mappings: columnMappings });
