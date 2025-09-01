@@ -194,6 +194,14 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     let userRole = req.headers['x-user-role'];
     let userCompanyId = req.headers['x-user-company-id'];
     
+    console.log('Authentication middleware headers:', {
+      userId,
+      userRole,
+      userCompanyId,
+      hasSession: !!req.session,
+      sessionUserId: req.session?.userId
+    });
+    
     // If headers not available, try to get from session (production approach)
     if (!userId && req.session && req.session.userId) {
       userId = req.session.userId;
@@ -241,7 +249,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     // Store authenticated user data for use in route handlers
     req.authenticatedUserId = parsedUserId;
     req.authenticatedUserRole = userRole;
-    req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId) : null;
+    req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId.toString()) : null;
     
     next();
   } catch (error) {
@@ -2668,10 +2676,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       // Check if part exists before updating
-      const existingPart = await storage.getPartById(id);
+      const existingPart = await storage.getPart(id);
       if (!existingPart) {
         console.error(`PATCH /api/parts/:id - Part not found: ${id}`);
         return res.status(404).json({ message: "Part not found" });
+      }
+      
+      // Ensure the part belongs to the user's company
+      const authenticatedCompanyId = req.authenticatedUserCompanyId;
+      console.log("PATCH /api/parts/:id - User company ID:", authenticatedCompanyId, "Part company ID:", existingPart.companyId);
+      
+      // Only check company ownership if the user has a company (not null)
+      if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
+        console.error(`PATCH /api/parts/:id - Access denied. User company ${authenticatedCompanyId} cannot update part from company ${existingPart.companyId}`);
+        return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
       }
       
       const partData = insertPartSchema.partial().parse(req.body);
@@ -2690,7 +2708,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: error,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         errorStack: error instanceof Error ? error.stack : undefined,
-        requestId: id,
+        requestId: req.params.id,
         requestBody: req.body
       });
       if (error instanceof z.ZodError) {
