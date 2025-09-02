@@ -64,7 +64,7 @@ function Router() {
     // Clear stale cache on app startup
     clearStaleCache();
     
-    // Check for saved user in localStorage and force refresh
+    // Check for saved user in localStorage and validate session
     const refreshUserSession = async () => {
       const savedUser = localStorage.getItem("user");
       if (savedUser) {
@@ -72,40 +72,41 @@ function Router() {
           const userData = JSON.parse(savedUser);
           console.log("Found saved user:", userData);
           
-          // Force refresh user data from API
+          // First check session to ensure frontend/backend sync
           try {
-            const response = await fetch('/api/users', {
+            const sessionResponse = await fetch('/api/auth/user', {
               method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
               credentials: 'include'
             });
             
-            if (response.ok) {
-              try {
-                const users = await response.json();
-                const updatedUser = users.find((u: any) => u.username === userData.username);
-                if (updatedUser) {
-                  localStorage.setItem("user", JSON.stringify(updatedUser));
-                  setUser(updatedUser);
-                  console.log("Updated user session:", updatedUser);
-                } else {
-                  // If user not found with current username, clear session
-                  localStorage.removeItem("user");
-                  setUser(null);
-                }
-              } catch (jsonError) {
-                console.error("Error parsing user JSON response:", jsonError);
+            if (sessionResponse.ok) {
+              const sessionUser = await sessionResponse.json();
+              
+              // Check if session user matches localStorage user
+              if (sessionUser && sessionUser.id === userData.id) {
+                console.log("✅ Session and localStorage user match");
                 setUser(userData);
+                console.log("Updated user session:", userData);
+              } else if (sessionUser) {
+                console.log("⚠️ Session/localStorage mismatch. Using session user:", sessionUser);
+                localStorage.setItem("user", JSON.stringify(sessionUser));
+                setUser(sessionUser);
+              } else {
+                console.log("❌ No session user found, clearing localStorage");
+                localStorage.removeItem("user");
+                setUser(null);
               }
             } else {
-              console.warn(`User fetch failed with status: ${response.status}`);
-              setUser(userData);
+              // Session check failed, clear everything for fresh login
+              console.log("❌ Session validation failed, forcing relogin");
+              localStorage.removeItem("user");
+              setUser(null);
             }
-          } catch (apiError) {
-            console.error("Error fetching updated user:", apiError);
+          } catch (sessionError) {
+            console.error("Error validating session:", sessionError);
+            // Fall back to localStorage user if session check fails
             setUser(userData);
+            console.log("Updated user session:", userData);
           }
         } catch (error) {
           console.error("Error parsing user data:", error);
