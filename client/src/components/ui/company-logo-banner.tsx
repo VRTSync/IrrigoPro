@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import React from "react";
 
 interface CompanyLogoBannerProps {
   className?: string;
@@ -6,19 +7,53 @@ interface CompanyLogoBannerProps {
 
 export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
   // Always get current user from session first (production-safe)
-  const { data: user } = useQuery<{ companyId: number }>({
+  const { data: user } = useQuery<{ id: number, companyId: number, role: string }>({
     queryKey: ["/api/auth/user"],
     retry: false,
     staleTime: 30000, // Cache for 30 seconds to reduce API calls
   });
 
-  // Fetch company profile using the authenticated user's company ID
-  const { data: company } = useQuery({
+  // Fetch company profile using the authenticated user's company ID from session
+  const { data: company, error } = useQuery({
     queryKey: [`/api/company/${user?.companyId}/profile`],
-    enabled: !!user?.companyId, // Only fetch when we have a valid company ID from session
+    enabled: !!user?.companyId && !isNaN(user?.companyId), // Only fetch when we have a valid numeric company ID
     retry: false,
     staleTime: 60000, // Cache company profile for 1 minute
   });
+
+  // Force clear any cached queries with wrong company ID
+  React.useEffect(() => {
+    import('@/lib/queryClient').then(({ queryClient }) => {
+      // Always clear potentially stale company queries on mount
+      queryClient.removeQueries({ 
+        queryKey: ['/api/company/1/profile'] 
+      });
+      queryClient.removeQueries({ 
+        predicate: (query) => {
+          const key = Array.isArray(query.queryKey) ? query.queryKey[0] as string : '';
+          // Clear any company profile queries that don't match current user's company
+          if (key && key.includes('/api/company/') && key.includes('/profile')) {
+            const match = key.match(/\/api\/company\/(\d+)\/profile/);
+            if (match) {
+              const queryCompanyId = parseInt(match[1]);
+              return user?.companyId ? queryCompanyId !== user.companyId : queryCompanyId === 1;
+            }
+          }
+          return false;
+        }
+      });
+      
+      // Force invalidate auth user to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
+    });
+  }, [user?.companyId]);
+
+  // Debug logging to track the issue
+  console.log('CompanyLogoBanner - User from session:', { id: user?.id, companyId: user?.companyId, role: user?.role });
+  console.log('CompanyLogoBanner - Query URL would be:', `/api/company/${user?.companyId}/profile`);
+  if (error) {
+    console.error('CompanyLogoBanner - Company profile query error:', error);
+  }
 
   if (!company?.logo) {
     return (

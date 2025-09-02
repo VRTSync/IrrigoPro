@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Navigation from "@/components/layout/navigation";
+import { clearStaleCache } from "@/utils/clearStaleCache";
 import Dashboard from "@/pages/dashboard";
 import Estimates from "@/pages/estimates";
 import PartsCatalog from "@/pages/parts-catalog";
@@ -60,6 +61,9 @@ function Router() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Clear stale cache on app startup
+    clearStaleCache();
+    
     // Check for saved user in localStorage and force refresh
     const refreshUserSession = async () => {
       const savedUser = localStorage.getItem("user");
