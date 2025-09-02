@@ -671,8 +671,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined> {
-    const [updatedPart] = await db.update(parts).set(part).where(eq(parts.id, id)).returning();
-    return updatedPart || undefined;
+    try {
+      const [updatedPart] = await db.update(parts).set(part).where(eq(parts.id, id)).returning();
+      return updatedPart || undefined;
+    } catch (error) {
+      console.error(`Database error in updatePart for ID ${id}:`, error);
+      console.error(`Data being updated:`, part);
+      throw error; // Re-throw to let calling code handle it
+    }
   }
 
   async deletePart(id: number): Promise<boolean> {

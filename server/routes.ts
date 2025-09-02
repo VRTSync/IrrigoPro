@@ -2751,10 +2751,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
       }
       
-      // Parse and validate request data
+      // Parse and validate request data with proper type conversion for database
       let partData;
       try {
-        partData = insertPartSchema.partial().parse(req.body);
+        const rawData = req.body;
+        
+        // Convert numeric fields to strings for decimal database fields
+        const processedData = {
+          ...rawData,
+          price: rawData.price !== undefined ? Number(rawData.price).toFixed(2) : undefined,
+          cost: rawData.cost !== undefined ? Number(rawData.cost).toFixed(2) : undefined,
+          laborHours: rawData.laborHours !== undefined ? Number(rawData.laborHours).toFixed(2) : undefined,
+        };
+        
+        partData = insertPartSchema.partial().parse(processedData);
       } catch (validationError) {
         if (validationError instanceof z.ZodError) {
           console.error("PATCH /api/parts/:id - Zod validation errors:", validationError.errors);
@@ -2768,7 +2778,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         part = await storage.updatePart(id, partData);
       } catch (updateError) {
-        console.error(`PATCH /api/parts/:id - Database error during update:`, updateError);
+        console.error(`PATCH /api/parts/:id - Database error during update for part ${id}:`, {
+          error: updateError,
+          partData: partData,
+          userId: req.authenticatedUserId,
+          companyId: req.authenticatedUserCompanyId
+        });
+        
+        // Check if it's a constraint violation or data type error
+        const errorMessage = updateError instanceof Error ? updateError.message : String(updateError);
+        if (errorMessage.includes('constraint') || errorMessage.includes('violates') || errorMessage.includes('invalid input')) {
+          return res.status(400).json({ 
+            message: "Invalid data provided. Please check all fields and try again.",
+            details: errorMessage 
+          });
+        }
+        
         return res.status(500).json({ message: "Database error while updating part" });
       }
       
