@@ -2764,6 +2764,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborHours: rawData.laborHours !== undefined ? Number(rawData.laborHours).toFixed(2) : undefined,
         };
         
+        // Don't update companyId - it should stay with the existing part's company
+        delete processedData.companyId;
+        
         partData = insertPartSchema.partial().parse(processedData);
       } catch (validationError) {
         if (validationError instanceof z.ZodError) {
