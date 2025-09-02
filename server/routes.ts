@@ -195,17 +195,27 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     let userCompanyId = req.headers['x-user-company-id'];
     
     
-    // If headers not available, try to get from session (production approach)
-    if (!userId && req.session && req.session.userId) {
-      userId = req.session.userId;
-      // Get user from database to verify role and company
+    // Production: Use session as authoritative source, validate against headers
+    if (req.session && req.session.userId) {
+      // Get user from database for authoritative data
       try {
-        const user = await storage.getUser(parseInt(userId));
+        const user = await storage.getUser(parseInt(req.session.userId));
         if (user) {
+          // Use session data as authoritative source
+          userId = req.session.userId;
           userRole = user.role;
           userCompanyId = user.companyId;
+          
+          // Validate headers match session (security check)
+          const headerUserId = req.headers['x-user-id'];
+          if (headerUserId && parseInt(headerUserId) !== user.id) {
+            console.error(`Header/session mismatch: header ${headerUserId}, session ${user.id}`);
+            return res.status(401).json({ 
+              message: "Authentication mismatch" 
+            });
+          }
         } else {
-          console.log(`User not found in database: ${userId}`);
+          console.log(`User not found in database: ${req.session.userId}`);
           return res.status(401).json({ 
             message: "Invalid user session" 
           });
@@ -216,6 +226,14 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
           message: "Authentication error" 
         });
       }
+    } 
+    // Development fallback: Use headers if no session
+    else if (!userId) {
+      // No session and no headers - authentication required
+      console.log(`Authentication failed - no session or headers available`);
+      return res.status(401).json({ 
+        message: "Authentication required" 
+      });
     }
     
     if (!userId || !userRole) {

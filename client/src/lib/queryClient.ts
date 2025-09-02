@@ -12,27 +12,16 @@ export async function apiRequest(
   method: string = "GET",
   data?: unknown | undefined,
 ): Promise<any> {
-  // Always get current user from session, not localStorage
-  const getCurrentUser = async () => {
-    try {
-      const response = await fetch("/api/auth/user", {
-        credentials: "include"
-      });
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch (error) {
-      // Fallback to localStorage for development/transition
-      const savedUser = localStorage.getItem("user");
-      return savedUser ? JSON.parse(savedUser) : null;
-    }
-    return null;
+  // Use localStorage for headers but rely on session for actual auth
+  const getCurrentUser = () => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
   };
   
-  const user = await getCurrentUser();
+  const user = getCurrentUser();
   const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
   
-  // Add user headers if user is logged in
+  // Add user headers if user is logged in - server will validate against session
   if (user?.role) {
     headers["x-user-role"] = user.role;
     headers["x-user-id"] = user.id?.toString() || "";
@@ -57,27 +46,16 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Always get current user from session, not localStorage
-    const getCurrentUser = async () => {
-      try {
-        const response = await fetch("/api/auth/user", {
-          credentials: "include"
-        });
-        if (response.ok) {
-          return await response.json();
-        }
-      } catch (error) {
-        // Fallback to localStorage for development/transition
-        const savedUser = localStorage.getItem("user");
-        return savedUser ? JSON.parse(savedUser) : null;
-      }
-      return null;
+    // Use localStorage for headers but rely on session for actual auth
+    const getCurrentUser = () => {
+      const savedUser = localStorage.getItem("user");
+      return savedUser ? JSON.parse(savedUser) : null;
     };
     
-    const user = await getCurrentUser();
+    const user = getCurrentUser();
     const headers: Record<string, string> = {};
     
-    // Add user headers if user is logged in
+    // Add user headers if user is logged in - server will validate against session
     if (user?.role) {
       headers["x-user-role"] = user.role;
       headers["x-user-id"] = user.id?.toString() || "";
