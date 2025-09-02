@@ -72,42 +72,9 @@ function Router() {
           const userData = JSON.parse(savedUser);
           console.log("Found saved user:", userData);
           
-          // First check session to ensure frontend/backend sync
-          try {
-            const sessionResponse = await fetch('/api/auth/user', {
-              method: 'GET',
-              credentials: 'include'
-            });
-            
-            if (sessionResponse.ok) {
-              const sessionUser = await sessionResponse.json();
-              
-              // Check if session user matches localStorage user
-              if (sessionUser && sessionUser.id === userData.id) {
-                console.log("✅ Session and localStorage user match");
-                setUser(userData);
-                console.log("Updated user session:", userData);
-              } else if (sessionUser) {
-                console.log("⚠️ Session/localStorage mismatch. Using session user:", sessionUser);
-                localStorage.setItem("user", JSON.stringify(sessionUser));
-                setUser(sessionUser);
-              } else {
-                console.log("❌ No session user found, clearing localStorage");
-                localStorage.removeItem("user");
-                setUser(null);
-              }
-            } else {
-              // Session check failed, clear everything for fresh login
-              console.log("❌ Session validation failed, forcing relogin");
-              localStorage.removeItem("user");
-              setUser(null);
-            }
-          } catch (sessionError) {
-            console.error("Error validating session:", sessionError);
-            // Fall back to localStorage user if session check fails
-            setUser(userData);
-            console.log("Updated user session:", userData);
-          }
+          // Use localStorage user data directly - no session validation to avoid login loops
+          setUser(userData);
+          console.log("Updated user session:", userData);
         } catch (error) {
           console.error("Error parsing user data:", error);
           localStorage.removeItem("user");
