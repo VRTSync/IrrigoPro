@@ -2706,9 +2706,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
       }
       
+      // Check if part exists before updating - with explicit error handling
+      let existingPart;
+      try {
+        existingPart = await storage.getPart(id);
+      } catch (partLookupError) {
+        console.error(`PATCH /api/parts/:id - Database error during part lookup:`, partLookupError);
+        return res.status(500).json({ message: "Database error while checking part" });
+      }
       
-      // Check if part exists before updating
-      const existingPart = await storage.getPart(id);
       if (!existingPart) {
         console.error(`PATCH /api/parts/:id - Part not found: ${id}`);
         return res.status(404).json({ message: "Part not found" });
@@ -2724,30 +2730,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
       }
       
-      const partData = insertPartSchema.partial().parse(req.body);
-      console.log("PATCH /api/parts/:id - Parsed data:", partData);
+      // Parse and validate request data
+      let partData;
+      try {
+        partData = insertPartSchema.partial().parse(req.body);
+        console.log("PATCH /api/parts/:id - Parsed data:", partData);
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          console.error("PATCH /api/parts/:id - Zod validation errors:", validationError.errors);
+          return res.status(400).json({ message: "Invalid part data", errors: validationError.errors });
+        }
+        throw validationError; // Re-throw if not a Zod error
+      }
       
-      const part = await storage.updatePart(id, partData);
+      // Perform the update with explicit error handling
+      let part;
+      try {
+        part = await storage.updatePart(id, partData);
+      } catch (updateError) {
+        console.error(`PATCH /api/parts/:id - Database error during update:`, updateError);
+        return res.status(500).json({ message: "Database error while updating part" });
+      }
+      
       if (!part) {
         console.error(`PATCH /api/parts/:id - Update failed for part: ${id}`);
-        return res.status(404).json({ message: "Part not found" });
+        return res.status(404).json({ message: "Part not found after update" });
       }
       
       console.log("PATCH /api/parts/:id - Success:", { id, updatedPart: part });
       res.json(part);
     } catch (error) {
-      console.error("Error updating part (PATCH):", {
+      console.error("Error updating part (PATCH) - Unhandled exception:", {
         error: error,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         errorStack: error instanceof Error ? error.stack : undefined,
         requestId: req.params.id,
-        requestBody: req.body
+        requestBody: req.body,
+        authenticatedUserId: req.authenticatedUserId,
+        authenticatedUserRole: req.authenticatedUserRole,
+        authenticatedUserCompanyId: req.authenticatedUserCompanyId
       });
-      if (error instanceof z.ZodError) {
-        console.error("Zod validation errors:", error.errors);
-        return res.status(400).json({ message: "Invalid part data", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to update part" });
+      
+      // Fallback error response
+      res.status(500).json({ message: "Internal server error while updating part" });
     }
   });
 
