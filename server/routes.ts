@@ -197,6 +197,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     
     // Production: Use session as authoritative source when available
     if (req.session && req.session.userId) {
+      console.log(`Attempting session auth for user: ${req.session.userId}`);
       try {
         const user = await storage.getUser(parseInt(req.session.userId));
         if (user) {
@@ -204,36 +205,48 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
           userId = req.session.userId;
           userRole = user.role;
           userCompanyId = user.companyId;
-          console.log(`Using session auth: userId=${userId}, role=${userRole}, companyId=${userCompanyId}`);
+          console.log(`✅ Session auth successful: userId=${userId}, role=${userRole}, companyId=${userCompanyId}`);
         } else {
-          console.log(`User not found in database: ${req.session.userId}`);
+          console.log(`❌ User not found in database: ${req.session.userId}`);
           // Fall back to headers if session user not found
           if (!userId) {
             console.log('Session user not found, falling back to headers');
           }
         }
       } catch (dbError) {
-        console.error(`Database error during session user lookup:`, dbError);
+        console.error(`❌ Database error during session user lookup:`, dbError);
         // Fall back to headers if database error
         if (!userId) {
           console.log('Database error during session lookup, falling back to headers');
         }
       }
+    } else {
+      console.log('No session found, using headers');
     }
     
     // If session auth failed or unavailable, use headers (development/fallback)
     if (!userId && req.headers['x-user-id']) {
-      console.log('Using header-based authentication');
+      console.log('✅ Using header-based authentication as fallback');
       // Headers are already set above
     }
     
     // Final check - must have authentication
     if (!userId) {
-      console.log(`Authentication failed - no valid session or headers available`);
+      console.log(`❌ Authentication FAILED - no valid session or headers available`);
+      console.log('Request details:', {
+        hasSession: !!req.session,
+        sessionUserId: req.session?.userId,
+        hasUserIdHeader: !!req.headers['x-user-id'],
+        userIdHeader: req.headers['x-user-id'],
+        url: req.url,
+        method: req.method
+      });
       return res.status(401).json({ 
         message: "Authentication required" 
       });
     }
+    
+    console.log(`✅ Final auth success: userId=${userId}, role=${userRole}, companyId=${userCompanyId}`);
     
     if (!userId || !userRole) {
       console.log(`Authentication failed - missing data:`, {
