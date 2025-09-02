@@ -70,11 +70,8 @@ function Router() {
       if (savedUser) {
         try {
           const userData = JSON.parse(savedUser);
-          console.log("Found saved user:", userData);
-          
-          // Use localStorage user data directly - production compatible
+          // Production user session initialization
           setUser(userData);
-          console.log("Updated user session:", userData);
         } catch (error) {
           console.error("Error parsing user data:", error);
           localStorage.removeItem("user");

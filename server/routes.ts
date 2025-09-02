@@ -195,58 +195,31 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     let userCompanyId = req.headers['x-user-company-id'];
     
     
-    // Production: Use session as authoritative source when available
+    // Production session-based authentication
     if (req.session && req.session.userId) {
-      console.log(`Attempting session auth for user: ${req.session.userId}`);
       try {
         const user = await storage.getUser(parseInt(req.session.userId));
         if (user) {
-          // Use session data as authoritative source
           userId = req.session.userId;
           userRole = user.role;
           userCompanyId = user.companyId;
-          console.log(`✅ Session auth successful: userId=${userId}, role=${userRole}, companyId=${userCompanyId}`);
-        } else {
-          console.log(`❌ User not found in database: ${req.session.userId}`);
-          // Fall back to headers if session user not found
-          if (!userId) {
-            console.log('Session user not found, falling back to headers');
-          }
         }
       } catch (dbError) {
-        console.error(`❌ Database error during session user lookup:`, dbError);
-        // Fall back to headers if database error
-        if (!userId) {
-          console.log('Database error during session lookup, falling back to headers');
-        }
+        // Continue to header fallback on database error
       }
-    } else {
-      console.log('No session found, using headers');
     }
     
-    // If session auth failed or unavailable, use headers (development/fallback)
+    // Header fallback for development compatibility
     if (!userId && req.headers['x-user-id']) {
-      console.log('✅ Using header-based authentication as fallback');
       // Headers are already set above
     }
     
-    // Final check - must have authentication
+    // Authentication required
     if (!userId) {
-      console.log(`❌ Authentication FAILED - no valid session or headers available`);
-      console.log('Request details:', {
-        hasSession: !!req.session,
-        sessionUserId: req.session?.userId,
-        hasUserIdHeader: !!req.headers['x-user-id'],
-        userIdHeader: req.headers['x-user-id'],
-        url: req.url,
-        method: req.method
-      });
       return res.status(401).json({ 
         message: "Authentication required" 
       });
     }
-    
-    console.log(`✅ Final auth success: userId=${userId}, role=${userRole}, companyId=${userCompanyId}`);
     
     if (!userId || !userRole) {
       console.log(`Authentication failed - missing data:`, {
@@ -351,11 +324,6 @@ import {
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Test route for logo serving debugging
-  app.get("/api/test-logo", (req, res) => {
-    console.log("[TEST-LOGO] Route called successfully", req.headers['user-agent']);
-    res.json({ message: "Test route working", timestamp: Date.now() });
-  });
 
   // Serve company logo images directly (binary response)
   app.get("/api/company-logo/:logoId", async (req, res) => {
@@ -965,9 +933,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned" || wo.status === "in_progress").length;
         
         const allCustomers = await storage.getCustomers();
-        // For debugging: log actual customer data
-        console.log(`All customers found: ${allCustomers.length}`);
-        console.log(`Customer company IDs:`, allCustomers.map(c => ({ id: c.id, name: c.name, companyId: c.companyId })));
         
         // Include customers for this company OR customers with companyId 99 (QuickBooks sync default)
         // This handles cases where QuickBooks sync used a default company ID
@@ -2740,14 +2705,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH alias for PUT (frontend expects PATCH for partial updates)
   app.patch("/api/parts/:id", requireAuthentication, async (req, res) => {
     const partId = req.params.id;
-    console.log(`PATCH /api/parts/${partId} - Starting update request`);
-    console.log(`Authentication context:`, {
-      userId: req.authenticatedUserId,
-      role: req.authenticatedUserRole,
-      companyId: req.authenticatedUserCompanyId,
-      hasSession: !!req.session,
-      sessionUserId: req.session?.userId
-    });
     
     try {
       const id = parseInt(partId);
@@ -2782,7 +2739,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Ensure the part belongs to the user's company
       const authenticatedCompanyId = req.authenticatedUserCompanyId;
-      console.log("PATCH /api/parts/:id - User company ID:", authenticatedCompanyId, "Part company ID:", existingPart.companyId);
       
       // Only check company ownership if the user has a company (not null)
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
@@ -2794,7 +2750,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let partData;
       try {
         partData = insertPartSchema.partial().parse(req.body);
-        console.log("PATCH /api/parts/:id - Parsed data:", partData);
       } catch (validationError) {
         if (validationError instanceof z.ZodError) {
           console.error("PATCH /api/parts/:id - Zod validation errors:", validationError.errors);
@@ -2817,7 +2772,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Part not found after update" });
       }
       
-      console.log("PATCH /api/parts/:id - Success:", { id, updatedPart: part });
       res.json(part);
     } catch (error) {
       console.error("Error updating part (PATCH) - Unhandled exception:", {
@@ -4088,11 +4042,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (host?.includes('irrigopro.com')) {
         redirectUri = 'https://irrigopro.com/api/quickbooks/callback';
       } else {
-        // Use the development callback for all non-production environments
+        // Use development callback
         redirectUri = 'https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback';
       }
       
-      // For development apps, use the app/connect path
+      // QuickBooks OAuth URL
       const authUrl = `https://appcenter.intuit.com/app/connect/oauth2?` +
         `client_id=${process.env.QUICKBOOKS_CLIENT_ID}&` +
         `scope=com.intuit.quickbooks.accounting&` +
@@ -4101,7 +4055,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `access_type=offline&` +
         `state=${state}`;
       
-      console.log("Generated QuickBooks auth URL:", authUrl);
       res.json({ authUrl, state });
     } catch (error) {
       console.error("QuickBooks auth error:", error);
@@ -4395,7 +4348,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/quickbooks/sync-customers", requireQuickBooksAccess, async (req, res) => {
     try {
-      console.log("Starting QuickBooks customer sync...");
       
       // Get user's company ID
       const user = req.user as any;
@@ -4539,7 +4491,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // QuickBooks Parts Sync - Only irrigation-related items
   app.post('/api/quickbooks/sync-parts', async (req, res) => {
     try {
-      console.log('Starting QuickBooks parts sync...');
       
       const integration = await storage.getQuickBooksIntegration();
       if (!integration || !integration.accessToken) {
@@ -5725,9 +5676,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const userId = req.authenticatedUserId; // Use the validated user ID from middleware
       
-      console.log(`Fetching notifications for authenticated user ${userId}`);
       const notifications = await storage.getNotifications(userId);
-      console.log(`Found ${notifications.length} notifications for user ${userId}`);
       res.json(notifications);
     } catch (error) {
       console.error("Error fetching notifications:", {
@@ -5744,9 +5693,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const userId = req.authenticatedUserId; // Use the validated user ID from middleware
       
-      console.log(`Fetching notification count for authenticated user ${userId}`);
       const count = await storage.getUnreadNotificationCount(userId);
-      console.log(`Found ${count} unread notifications for user ${userId}`);
       res.json({ count });
     } catch (error) {
       console.error("Error fetching notification count:", {
