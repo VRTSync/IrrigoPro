@@ -1394,6 +1394,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get current authenticated user from session
+  app.get("/api/auth/user", async (req, res) => {
+    try {
+      // Check session for user ID
+      if (!req.session || !req.session.userId) {
+        return res.status(401).json({ 
+          message: "No active session" 
+        });
+      }
+      
+      // Get user from database
+      const user = await storage.getUser(parseInt(req.session.userId));
+      if (!user) {
+        return res.status(404).json({ 
+          message: "User not found" 
+        });
+      }
+      
+      // Return user data (excluding sensitive fields)
+      const { 
+        passwordResetToken, 
+        passwordResetExpires, 
+        emailVerificationToken,
+        mfaSecret,
+        mfaBackupCodes,
+        ...safeUserData 
+      } = user;
+      
+      res.json(safeUserData);
+    } catch (error) {
+      console.error('Auth user endpoint error:', error);
+      res.status(500).json({ 
+        message: "Failed to get user session" 
+      });
+    }
+  });
+
   // Email verification endpoint
   app.get("/api/auth/verify-email/:token", async (req, res) => {
     try {
