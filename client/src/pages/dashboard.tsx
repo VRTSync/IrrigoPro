@@ -44,11 +44,19 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard/stats"],
   });
 
-  // Get current user info from session API (production-safe)
-  const { data: user } = useQuery<{ companyId: number }>({
-    queryKey: ["/api/auth/user"],
-    retry: false,
-  });
+  // Get user from localStorage (production-compatible)  
+  const [user, setUser] = useState<{ companyId: number } | null>(null);
+  
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
+  }, []);
 
   // Fetch company profile to get company info
   const { data: company } = useQuery({

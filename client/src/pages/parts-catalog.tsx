@@ -939,11 +939,19 @@ export default function PartsCatalog() {
   
   const { toast } = useToast();
 
-  // Get current user from API (production-safe)
-  const { data: currentUser } = useQuery({
-    queryKey: ["/api/auth/user"],
-    retry: false,
-  });
+  // Get user from localStorage (production-compatible)
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        setCurrentUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
+  }, []);
   
   const userRole = currentUser?.role || "";
   const canImport = userRole === "company_admin" || userRole === "super_admin";

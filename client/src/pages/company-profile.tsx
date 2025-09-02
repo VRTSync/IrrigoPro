@@ -402,8 +402,7 @@ export default function CompanyProfile() {
                               }
                             });
 
-                            // Invalidate auth user query for consistent state
-                            await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+                            // Auth user query removed for production compatibility
 
                             // Refetch current data to ensure UI updates
                             await queryClient.refetchQueries({ 

@@ -1,17 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 interface CompanyLogoBannerProps {
   className?: string;
 }
 
 export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
-  // Always get current user from session first (production-safe)
-  const { data: user } = useQuery<{ id: number, companyId: number, role: string }>({
-    queryKey: ["/api/auth/user"],
-    retry: false,
-    staleTime: 30000, // Cache for 30 seconds to reduce API calls
-  });
+  // Get user from localStorage (production-compatible)
+  const [user, setUser] = useState<{ id: number, companyId: number, role: string } | null>(null);
+  
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
+  }, []);
 
   // Fetch company profile using the authenticated user's company ID from session
   const { data: company, error } = useQuery({
@@ -43,8 +51,7 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
         }
       });
       
-      // Force invalidate auth user to ensure fresh data
-      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
+      // Auth user query removed for production compatibility
     });
   }, [user?.companyId]);
 

@@ -42,11 +42,21 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Get current user from API (production-safe)
-  const { data: currentUser, isLoading: isLoadingUser } = useQuery<User>({
-    queryKey: ["/api/auth/user"],
-    retry: false,
-  });
+  // Get user from localStorage (production-compatible)
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
+  
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        setCurrentUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
+    setIsLoadingUser(false);
+  }, []);
 
   const companyId = currentUser?.companyId;
 

@@ -80,11 +80,19 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // Get current user from API (production-safe)
-  const { data: currentUser } = useQuery({
-    queryKey: ["/api/auth/user"],
-    retry: false,
-  });
+  // Get user from localStorage (production-compatible)
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        setCurrentUser(JSON.parse(savedUser));
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+      }
+    }
+  }, []);
 
   // Fetch estimate data for editing
   const { data: estimate, isLoading: isLoadingEstimate } = useQuery<EstimateWithZones>({
