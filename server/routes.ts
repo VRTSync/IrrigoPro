@@ -2738,15 +2738,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!existingPart) {
-        if (id === 393) {
-          console.log(`[PART-393-DEBUG] Part 393 not found in database`);
-        }
         console.error(`PATCH /api/parts/:id - Part not found: ${id}`);
         return res.status(404).json({ message: "Part not found" });
-      }
-      
-      if (id === 393) {
-        console.log(`[PART-393-DEBUG] Found part 393 - companyId: ${existingPart.companyId}, user company: ${req.authenticatedUserCompanyId}`);
       }
       
       // Ensure the part belongs to the user's company
@@ -2754,15 +2747,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Only check company ownership if the user has a company (not null)
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
-        if (id === 393) {
-          console.log(`[PART-393-DEBUG] Company mismatch - user: ${authenticatedCompanyId}, part: ${existingPart.companyId}`);
-        }
         console.error(`PATCH /api/parts/:id - Access denied. User company ${authenticatedCompanyId} cannot update part from company ${existingPart.companyId}`);
         return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
-      }
-      
-      if (id === 393) {
-        console.log(`[PART-393-DEBUG] Company access OK - proceeding with update`);
       }
       
       // Parse and validate request data

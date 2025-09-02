@@ -55,12 +55,6 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
     });
   }, [user?.companyId]);
 
-  // Debug logging to track the issue
-  console.log('CompanyLogoBanner - User from session:', { id: user?.id, companyId: user?.companyId, role: user?.role });
-  console.log('CompanyLogoBanner - Query URL would be:', `/api/company/${user?.companyId}/profile`);
-  if (error) {
-    console.error('CompanyLogoBanner - Company profile query error:', error);
-  }
 
   if (!company?.logo) {
     return (
