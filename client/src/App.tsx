@@ -72,7 +72,7 @@ function Router() {
           const userData = JSON.parse(savedUser);
           console.log("Found saved user:", userData);
           
-          // Use localStorage user data directly - no session validation to avoid login loops
+          // Use localStorage user data directly - production compatible
           setUser(userData);
           console.log("Updated user session:", userData);
         } catch (error) {
