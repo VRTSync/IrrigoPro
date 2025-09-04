@@ -95,12 +95,12 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     setIsConnecting(true);
     
     try {
-      const response = await fetch('/api/quickbooks/auth');
-      console.log("QuickBooks auth response:", response.status);
+      const response = await apiRequest('/api/quickbooks/auth');
+      console.log("QuickBooks auth response:", response);
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log("QuickBooks auth success:", data);
+      if (response?.authUrl) {
+        console.log("QuickBooks auth success:", response);
+        const data = response;
         
         if (data?.authUrl) {
           // Show user-friendly message and redirect to avoid popup blocking
@@ -117,13 +117,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
           throw new Error("No authUrl in response");
         }
       } else {
-        const errorData = await response.text();
-        console.error("QuickBooks auth error:", response.status, errorData);
-        toast({
-          title: "Connection Failed",
-          description: "Failed to initiate QuickBooks connection",
-          variant: "destructive"
-        });
+        throw new Error("No authUrl in response");
       }
     } catch (error) {
       console.error("QuickBooks connection error:", error);
@@ -254,32 +248,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
                 </p>
                 <button 
-                  onClick={() => {
-                    console.log("QuickBooks button clicked - starting connection");
-                    setIsConnecting(true);
-                    
-                    fetch('/api/quickbooks/auth')
-                      .then(response => {
-                        console.log('QuickBooks auth response:', response.status);
-                        if (!response.ok) {
-                          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                        }
-                        return response.json();
-                      })
-                      .then(data => {
-                        console.log('QuickBooks auth success:', data);
-                        window.location.href = data.authUrl;
-                      })
-                      .catch(error => {
-                        console.error('QuickBooks connection failed:', error);
-                        toast({
-                          title: "Connection Failed",
-                          description: "Unable to connect to QuickBooks. Please try again.",
-                          variant: "destructive"
-                        });
-                        setIsConnecting(false);
-                      });
-                  }}
+                  onClick={handleQuickBooksConnect}
                   disabled={isConnecting}
                   className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
                   data-testid="quickbooks-connect-btn"
