@@ -1209,21 +1209,16 @@ export default function CustomerBilling() {
                         {customerBillingData.unbilledWorkOrders.length} WO, {customerBillingData.unbilledBillingSheets.length} BS ready
                       </div>
                       <Button
-                        onClick={() => previewInvoiceMutation.mutate(selectedCustomerId!)}
-                        disabled={previewInvoiceMutation.isPending || customerBillingData.totalUnbilledAmount === 0}
+                        onClick={() => {
+                          // Auto-select all unbilled items when opening
+                          selectAllUnbilledItems();
+                          setShowItemSelection(true);
+                        }}
+                        disabled={customerBillingData.totalUnbilledAmount === 0}
                         className="bg-orange-600 hover:bg-orange-700 text-white w-full h-8 text-xs"
                       >
-                        {previewInvoiceMutation.isPending ? (
-                          <>
-                            <Clock className="w-3 h-3 mr-1 animate-spin" />
-                            Previewing...
-                          </>
-                        ) : (
-                          <>
-                            <Receipt className="w-3 h-3 mr-1" />
-                            Preview Invoice
-                          </>
-                        )}
+                        <Receipt className="w-3 h-3 mr-1" />
+                        Select Items to Invoice
                       </Button>
                     </div>
                   </CardContent>
