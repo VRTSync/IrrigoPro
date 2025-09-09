@@ -234,14 +234,23 @@ export default function CustomerBilling() {
 
   // Create Invoice Mutation (after preview confirmation)
   const createInvoiceMutation = useMutation({
-    mutationFn: async (customerId: number) => {
+    mutationFn: async ({ customerId, workOrderIds, billingSheetIds }: { 
+      customerId: number, 
+      workOrderIds?: number[], 
+      billingSheetIds?: number[] 
+    }) => {
       return await apiRequest("/api/invoices/monthly", "POST", {
-        customerId
+        customerId,
+        workOrderIds,
+        billingSheetIds
       });
     },
-    onSuccess: (data, customerId) => {
+    onSuccess: (data, { customerId }) => {
       setShowInvoicePreview(false);
       setPreviewInvoiceData(null);
+      // Clear selections after successful invoice creation
+      setSelectedWorkOrderIds(new Set());
+      setSelectedBillingSheetIds(new Set());
       toast({
         title: "Invoice Created Successfully",
         description: `Monthly invoice ${data.invoiceNumber} has been created and synced to QuickBooks.`,
@@ -1877,7 +1886,11 @@ export default function CustomerBilling() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => createInvoiceMutation.mutate(selectedCustomerId!)}
+                  onClick={() => createInvoiceMutation.mutate({
+                    customerId: selectedCustomerId!,
+                    workOrderIds: Array.from(selectedWorkOrderIds),
+                    billingSheetIds: Array.from(selectedBillingSheetIds)
+                  })}
                   disabled={createInvoiceMutation.isPending}
                   className="bg-green-600 hover:bg-green-700"
                 >
@@ -1893,6 +1906,223 @@ export default function CustomerBilling() {
                     </>
                   )}
                 </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Item Selection Dialog */}
+      <Dialog open={showItemSelection} onOpenChange={setShowItemSelection}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              Select Items to Invoice
+            </DialogTitle>
+          </DialogHeader>
+          
+          {customerBillingData && (
+            <div className="space-y-6">
+              {/* Selection Controls */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={selectAllUnbilledItems}
+                    className="text-sm"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-1" />
+                    Select All
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={clearAllSelections}
+                    className="text-sm"
+                  >
+                    <X className="w-4 h-4 mr-1" />
+                    Clear All
+                  </Button>
+                </div>
+                <div className="text-sm text-gray-600">
+                  {selectedWorkOrderIds.size + selectedBillingSheetIds.size} item(s) selected
+                </div>
+              </div>
+
+              {/* Work Orders Section */}
+              {customerBillingData.unbilledWorkOrders.length > 0 && (
+                <div>
+                  <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Unbilled Work Orders ({customerBillingData.unbilledWorkOrders.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {customerBillingData.unbilledWorkOrders.map((workOrder) => (
+                      <Card key={workOrder.id} className={`cursor-pointer transition-all ${
+                        selectedWorkOrderIds.has(workOrder.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                      }`}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={selectedWorkOrderIds.has(workOrder.id)}
+                                onCheckedChange={() => toggleWorkOrderSelection(workOrder.id)}
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-medium">Work Order #{workOrder.id}</span>
+                                  {getStatusBadge(workOrder.status)}
+                                </div>
+                                <div className="text-sm text-gray-600 mb-2">
+                                  {workOrder.description}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Assigned to: {workOrder.assignedTo}
+                                </div>
+                                {workOrder.completedDate && (
+                                  <div className="text-xs text-gray-500">
+                                    Completed: {formatDate(workOrder.completedDate)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-lg">
+                                {formatCurrency(workOrder.laborCost + workOrder.partsCost)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Labor: {formatCurrency(workOrder.laborCost)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Parts: {formatCurrency(workOrder.partsCost)}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Billing Sheets Section */}
+              {customerBillingData.unbilledBillingSheets.length > 0 && (
+                <div>
+                  <h3 className="font-medium text-lg mb-3 flex items-center gap-2">
+                    <DollarSign className="w-5 h-5" />
+                    Unbilled Billing Sheets ({customerBillingData.unbilledBillingSheets.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {customerBillingData.unbilledBillingSheets.map((billingSheet) => (
+                      <Card key={billingSheet.id} className={`cursor-pointer transition-all ${
+                        selectedBillingSheetIds.has(billingSheet.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                      }`}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={selectedBillingSheetIds.has(billingSheet.id)}
+                                onCheckedChange={() => toggleBillingSheetSelection(billingSheet.id)}
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-medium">Billing Sheet #{billingSheet.id}</span>
+                                  {getStatusBadge(billingSheet.status)}
+                                </div>
+                                <div className="text-sm text-gray-600 mb-2">
+                                  {billingSheet.description}
+                                </div>
+                                {billingSheet.completedDate && (
+                                  <div className="text-xs text-gray-500">
+                                    Completed: {formatDate(billingSheet.completedDate)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-lg">
+                                {formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Labor: {formatCurrency(billingSheet.laborCost)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Parts: {formatCurrency(billingSheet.partsCost)}
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Summary & Actions */}
+              <div className="border-t pt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="font-medium">Selected Items Summary</div>
+                    <div className="text-sm text-gray-600">
+                      {selectedWorkOrderIds.size} Work Orders, {selectedBillingSheetIds.size} Billing Sheets
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-medium text-lg">
+                      Total: {formatCurrency(
+                        customerBillingData.unbilledWorkOrders
+                          .filter(wo => selectedWorkOrderIds.has(wo.id))
+                          .reduce((sum, wo) => sum + wo.laborCost + wo.partsCost, 0) +
+                        customerBillingData.unbilledBillingSheets
+                          .filter(bs => selectedBillingSheetIds.has(bs.id))
+                          .reduce((sum, bs) => sum + bs.laborCost + bs.partsCost, 0)
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex justify-end space-x-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowItemSelection(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (!hasAnySelection()) {
+                        toast({
+                          title: "No Items Selected",
+                          description: "Please select at least one item to preview the invoice.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      
+                      previewInvoiceMutation.mutate({
+                        customerId: selectedCustomerId!,
+                        workOrderIds: Array.from(selectedWorkOrderIds),
+                        billingSheetIds: Array.from(selectedBillingSheetIds)
+                      });
+                    }}
+                    disabled={previewInvoiceMutation.isPending || !hasAnySelection()}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {previewInvoiceMutation.isPending ? (
+                      <>
+                        <Clock className="w-4 h-4 mr-2 animate-spin" />
+                        Generating Preview...
+                      </>
+                    ) : (
+                      <>
+                        <Receipt className="w-4 h-4 mr-2" />
+                        Preview Invoice ({selectedWorkOrderIds.size + selectedBillingSheetIds.size} items)
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           )}

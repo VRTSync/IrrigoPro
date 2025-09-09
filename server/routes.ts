@@ -1804,7 +1804,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Invoice preview (no creation, just calculation)
   app.post("/api/invoices/preview", async (req, res) => {
     try {
-      const { customerId } = req.body;
+      const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
       
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
@@ -1820,16 +1820,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
-      // Filter unbilled work (check if notes contain billing information)
-      const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
-      );
-      const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
-      );
+      // Filter to only include selected items
+      let selectedWorkOrders = [];
+      let selectedBillingSheets = [];
 
-      if (unbilledWorkOrders.length === 0 && unbilledBillingSheets.length === 0) {
-        return res.status(400).json({ message: "No unbilled work found for this customer" });
+      if (workOrderIds.length > 0) {
+        selectedWorkOrders = workOrders.filter(wo => 
+          workOrderIds.includes(wo.id) && 
+          wo.status === 'completed' && 
+          (!wo.notes || !wo.notes.includes('[BILLED:'))
+        );
+      }
+
+      if (billingSheetIds.length > 0) {
+        selectedBillingSheets = billingSheets.filter(bs => 
+          billingSheetIds.includes(bs.id) && 
+          bs.status === 'completed' && 
+          (!bs.notes || !bs.notes.includes('[BILLED:'))
+        );
+      }
+
+      // If no specific items selected, fall back to all unbilled items
+      if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
+        selectedWorkOrders = workOrders.filter(wo => 
+          wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
+        );
+        selectedBillingSheets = billingSheets.filter(bs => 
+          bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
+        );
+      }
+
+      if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0) {
+        return res.status(400).json({ message: "No valid items selected for invoicing" });
       }
 
       // Create preview invoice data (same calculations as actual invoice)
@@ -1838,12 +1860,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Calculate totals
       const laborSubtotal = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
+        selectedWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
       const markupAmount = 0;
       const taxAmount = 0;
@@ -1853,7 +1875,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const previewItems = [];
 
       // Add work order items
-      for (const workOrder of unbilledWorkOrders) {
+      for (const workOrder of selectedWorkOrders) {
         previewItems.push({
           sourceType: 'work_order',
           sourceId: workOrder.id,
@@ -1869,7 +1891,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Add billing sheet items
-      for (const billingSheet of unbilledBillingSheets) {
+      for (const billingSheet of selectedBillingSheets) {
         previewItems.push({
           sourceType: 'billing_sheet',
           sourceId: billingSheet.id,
@@ -1899,7 +1921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         items: previewItems,
-        itemCount: unbilledWorkOrders.length + unbilledBillingSheets.length
+        itemCount: selectedWorkOrders.length + selectedBillingSheets.length
       };
 
       res.json(previewData);
