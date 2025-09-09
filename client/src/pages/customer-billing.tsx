@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Search, 
   FileText, 
@@ -89,6 +90,11 @@ export default function CustomerBilling() {
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
   const [previewInvoiceData, setPreviewInvoiceData] = useState<any>(null);
   
+  // Item selection for invoice preview
+  const [showItemSelection, setShowItemSelection] = useState(false);
+  const [selectedWorkOrderIds, setSelectedWorkOrderIds] = useState<Set<number>>(new Set());
+  const [selectedBillingSheetIds, setSelectedBillingSheetIds] = useState<Set<number>>(new Set());
+  
   // Filter states
   const [dateFilter, setDateFilter] = useState<string>("last_30_days"); // Default to last 30 days
   const [selectedMonth, setSelectedMonth] = useState<string>("");
@@ -158,16 +164,64 @@ export default function CustomerBilling() {
     };
   };
 
+  // Selection helper functions
+  const toggleWorkOrderSelection = (workOrderId: number) => {
+    setSelectedWorkOrderIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(workOrderId)) {
+        newSet.delete(workOrderId);
+      } else {
+        newSet.add(workOrderId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleBillingSheetSelection = (billingSheetId: number) => {
+    setSelectedBillingSheetIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(billingSheetId)) {
+        newSet.delete(billingSheetId);
+      } else {
+        newSet.add(billingSheetId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllUnbilledItems = () => {
+    if (!customerBillingData) return;
+    
+    setSelectedWorkOrderIds(new Set(customerBillingData.unbilledWorkOrders.map(wo => wo.id)));
+    setSelectedBillingSheetIds(new Set(customerBillingData.unbilledBillingSheets.map(bs => bs.id)));
+  };
+
+  const clearAllSelections = () => {
+    setSelectedWorkOrderIds(new Set());
+    setSelectedBillingSheetIds(new Set());
+  };
+
+  const hasAnySelection = () => {
+    return selectedWorkOrderIds.size > 0 || selectedBillingSheetIds.size > 0;
+  };
+
   // Preview Invoice Mutation
   const previewInvoiceMutation = useMutation({
-    mutationFn: async (customerId: number) => {
+    mutationFn: async ({ customerId, workOrderIds, billingSheetIds }: { 
+      customerId: number, 
+      workOrderIds: number[], 
+      billingSheetIds: number[] 
+    }) => {
       return await apiRequest("/api/invoices/preview", "POST", {
-        customerId
+        customerId,
+        workOrderIds,
+        billingSheetIds
       });
     },
     onSuccess: (data) => {
       setPreviewInvoiceData(data);
       setShowInvoicePreview(true);
+      setShowItemSelection(false);
     },
     onError: (error: any) => {
       toast({
@@ -635,21 +689,16 @@ export default function CustomerBilling() {
                             {customerBillingData.unbilledWorkOrders.length} Work Orders, {customerBillingData.unbilledBillingSheets.length} Billing Sheets ready
                           </div>
                           <Button
-                            onClick={() => previewInvoiceMutation.mutate(selectedCustomerId!)}
-                            disabled={previewInvoiceMutation.isPending || customerBillingData.totalUnbilledAmount === 0}
+                            onClick={() => {
+                              // Auto-select all unbilled items when opening
+                              selectAllUnbilledItems();
+                              setShowItemSelection(true);
+                            }}
+                            disabled={customerBillingData.totalUnbilledAmount === 0}
                             className="bg-orange-600 hover:bg-orange-700 text-white w-full h-10 text-sm"
                           >
-                            {previewInvoiceMutation.isPending ? (
-                              <>
-                                <Clock className="w-4 h-4 mr-2 animate-spin" />
-                                Previewing...
-                              </>
-                            ) : (
-                              <>
-                                <Receipt className="w-4 h-4 mr-2" />
-                                Preview Invoice
-                              </>
-                            )}
+                            <Receipt className="w-4 h-4 mr-2" />
+                            Select Items to Invoice
                           </Button>
                         </div>
                       </CardContent>
