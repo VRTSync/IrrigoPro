@@ -830,9 +830,9 @@ export default function CustomerBilling() {
                                   <span>Total:</span>
                                   <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
                                 </div>
-                                {workOrder.completedDate && (
+                                {workOrder.completedAt && (
                                   <div className="text-xs text-gray-500 mt-1">
-                                    Completed: {formatDate(workOrder.completedDate)}
+                                    Completed: {formatDate(workOrder.completedAt)}
                                   </div>
                                 )}
                               </CardContent>
@@ -861,9 +861,9 @@ export default function CustomerBilling() {
                                   <span>Total:</span>
                                   <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
                                 </div>
-                                {billingSheet.completedDate && (
+                                {billingSheet.workDate && (
                                   <div className="text-xs text-gray-500 mt-1">
-                                    Completed: {formatDate(billingSheet.completedDate)}
+                                    Work Date: {formatDate(billingSheet.workDate)}
                                   </div>
                                 )}
                               </CardContent>
@@ -1491,10 +1491,12 @@ export default function CustomerBilling() {
                                   {wo.description}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                                  <div className="flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {formatDate(wo.scheduledDate)}
-                                  </div>
+                                  {wo.completedAt && (
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      Completed: {formatDate(wo.completedAt)}
+                                    </div>
+                                  )}
                                   {wo.assignedTo && (
                                     <div className="flex items-center gap-1">
                                       <User className="w-3 h-3" />
@@ -1593,10 +1595,12 @@ export default function CustomerBilling() {
                                   {bs.description || 'Billing Sheet'}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                                  <div className="flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {new Date(bs.createdAt).toLocaleDateString()}
-                                  </div>
+                                  {bs.workDate && (
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      Work Date: {formatDate(bs.workDate)}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
@@ -1981,9 +1985,9 @@ export default function CustomerBilling() {
                                 <div className="text-xs text-gray-500">
                                   Assigned to: {workOrder.assignedTo}
                                 </div>
-                                {workOrder.completedDate && (
+                                {workOrder.completedAt && (
                                   <div className="text-xs text-gray-500">
-                                    Completed: {formatDate(workOrder.completedDate)}
+                                    Completed: {formatDate(workOrder.completedAt)}
                                   </div>
                                 )}
                               </div>
@@ -2034,9 +2038,9 @@ export default function CustomerBilling() {
                                 <div className="text-sm text-gray-600 mb-2">
                                   {billingSheet.description}
                                 </div>
-                                {billingSheet.completedDate && (
+                                {billingSheet.workDate && (
                                   <div className="text-xs text-gray-500">
-                                    Completed: {formatDate(billingSheet.completedDate)}
+                                    Work Date: {formatDate(billingSheet.workDate)}
                                   </div>
                                 )}
                               </div>
