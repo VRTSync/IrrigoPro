@@ -95,43 +95,38 @@ export function ColorCodedMapViewer({
     }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
-    // Add multiple high-resolution tile layers for maximum detail
+    // Add multiple tile layers with clean streets as default
     const baseLayers = {
-      'Google Satellite (Ultra HD)': L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      'Clean Streets': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CartoDB',
+        subdomains: 'abcd',
+        maxZoom: 25,
+        maxNativeZoom: 20
+      }),
+      'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 25,
+        maxNativeZoom: 19
+      }),
+      'Google Satellite': L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
         attribution: '&copy; Google',
         maxZoom: 25,
-        maxNativeZoom: 23  // Google's highest resolution
+        maxNativeZoom: 23
       }),
       'Google Hybrid': L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         attribution: '&copy; Google',
         maxZoom: 25,
         maxNativeZoom: 22
       }),
-      'CartoDB Positron': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CartoDB',
-        subdomains: 'abcd',
-        maxZoom: 25,
-        maxNativeZoom: 20
-      }),
-      'USGS Imagery': L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles courtesy of the U.S. Geological Survey',
-        maxZoom: 25,
-        maxNativeZoom: 20
-      }),
       'Esri World Imagery': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-        maxZoom: 25,
-        maxNativeZoom: 19
-      }),
-      'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
         maxZoom: 25,
         maxNativeZoom: 19
       })
     };
 
-    // Add Google satellite by default (highest resolution available)
-    baseLayers['Google Satellite (Ultra HD)'].addTo(map);
+    // Add clean streets layer as default
+    baseLayers['Clean Streets'].addTo(map);
     
     // Add layer control for switching between tile sources
     L.control.layers(baseLayers).addTo(map);
@@ -161,7 +156,7 @@ export function ColorCodedMapViewer({
     
     // Clear only outdated markers instead of all markers
     const currentControllerIds = new Set(project.controllers.map(c => c.id));
-    const currentZoneIds = new Set(project.allZones.map(z => z.id || `${z.controllerId}-${z.name}`));
+    const currentZoneIds = new Set(project.allZones.map(z => `${z.controllerId}-${z.name}`));
     
     // Remove markers for controllers that no longer exist
     markerRefs.current.forEach((marker, controllerId) => {
