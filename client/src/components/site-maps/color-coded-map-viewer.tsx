@@ -149,37 +149,68 @@ export function ColorCodedMapViewer({
     };
   }, []);
 
+  // Store marker references to prevent recreation
+  const markerRefs = useRef<Map<string, L.Marker>>(new Map());
+  const circleRefs = useRef<Map<string, L.Circle>>(new Map());
+  const zoneRefs = useRef<Map<string, L.Layer>>(new Map());
+
   useEffect(() => {
     if (!mapInstanceRef.current || project.controllers.length === 0) return;
 
     const map = mapInstanceRef.current;
     
-    // Clear existing markers
-    map.eachLayer((layer) => {
-      if (layer instanceof L.Marker) {
-        map.removeLayer(layer);
+    // Clear only outdated markers instead of all markers
+    const currentControllerIds = new Set(project.controllers.map(c => c.id));
+    const currentZoneIds = new Set(project.allZones.map(z => z.id || `${z.controllerId}-${z.name}`));
+    
+    // Remove markers for controllers that no longer exist
+    markerRefs.current.forEach((marker, controllerId) => {
+      if (!currentControllerIds.has(controllerId) || !visibleControllers.has(controllerId)) {
+        map.removeLayer(marker);
+        markerRefs.current.delete(controllerId);
+      }
+    });
+    
+    // Remove circles for controllers that no longer exist
+    circleRefs.current.forEach((circle, controllerId) => {
+      if (!currentControllerIds.has(controllerId) || !visibleControllers.has(controllerId) || !showControllerAreas) {
+        map.removeLayer(circle);
+        circleRefs.current.delete(controllerId);
+      }
+    });
+    
+    // Remove zones that no longer exist
+    zoneRefs.current.forEach((zone, zoneId) => {
+      if (!currentZoneIds.has(zoneId)) {
+        map.removeLayer(zone);
+        zoneRefs.current.delete(zoneId);
       }
     });
 
     const allCoordinates: [number, number][] = [];
 
-    // Add controller area circles if enabled
+    // Add controller area circles if enabled (optimized)
     if (showControllerAreas) {
       project.controllers.forEach((controller) => {
         if (!visibleControllers.has(controller.id)) return;
         
-        const controllerZones = project.allZones.filter((z: any) => z.controllerId === controller.id);
-        if (controllerZones.length > 0) {
-          // Calculate coverage area radius based on number of zones
-          const radius = Math.max(50, controllerZones.length * 15);
-          
-          L.circle([controller.latitude, controller.longitude], {
-            color: controller.color,
-            fillColor: controller.color,
-            fillOpacity: 0.1,
-            weight: 2,
-            radius: radius
-          }).addTo(map);
+        // Only create circle if it doesn't exist
+        if (!circleRefs.current.has(controller.id)) {
+          const controllerZones = project.allZones.filter((z: any) => z.controllerId === controller.id);
+          if (controllerZones.length > 0) {
+            // Calculate coverage area radius based on number of zones
+            const radius = Math.max(50, controllerZones.length * 15);
+            
+            const circle = L.circle([controller.latitude, controller.longitude], {
+              color: controller.color,
+              fillColor: controller.color,
+              fillOpacity: 0.1,
+              weight: 2,
+              radius: radius
+            }).addTo(map);
+            
+            circleRefs.current.set(controller.id, circle);
+          }
         }
       });
     }
@@ -199,32 +230,37 @@ export function ColorCodedMapViewer({
       // Skip controller markers for heatmap mode
       if (displayMode === 'heatmap') return;
 
-      let controllerIcon;
+      // Only create/update marker if it doesn't exist or needs updating
+      const existingMarker = markerRefs.current.get(controller.id);
       const sizes = { small: [28, 28], medium: [40, 40], large: [52, 52] };
       const [width, height] = sizes[markerSize];
+      
+      // Create consistent anchor point for all marker types to prevent jumping
+      const centerAnchor = [width/2, height/2] as [number, number];
 
+      let controllerIcon;
       switch (displayMode) {
         case 'circles':
           controllerIcon = L.divIcon({
             html: `
-              <div class="rounded-full shadow-lg flex items-center justify-center text-white font-bold border-2 border-white" 
-                   style="background-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'}">
+              <div class="rounded-full shadow-lg flex items-center justify-center text-white font-bold border-2 border-white marker-stable" 
+                   style="background-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'}; transform: translate(-50%, -50%);">
                 ${controller.name.split(' ')[1] || 'C'}
               </div>
             `,
-            className: 'custom-div-icon',
+            className: 'custom-div-icon-stable',
             iconSize: [width, height],
-            iconAnchor: [width/2, height/2]
+            iconAnchor: centerAnchor
           });
           break;
         case 'badges':
           controllerIcon = L.divIcon({
             html: `
-              <div class="bg-white rounded-lg shadow-lg px-2 py-1 border-l-4 text-xs font-bold whitespace-nowrap" style="border-color: ${controller.color}">
+              <div class="bg-white rounded-lg shadow-lg px-2 py-1 border-l-4 text-xs font-bold whitespace-nowrap marker-stable" style="border-color: ${controller.color}; transform: translate(-50%, -50%);">
                 ${controller.name}
               </div>
             `,
-            className: 'custom-div-icon',
+            className: 'custom-div-icon-stable',
             iconSize: [80, 24],
             iconAnchor: [40, 12]
           });
@@ -232,11 +268,11 @@ export function ColorCodedMapViewer({
         case 'minimal':
           controllerIcon = L.divIcon({
             html: `
-              <div class="rounded-full border-2 border-white shadow-md" 
-                   style="background-color: ${controller.color}; width: ${width * 0.7}px; height: ${height * 0.7}px;">
+              <div class="rounded-full border-2 border-white shadow-md marker-stable" 
+                   style="background-color: ${controller.color}; width: ${width * 0.7}px; height: ${height * 0.7}px; transform: translate(-50%, -50%);">
               </div>
             `,
-            className: 'custom-div-icon',
+            className: 'custom-div-icon-stable',
             iconSize: [width * 0.7, height * 0.7],
             iconAnchor: [width * 0.35, height * 0.35]
           });
@@ -244,20 +280,30 @@ export function ColorCodedMapViewer({
         default: // markers
           controllerIcon = L.divIcon({
             html: `
-              <div class="bg-white text-gray-800 rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-4" 
-                   style="border-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'}">
+              <div class="bg-white text-gray-800 rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-4 marker-stable" 
+                   style="border-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'}; transform: translate(-50%, -50%);">
                 C
               </div>
             `,
-            className: 'custom-div-icon',
+            className: 'custom-div-icon-stable',
             iconSize: [width, height],
-            iconAnchor: [width/2, height/2]
+            iconAnchor: centerAnchor
           });
       }
 
-      const marker = L.marker([controller.latitude, controller.longitude], {
-        icon: controllerIcon
-      }).addTo(map);
+      let marker = existingMarker;
+      if (!marker) {
+        // Create new marker only if it doesn't exist
+        marker = L.marker([controller.latitude, controller.longitude], {
+          icon: controllerIcon,
+          riseOnHover: false, // Prevent z-index changes that can cause jumping
+          pane: 'markerPane' // Ensure consistent layering
+        }).addTo(map);
+        markerRefs.current.set(controller.id, marker);
+      } else {
+        // Just update the icon without recreating the marker
+        marker.setIcon(controllerIcon);
+      }
 
       // Create enhanced popup content for controller
       const controllerPopupContent = `
@@ -613,17 +659,20 @@ export function ColorCodedMapViewer({
     });
     }
 
-    // Fit map to show all markers with enhanced zoom for irrigation detail
-    if (allCoordinates.length > 0) {
+    // Only fit bounds on initial load to prevent jumping during updates
+    const hasInitiallyFitted = useRef(false);
+    if (allCoordinates.length > 0 && !hasInitiallyFitted.current) {
       if (allCoordinates.length === 1) {
         map.setView(allCoordinates[0], 22); // Much closer for single point
       } else {
         const bounds = L.latLngBounds(allCoordinates);
         map.fitBounds(bounds, { 
           padding: [20, 20],
-          maxZoom: 20  // Start closer for detailed irrigation point viewing
+          maxZoom: 20,  // Start closer for detailed irrigation point viewing
+          animate: false // Disable animation to prevent jumping
         });
       }
+      hasInitiallyFitted.current = true;
     }
   }, [project, visibleControllers, displayMode, markerSize, showZoneConnections, showControllerAreas, onControllerClick, onZoneClick]);
 
