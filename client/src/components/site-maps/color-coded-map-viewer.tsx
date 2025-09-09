@@ -95,7 +95,7 @@ export function ColorCodedMapViewer({
     }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
-    // Add multiple tile layers with clean streets as default
+    // Simple two-option layer switcher: Clean Streets vs Google Satellite
     const baseLayers = {
       'Clean Streets': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap &copy; CartoDB',
@@ -103,25 +103,10 @@ export function ColorCodedMapViewer({
         maxZoom: 25,
         maxNativeZoom: 20
       }),
-      'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 25,
-        maxNativeZoom: 19
-      }),
       'Google Satellite': L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
         attribution: '&copy; Google',
         maxZoom: 25,
         maxNativeZoom: 23
-      }),
-      'Google Hybrid': L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-        attribution: '&copy; Google',
-        maxZoom: 25,
-        maxNativeZoom: 22
-      }),
-      'Esri World Imagery': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-        maxZoom: 25,
-        maxNativeZoom: 19
       })
     };
 
