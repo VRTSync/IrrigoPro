@@ -357,75 +357,184 @@ export default function CustomerBilling() {
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-gray-50">
-      {/* Mobile: Customer Selector */}
-      <div className="lg:hidden w-full bg-white border-b border-gray-200 flex-col max-h-[40vh]">
-        <div className="p-3 border-b border-gray-200">
-          <h1 className="text-lg font-bold text-gray-900 mb-3">Customer Billing</h1>
-          
-          {/* Mobile Summary Stats */}
-          {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <div className="bg-orange-50 p-2 rounded-lg text-center">
-                <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                <div className="text-xs font-bold text-orange-800">
-                  {formatCurrency(
-                    customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
+      {/* Mobile: Two-Screen Navigation */}
+      <div className="lg:hidden w-full h-full bg-white flex flex-col">
+        {!selectedCustomerId ? (
+          /* Screen 1: Customer List (Full Screen) */
+          <div className="flex flex-col h-full">
+            {/* Header */}
+            <div className="p-4 border-b border-gray-200 bg-white">
+              <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
+              
+              {/* Summary Stats */}
+              {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-orange-50 p-3 rounded-lg text-center">
+                    <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
+                    <div className="text-sm font-bold text-orange-800">
+                      {formatCurrency(
+                        customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
+                      )}
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-lg text-center">
+                    <div className="text-xs text-blue-700 font-medium">Active Customers</div>
+                    <div className="text-sm font-bold text-blue-800">
+                      {customerPreviews.filter(preview => 
+                        (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
+                      ).length}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Search Bar */}
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search customers..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Filter Controls */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
+                    className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 p-0 h-auto"
+                  >
+                    <Filter className="w-4 h-4" />
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <Badge variant="secondary" className="ml-1 text-xs">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                    {isFiltersExpanded ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                  </Button>
+                  {activeFilterCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={resetFilters}
+                      className="text-xs h-6 px-2"
+                    >
+                      <X className="w-3 h-3 mr-1" />
+                      Clear
+                    </Button>
                   )}
                 </div>
-              </div>
-              <div className="bg-blue-50 p-2 rounded-lg text-center">
-                <div className="text-xs text-blue-700 font-medium">Active Customers</div>
-                <div className="text-xs font-bold text-blue-800">
-                  {customerPreviews.filter(preview => 
-                    (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
-                  ).length}
-                </div>
-              </div>
-            </div>
-          )}
 
-          {/* Mobile Customer Search/Selector - Dropdown Style */}
-          <div className="relative mb-3" ref={dropdownRef}>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder={selectedCustomerId 
-                  ? customers.find(c => c.id === selectedCustomerId)?.name || "Search customers..."
-                  : "Search customers..."
-                }
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setShowCustomerDropdown(true);
-                }}
-                onFocus={() => setShowCustomerDropdown(true)}
-                className="pl-10 h-8 text-sm"
-              />
-              <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                {/* Collapsible Filter Content */}
+                {isFiltersExpanded && (
+                  <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
+                    {/* Date Range Filter */}
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
+                      <Select value={dateFilter} onValueChange={setDateFilter}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Time</SelectItem>
+                          <SelectItem value="last_30_days">Last 30 Days</SelectItem>
+                          <SelectItem value="current_month">Current Month</SelectItem>
+                          <SelectItem value="last_90_days">Last 90 Days</SelectItem>
+                          <SelectItem value="custom_month">Specific Month</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Month Selector */}
+                    {dateFilter === "custom_month" && (
+                      <div>
+                        <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
+                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Choose month..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {generateMonthOptions().map(month => (
+                              <SelectItem key={month.value} value={month.value}>
+                                {month.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Amount Filter */}
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
+                      <Select value={amountFilter} onValueChange={setAmountFilter}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Amounts</SelectItem>
+                          <SelectItem value="under_500">Under $500</SelectItem>
+                          <SelectItem value="500_to_2000">$500 - $2,000</SelectItem>
+                          <SelectItem value="over_2000">Over $2,000</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Status</label>
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Customers</SelectItem>
+                          <SelectItem value="has_unbilled">Has Unbilled Work</SelectItem>
+                          <SelectItem value="no_activity">No Recent Activity</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Results Summary */}
+                    <div className="text-xs text-gray-500 pt-2 border-t">
+                      Showing {filteredCustomers.length} of {customers.length} customers
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-            
-            {/* Customer Dropdown */}
-            {showCustomerDropdown && (
-              <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-80 overflow-y-auto">
-                {filteredCustomers.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500 text-sm">No customers found</div>
-                ) : (
-                  filteredCustomers.map((customer) => {
+
+            {/* Customer List (Scrollable) */}
+            <div className="flex-1 overflow-y-auto">
+              {loadingCustomers ? (
+                <div className="p-4 text-center">
+                  <div className="text-gray-500">Loading customers...</div>
+                </div>
+              ) : filteredCustomers.length === 0 ? (
+                <div className="p-4 text-center">
+                  <div className="text-gray-500">No customers found</div>
+                </div>
+              ) : (
+                <div className="space-y-2 p-4">
+                  {filteredCustomers.map((customer) => {
                     const preview = getCustomerPreview(customer);
                     return (
-                      <div
+                      <Card
                         key={customer.id}
-                        onClick={() => {
-                          setSelectedCustomerId(customer.id);
-                          setSearchTerm("");
-                          setShowCustomerDropdown(false);
-                        }}
-                        className={`p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                          selectedCustomerId === customer.id ? 'bg-blue-50' : ''
-                        }`}
+                        className="p-4 cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
+                        onClick={() => setSelectedCustomerId(customer.id)}
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="font-medium text-sm text-gray-900">{customer.name}</div>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-medium text-base text-gray-900">{customer.name}</div>
                           {preview.billingPace >= 1.3 ? (
                             <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
                           ) : preview.billingPace <= 0.7 ? (
@@ -434,175 +543,75 @@ export default function CustomerBilling() {
                             <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
                           )}
                         </div>
-                        <div className="text-xs text-gray-600 mb-1">{customer.email}</div>
+                        <div className="text-sm text-gray-600 mb-2">{customer.email}</div>
+                        {customer.phone && (
+                          <div className="text-sm text-gray-600 mb-2">{customer.phone}</div>
+                        )}
                         {preview.unbilledAmount > 0 && (
                           <div className="flex items-center justify-between">
-                            <span className="text-xs text-orange-700">Unbilled:</span>
-                            <Badge className="bg-orange-100 text-orange-800 text-xs">
+                            <span className="text-sm text-orange-700 font-medium">Unbilled Work:</span>
+                            <Badge className="bg-orange-100 text-orange-800">
                               {formatCurrency(preview.unbilledAmount)}
                             </Badge>
                           </div>
                         )}
-                      </div>
+                        {customer.address && (
+                          <div className="text-xs text-gray-500 mt-2 truncate">{customer.address}</div>
+                        )}
+                      </Card>
                     );
-                  })
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Mobile Filter Controls - Collapsible */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
-                className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 p-0 h-auto"
-              >
-                <Filter className="w-4 h-4" />
-                Filters
-                {activeFilterCount > 0 && (
-                  <Badge variant="secondary" className="ml-1 text-xs">
-                    {activeFilterCount}
-                  </Badge>
-                )}
-                {isFiltersExpanded ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </Button>
-              {activeFilterCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={resetFilters}
-                  className="text-xs h-6 px-2"
-                >
-                  <X className="w-3 h-3 mr-1" />
-                  Clear
-                </Button>
+                  })}
+                </div>
               )}
             </div>
-
-            {/* Collapsible Filter Content */}
-            {isFiltersExpanded && (
-              <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
-                {/* Date Range Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Date Range</label>
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Time</SelectItem>
-                      <SelectItem value="last_30_days">Last 30 Days</SelectItem>
-                      <SelectItem value="current_month">Current Month</SelectItem>
-                      <SelectItem value="last_90_days">Last 90 Days</SelectItem>
-                      <SelectItem value="custom_month">Specific Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Month Selector (shown when custom_month is selected) */}
-                {dateFilter === "custom_month" && (
-                  <div>
-                    <label className="text-xs text-gray-600 mb-1 block">Select Month</label>
-                    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Choose month..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {generateMonthOptions().map(month => (
-                          <SelectItem key={month.value} value={month.value}>
-                            {month.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {/* Amount Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Billing Amount</label>
-                  <Select value={amountFilter} onValueChange={setAmountFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Amounts</SelectItem>
-                      <SelectItem value="under_500">Under $500</SelectItem>
-                      <SelectItem value="500_to_2000">$500 - $2,000</SelectItem>
-                      <SelectItem value="over_2000">Over $2,000</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Status Filter */}
-                <div>
-                  <label className="text-xs text-gray-600 mb-1 block">Status</label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Customers</SelectItem>
-                      <SelectItem value="has_unbilled">Has Unbilled Work</SelectItem>
-                      <SelectItem value="no_activity">No Recent Activity</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Results Summary */}
-                <div className="text-xs text-gray-500 pt-2 border-t">
-                  Showing {filteredCustomers.length} of {customers.length} customers
-                </div>
-              </div>
-            )}
           </div>
-
-
-
-          {/* Selected Customer Summary - Only show when customer is selected */}
-          {selectedCustomerId && (
-            <div className="border-t border-gray-200 p-3 bg-gray-50 mt-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="font-medium text-sm text-gray-900">
-                  {customers.find(c => c.id === selectedCustomerId)?.name}
-                </div>
+        ) : (
+          /* Screen 2: Customer Details (Full Screen) */
+          <div className="flex flex-col h-full">
+            {/* Header with Back Button */}
+            <div className="p-4 border-b border-gray-200 bg-white">
+              <div className="flex items-center justify-between mb-4">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setSelectedCustomerId(null)}
-                  className="h-6 w-6 p-0 text-gray-400 hover:text-gray-600"
+                  className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
                 >
-                  <X className="w-4 h-4" />
+                  <ChevronDown className="w-4 h-4 rotate-90" />
+                  Back to Customers
                 </Button>
+                <div className="text-sm text-gray-500">
+                  {customers.findIndex(c => c.id === selectedCustomerId) + 1} of {customers.length}
+                </div>
               </div>
-              {(() => {
-                const preview = getCustomerPreview(customers.find(c => c.id === selectedCustomerId)!);
-                return (
-                  <div className="space-y-1">
-                    <div className="text-xs text-gray-600">
-                      {customers.find(c => c.id === selectedCustomerId)?.email}
-                    </div>
-                    {preview.unbilledAmount > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-orange-700">Unbilled:</span>
-                        <Badge className="bg-orange-100 text-orange-800 text-xs">
-                          {formatCurrency(preview.unbilledAmount)}
+              
+              {selectedCustomer && (
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900">{selectedCustomer.name}</h1>
+                  <div className="text-sm text-gray-600">{selectedCustomer.email}</div>
+                  {selectedCustomer.phone && (
+                    <div className="text-sm text-gray-600">{selectedCustomer.phone}</div>
+                  )}
+                  {(() => {
+                    const preview = getCustomerPreview(selectedCustomer);
+                    return preview.unbilledAmount > 0 ? (
+                      <div className="mt-2">
+                        <Badge className="bg-orange-100 text-orange-800">
+                          Unbilled: {formatCurrency(preview.unbilledAmount)}
                         </Badge>
                       </div>
-                    )}
-                  </div>
-                );
-              })()}
+                    ) : null;
+                  })()}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+
+            {/* Customer Details Content */}
+            <div className="flex-1 overflow-y-auto">
+              {/* This will be filled with the customer details content */}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Desktop: Left Sidebar - Customer List */}
