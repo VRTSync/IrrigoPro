@@ -1931,10 +1931,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create monthly invoice for customer - consolidates all unbilled work
+  // Create monthly invoice for customer - consolidates selected or all unbilled work
   app.post("/api/invoices/monthly", async (req, res) => {
     try {
-      const { customerId } = req.body;
+      const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
       
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
@@ -1950,16 +1950,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allBillingSheets = await storage.getAllBillingSheets();
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
-      // Filter unbilled work (check if notes contain billing information)
-      const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
-      );
-      const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
-      );
+      // Filter to only include selected items
+      let selectedWorkOrders = [];
+      let selectedBillingSheets = [];
 
-      if (unbilledWorkOrders.length === 0 && unbilledBillingSheets.length === 0) {
-        return res.status(400).json({ message: "No unbilled work found for this customer" });
+      if (workOrderIds.length > 0) {
+        selectedWorkOrders = workOrders.filter(wo => 
+          workOrderIds.includes(wo.id) && 
+          wo.status === 'completed' && 
+          (!wo.notes || !wo.notes.includes('[BILLED:'))
+        );
+      }
+
+      if (billingSheetIds.length > 0) {
+        selectedBillingSheets = billingSheets.filter(bs => 
+          billingSheetIds.includes(bs.id) && 
+          bs.status === 'completed' && 
+          (!bs.notes || !bs.notes.includes('[BILLED:'))
+        );
+      }
+
+      // If no specific items selected, fall back to all unbilled items
+      if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
+        selectedWorkOrders = workOrders.filter(wo => 
+          wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
+        );
+        selectedBillingSheets = billingSheets.filter(bs => 
+          bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
+        );
+      }
+
+      if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0) {
+        return res.status(400).json({ message: "No valid items selected for invoicing" });
       }
 
       // Create the consolidated monthly invoice
@@ -1968,12 +1990,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Calculate totals - no markup on parts, tax only on labor
       const laborSubtotal = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
-        unbilledWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
-        unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
       // No markup on parts for invoices
       const markupAmount = 0;
@@ -2010,7 +2032,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create invoice items for work orders
-      for (const workOrder of unbilledWorkOrders) {
+      for (const workOrder of selectedWorkOrders) {
         await storage.createInvoiceItem({
           invoiceId: invoice.id,
           sourceType: 'work_order',
@@ -2040,7 +2062,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create invoice items for billing sheets
-      for (const billingSheet of unbilledBillingSheets) {
+      for (const billingSheet of selectedBillingSheets) {
         await storage.createInvoiceItem({
           invoiceId: invoice.id,
           sourceType: 'billing_sheet',
@@ -2091,7 +2113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const qbLineItems = [];
           
           // Add work order line items
-          for (const workOrder of unbilledWorkOrders) {
+          for (const workOrder of selectedWorkOrders) {
             const laborAmount = parseFloat(workOrder.totalHours || '0') * 45; // $45/hour rate
             const partsAmount = parseFloat(workOrder.totalPartsCost || '0');
             const totalLineAmount = laborAmount + partsAmount;
@@ -2112,7 +2134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           // Add billing sheet line items
-          for (const billingSheet of unbilledBillingSheets) {
+          for (const billingSheet of selectedBillingSheets) {
             const lineTotal = parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0');
             if (lineTotal > 0) {
               qbLineItems.push({
