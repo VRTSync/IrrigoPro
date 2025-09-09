@@ -1747,7 +1747,7 @@ export class DatabaseStorage implements IStorage {
       markupAmount: markupAmount.toString(),
       taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
-      workDate: sheetData.workDate ? new Date(sheetData.workDate).toISOString() : new Date().toISOString()
+      workDate: sheetData.workDate ? (sheetData.workDate instanceof Date ? sheetData.workDate.toISOString() : new Date(sheetData.workDate).toISOString()) : new Date().toISOString()
     };
 
     console.log('Creating billing sheet with data:', finalSheetData);

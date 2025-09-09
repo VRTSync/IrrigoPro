@@ -5369,17 +5369,40 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log('Received billing sheet data:', req.body);
       const billingSheetData = req.body;
       
+      // Clean the data - remove any fields that might interfere with timestamps
+      const cleanData = {
+        customerId: billingSheetData.customerId,
+        customerName: billingSheetData.customerName,
+        customerEmail: billingSheetData.customerEmail,
+        propertyAddress: billingSheetData.propertyAddress || '',
+        workDate: billingSheetData.workDate, // Let storage handle the conversion
+        technicianName: billingSheetData.technicianName,
+        technicianId: billingSheetData.technicianId || null,
+        workDescription: billingSheetData.workDescription,
+        status: billingSheetData.status || 'completed',
+        totalHours: billingSheetData.totalHours || '0',
+        laborRate: billingSheetData.laborRate || '45.00',
+        laborSubtotal: billingSheetData.laborSubtotal || '0',
+        partsSubtotal: billingSheetData.partsSubtotal || '0',
+        markupAmount: billingSheetData.markupAmount || '0',
+        taxAmount: billingSheetData.taxAmount || '0',
+        totalAmount: billingSheetData.totalAmount || '0',
+        photos: billingSheetData.photos || [],
+        notes: billingSheetData.notes || ''
+      };
+      
       // Generate billing number
       const count = await storage.getBillingSheetCount();
       const billingNumber = `BS-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
       
-      // Set status to 'submitted' for field techs, 'draft' for others
-      const status = billingSheetData.status || 'submitted';
+      console.log('Creating billing sheet with clean data:', {
+        ...cleanData,
+        billingNumber
+      });
       
       const billingSheet = await storage.createBillingSheet({
-        ...billingSheetData,
-        billingNumber,
-        status
+        ...cleanData,
+        billingNumber
       });
       
       res.json(billingSheet);
