@@ -1747,7 +1747,7 @@ export class DatabaseStorage implements IStorage {
       markupAmount: markupAmount.toString(),
       taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
-      workDate: sheetData.workDate ? (sheetData.workDate instanceof Date ? sheetData.workDate.toISOString() : new Date(sheetData.workDate).toISOString()) : new Date().toISOString()
+      workDate: sheetData.workDate ? (sheetData.workDate instanceof Date ? sheetData.workDate : new Date(sheetData.workDate)) : new Date()
     };
 
     console.log('Creating billing sheet with data:', finalSheetData);
@@ -1761,7 +1761,10 @@ export class DatabaseStorage implements IStorage {
       billingNumber
     };
     
-    const [newSheet] = await db.insert(billingSheets).values([finalSheetDataWithNumber]).returning();
+    // Remove any timestamp fields that Drizzle manages automatically
+    const { createdAt, updatedAt, ...insertData } = finalSheetDataWithNumber;
+    
+    const [newSheet] = await db.insert(billingSheets).values([insertData]).returning();
     
     // If items are provided, insert them
     if (items && Array.isArray(items)) {
