@@ -101,8 +101,53 @@ export function WorkOrderCompletion({
     }
   }, []);
 
+  // Pre-fill form with estimate data when available
+  useEffect(() => {
+    if (workOrderItems && estimateZones && workOrder.estimateId && usedParts.length === 0) {
+      // Pre-fill used parts from work order items
+      const prefilledParts: UsedPart[] = workOrderItems.map((item: any) => ({
+        id: Date.now() + Math.random(), // Unique ID for state management
+        partId: item.partId,
+        partName: item.partName,
+        partPrice: item.partPrice,
+        quantity: item.quantity,
+        totalCost: parseFloat(item.totalPrice),
+      }));
+      
+      setUsedParts(prefilledParts);
+
+      // Calculate estimated total hours from all items
+      const estimatedHours = workOrderItems.reduce((total: number, item: any) => 
+        total + (parseFloat(item.laborHours) * item.quantity), 0
+      );
+
+      // Create work summary from zone descriptions
+      const workDescriptions = estimateZones
+        .filter((zone: any) => zone.workDescription)
+        .map((zone: any) => `${zone.zoneName}: ${zone.workDescription}`)
+        .join('\n');
+
+      // Pre-fill form fields
+      form.reset({
+        workSummary: workDescriptions || "Work completed as per estimate",
+        customerNotes: "Work completed according to estimate specifications",
+        totalHours: Math.max(estimatedHours, 0.1), // Ensure minimum 0.1 hours
+      });
+    }
+  }, [workOrderItems, estimateZones, workOrder.estimateId, form, usedParts.length]);
+
   const { data: parts } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
+  });
+
+  // Get work order items and estimate zones for prefilling
+  const { data: workOrderItems } = useQuery({
+    queryKey: ["/api/work-orders", workOrder.id, "items"],
+  });
+
+  const { data: estimateZones } = useQuery({
+    queryKey: ["/api/estimates", workOrder.estimateId, "zones"],
+    enabled: !!workOrder.estimateId,
   });
 
   const form = useForm<WorkOrderCompletionData>({
@@ -285,6 +330,31 @@ export function WorkOrderCompletion({
             }
           </DialogDescription>
         </DialogHeader>
+
+        {/* Work Plan Reference Section - Shows estimated work for field techs */}
+        {workOrder.estimateId && estimateZones && estimateZones.length > 0 && !showSummary && (
+          <div className="border-b border-gray-200 bg-blue-50 p-4">
+            <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
+              <Activity className="w-4 h-4" />
+              Planned Work (Based on Estimate #{workOrder.estimateId})
+            </h3>
+            <div className="space-y-2">
+              {estimateZones.slice(0, 3).map((zone: any) => (
+                <div key={zone.id} className="text-xs text-blue-800">
+                  <span className="font-medium">{zone.zoneName}:</span> {zone.workDescription || "Work as estimated"}
+                </div>
+              ))}
+              {estimateZones.length > 3 && (
+                <div className="text-xs text-blue-600 italic">
+                  +{estimateZones.length - 3} more zones...
+                </div>
+              )}
+            </div>
+            <div className="text-xs text-blue-700 mt-2 italic">
+              Parts and hours below are pre-filled from estimate. Adjust as needed for actual work performed.
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {showSummary ? (
