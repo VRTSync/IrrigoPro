@@ -74,27 +74,16 @@ export default function Estimates() {
   const handleCreateWorkOrder = async (estimateId: number) => {
     setCreatingWorkOrder(estimateId);
     try {
-      const response = await apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}),
-      });
+      const response = await apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, "POST", {});
 
-      if (response.ok) {
-        toast({
-          title: "Work Order Created",
-          description: "The estimate has been successfully converted to a work order.",
-        });
-        
-        // Refresh estimates list and work orders
-        await queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
-        await queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create work order');
-      }
+      toast({
+        title: "Work Order Created",
+        description: "The estimate has been successfully converted to a work order.",
+      });
+      
+      // Refresh estimates list and work orders
+      await queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
     } catch (error) {
       toast({
         title: "Error",
