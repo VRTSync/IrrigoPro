@@ -123,6 +123,40 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   next();
 };
 
+// More granular middleware for work order updates that allows field techs to start their own work orders
+const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) => {
+  const userRole = req.headers['x-user-role'];
+  const userId = req.headers['x-user-id'];
+  
+  // Company admins and billing managers have full access
+  if (userRole === 'company_admin' || userRole === 'billing_manager') {
+    return next();
+  }
+  
+  // Field techs can only start work orders assigned to them
+  if (userRole === 'field_tech') {
+    const workOrderId = parseInt(req.params.id);
+    const updateData = req.body;
+    
+    // Check if this is just starting a work order (changing status to in_progress)
+    if (updateData.status === 'in_progress' && Object.keys(updateData).length <= 2) {
+      try {
+        // Check if the work order is assigned to this field tech
+        const workOrder = await storage.getWorkOrder(workOrderId);
+        if (workOrder && workOrder.assignedTechnicianId === parseInt(userId)) {
+          return next();
+        }
+      } catch (error) {
+        // Continue to access denied if there's an error
+      }
+    }
+  }
+  
+  return res.status(403).json({ 
+    message: "Access denied. Field technicians can only start work orders assigned to them." 
+  });
+};
+
 // Authentication middleware for notifications - ensures users can only access their own notifications
 const requireNotificationAccess = async (req: any, res: any, next: any) => {
   try {
@@ -5567,7 +5601,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/work-orders/:id", requireWorkOrderBillingAccess, async (req, res) => {
+  app.patch("/api/work-orders/:id", requireWorkOrderUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
