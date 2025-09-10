@@ -114,9 +114,9 @@ const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
 const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   const userRole = req.headers['x-user-role'];
   
-  if (userRole !== 'company_admin' && userRole !== 'billing_manager') {
+  if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
     return res.status(403).json({ 
-      message: "Access denied. Only company administrators and billing managers can edit or delete work orders and billing sheets." 
+      message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit or delete work orders and billing sheets." 
     });
   }
   
@@ -139,9 +139,9 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
     bodyKeys: Object.keys(updateData)
   });
   
-  // Company admins and billing managers have full access
-  if (userRole === 'company_admin' || userRole === 'billing_manager') {
-    console.log('Access granted - admin/billing manager');
+  // Company admins, billing managers, and irrigation managers have full access
+  if (userRole === 'company_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
+    console.log('Access granted - admin/billing manager/irrigation manager');
     return next();
   }
   
