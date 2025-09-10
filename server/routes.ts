@@ -1617,7 +1617,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...est,
         laborCost: 0, // Calculate if needed
         partsCost: 0, // Calculate if needed  
-        description: est.projectDescription || '',
+        description: est.projectName || '',
         billedDate: null,
         completedDate: est.updatedAt
       }));
