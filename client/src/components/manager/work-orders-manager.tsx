@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Plus, Eye, User, CheckCircle } from "lucide-react";
+import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
@@ -145,6 +145,12 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                     <p className="text-sm text-gray-500">
                       Created: {new Date(workOrder.createdAt).toLocaleDateString()}
                     </p>
+                    {workOrder.estimateId && (
+                      <p className="text-sm text-purple-600 mt-1 flex items-center gap-1">
+                        <ExternalLink className="w-3 h-3" />
+                        From Estimate #{workOrder.estimateId}
+                      </p>
+                    )}
                     {workOrder.assignedTechnicianName && (
                       <p className="text-sm text-blue-600 mt-1">
                         Assigned to: {workOrder.assignedTechnicianName}

@@ -31,7 +31,8 @@ import {
   Users,
   List,
   Edit,
-  Trash2
+  Trash2,
+  ExternalLink
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
 
@@ -539,6 +540,16 @@ export default function WorkOrders() {
                                   <span className="text-gray-700 text-sm truncate">{workOrder.projectAddress}</span>
                                 </div>
 
+                                {/* Source Estimate Reference */}
+                                {workOrder.estimateId && (
+                                  <div className="flex items-center gap-2">
+                                    <ExternalLink className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                                    <span className="text-purple-700 text-sm font-medium">
+                                      From Estimate #{workOrder.estimateId}
+                                    </span>
+                                  </div>
+                                )}
+
                                 {/* Assigned Technician */}
                                 {workOrder.assignedTechnicianName && (
                                   <div className="flex items-center gap-2">
@@ -701,6 +712,16 @@ export default function WorkOrders() {
                         <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         <span className="text-gray-700 text-sm truncate">{workOrder.projectName}</span>
                       </div>
+
+                      {/* Source Estimate Reference */}
+                      {workOrder.estimateId && (
+                        <div className="flex items-center gap-2">
+                          <ExternalLink className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                          <span className="text-purple-700 text-sm font-medium">
+                            From Estimate #{workOrder.estimateId}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Date Assigned */}
                       {workOrder.assignedTechnicianId && (
