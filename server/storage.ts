@@ -170,6 +170,7 @@ export interface IStorage {
 
   // Estimate Items
   getEstimateItems(estimateId: number): Promise<EstimateItem[]>;
+  getEstimateZones(estimateId: number): Promise<EstimateZone[]>;
   
   // Dashboard Stats
   getDashboardStats(): Promise<{
@@ -1064,6 +1065,10 @@ export class DatabaseStorage implements IStorage {
 
   async getEstimateItems(estimateId: number): Promise<EstimateItem[]> {
     return await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimateId));
+  }
+
+  async getEstimateZones(estimateId: number): Promise<EstimateZone[]> {
+    return await db.select().from(estimateZones).where(eq(estimateZones.estimateId, estimateId)).orderBy(estimateZones.sortOrder);
   }
 
   // Property Zones

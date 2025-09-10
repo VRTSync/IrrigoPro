@@ -3573,6 +3573,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/estimates/:id/zones", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const zones = await storage.getEstimateZones(id);
+      res.json(zones);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch estimate zones" });
+    }
+  });
+
   app.post("/api/estimates", async (req, res) => {
     try {
       console.log("Received estimate data:", JSON.stringify(req.body, null, 2));
