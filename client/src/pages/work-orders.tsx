@@ -233,9 +233,7 @@ export default function WorkOrders() {
   // Delete work order mutation
   const deleteWorkOrder = useMutation({
     mutationFn: async (workOrderId: number) => {
-      return apiRequest(`/api/work-orders/${workOrderId}`, "DELETE", {}, {
-        headers: { 'x-user-role': currentUser?.role }
-      });
+      return apiRequest(`/api/work-orders/${workOrderId}`, "DELETE");
     },
     onSuccess: () => {
       toast({

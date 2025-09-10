@@ -30,9 +30,10 @@ type WorkOrderFormData = z.infer<typeof workOrderFormSchema>;
 interface WorkOrderFormProps {
   onClose: () => void;
   onSuccess: () => void;
+  editingWorkOrder?: any;
 }
 
-export function WorkOrderForm({ onClose, onSuccess }: WorkOrderFormProps) {
+export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrderFormProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
