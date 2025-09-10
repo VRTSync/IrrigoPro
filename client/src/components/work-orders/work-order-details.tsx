@@ -440,14 +440,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <p className="text-lg font-bold text-blue-900 mt-1">
                       {workOrder.assignedTechnicianName || 'Unassigned'}
                     </p>
-                    {workOrder.status === 'completed' && workOrder.completedByUserName && (
-                      <div className="mt-2 pt-2 border-t border-blue-200">
-                        <span className="text-sm text-blue-700">Completed by: </span>
-                        <span className="text-sm font-medium text-blue-800">
-                          {workOrder.completedByUserName}
-                        </span>
-                      </div>
-                    )}
                   </div>
                   
                   <div className="bg-green-50 p-4 rounded-lg">
@@ -585,8 +577,9 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <div className="flex items-center gap-4">
                       <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                       <div>
-                        <p className="font-medium text-gray-900">Work Completed</p>
-                        <p className="text-sm text-gray-600">{formatDate(workOrder.completedAt)}</p>
+                        <p className="font-medium text-gray-900">
+                          Completed by {workOrder.completedByUserName || 'Unknown'} on {formatDate(workOrder.completedAt)}
+                        </p>
                       </div>
                     </div>
                   )}
