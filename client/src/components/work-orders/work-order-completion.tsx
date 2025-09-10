@@ -64,6 +64,7 @@ interface UsedPart {
   partPrice: string;
   quantity: number;
   totalCost: number;
+  source: 'estimate' | 'field_added';
 }
 
 interface WorkOrderCompletionProps {
@@ -136,6 +137,7 @@ export function WorkOrderCompletion({
         partPrice: item.partPrice,
         quantity: item.quantity,
         totalCost: parseFloat(item.totalPrice),
+        source: 'estimate' as const,
       }));
       
       setUsedParts(prefilledParts);
@@ -203,6 +205,7 @@ export function WorkOrderCompletion({
         partPrice: part.price,
         quantity: 1,
         totalCost: parseFloat(part.price),
+        source: 'field_added',
       };
       setUsedParts(prev => [...prev, newUsedPart]);
     }
@@ -624,42 +627,110 @@ export function WorkOrderCompletion({
 
                 {/* Used Parts List */}
                 {usedParts.length > 0 ? (
-                  <div className="space-y-2">
-                    {usedParts.map((usedPart) => (
-                      <div key={usedPart.id} className="flex items-center justify-between p-3 border rounded-lg bg-white">
-                        <div className="flex-1">
-                          <div className="font-medium">{usedPart.partName}</div>
-                          {currentUser?.role !== 'field_tech' ? (
-                            <div className="text-sm text-gray-500">
-                              ${usedPart.partPrice} each × {usedPart.quantity} = ${usedPart.totalCost.toFixed(2)}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-gray-500">
-                              Quantity: {usedPart.quantity}
-                            </div>
-                          )}
+                  <div className="space-y-4">
+                    {/* Estimate Parts Section */}
+                    {usedParts.filter(part => part.source === 'estimate').length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-blue-200">
+                          <div className="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></div>
+                          <h4 className="font-medium text-blue-800">Planned Parts (From Estimate)</h4>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity - 1)}
-                          >
-                            <Minus className="w-3 h-3" />
-                          </Button>
-                          <span className="w-8 text-center">{usedPart.quantity}</span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity + 1)}
-                          >
-                            <Plus className="w-3 h-3" />
-                          </Button>
+                        <div className="space-y-2">
+                          {usedParts.filter(part => part.source === 'estimate').map((usedPart) => (
+                            <div key={usedPart.id} className="flex items-center justify-between p-3 border border-blue-200 rounded-lg bg-blue-50">
+                              <div className="flex-1">
+                                <div className="font-medium flex items-center gap-2">
+                                  {usedPart.partName}
+                                  <span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded">Estimate</span>
+                                </div>
+                                {currentUser?.role !== 'field_tech' ? (
+                                  <div className="text-sm text-blue-600">
+                                    ${usedPart.partPrice} each × {usedPart.quantity} = ${usedPart.totalCost.toFixed(2)}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-blue-600">
+                                    Quantity: {usedPart.quantity}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity - 1)}
+                                  className="border-blue-300 hover:bg-blue-100"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </Button>
+                                <span className="w-8 text-center font-medium text-blue-800">{usedPart.quantity}</span>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity + 1)}
+                                  className="border-blue-300 hover:bg-blue-100"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Field Added Parts Section */}
+                    {usedParts.filter(part => part.source === 'field_added').length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-orange-200">
+                          <div className="w-3 h-3 bg-orange-100 border border-orange-300 rounded"></div>
+                          <h4 className="font-medium text-orange-800">Additional Parts (Field Added)</h4>
+                        </div>
+                        <div className="space-y-2">
+                          {usedParts.filter(part => part.source === 'field_added').map((usedPart) => (
+                            <div key={usedPart.id} className="flex items-center justify-between p-3 border border-orange-200 rounded-lg bg-orange-50">
+                              <div className="flex-1">
+                                <div className="font-medium flex items-center gap-2">
+                                  {usedPart.partName}
+                                  <span className="text-xs bg-orange-200 text-orange-800 px-2 py-1 rounded">Field Added</span>
+                                </div>
+                                {currentUser?.role !== 'field_tech' ? (
+                                  <div className="text-sm text-orange-600">
+                                    ${usedPart.partPrice} each × {usedPart.quantity} = ${usedPart.totalCost.toFixed(2)}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-orange-600">
+                                    Quantity: {usedPart.quantity}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity - 1)}
+                                  className="border-orange-300 hover:bg-orange-100"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </Button>
+                                <span className="w-8 text-center font-medium text-orange-800">{usedPart.quantity}</span>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity + 1)}
+                                  className="border-orange-300 hover:bg-orange-100"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-gray-500">
