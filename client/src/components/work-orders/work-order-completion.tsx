@@ -128,7 +128,7 @@ export function WorkOrderCompletion({
 
   // Pre-fill form with estimate data when available
   useEffect(() => {
-    if (workOrderItems && estimateZones && workOrder.estimateId && usedParts.length === 0) {
+    if (Array.isArray(workOrderItems) && Array.isArray(estimateZones) && workOrder.estimateId && usedParts.length === 0) {
       // Pre-fill used parts from work order items
       const prefilledParts: UsedPart[] = workOrderItems.map((item: any) => ({
         id: Date.now() + Math.random(), // Unique ID for state management
@@ -336,7 +336,7 @@ export function WorkOrderCompletion({
         </DialogHeader>
 
         {/* Work Plan Reference Section - Shows estimated work for field techs */}
-        {workOrder.estimateId && estimateZones && estimateZones.length > 0 && !showSummary && (
+        {workOrder.estimateId && Array.isArray(estimateZones) && estimateZones.length > 0 && !showSummary && (
           <div className="border-b border-gray-200 bg-blue-50 p-4">
             <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
               <Activity className="w-4 h-4" />
