@@ -31,7 +31,11 @@ import {
   MessageSquare,
   Users,
   Download,
-  ArrowRight
+  ArrowRight,
+  Package,
+  Wrench,
+  List,
+  Activity
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -67,6 +71,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   // Get field technicians for reassignment
   const { data: fieldTechs } = useQuery<UserType[]>({
     queryKey: ["/api/users/field-techs"],
+  });
+
+  // Get work order items and zones for work plan display
+  const { data: workOrderItems } = useQuery({
+    queryKey: ["/api/work-orders", workOrder.id, "items"],
+  });
+
+  const { data: estimateZones } = useQuery({
+    queryKey: ["/api/estimates", workOrder.estimateId, "zones"],
+    enabled: !!workOrder.estimateId,
   });
 
   const updatePriority = useMutation({
@@ -282,8 +296,9 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-1">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="workplan">Work Plan</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 mt-6">
@@ -574,6 +589,102 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <div>
                       <h4 className="font-medium text-gray-900 mb-2">Notes</h4>
                       <p className="text-gray-700 bg-blue-50 p-3 rounded-lg border border-blue-200">{workOrder.notes}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="workplan" className="space-y-6 mt-6">
+            {/* Work Plan Header */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-blue-600" />
+                  Work Plan Details
+                </CardTitle>
+                {workOrder.estimateId && (
+                  <p className="text-sm text-gray-600">
+                    Based on Estimate #{workOrder.estimateId}
+                  </p>
+                )}
+              </CardHeader>
+            </Card>
+
+            {/* Zones and Work Items */}
+            {estimateZones && estimateZones.length > 0 ? (
+              <div className="space-y-4">
+                {estimateZones.map((zone: any, index: number) => {
+                  // Get items for this zone
+                  const zoneItems = workOrderItems?.filter((item: any) => item.zoneId === zone.id) || [];
+                  
+                  return (
+                    <Card key={zone.id} className="border-l-4 border-l-blue-500">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Wrench className="w-4 h-4 text-blue-600" />
+                            {zone.zoneName}
+                          </CardTitle>
+                          <Badge variant="outline" className="text-xs">
+                            {zoneItems.length} part{zoneItems.length !== 1 ? 's' : ''}
+                          </Badge>
+                        </div>
+                        {zone.workDescription && (
+                          <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p className="text-sm font-medium text-yellow-800 mb-1">Work Description:</p>
+                            <p className="text-yellow-700">{zone.workDescription}</p>
+                          </div>
+                        )}
+                      </CardHeader>
+
+                      {zoneItems.length > 0 && (
+                        <CardContent className="pt-0">
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 mb-3">
+                              <Package className="w-4 h-4 text-gray-600" />
+                              <span className="font-medium text-gray-700">Parts & Materials:</span>
+                            </div>
+                            
+                            {zoneItems.map((item: any) => (
+                              <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                <div className="flex-1">
+                                  <p className="font-medium text-gray-900">{item.partName}</p>
+                                  <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                                    <span>Qty: {item.quantity}</span>
+                                    <span>Labor: {item.laborHours}h</span>
+                                    <span>Total: ${item.totalPrice}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : workOrder.estimateId ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <List className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-600">Loading work plan details...</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">Direct Work Order</h3>
+                  <p className="text-gray-600">
+                    This work order was created directly and is not based on an estimate.
+                  </p>
+                  {workOrder.description && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-sm font-medium text-blue-800 mb-1">Work Description:</p>
+                      <p className="text-blue-700">{workOrder.description}</p>
                     </div>
                   )}
                 </CardContent>
