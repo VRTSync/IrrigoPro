@@ -221,8 +221,10 @@ export interface IStorage {
   getWorkOrdersByTechnician(technicianId: number): Promise<WorkOrder[]>;
   getWorkOrdersByCustomer(customerId: number): Promise<WorkOrder[]>;
   getWorkOrdersByStatus(status: string): Promise<WorkOrder[]>;
+  getWorkOrdersByEstimate(estimateId: number): Promise<WorkOrder[]>;
   getWorkOrder(id: number): Promise<WorkOrder | undefined>;
   createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder>;
+  createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
   assignWorkOrder(workOrderId: number, technicianId: number, technicianName: string): Promise<boolean>;
@@ -1603,6 +1605,17 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async getWorkOrdersByEstimate(estimateId: number): Promise<WorkOrder[]> {
+    try {
+      return await db.select().from(workOrders)
+        .where(eq(workOrders.estimateId, estimateId))
+        .orderBy(desc(workOrders.createdAt));
+    } catch (error) {
+      console.error("Error fetching work orders by estimate:", error);
+      return [];
+    }
+  }
+
   async getWorkOrder(id: number): Promise<WorkOrder | undefined> {
     const [workOrder] = await db.select().from(workOrders).where(eq(workOrders.id, id));
     return workOrder || undefined;
@@ -1635,6 +1648,73 @@ export class DatabaseStorage implements IStorage {
       }
     }
     
+    return newWorkOrder;
+  }
+
+  async createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder> {
+    // Get the estimate with its zones and items
+    const estimate = await this.getEstimate(estimateId);
+    if (!estimate) {
+      throw new Error(`Estimate ${estimateId} not found`);
+    }
+    
+    if (estimate.status !== 'approved') {
+      throw new Error(`Estimate ${estimateId} must be approved before creating work order`);
+    }
+
+    // Check if work order already exists for this estimate
+    const existingWorkOrders = await this.getWorkOrdersByEstimate(estimateId);
+    if (existingWorkOrders.length > 0) {
+      throw new Error(`Work order already exists for estimate ${estimateId}`);
+    }
+
+    // Generate work order number
+    const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    // Create the work order
+    const workOrderData: InsertWorkOrder = {
+      workOrderNumber,
+      estimateId: estimateId,
+      customerId: estimate.customerId!,
+      customerName: estimate.customerName,
+      customerEmail: estimate.customerEmail,
+      customerPhone: estimate.customerPhone,
+      projectName: estimate.projectName,
+      projectAddress: estimate.projectAddress,
+      locationNotes: estimate.locationNotes,
+      accessInstructions: estimate.accessInstructions,
+      workType: 'estimate_based',
+      status: 'pending',
+      priority: 'medium',
+      totalAmount: estimate.totalAmount,
+      totalItems: estimate.zones?.reduce((sum, zone) => sum + zone.items.length, 0) || 0,
+    };
+
+    const [newWorkOrder] = await db.insert(workOrders).values(workOrderData).returning();
+
+    // Copy estimate items to work order items
+    if (estimate.zones) {
+      for (const zone of estimate.zones) {
+        for (const item of zone.items) {
+          await db.insert(workOrderItems).values({
+            workOrderId: newWorkOrder.id,
+            zoneId: zone.id,
+            partId: item.partId,
+            partName: item.partName,
+            partPrice: item.partPrice,
+            quantity: item.quantity,
+            laborHours: item.laborHours,
+            totalPrice: item.totalPrice,
+          });
+        }
+      }
+    }
+
+    // Update estimate status to indicate it has been converted
+    await db.update(estimates)
+      .set({ status: 'converted_to_work_order' })
+      .where(eq(estimates.id, estimateId));
+
     return newWorkOrder;
   }
 
