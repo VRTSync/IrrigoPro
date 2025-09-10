@@ -312,8 +312,8 @@ export function WorkOrderCompletion({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
-        <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+      <DialogContent className="w-screen h-screen sm:w-[95vw] sm:max-w-4xl sm:h-[95vh] sm:max-h-[95vh] sm:rounded-lg overflow-hidden p-0 flex flex-col m-0 sm:m-auto">
+        <DialogHeader className="p-3 sm:p-6 border-b border-gray-200 flex-shrink-0">
           <DialogTitle className="flex items-center gap-3 text-lg sm:text-xl">
             <div className="bg-green-50 p-2 rounded-lg">
               <CheckCircle className="w-5 h-5 text-green-600" />
@@ -360,7 +360,7 @@ export function WorkOrderCompletion({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
           {showSummary ? (
             // Summary View
             <div className="space-y-6">
@@ -458,12 +458,12 @@ export function WorkOrderCompletion({
             <Separator />
 
             {/* Action Buttons for Summary */}
-            <div className="flex justify-end gap-3">
+            <div className="flex flex-col sm:flex-row justify-end gap-3">
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={onEditClick}
-                className="px-6"
+                className="px-6 w-full sm:w-auto min-h-[44px]"
               >
                 <Edit className="w-4 h-4 mr-2" />
                 Edit Details
@@ -471,7 +471,7 @@ export function WorkOrderCompletion({
               <Button 
                 onClick={onFinalSubmit}
                 disabled={isSubmitting}
-                className="bg-green-600 hover:bg-green-700 text-white px-6"
+                className="bg-green-600 hover:bg-green-700 text-white px-6 w-full sm:w-auto min-h-[44px]"
               >
                 {isSubmitting ? "Submitting..." : "Submit Work Order"}
               </Button>
@@ -790,16 +790,16 @@ export function WorkOrderCompletion({
             <Separator />
 
             {/* Submit Button */}
-            <div className="flex justify-end gap-3">
+            <div className="flex flex-col sm:flex-row justify-end gap-3">
               {currentUser?.role !== 'field_tech' && (
-                <Button type="button" variant="outline" onClick={handleClose}>
+                <Button type="button" variant="outline" onClick={handleClose} className="w-full sm:w-auto min-h-[44px]">
                   Cancel
                 </Button>
               )}
               <Button 
                 type="submit" 
                 disabled={isSubmitting}
-                className="bg-green-600 hover:bg-green-700 text-white"
+                className="bg-green-600 hover:bg-green-700 text-white w-full sm:w-auto min-h-[44px]"
               >
                 {isSubmitting ? "Reviewing..." : "Review Work Order"}
               </Button>

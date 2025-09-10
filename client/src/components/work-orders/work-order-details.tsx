@@ -268,8 +268,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   return (
     <>
       <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
-        <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+      <DialogContent className="w-screen h-screen sm:w-[95vw] sm:max-w-4xl sm:h-[95vh] sm:max-h-[95vh] sm:rounded-lg overflow-hidden p-0 flex flex-col m-0 sm:m-auto">
+        <DialogHeader className="p-3 sm:p-6 border-b border-gray-200 flex-shrink-0">
           <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
             <FileText className="w-5 h-5" />
             <span>Work Order Details</span>
@@ -293,7 +293,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         )}
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-1">
