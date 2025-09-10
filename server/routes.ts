@@ -5034,42 +5034,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/estimates/:id/convert-to-work-order", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const estimate = await storage.getEstimate(id);
-      if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+      
+      // Use the new storage function that handles all validation and conversion
+      const workOrder = await storage.createWorkOrderFromEstimate(id);
+      
+      // Optionally assign to a technician if provided in request
+      if (req.body.assignedTechnicianId) {
+        const assignedUser = await storage.getUser(req.body.assignedTechnicianId);
+        if (assignedUser) {
+          await storage.assignWorkOrder(workOrder.id, assignedUser.id, assignedUser.name);
+        }
       }
-      if (estimate.status !== "approved") {
-        return res.status(400).json({ message: "Only approved estimates can be converted to work orders" });
+      
+      // Update scheduled date if provided
+      if (req.body.scheduledDate) {
+        await storage.updateWorkOrder(workOrder.id, {
+          scheduledDate: new Date(req.body.scheduledDate)
+        });
       }
       
-      // Find the manager user to auto-assign work orders initially
-      const managerUser = await storage.getUserByRole('irrigation_manager');
-      
-      // Create work order from estimate - initially assign to manager
-      const workOrderData = {
-        estimateId: estimate.id,
-        customerId: estimate.customerId || 0,
-        customerName: estimate.customerName,
-        customerEmail: estimate.customerEmail,
-        customerPhone: estimate.customerPhone,
-        projectName: estimate.projectName,
-        projectAddress: estimate.projectAddress,
-        workType: "estimate_based" as const,
-        status: "assigned" as const,
-        priority: "medium" as const, // Standard priority for estimate-based work orders
-        assignedTechnicianId: managerUser?.id || null,
-        assignedTechnicianName: managerUser?.name || "Manager",
-        scheduledDate: req.body.scheduledDate ? new Date(req.body.scheduledDate) : null,
-        notes: req.body.notes || null,
-        totalAmount: estimate.totalAmount,
-        totalItems: estimate.zones?.reduce((total, zone) => total + (zone.items?.length || 0), 0) || 0
-      };
-      
-      // Create the work order and update estimate status
-      const workOrder = await storage.createWorkOrder(workOrderData, estimate.zones || []);
-      
-      // Update estimate status to converted
-      await storage.updateEstimate(id, { status: "converted_to_work_order" });
+      // Add notes if provided
+      if (req.body.notes) {
+        await storage.updateWorkOrder(workOrder.id, {
+          notes: req.body.notes
+        });
+      }
       
       res.json({ 
         message: "Work order created successfully", 
@@ -5078,6 +5067,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       });
     } catch (error) {
       console.error("Error converting estimate to work order:", error);
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          return res.status(404).json({ message: error.message });
+        }
+        if (error.message.includes('must be approved') || error.message.includes('already exists')) {
+          return res.status(400).json({ message: error.message });
+        }
+      }
       res.status(500).json({ message: "Failed to create work order" });
     }
   });
