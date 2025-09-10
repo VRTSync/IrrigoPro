@@ -38,7 +38,8 @@ import {
   Edit,
   Search,
   Check,
-  ShoppingCart
+  ShoppingCart,
+  Activity
 } from "lucide-react";
 import type { WorkOrder, Part } from "@shared/schema";
 
@@ -101,6 +102,20 @@ export function WorkOrderCompletion({
     }
   }, []);
 
+  const { data: parts } = useQuery<Part[]>({
+    queryKey: ["/api/parts"],
+  });
+
+  // Get work order items and estimate zones for prefilling
+  const { data: workOrderItems } = useQuery({
+    queryKey: ["/api/work-orders", workOrder.id, "items"],
+  });
+
+  const { data: estimateZones } = useQuery({
+    queryKey: ["/api/estimates", workOrder.estimateId, "zones"],
+    enabled: !!workOrder.estimateId,
+  });
+
   // Pre-fill form with estimate data when available
   useEffect(() => {
     if (workOrderItems && estimateZones && workOrder.estimateId && usedParts.length === 0) {
@@ -135,20 +150,6 @@ export function WorkOrderCompletion({
       });
     }
   }, [workOrderItems, estimateZones, workOrder.estimateId, form, usedParts.length]);
-
-  const { data: parts } = useQuery<Part[]>({
-    queryKey: ["/api/parts"],
-  });
-
-  // Get work order items and estimate zones for prefilling
-  const { data: workOrderItems } = useQuery({
-    queryKey: ["/api/work-orders", workOrder.id, "items"],
-  });
-
-  const { data: estimateZones } = useQuery({
-    queryKey: ["/api/estimates", workOrder.estimateId, "zones"],
-    enabled: !!workOrder.estimateId,
-  });
 
   const form = useForm<WorkOrderCompletionData>({
     resolver: zodResolver(workOrderCompletionSchema),
