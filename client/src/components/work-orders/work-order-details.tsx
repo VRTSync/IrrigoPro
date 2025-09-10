@@ -440,6 +440,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                     <p className="text-lg font-bold text-blue-900 mt-1">
                       {workOrder.assignedTechnicianName || 'Unassigned'}
                     </p>
+                    {workOrder.status === 'completed' && workOrder.completedByUserName && (
+                      <div className="mt-2 pt-2 border-t border-blue-200">
+                        <span className="text-sm text-blue-700">Completed by: </span>
+                        <span className="text-sm font-medium text-blue-800">
+                          {workOrder.completedByUserName}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   
                   <div className="bg-green-50 p-4 rounded-lg">
