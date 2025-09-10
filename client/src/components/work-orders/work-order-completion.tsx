@@ -116,6 +116,15 @@ export function WorkOrderCompletion({
     enabled: !!workOrder.estimateId,
   });
 
+  const form = useForm<WorkOrderCompletionData>({
+    resolver: zodResolver(workOrderCompletionSchema),
+    defaultValues: {
+      workSummary: "",
+      customerNotes: "",
+      totalHours: 1,
+    },
+  });
+
   // Pre-fill form with estimate data when available
   useEffect(() => {
     if (workOrderItems && estimateZones && workOrder.estimateId && usedParts.length === 0) {
@@ -150,15 +159,6 @@ export function WorkOrderCompletion({
       });
     }
   }, [workOrderItems, estimateZones, workOrder.estimateId, form, usedParts.length]);
-
-  const form = useForm<WorkOrderCompletionData>({
-    resolver: zodResolver(workOrderCompletionSchema),
-    defaultValues: {
-      workSummary: "",
-      customerNotes: "",
-      totalHours: 1,
-    },
-  });
 
   const completeWorkOrderMutation = useMutation({
     mutationFn: async (data: any) => {
