@@ -130,18 +130,8 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
   const workOrderId = parseInt(req.params.id);
   const updateData = req.body;
   
-  // Debug logging
-  console.log(`Work Order Update Access Check:`, {
-    workOrderId,
-    userRole,
-    userId,
-    updateData,
-    bodyKeys: Object.keys(updateData)
-  });
-  
   // Company admins, billing managers, and irrigation managers have full access
   if (userRole === 'company_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
-    console.log('Access granted - admin/billing manager/irrigation manager');
     return next();
   }
   
@@ -149,7 +139,6 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
   if (userRole === 'field_tech') {
     // Validate that we have user ID
     if (!userId) {
-      console.log('Access denied - no user ID found');
       return res.status(401).json({ 
         message: "Authentication required - user ID not found." 
       });
@@ -162,27 +151,14 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
         const workOrder = await storage.getWorkOrder(workOrderId);
         const userIdNum = parseInt(userId as string);
         
-        console.log(`Work order assignment check:`, {
-          workOrderAssignedTo: workOrder?.assignedTechnicianId,
-          requestingUserId: userIdNum,
-          workOrderExists: !!workOrder
-        });
-        
         if (workOrder && workOrder.assignedTechnicianId === userIdNum) {
-          console.log('Access granted - field tech can start assigned work order');
           return next();
         }
-        
-        console.log(`Field tech access denied - Work Order ${workOrderId}: assigned to ${workOrder?.assignedTechnicianId}, user ID: ${userIdNum}`);
         
       } catch (error) {
         console.error('Error checking work order assignment:', error);
       }
-    } else {
-      console.log('Access denied - not a simple status update to in_progress');
     }
-  } else {
-    console.log(`Access denied - invalid role: ${userRole}`);
   }
   
   return res.status(403).json({ 
