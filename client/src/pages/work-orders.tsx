@@ -565,7 +565,7 @@ export default function WorkOrders() {
                                   <div className="flex items-center gap-2">
                                     <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
                                     <span className="text-green-700 text-sm font-medium">
-                                      Completed: {formatDate(workOrder.completedAt)}
+                                      Completed by {workOrder.completedByUserName || 'Unknown'} on {formatDate(workOrder.completedAt)}
                                     </span>
                                   </div>
                                 )}
@@ -777,8 +777,9 @@ export default function WorkOrders() {
                           <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-2">
                             <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
                             <div className="flex-1">
-                              <p className="text-xs font-medium text-green-600">Completed on</p>
-                              <p className="text-sm font-semibold text-green-700">{formatDate(workOrder.completedAt)}</p>
+                              <p className="text-sm font-semibold text-green-700">
+                                Completed by {workOrder.completedByUserName || 'Unknown'} on {formatDate(workOrder.completedAt)}
+                              </p>
                             </div>
                           </div>
                         )}
