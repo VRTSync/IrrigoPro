@@ -135,6 +135,13 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
   
   // Field techs can only start work orders assigned to them
   if (userRole === 'field_tech') {
+    // Validate that we have user ID
+    if (!userId) {
+      return res.status(401).json({ 
+        message: "Authentication required - user ID not found." 
+      });
+    }
+    
     const workOrderId = parseInt(req.params.id);
     const updateData = req.body;
     
@@ -143,11 +150,17 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
       try {
         // Check if the work order is assigned to this field tech
         const workOrder = await storage.getWorkOrder(workOrderId);
-        if (workOrder && workOrder.assignedTechnicianId === parseInt(userId)) {
+        const userIdNum = parseInt(userId as string);
+        
+        if (workOrder && workOrder.assignedTechnicianId === userIdNum) {
           return next();
         }
+        
+        // Log detailed info for debugging
+        console.log(`Field tech access denied - Work Order ${workOrderId}: assigned to ${workOrder?.assignedTechnicianId}, user ID: ${userIdNum}`);
+        
       } catch (error) {
-        // Continue to access denied if there's an error
+        console.error('Error checking work order assignment:', error);
       }
     }
   }
