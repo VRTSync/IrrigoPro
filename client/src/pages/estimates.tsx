@@ -9,8 +9,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
-import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw } from "lucide-react";
+import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw, Wrench } from "lucide-react";
 import { useState, useEffect } from "react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Estimate } from "@shared/schema";
 
 export default function Estimates() {
@@ -19,8 +21,10 @@ export default function Estimates() {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [creatingWorkOrder, setCreatingWorkOrder] = useState<number | null>(null);
 
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Get current user role
   const getCurrentUser = () => {
@@ -64,6 +68,42 @@ export default function Estimates() {
       await queryClient.refetchQueries({ queryKey: ["/api/estimates"] });
     } catch (error) {
       console.error("Error checking estimate status:", error);
+    }
+  };
+
+  const handleCreateWorkOrder = async (estimateId: number) => {
+    setCreatingWorkOrder(estimateId);
+    try {
+      const response = await apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Work Order Created",
+          description: "The estimate has been successfully converted to a work order.",
+        });
+        
+        // Refresh estimates list and work orders
+        await queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+        await queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create work order');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create work order. Please try again.",
+        variant: "destructive",
+      });
+      console.error("Error creating work order:", error);
+    } finally {
+      setCreatingWorkOrder(null);
     }
   };
 
@@ -253,6 +293,22 @@ export default function Estimates() {
                               </Button>
                               {estimate.status !== 'converted_to_work_order' && (
                                 <>
+                                  {estimate.status === 'approved' && (
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400"
+                                      onClick={() => handleCreateWorkOrder(estimate.id)}
+                                      disabled={creatingWorkOrder === estimate.id}
+                                      title="Create Work Order"
+                                    >
+                                      {creatingWorkOrder === estimate.id ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <Wrench className="w-4 h-4" />
+                                      )}
+                                    </Button>
+                                  )}
                                   <Button 
                                     variant="ghost" 
                                     size="sm" 
@@ -374,6 +430,22 @@ export default function Estimates() {
                       </Button>
                       {estimate.status !== 'converted_to_work_order' && (
                         <>
+                          {estimate.status === 'approved' && (
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400"
+                              onClick={() => handleCreateWorkOrder(estimate.id)}
+                              disabled={creatingWorkOrder === estimate.id}
+                              title="Create Work Order"
+                            >
+                              {creatingWorkOrder === estimate.id ? (
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Wrench className="w-4 h-4" />
+                              )}
+                            </Button>
+                          )}
                           <Button 
                             variant="outline" 
                             size="sm"
