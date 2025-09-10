@@ -972,7 +972,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const activeUsers = companyUsers.filter(user => user.isActive).length;
         
         const allWorkOrders = await storage.getWorkOrders();
-        const companyWorkOrders = allWorkOrders.filter(wo => wo.companyId === userCompanyId);
+        const companyWorkOrders = allWorkOrders.filter(wo => wo.customerId && allCustomers.find(c => c.id === wo.customerId)?.companyId === userCompanyId);
         const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned" || wo.status === "in_progress").length;
         
         const allCustomers = await storage.getCustomers();
@@ -998,7 +998,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stats);
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
-      res.status(500).json({ message: "Failed to fetch dashboard statistics", error: error.message });
+      res.status(500).json({ message: "Failed to fetch dashboard statistics", error: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -1058,7 +1058,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
       console.error('Full error details for user creation:', error);
-      res.status(500).json({ message: "Failed to create user", error: error.message });
+      res.status(500).json({ message: "Failed to create user", error: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -1132,8 +1132,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update the user's password
       const user = await storage.updateUser(userId, { 
-        password: hashedPassword,
-        updatedAt: new Date()
+        password: hashedPassword
       });
       
       if (!user) {
@@ -1161,7 +1160,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       res.status(500).json({ 
         message: "Database connection failed", 
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString()
       });
     }
@@ -2083,17 +2082,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
           workDate: workOrder.completedAt || workOrder.createdAt,
           technicianName: workOrder.assignedTechnicianName || 'Unknown',
-          laborHours: parseFloat(workOrder.totalHours || '0'),
-          laborRate: parseFloat(workOrder.laborRate || '45'),
-          laborAmount: parseFloat(workOrder.laborSubtotal || '0'),
-          laborTotal: parseFloat(workOrder.laborSubtotal || '0'),
-          partsAmount: parseFloat(workOrder.partsSubtotal || '0'),
+          laborHours: (parseFloat(workOrder.totalHours || '0')).toString(),
+          laborRate: (parseFloat(workOrder.laborRate || '45')).toString(),
+          laborAmount: (parseFloat(workOrder.laborSubtotal || '0')).toString(),
+          laborTotal: (parseFloat(workOrder.laborSubtotal || '0')).toString(),
+          partsAmount: (parseFloat(workOrder.partsSubtotal || '0')).toString(),
           markupAmount: 0, // No markup on invoices
           taxAmount: 0, // No tax
-          totalAmount: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0'),
+          totalAmount: (parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')).toString(),
           quantity: 1, // Default quantity
-          unitPrice: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0'),
-          totalPrice: parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')
+          unitPrice: (parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')).toString(),
+          totalPrice: (parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')).toString()
         });
 
         // Update work order to mark as billed (we'll use notes to track billing status)
@@ -2113,17 +2112,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
           workDate: billingSheet.workDate,
           technicianName: billingSheet.technicianName,
-          laborHours: parseFloat(billingSheet.totalHours || '0'),
-          laborRate: parseFloat(billingSheet.laborRate || '45'),
-          laborAmount: parseFloat(billingSheet.laborSubtotal || '0'),
-          laborTotal: parseFloat(billingSheet.laborSubtotal || '0'),
-          partsAmount: parseFloat(billingSheet.partsSubtotal || '0'),
+          laborHours: (parseFloat(billingSheet.totalHours || '0')).toString(),
+          laborRate: (parseFloat(billingSheet.laborRate || '45')).toString(),
+          laborAmount: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
+          laborTotal: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
+          partsAmount: (parseFloat(billingSheet.partsSubtotal || '0')).toString(),
           markupAmount: 0, // No markup on invoices
           taxAmount: 0, // No tax
-          totalAmount: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0'),
+          totalAmount: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
           quantity: 1, // Default quantity  
-          unitPrice: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0'),
-          totalPrice: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')
+          unitPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
+          totalPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString()
         });
 
         // Update billing sheet to mark as billed (we'll use notes to track billing status)
