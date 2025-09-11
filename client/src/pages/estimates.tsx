@@ -404,63 +404,74 @@ export default function Estimates() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center space-x-2 pt-3 border-t border-gray-100">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="flex-1"
-                        onClick={() => {
-                          setSelectedEstimateId(estimate.id);
-                          setShowDetailModal(true);
-                        }}
-                      >
-                        <Eye className="w-4 h-4 mr-2" />
-                        View Details
-                      </Button>
-                      {estimate.status !== 'converted_to_work_order' && (
-                        <>
-                          {estimate.status === 'approved' && (
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400"
-                              onClick={() => handleCreateWorkOrder(estimate.id)}
-                              disabled={creatingWorkOrder === estimate.id}
-                              title="Create Work Order"
-                            >
-                              {creatingWorkOrder === estimate.id ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Wrench className="w-4 h-4" />
-                              )}
-                            </Button>
-                          )}
+                    <div className="pt-3 border-t border-gray-100 space-y-2">
+                      {/* Primary Actions Row */}
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => {
+                            setSelectedEstimateId(estimate.id);
+                            setShowDetailModal(true);
+                          }}
+                        >
+                          <Eye className="w-4 h-4 mr-2" />
+                          View Details
+                        </Button>
+                        {estimate.status === 'approved' && (
                           <Button 
                             variant="outline" 
                             size="sm"
+                            className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400 flex-1"
+                            onClick={() => handleCreateWorkOrder(estimate.id)}
+                            disabled={creatingWorkOrder === estimate.id}
+                            title="Create Work Order"
+                          >
+                            {creatingWorkOrder === estimate.id ? (
+                              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                            ) : (
+                              <Wrench className="w-4 h-4 mr-2" />
+                            )}
+                            <span className="truncate">Create Work Order</span>
+                          </Button>
+                        )}
+                      </div>
+                      
+                      {/* Secondary Actions Row */}
+                      {estimate.status !== 'converted_to_work_order' && (
+                        <div className="flex items-center justify-center gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            className="flex-1"
                             onClick={() => {
                               setEditEstimateId(estimate.id);
                               setShowEstimateModal(true);
                             }}
                           >
-                            <Edit2 className="w-4 h-4" />
+                            <Edit2 className="w-4 h-4 mr-1" />
+                            Edit
                           </Button>
                           <Button 
                             variant="outline" 
                             size="sm"
-                            className="text-green-600 hover:text-green-800"
+                            className="text-green-600 hover:text-green-800 flex-1"
                             onClick={() => handleCheckStatus(estimate.id)}
                             title="Check Status"
                           >
-                            <RefreshCw className="w-4 h-4" />
+                            <RefreshCw className="w-4 h-4 mr-1" />
+                            Status
                           </Button>
-                          <Button variant="outline" size="sm">
-                            <Mail className="w-4 h-4" />
+                          <Button variant="outline" size="sm" className="flex-1">
+                            <Mail className="w-4 h-4 mr-1" />
+                            Email
                           </Button>
-                          <Button variant="outline" size="sm">
-                            <Download className="w-4 h-4" />
+                          <Button variant="outline" size="sm" className="flex-1">
+                            <Download className="w-4 h-4 mr-1" />
+                            PDF
                           </Button>
-                        </>
+                        </div>
                       )}
                     </div>
                     {estimate.status === 'converted_to_work_order' && (
