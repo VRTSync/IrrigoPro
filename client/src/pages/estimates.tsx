@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
+import { EstimateModal } from "@/components/estimates/estimate-modal";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw, Wrench } from "lucide-react";
@@ -484,7 +484,7 @@ export default function Estimates() {
       </Tabs>
 
       {/* Estimate Modal */}
-      <EnhancedEstimateModal
+      <EstimateModal
         open={showEstimateModal}
         onOpenChange={(open) => {
           setShowEstimateModal(open);
@@ -492,7 +492,6 @@ export default function Estimates() {
             setEditEstimateId(null);
           }
         }}
-        estimateId={editEstimateId}
       />
 
       {/* Estimate Detail Modal */}
