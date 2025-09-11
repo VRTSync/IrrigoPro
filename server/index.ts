@@ -4,9 +4,70 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 
+// Optional API Rate Limiting (disabled by default for production compatibility)
+interface RateLimitOptions {
+  enabled: boolean;
+  windowMs: number;
+  maxRequests: number;
+}
+
+const rateLimitConfig: RateLimitOptions = {
+  enabled: process.env.ENABLE_RATE_LIMITING === 'true',
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
+  maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000') // 1000 requests per window
+};
+
+// In-memory rate limiting store (simple implementation)
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+
+const rateLimitMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+  if (!rateLimitConfig.enabled) {
+    next();
+    return;
+  }
+
+  const clientId = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const key = `${clientId}`;
+  
+  const existing = rateLimitStore.get(key);
+  
+  if (!existing || now > existing.resetTime) {
+    rateLimitStore.set(key, {
+      count: 1,
+      resetTime: now + rateLimitConfig.windowMs
+    });
+    next();
+    return;
+  }
+  
+  if (existing.count >= rateLimitConfig.maxRequests) {
+    logger.warn(`Rate limit exceeded for ${clientId}`, "Security", {
+      requests: existing.count,
+      windowMs: rateLimitConfig.windowMs
+    });
+    res.status(429).json({ 
+      message: "Too many requests, please try again later" 
+    });
+    return;
+  }
+  
+  existing.count++;
+  rateLimitStore.set(key, existing);
+  next();
+};
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Configure proxy trust for production rate limiting
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
+// Apply rate limiting if enabled (defaults to disabled)
+app.use(rateLimitMiddleware);
 app.use(fileUpload({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   abortOnLimit: true

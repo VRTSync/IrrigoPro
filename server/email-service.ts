@@ -29,14 +29,22 @@ export interface EstimateEmailData {
 
 export class EmailService {
   private static get baseUrl() {
+    // Use environment variable if set (flexible for different production domains)
+    if (process.env.APP_BASE_URL) {
+      return process.env.APP_BASE_URL.replace(/\/$/, ''); // Remove trailing slash
+    }
+    
+    // Production fallback (maintains existing behavior)
     if (process.env.NODE_ENV === 'production') {
       return 'https://irrigopro.com';
     }
+    
     // For development, use the current Replit domain from REPLIT_DOMAINS
     const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
     if (replitDomain) {
       return `https://${replitDomain}`;
     }
+    
     // Fallback to standard Replit format
     return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
   }

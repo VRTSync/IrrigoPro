@@ -93,7 +93,7 @@ export interface IStorage {
   deleteCompany(id: number): Promise<boolean>;
   
   // Users
-  getUsers(companyId?: number): Promise<User[]>;
+  getUsers(companyId?: number, options?: { limit?: number; offset?: number }): Promise<User[]>;
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -386,18 +386,26 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Users
-  async getUsers(companyId?: number): Promise<User[]> {
-    const query = db.select().from(users);
+  // Users - with optional pagination (backward compatible)
+  async getUsers(companyId?: number, options?: { limit?: number; offset?: number }): Promise<User[]> {
+    let query = db.select().from(users);
+    
     if (companyId !== undefined) {
       // For super_admin (companyId = null), show all users
       // For company users, show only users from their company
-      if (companyId === null) {
-        return await query;
-      } else {
-        return await query.where(eq(users.companyId, companyId));
+      if (companyId !== null) {
+        query = query.where(eq(users.companyId, companyId));
       }
     }
+    
+    // Add pagination if requested (maintains backward compatibility)
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+    if (options?.offset) {
+      query = query.offset(options.offset);
+    }
+    
     return await query;
   }
 
