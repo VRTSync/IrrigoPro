@@ -1524,8 +1524,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer billing preview data - includes estimates, work orders, and billing sheets
+  // This must come BEFORE the :id route to avoid parameter conflicts
+  app.get("/api/customers/billing-preview", async (req, res) => {
+    try {
+      console.log("Fetching comprehensive customer billing data...");
+      const customers = await storage.getCustomers();
+      console.log(`Found ${customers.length} customers`);
+      
+      // Get filter parameters from query
+      const dateFilter = req.query.dateFilter as string || "last_30_days";
+      const selectedMonth = req.query.selectedMonth as string;
+      
+      const currentDate = new Date();
+      const currentMonth = currentDate.getMonth();
+      const currentYear = currentDate.getFullYear();
+      
+      // Calculate date range based on filter
+      let startDate: Date;
+      let endDate: Date = currentDate;
+      
+      switch (dateFilter) {
+        case "all":
+          startDate = new Date(2020, 0, 1); // Far past date
+          break;
+        case "current_month":
+          startDate = new Date(currentYear, currentMonth, 1);
+          break;
+        case "last_30_days":
+          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
+          break;
+        case "last_90_days":
+          startDate = new Date(currentDate.getTime() - (90 * 24 * 60 * 60 * 1000));
+          break;
+        case "custom_month":
+          if (selectedMonth) {
+            const [year, month] = selectedMonth.split('-').map(Number);
+            startDate = new Date(year, month - 1, 1);
+            endDate = new Date(year, month, 0); // Last day of the month
+          } else {
+            startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
+          }
+          break;
+        default:
+          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
+      }
+      
+      console.log(`Filtering data from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+      const currentMonthStart = new Date(currentYear, currentMonth, 1);
+      
+      // Get billing previews for all customers including work orders, estimates, and billing sheets
+      const customerPreviews = await Promise.all(customers.map(async (customer) => {
+        try {
+          console.log(`Processing customer: ${customer.name} (ID: ${customer.id})`);
+          
+          // Get all three data sources for this customer
+          const workOrders = await storage.getWorkOrdersByCustomer(customer.id);
+          const estimates = await storage.getEstimatesByCustomer(customer.id);
+          const billingSheets = await storage.getBillingSheetsByCustomer(customer.id);
+          
+          const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
+          const approvedEstimates = estimates.filter(est => est.status === 'approved');
+          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed');
+          
+          // Calculate unbilled amounts for this customer
+          const unbilledWorkOrders = completedWorkOrders.filter(wo => 
+            !wo.invoiceId && wo.status === 'completed'
+          );
+          const unbilledBillingSheets = completedBillingSheets.filter(bs => 
+            !bs.invoiceId && bs.status === 'completed'
+          );
+          
+          const unbilledAmount = 
+            unbilledWorkOrders.reduce((sum, wo) => {
+              const laborAmount = parseFloat(wo.totalHours || '0') * 45;
+              const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
+              return sum + laborAmount + partsAmount;
+            }, 0) +
+            unbilledBillingSheets.reduce((sum, bs) => {
+              const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
+              const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
+              return sum + laborAmount + partsAmount;
+            }, 0);
+
+          return {
+            id: customer.id,
+            name: customer.name,
+            email: customer.email,
+            phone: customer.phone,
+            unbilledAmount,
+            currentMonthBilling: 0,
+            monthlyAverage: 0,
+            billingPace: 1,
+            lastInvoiceDate: null,
+            totalWorkOrders: workOrders.length,
+            pendingWorkOrders: workOrders.filter(wo => wo.status === 'pending' || wo.status === 'assigned' || wo.status === 'in_progress').length
+          };
+        } catch (error) {
+          console.error(`Error processing customer ${customer.id}: ${error.message}`);
+          return {
+            id: customer.id,
+            name: customer.name,
+            email: customer.email,
+            phone: customer.phone,
+            unbilledAmount: 0,
+            currentMonthBilling: 0,
+            monthlyAverage: 0,
+            billingPace: 1,
+            lastInvoiceDate: null,
+            totalWorkOrders: 0,
+            pendingWorkOrders: 0
+          };
+        }
+      }));
+      
+      res.json(customerPreviews);
+    } catch (error) {
+      console.error("Error fetching customer billing previews:", error);
+      res.status(500).json({ message: "Failed to fetch customer billing previews" });
+    }
+  });
+
   // Get individual customer by ID
-  app.get("/api/customers/:id", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       
@@ -1548,7 +1669,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get customer billing data - all work orders, billing sheets, and estimates for a customer
-  app.get("/api/customers/:id/billing", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)/billing", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       
@@ -1665,7 +1786,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:customerId/site-maps", requireSiteMapViewAccess, async (req, res) => {
+  app.get("/api/customers/:customerId(\\d+)/site-maps", requireSiteMapViewAccess, async (req, res) => {
     try {
       const customerId = parseInt(req.params.customerId);
       const siteMaps = await storage.getCustomerSiteMaps(customerId);
@@ -2270,215 +2391,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Customer billing preview data - includes estimates, work orders, and billing sheets
-  // This must come BEFORE the :id route to avoid parameter conflicts
-  app.get("/api/customers/billing-preview", async (req, res) => {
-    try {
-      console.log("Fetching comprehensive customer billing data...");
-      const customers = await storage.getCustomers();
-      console.log(`Found ${customers.length} customers`);
-      
-      // Get filter parameters from query
-      const dateFilter = req.query.dateFilter as string || "last_30_days";
-      const selectedMonth = req.query.selectedMonth as string;
-      
-      const currentDate = new Date();
-      const currentMonth = currentDate.getMonth();
-      const currentYear = currentDate.getFullYear();
-      
-      // Calculate date range based on filter
-      let startDate: Date;
-      let endDate: Date = currentDate;
-      
-      switch (dateFilter) {
-        case "all":
-          startDate = new Date(2020, 0, 1); // Far past date
-          break;
-        case "current_month":
-          startDate = new Date(currentYear, currentMonth, 1);
-          break;
-        case "last_30_days":
-          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
-          break;
-        case "last_90_days":
-          startDate = new Date(currentDate.getTime() - (90 * 24 * 60 * 60 * 1000));
-          break;
-        case "custom_month":
-          if (selectedMonth) {
-            const [year, month] = selectedMonth.split('-').map(Number);
-            startDate = new Date(year, month - 1, 1);
-            endDate = new Date(year, month, 0); // Last day of the month
-          } else {
-            startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
-          }
-          break;
-        default:
-          startDate = new Date(currentDate.getTime() - (30 * 24 * 60 * 60 * 1000));
-      }
-      
-      console.log(`Filtering data from ${startDate.toISOString()} to ${endDate.toISOString()}`);
-      const currentMonthStart = new Date(currentYear, currentMonth, 1);
-      
-      // Get billing previews for all customers including work orders, estimates, and billing sheets
-      const customerPreviews = await Promise.all(customers.map(async (customer) => {
-        try {
-          console.log(`Processing customer: ${customer.name} (ID: ${customer.id})`);
-          
-          // Get all three data sources for this customer
-          const workOrders = await storage.getWorkOrdersByCustomer(customer.id);
-          const estimates = await storage.getEstimatesByCustomer(customer.id);
-          const billingSheets = await storage.getBillingSheetsByCustomer(customer.id);
-          
-          const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
-          const approvedEstimates = estimates.filter(est => est.status === 'approved');
-          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed');
-          
-          // Calculate billing from all sources based on selected date range
-          const filteredWorkOrders = completedWorkOrders.filter(wo => 
-            wo.completedAt && new Date(wo.completedAt) >= startDate && new Date(wo.completedAt) <= endDate
-          );
-          const filteredEstimates = approvedEstimates.filter(est => 
-            est.approvedAt && new Date(est.approvedAt) >= startDate && new Date(est.approvedAt) <= endDate
-          );
-          const filteredBillingSheets = completedBillingSheets.filter(bs => 
-            bs.createdAt && new Date(bs.createdAt) >= startDate && new Date(bs.createdAt) <= endDate
-          );
-          
-          // Use dynamic calculation logic for consistent billing amounts
-          const workOrdersBilling = filteredWorkOrders.reduce((sum, wo) => {
-            const laborAmount = parseFloat(wo.totalHours || '0') * 45;
-            const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
-            return sum + laborAmount + partsAmount;
-          }, 0);
-          const estimatesBilling = filteredEstimates.reduce((sum, est) => 
-            sum + parseFloat(est.totalAmount || '0'), 0
-          );
-          const billingSheetsBilling = filteredBillingSheets.reduce((sum, bs) => {
-            const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
-            const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-            return sum + laborAmount + partsAmount;
-          }, 0);
-          
-          const currentMonthBilling = workOrdersBilling + estimatesBilling + billingSheetsBilling;
-          
-          // Calculate historical average from last 6 months
-          const monthlyTotals = [];
-          for (let i = 1; i <= 6; i++) {
-            const monthStart = new Date(currentYear, currentMonth - i, 1);
-            const monthEnd = new Date(currentYear, currentMonth - i + 1, 0);
-            
-            const monthWorkOrders = completedWorkOrders.filter(wo => 
-              wo.completedAt && new Date(wo.completedAt) >= monthStart && new Date(wo.completedAt) <= monthEnd
-            );
-            const monthEstimates = approvedEstimates.filter(est => 
-              est.approvedAt && new Date(est.approvedAt) >= monthStart && new Date(est.approvedAt) <= monthEnd
-            );
-            const monthBillingSheets = billingSheets.filter(bs => 
-              bs.status === 'completed' &&
-              bs.createdAt && new Date(bs.createdAt) >= monthStart && new Date(bs.createdAt) <= monthEnd
-            );
-            
-            // Use dynamic calculation for historical data too
-            const monthTotal = 
-              monthWorkOrders.reduce((sum, wo) => {
-                const laborAmount = parseFloat(wo.totalHours || '0') * 45;
-                const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
-                return sum + laborAmount + partsAmount;
-              }, 0) +
-              monthEstimates.reduce((sum, est) => sum + parseFloat(est.totalAmount || '0'), 0) +
-              monthBillingSheets.reduce((sum, bs) => {
-                const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
-                const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-                return sum + laborAmount + partsAmount;
-              }, 0);
-            
-            if (monthTotal > 0) monthlyTotals.push(monthTotal);
-          }
-          
-          const monthlyAverage = monthlyTotals.length > 0 
-            ? monthlyTotals.reduce((sum, total) => sum + total, 0) / monthlyTotals.length
-            : Math.max(currentMonthBilling, 1000);
-          
-          const billingPace = monthlyAverage > 0 ? currentMonthBilling / monthlyAverage : 1;
-          
-          // Get most recent invoice date for this customer (only if invoices table exists)
-          let lastInvoiceDate = null;
-          try {
-            const customerInvoices = await storage.getInvoicesByCustomer(customer.id);
-            lastInvoiceDate = customerInvoices.length > 0 
-              ? customerInvoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0].createdAt
-              : null;
-          } catch (error) {
-            // Invoices table doesn't exist yet, so no invoices have been created
-            lastInvoiceDate = null;
-          }
-          
-          // Count pending items across all sources
-          const pendingCount = 
-            workOrders.filter(wo => wo.status === 'pending' || wo.status === 'in_progress').length +
-            estimates.filter(est => est.status === 'pending').length +
-            billingSheets.filter(bs => bs.status === 'pending' || bs.status === 'in_progress').length;
-          
-          // Calculate actual unbilled amounts using the same logic as invoice system (notes field with [BILLED: markers)
-          // Don't apply date filtering to unbilled amounts - show total unbilled like invoice preview does
-          const unbilledWorkOrders = completedWorkOrders.filter(wo => 
-            !wo.notes || !wo.notes.includes('[BILLED:')
-          );
-          const unbilledBillingSheets = completedBillingSheets.filter(bs => 
-            !bs.notes || !bs.notes.includes('[BILLED:')
-          );
-          const unbilledEstimates = approvedEstimates.filter(est => 
-            !est.notes || !est.notes.includes('[BILLED:')
-          );
-          
-          // Use dynamic calculation for unbilled amounts (same as invoice preview)
-          const actualUnbilledAmount = 
-            unbilledWorkOrders.reduce((sum, wo) => {
-              const laborAmount = parseFloat(wo.totalHours || '0') * 45;
-              const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
-              return sum + laborAmount + partsAmount;
-            }, 0) +
-            unbilledBillingSheets.reduce((sum, bs) => {
-              const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
-              const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-              return sum + laborAmount + partsAmount;
-            }, 0) +
-            unbilledEstimates.reduce((sum, est) => sum + parseFloat(est.totalAmount || '0'), 0);
-          
-          return {
-            ...customer,
-            currentMonthBilling: Math.round(currentMonthBilling * 100) / 100,
-            monthlyAverage: Math.round(monthlyAverage * 100) / 100,
-            billingPace: Math.round(billingPace * 100) / 100,
-            unbilledAmount: Math.round(actualUnbilledAmount * 100) / 100,
-            lastInvoiceDate,
-            pendingWorkOrders: pendingCount,
-            totalWorkOrders: filteredWorkOrders.length + filteredEstimates.length + filteredBillingSheets.length
-          };
-        } catch (customerError) {
-          console.error(`Error processing customer ${customer.id}:`, customerError);
-          return {
-            ...customer,
-            currentMonthBilling: 0,
-            monthlyAverage: 1000,
-            billingPace: 0,
-            unbilledAmount: 0,
-            lastInvoiceDate: null,
-            pendingWorkOrders: 0,
-            totalWorkOrders: 0
-          };
-        }
-      }));
-      
-      console.log("Successfully processed all customer billing data from work orders, estimates, and billing sheets");
-      res.json(customerPreviews);
-    } catch (error) {
-      console.error("Error fetching customer billing previews:", error);
-      res.status(500).json({ message: "Failed to fetch customer billing data" });
-    }
-  });
 
-  app.get("/api/customers/:id", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customer = await storage.getCustomer(id);
@@ -2553,7 +2467,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Customer-related data endpoints
-  app.get("/api/customers/:id/estimates", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)/estimates", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       const estimates = await storage.getEstimatesByCustomer(customerId);
@@ -2563,7 +2477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:id/work-orders", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)/work-orders", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       const workOrders = await storage.getWorkOrdersByCustomer(customerId);
@@ -2573,7 +2487,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/customers/:id/billing-sheets", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)/billing-sheets", async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       const billingSheets = await storage.getBillingSheetsByCustomer(customerId);
