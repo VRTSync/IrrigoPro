@@ -269,7 +269,7 @@ export default function CustomerBilling() {
   });
 
   const handleCreateInvoice = (customerId: number) => {
-    createInvoiceMutation.mutate(customerId);
+    createInvoiceMutation.mutate({ customerId });
   };
 
   // Generate month options for the dropdown
@@ -431,21 +431,16 @@ export default function CustomerBilling() {
               
               {/* Summary Stats */}
               {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="bg-orange-50 p-3 rounded-lg text-center">
+                <div className="mb-4">
+                  <div className="bg-orange-50 p-4 rounded-lg text-center">
                     <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                    <div className="text-sm font-bold text-orange-800">
+                    <div className="text-lg font-bold text-orange-800">
                       {formatCurrency(
                         customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
                       )}
                     </div>
-                  </div>
-                  <div className="bg-blue-50 p-3 rounded-lg text-center">
-                    <div className="text-xs text-blue-700 font-medium">Active Customers</div>
-                    <div className="text-sm font-bold text-blue-800">
-                      {customerPreviews.filter(preview => 
-                        (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
-                      ).length}
+                    <div className="text-xs text-orange-600 mt-1">
+                      {customerPreviews.filter(preview => (preview.unbilledAmount || 0) > 0).length} customers need billing
                     </div>
                   </div>
                 </div>
@@ -923,21 +918,16 @@ export default function CustomerBilling() {
           
           {/* Summary Stats */}
           {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <div className="bg-orange-50 p-2 rounded-lg text-center">
+            <div className="mb-4">
+              <div className="bg-orange-50 p-3 rounded-lg text-center">
                 <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                <div className="text-sm font-bold text-orange-800">
+                <div className="text-lg font-bold text-orange-800">
                   {formatCurrency(
                     customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
                   )}
                 </div>
-              </div>
-              <div className="bg-blue-50 p-2 rounded-lg text-center">
-                <div className="text-xs text-blue-700 font-medium">Active Customers</div>
-                <div className="text-sm font-bold text-blue-800">
-                  {customerPreviews.filter(preview => 
-                    (preview.unbilledAmount || 0) > 0 || (preview.pendingWorkOrders || 0) > 0
-                  ).length}
+                <div className="text-xs text-orange-600 mt-1">
+                  {customerPreviews.filter(preview => (preview.unbilledAmount || 0) > 0).length} customers need billing
                 </div>
               </div>
             </div>
@@ -1090,17 +1080,13 @@ export default function CustomerBilling() {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-medium text-gray-900 truncate">{customer.name}</div>
-                      {preview.billingPace >= 1.3 ? (
-                        <Badge className="bg-green-100 text-green-800 text-xs">
-                          ABOVE AVG
-                        </Badge>
-                      ) : preview.billingPace <= 0.7 ? (
-                        <Badge className="bg-red-100 text-red-800 text-xs">
-                          BELOW AVG
+                      {preview.unbilledAmount > 0 ? (
+                        <Badge className="bg-orange-100 text-orange-800 text-xs">
+                          NEEDS BILLING
                         </Badge>
                       ) : (
-                        <Badge className="bg-blue-100 text-blue-800 text-xs">
-                          ON PACE
+                        <Badge className="bg-green-100 text-green-800 text-xs">
+                          UP TO DATE
                         </Badge>
                       )}
                     </div>
@@ -1111,10 +1097,7 @@ export default function CustomerBilling() {
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500">This month:</span>
                         <span className="text-xs font-medium">
-                          {formatCurrency(preview.currentMonthBilling)} 
-                          <span className="text-gray-400 ml-1">
-                            (avg: {formatCurrency(preview.monthlyAverage)})
-                          </span>
+                          {formatCurrency(preview.currentMonthBilling)}
                         </span>
                       </div>
 
@@ -1531,7 +1514,7 @@ export default function CustomerBilling() {
                                       <div className="grid grid-cols-2 gap-4">
                                         <div>
                                           <h4 className="font-medium mb-1">Scheduled Date</h4>
-                                          <p className="text-sm text-gray-600">{new Date(wo.scheduledDate).toLocaleDateString()}</p>
+                                          <p className="text-sm text-gray-600">{wo.scheduledDate ? new Date(wo.scheduledDate).toLocaleDateString() : 'Not scheduled'}</p>
                                         </div>
                                         <div>
                                           <h4 className="font-medium mb-1">Status</h4>
