@@ -333,28 +333,28 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6 border-4 border-red-500">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-blue-600" />
+        <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-2xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-2 sm:p-4 md:p-6 border-4 border-red-500">
+          <DialogHeader className="pb-4">
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
+              <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
               Create New Estimate
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-sm sm:text-base">
               Create a new estimate by selecting a customer and adding work zones
             </DialogDescription>
           </DialogHeader>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
               {/* Step 1: Customer Selection */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <User className="w-5 h-5 text-blue-600" />
+                <CardHeader className="pb-3 sm:pb-6">
+                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                    <User className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                     Step 1: Select Customer
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-3 sm:space-y-4">
                   <CustomerSelector
                     selectedCustomer={selectedCustomer}
                     onSelectCustomer={handleCustomerSelect}
@@ -382,7 +382,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                           )}
                         />
                         
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div className="grid grid-cols-1 gap-3 sm:gap-4">
                           <FormField
                             control={form.control}
                             name="customerEmail"
@@ -429,11 +429,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Step 2: Project Information */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Project Information</CardTitle>
+                <CardHeader className="pb-3 sm:pb-6">
+                  <CardTitle className="text-base sm:text-lg">Project Information</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <CardContent className="space-y-3 sm:space-y-4">
+                  <div className="grid grid-cols-1 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="projectName"
@@ -481,11 +481,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Step 3: Contract Terms */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Contract Terms</CardTitle>
+                <CardHeader className="pb-3 sm:pb-6">
+                  <CardTitle className="text-base sm:text-lg">Contract Terms</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                <CardContent className="space-y-3 sm:space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                     <FormField
                       control={form.control}
                       name="laborRate"
@@ -559,18 +559,19 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Step 4: Work Zones */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Work Zones</CardTitle>
+                <CardHeader className="pb-3 sm:pb-6">
+                  <CardTitle className="text-base sm:text-lg">Work Zones</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3 sm:space-y-4">
                   {/* Zones Section */}
                   <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Work Zones</h3>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                  <h3 className="text-base sm:text-lg font-medium text-gray-900">Work Zones</h3>
                   <Button
                     type="button"
                     onClick={addZoneSimple}
-                    className="bg-primary text-white hover:bg-blue-700"
+                    className="bg-primary text-white hover:bg-blue-700 h-10 sm:h-9 w-full sm:w-auto"
+                    size="sm"
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Add Zone
@@ -578,24 +579,24 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 </div>
 
                 {zones.length > 0 ? (
-                  <div className="w-full space-y-4">
+                  <div className="w-full space-y-3 sm:space-y-4">
                     {zones.map((zone) => (
                       <Card key={zone.id} className="bg-gray-50">
-                        <CardHeader className="pb-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 space-y-2">
+                        <CardHeader className="pb-2 sm:pb-3">
+                          <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+                            <div className="flex-1 space-y-3">
                               <Input
                                 placeholder="Zone name"
                                 value={zone.zoneName}
                                 onChange={(e) => updateZone(zone.id, { zoneName: e.target.value })}
-                                className="font-medium"
+                                className="font-medium text-sm sm:text-base h-10 sm:h-9"
                               />
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <Select 
                                   value={zone.controllerId} 
                                   onValueChange={(value) => updateZone(zone.id, { controllerId: value })}
                                 >
-                                  <SelectTrigger>
+                                  <SelectTrigger className="h-10 sm:h-9 text-sm sm:text-base">
                                     <SelectValue placeholder="Controller" />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -610,16 +611,16 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                                   placeholder="Zone #"
                                   value={zone.zoneNumber}
                                   onChange={(e) => updateZone(zone.id, { zoneNumber: e.target.value })}
+                                  className="h-10 sm:h-9 text-sm sm:text-base"
                                 />
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  size="sm"
                                   onClick={() => {
                                     setSelectedZoneId(zone.id);
                                     setShowPartsModal(true);
                                   }}
-                                  className="text-blue-600 hover:text-blue-700 w-full sm:w-auto"
+                                  className="text-blue-600 hover:text-blue-700 w-full h-10 sm:h-9 text-sm sm:text-base"
                                 >
                                   <Plus className="w-4 h-4 mr-1" />
                                   Add Parts
@@ -629,15 +630,14 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                                 placeholder="Work description"
                                 value={zone.workDescription}
                                 onChange={(e) => updateZone(zone.id, { workDescription: e.target.value })}
-                                className="min-h-16"
+                                className="min-h-16 text-sm sm:text-base"
                               />
                             </div>
                             <Button
                               type="button"
                               variant="ghost"
-                              size="sm"
                               onClick={() => removeZone(zone.id)}
-                              className="text-red-600 hover:text-red-700 ml-2"
+                              className="text-red-600 hover:text-red-700 w-10 h-10 sm:w-8 sm:h-8 flex-shrink-0 self-start"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -645,31 +645,30 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         </CardHeader>
                         {zone.items.length > 0 && (
                           <CardContent className="pt-0">
-                            <div className="w-full space-y-3">
+                            <div className="w-full space-y-2 sm:space-y-3">
                               {zone.items.map((item) => (
-                                <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
+                                <div key={item.part.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 bg-gray-50 rounded-lg gap-3">
                                   <div className="flex-1 min-w-0">
-                                    <p className="font-medium truncate">{item.part.name}</p>
-                                    <p className="text-sm text-gray-600">{item.totalLaborHours.toFixed(2)}h labor</p>
+                                    <p className="font-medium truncate text-sm sm:text-base">{item.part.name}</p>
+                                    <p className="text-xs sm:text-sm text-gray-600">{item.totalLaborHours.toFixed(2)}h labor</p>
                                   </div>
                                   <div className="flex items-center gap-2 flex-shrink-0">
                                     <div className="flex items-center gap-2">
-                                      <label className="text-sm font-medium text-gray-600 sm:hidden">Qty:</label>
+                                      <label className="text-xs sm:text-sm font-medium text-gray-600 sm:hidden">Qty:</label>
                                       <Input
                                         type="number"
                                         min="1"
                                         value={item.quantity}
                                         onChange={(e) => updateQuantity(zone.id, item.part.id, parseInt(e.target.value) || 0)}
-                                        className="w-16 text-center"
+                                        className="w-16 sm:w-14 text-center text-sm h-9"
                                       />
                                     </div>
-                                    <span className="font-medium min-w-[60px] text-right">{formatCurrency(item.totalPrice)}</span>
+                                    <span className="font-medium min-w-[60px] sm:min-w-[70px] text-right text-sm sm:text-base">{formatCurrency(item.totalPrice)}</span>
                                     <Button
                                       type="button"
                                       variant="ghost"
-                                      size="sm"
                                       onClick={() => removePart(zone.id, item.part.id)}
-                                      className="text-red-600 hover:text-red-700"
+                                      className="text-red-600 hover:text-red-700 w-9 h-9 sm:w-8 sm:h-8"
                                     >
                                       <Trash2 className="w-4 h-4" />
                                     </Button>
@@ -693,13 +692,13 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Step 5: Photos and Attachments */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Image className="w-5 h-5 text-blue-600" />
+                <CardHeader className="pb-3 sm:pb-6">
+                  <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                    <Image className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
                     Photos & Attachments
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="w-[98%] mx-auto space-y-4 sm:space-y-6">
+                <CardContent className="space-y-3 sm:space-y-6">
                   <div>
                     <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
                       <Image className="w-4 h-4" />
@@ -738,11 +737,11 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Step 6: Estimate Summary */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Estimate Summary</CardTitle>
+                <CardHeader className="pb-3 sm:pb-6">
+                  <CardTitle className="text-base sm:text-lg">Estimate Summary</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="w-[98%] mx-auto">
+                <CardContent className="space-y-3 sm:space-y-4">
+                  <div className="w-full">
                     <EstimateSummary
                       items={zones.flatMap(zone => zone.items)}
                       laborRate={form.watch("laborRate")}
@@ -755,19 +754,19 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
 
               {/* Action Buttons */}
               <Separator />
-              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4">
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => onOpenChange(false)}
-                  className="w-full sm:flex-1"
+                  className="w-full sm:w-auto sm:flex-1 h-12 sm:h-10 text-base sm:text-sm order-2 sm:order-1"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   disabled={createEstimateMutation.isPending}
-                  className="w-full sm:flex-1 bg-primary text-white hover:bg-blue-700"
+                  className="w-full sm:w-auto sm:flex-1 h-12 sm:h-10 text-base sm:text-sm bg-primary text-white hover:bg-blue-700 order-1 sm:order-2"
                 >
                   {createEstimateMutation.isPending ? "Creating..." : "Create Estimate"}
                 </Button>
