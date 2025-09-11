@@ -7,9 +7,10 @@ import { Control } from "react-hook-form";
 interface LocationFieldsProps {
   control: Control<any>;
   prefix?: string;
+  readOnlyAddress?: boolean;
 }
 
-export function LocationFields({ control, prefix = "" }: LocationFieldsProps) {
+export function LocationFields({ control, prefix = "", readOnlyAddress = false }: LocationFieldsProps) {
   return (
     <div className="w-full space-y-4">
       <div className="flex items-center space-x-2 mb-2">
@@ -22,12 +23,13 @@ export function LocationFields({ control, prefix = "" }: LocationFieldsProps) {
         name={`${prefix}projectAddress`}
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Property Address</FormLabel>
+            <FormLabel>Property Address {readOnlyAddress && "(from customer profile)"}</FormLabel>
             <FormControl>
               <Input 
                 {...field} 
+                readOnly={readOnlyAddress}
                 placeholder="123 Main St, City, State 12345"
-                className="w-full min-w-0"
+                className={`w-full min-w-0 ${readOnlyAddress ? "bg-gray-50" : ""}`}
               />
             </FormControl>
             <FormMessage />

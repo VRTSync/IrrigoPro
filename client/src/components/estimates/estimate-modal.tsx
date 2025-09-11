@@ -106,14 +106,29 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     form.setValue("customerName", customer.name);
     form.setValue("customerEmail", customer.email);
     form.setValue("customerPhone", customer.phone || "");
-    // Use customer's contract rates
-    form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
-    form.setValue("markupPercent", parseFloat(customer.markupPercent || "20"));
-    form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
+    
+    // Auto-populate location with customer address
+    if (customer.address) {
+      form.setValue("projectAddress", customer.address);
+    }
+    
+    // Apply customer's contract rates (without UI - these come from customer profile)
+    // Helper to handle null/undefined/empty while preserving 0 values
+    const safeParseFloat = (value: string | null | undefined, defaultValue: string): number => {
+      if (value === null || value === undefined || value === "") {
+        return parseFloat(defaultValue);
+      }
+      return parseFloat(value);
+    };
+    
+    form.setValue("laborRate", safeParseFloat(customer.laborRate, "45"));
+    form.setValue("markupPercent", safeParseFloat(customer.markupPercent, "20"));
+    form.setValue("taxPercent", safeParseFloat(customer.taxPercent, "8.25"));
     
     // Clear validation errors for auto-populated fields
     form.clearErrors("customerName");
     form.clearErrors("customerEmail");
+    form.clearErrors("projectAddress");
   };
 
   const addZone = (controllerId: string, zoneNumber: string, workDescription: string) => {
@@ -242,9 +257,15 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     const allItems = zones.flatMap(zone => zone.items);
     const partsSubtotal = allItems.reduce((sum, item) => sum + item.totalPrice, 0);
     const totalLaborHours = allItems.reduce((sum, item) => sum + item.totalLaborHours, 0);
-    const laborRate = form.getValues("laborRate") || 75;
-    const markupPercent = form.getValues("markupPercent") || 20;
-    const taxPercent = form.getValues("taxPercent") || 8.25;
+    
+    // Helper to preserve 0 values while providing defaults for null/undefined
+    const getValue = (value: any, defaultValue: number): number => {
+      return (value === null || value === undefined || value === "") ? defaultValue : Number(value);
+    };
+    
+    const laborRate = getValue(form.getValues("laborRate"), 75);
+    const markupPercent = getValue(form.getValues("markupPercent"), 20);
+    const taxPercent = getValue(form.getValues("taxPercent"), 8.25);
     
     const laborSubtotal = totalLaborHours * laborRate;
     const subtotal = partsSubtotal + laborSubtotal;
@@ -451,113 +472,16 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                         </FormItem>
                       )}
                     />
-
-                    <FormField
-                      control={form.control}
-                      name="projectAddress"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Project Address</FormLabel>
-                          <FormControl>
-                            <Input 
-                              {...field} 
-                              placeholder="123 Oak Street, Springfield, IL" 
-                              value={field.value || ""} 
-                              className="text-sm w-full min-w-0" 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
                   </div>
                   
                   <Separator />
                   
                   {/* Location Fields */}
-                  <LocationFields control={form.control} />
+                  <LocationFields control={form.control} readOnlyAddress={!!selectedCustomer} />
                 </CardContent>
               </Card>
 
-              {/* Step 3: Contract Terms */}
-              <Card className="w-full overflow-hidden">
-                <CardHeader className="pb-3 sm:pb-6">
-                  <CardTitle className="text-base sm:text-lg">Contract Terms</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 sm:space-y-4 w-full overflow-hidden">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 w-full">
-                    <FormField
-                      control={form.control}
-                      name="laborRate"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Labor Rate ($/hour)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              type="number" 
-                              step="0.01" 
-                              min="0" 
-                              {...field} 
-                              readOnly={!!selectedCustomer}
-                              className={`text-sm w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="markupPercent"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Markup (%)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              type="number" 
-                              step="0.01" 
-                              min="0" 
-                              {...field} 
-                              readOnly={!!selectedCustomer}
-                              className={`text-sm w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="taxPercent"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Tax Rate (%)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              type="number" 
-                              step="0.01" 
-                              min="0" 
-                              {...field} 
-                              readOnly={!!selectedCustomer}
-                              className={`text-sm w-full min-w-0 ${selectedCustomer ? "bg-gray-50" : ""}`}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                  {selectedCustomer && (
-                    <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-md">
-                      <p>These rates are automatically set based on the customer's contract terms.</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Step 4: Work Zones */}
+              {/* Step 3: Work Zones */}
               <Card className="w-full overflow-hidden">
                 <CardHeader className="pb-3 sm:pb-6">
                   <CardTitle className="text-base sm:text-lg">Work Zones</CardTitle>
@@ -690,7 +614,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 </CardContent>
               </Card>
 
-              {/* Step 5: Photos and Attachments */}
+              {/* Step 4: Photos and Attachments */}
               <Card className="w-full overflow-hidden">
                 <CardHeader className="pb-3 sm:pb-6">
                   <CardTitle className="text-base sm:text-lg flex items-center gap-2">
@@ -735,7 +659,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                 </CardContent>
               </Card>
 
-              {/* Step 6: Estimate Summary */}
+              {/* Step 5: Estimate Summary */}
               <Card className="w-full overflow-hidden">
                 <CardHeader className="pb-3 sm:pb-6">
                   <CardTitle className="text-base sm:text-lg">Estimate Summary</CardTitle>
