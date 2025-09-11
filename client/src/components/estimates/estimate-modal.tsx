@@ -333,7 +333,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-2xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-2 sm:p-4 md:p-6 border-4 border-red-500">
+        <DialogContent className="w-[98vw] max-w-[98vw] sm:max-w-2xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-2 sm:p-4 md:p-6">
           <DialogHeader className="pb-4">
             <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
               <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
