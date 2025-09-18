@@ -65,7 +65,7 @@ export default function CustomerProfile() {
             )}
           </div>
           <Button 
-            onClick={() => setLocation(`/customers/${id}/site-map`)}
+            onClick={() => setLocation(`/customers/${id}/site-maps`)}
             className="w-full bg-blue-600 hover:bg-blue-700"
           >
             <MapPin className="w-4 h-4 mr-2" />
@@ -97,7 +97,7 @@ export default function CustomerProfile() {
         </div>
 
         <Button 
-          onClick={() => setLocation(`/customers/${id}/site-map`)}
+          onClick={() => setLocation(`/customers/${id}/site-maps`)}
           className="bg-blue-600 hover:bg-blue-700"
         >
           <MapPin className="w-4 h-4 mr-2" />

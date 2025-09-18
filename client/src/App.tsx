@@ -38,6 +38,7 @@ import CustomerProfile from "@/pages/customer-profile";
 import EstimateApproval from "@/pages/estimate-approval";
 
 import SiteMapsPage from "@/pages/site-maps";
+import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
 import FieldTechMaps from "@/pages/field-tech-maps";
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 import CompanyAdminApp from "@/components/company-admin-app";
@@ -133,7 +134,7 @@ function Router() {
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
-                <Route path="/customers/:customerId/site-maps" component={SiteMapsPage} />
+                <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
                 <Route path="/site-maps" component={FieldTechMaps} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
