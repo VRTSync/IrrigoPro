@@ -311,31 +311,47 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
 // Middleware to check if user has permission to view site maps (company admin and irrigation manager)
 const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
   try {
-    // Production-ready authentication using session lookup
-    let userId = req.headers['x-user-id'];
-    let userRole = req.headers['x-user-role'];
+    let userId: string | undefined;
+    let userRole: string | undefined;
     
-    // If headers not available, try to get from session (production approach)
-    if (!userId && req.session?.userId) {
-      userId = req.session.userId;
+    console.log('Site map authentication check:', {
+      hasSession: !!req.session,
+      sessionUserId: req.session?.userId,
+      hasHeaders: !!(req.headers['x-user-id'] && req.headers['x-user-role'])
+    });
+    
+    // Prioritize session authentication (production-safe)
+    if (req.session?.userId) {
+      userId = req.session.userId.toString();
       const user = await storage.getUser(parseInt(userId));
       if (user) {
         userRole = user.role;
+        console.log('Session authentication successful:', { userId, userRole });
       }
     }
     
+    // Fallback to headers for development only
+    if (!userId && req.headers['x-user-id'] && req.headers['x-user-role']) {
+      userId = req.headers['x-user-id'] as string;
+      userRole = req.headers['x-user-role'] as string;
+      console.log('Header authentication fallback:', { userId, userRole });
+    }
+    
     if (!userId || !userRole) {
+      console.log('Authentication failed - missing user data');
       return res.status(401).json({ 
         message: "Authentication required" 
       });
     }
     
     if (userRole !== 'company_admin' && userRole !== 'irrigation_manager' && userRole !== 'field_tech') {
+      console.log('Access denied for role:', userRole);
       return res.status(403).json({ 
         message: "Access denied. Site map viewing is restricted to company administrators, irrigation managers, and field technicians only." 
       });
     }
     
+    console.log('Site map access granted:', { userId, userRole });
     next();
   } catch (error) {
     console.error('Site map view authentication error:', error);

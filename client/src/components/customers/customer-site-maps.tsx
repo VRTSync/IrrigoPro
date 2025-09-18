@@ -160,17 +160,30 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     console.log('Site maps available but no project selected:', siteMaps);
   }
 
-  // Check authentication status and handle missing auth
-  const savedUser = localStorage.getItem("user");
-  const userData = savedUser ? JSON.parse(savedUser) : null;
-  console.log('Authentication status for site maps:', {
-    hasLocalStorageUser: !!savedUser,
-    userData
+  // Check authentication via session (production-compatible)
+  const { data: currentUser } = useQuery({
+    queryKey: ['/api/auth/me'],
   });
 
-  // If user is not authenticated, redirect to login or show error
-  if (!userData || !userData.role || !userData.id) {
-    console.error('User not authenticated for site maps access');
+  console.log('Site maps authentication check:', {
+    hasCurrentUser: !!currentUser,
+    currentUser
+  });
+
+  // Show loading state while checking authentication
+  if (currentUser === undefined) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="text-gray-600 mt-2">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If authentication failed, show proper error
+  if (!currentUser) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="max-w-md mx-auto text-center">
