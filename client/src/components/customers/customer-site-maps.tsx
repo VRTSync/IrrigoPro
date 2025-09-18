@@ -78,9 +78,18 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // Fetch customer site maps
-  const { data: siteMaps, isLoading } = useQuery<SiteMap[]>({
+  // Fetch customer site maps with error handling
+  const { data: siteMaps, isLoading, error: siteMapsError } = useQuery<SiteMap[]>({
     queryKey: [`/api/customers/${customer.id}/site-maps`],
+    retry: 2, // Retry failed requests
+    refetchOnWindowFocus: false,
+  });
+
+  console.log('Site maps query status:', {
+    isLoading,
+    hasSiteMaps: !!siteMaps,
+    siteMapsCount: siteMaps?.length || 0,
+    error: siteMapsError
   });
 
   // Auto-select site map when coming from Maps page or if there's only one
@@ -160,42 +169,15 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
     console.log('Site maps available but no project selected:', siteMaps);
   }
 
-  // Check authentication via session (production-compatible)
-  const { data: currentUser } = useQuery({
-    queryKey: ['/api/auth/me'],
-  });
-
+  // Debug authentication status
+  const savedUser = localStorage.getItem("user");
+  const userData = savedUser ? JSON.parse(savedUser) : null;
   console.log('Site maps authentication check:', {
-    hasCurrentUser: !!currentUser,
-    currentUser
+    hasLocalStorageUser: !!savedUser,
+    userData,
+    userRole,
+    customerId: customer.id
   });
-
-  // Show loading state while checking authentication
-  if (currentUser === undefined) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="text-gray-600 mt-2">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // If authentication failed, show proper error
-  if (!currentUser) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="max-w-md mx-auto text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Authentication Required</h2>
-          <p className="text-gray-600 mb-6">You need to be logged in to access site maps.</p>
-          <Button onClick={() => window.location.href = '/login'}>
-            Go to Login
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   const handleControllerKMLParsed = async (data: any) => {
     console.log("Controller KML parsed:", data);
@@ -660,7 +642,24 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
           {isLoading ? (
             <Card>
               <CardContent className="p-6">
-                <div className="text-center text-gray-500">Loading site maps...</div>
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                  <div className="text-gray-500">Loading site maps...</div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : siteMapsError ? (
+            <Card>
+              <CardContent className="p-6">
+                <div className="text-center">
+                  <div className="text-red-600 mb-4">❌ Error Loading Site Maps</div>
+                  <p className="text-gray-600 mb-4">
+                    {siteMapsError?.message || 'Unable to load site maps data. Please try again.'}
+                  </p>
+                  <Button onClick={() => window.location.reload()} variant="outline">
+                    Reload Page
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : siteMaps && siteMaps.length > 0 ? (
