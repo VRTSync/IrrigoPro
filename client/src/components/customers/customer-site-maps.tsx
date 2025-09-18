@@ -500,6 +500,8 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                       stationCount: controller.stationCount || 0,
                       zones: (project?.zonesByController[controller.id.toString()] || []).map(zone => ({
                         ...zone,
+                        controllerName: controller.name || `Controller ${controller.id}`,
+                        zoneType: zone.zoneType || 'Standard',
                         boundaries: zone.boundaries 
                           ? parseBoundariesFromDB(zone.boundaries)
                           : []
