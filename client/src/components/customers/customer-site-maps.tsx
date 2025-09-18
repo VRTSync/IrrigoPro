@@ -143,11 +143,46 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
 
   // Debug logging
   console.log('CustomerSiteMaps Debug:', {
+    customer: customer.name,
+    customerID: customer.id,
     selectedProject,
     controllers: controllers?.length || 0,
     zones: zones?.length || 0,
-    project: project ? `${project.name} with ${project.controllers.length} controllers and ${project.zones.length} zones` : 'null'
+    project: project ? `${project.name} with ${project.controllers.length} controllers and ${project.zones.length} zones` : 'null',
+    siteMaps: siteMaps?.length || 0,
+    isLoading,
+    userRole,
+    canEdit
   });
+
+  // Additional error boundary
+  if (siteMaps && siteMaps.length > 0 && !selectedProject) {
+    console.log('Site maps available but no project selected:', siteMaps);
+  }
+
+  // Check authentication status and handle missing auth
+  const savedUser = localStorage.getItem("user");
+  const userData = savedUser ? JSON.parse(savedUser) : null;
+  console.log('Authentication status for site maps:', {
+    hasLocalStorageUser: !!savedUser,
+    userData
+  });
+
+  // If user is not authenticated, redirect to login or show error
+  if (!userData || !userData.role || !userData.id) {
+    console.error('User not authenticated for site maps access');
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">Authentication Required</h2>
+          <p className="text-gray-600 mb-6">You need to be logged in to access site maps.</p>
+          <Button onClick={() => window.location.href = '/login'}>
+            Go to Login
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const handleControllerKMLParsed = async (data: any) => {
     console.log("Controller KML parsed:", data);
