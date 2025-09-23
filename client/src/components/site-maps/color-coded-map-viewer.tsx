@@ -71,6 +71,7 @@ export function ColorCodedMapViewer({
   const [showUserLocation, setShowUserLocation] = useState(false);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const hasInitiallyFitted = useRef(false);
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
@@ -640,7 +641,6 @@ export function ColorCodedMapViewer({
     }
 
     // Only fit bounds on initial load to prevent jumping during updates
-    const hasInitiallyFitted = useRef(false);
     if (allCoordinates.length > 0 && !hasInitiallyFitted.current) {
       if (allCoordinates.length === 1) {
         map.setView(allCoordinates[0], 22); // Much closer for single point
