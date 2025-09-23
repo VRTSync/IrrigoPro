@@ -76,7 +76,7 @@ export function ColorCodedMapViewer({
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
-    // Initialize map with mobile-optimized zoom capabilities
+    // Initialize map with mobile-optimized zoom capabilities and canvas rendering
     const map = L.map(mapRef.current, {
       maxZoom: 25,
       zoomSnap: 0.25,
@@ -92,7 +92,8 @@ export function ColorCodedMapViewer({
       bounceAtZoomLimits: true,
       zoomAnimation: true,
       fadeAnimation: true,
-      markerZoomAnimation: true
+      markerZoomAnimation: true,
+      preferCanvas: true  // Use canvas renderer to reduce zoom jitter
     }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
@@ -189,7 +190,8 @@ export function ColorCodedMapViewer({
               weight: 2,
               radius: radius,
               interactive: false,  // Disable hover effects to prevent jumpiness
-              bubblingMouseEvents: false
+              bubblingMouseEvents: false,
+              renderer: canvasRenderer  // Use canvas renderer for better zoom stability
             }).addTo(map);
             
             circleRefs.current.set(controller.id, circle);
@@ -378,12 +380,12 @@ export function ColorCodedMapViewer({
             return;
           }
 
-          L.circle([zoneLat, zoneLng], {
+          L.circleMarker([zoneLat, zoneLng], {
             color: zone.color,
             fillColor: zone.color,
             fillOpacity: 0.6,
             weight: 1,
-            radius: markerSize === 'small' ? 8 : markerSize === 'large' ? 20 : 15,
+            radius: markerSize === 'small' ? 4 : markerSize === 'large' ? 8 : 6,  // Pixel radius stays constant
             interactive: false,  // Disable hover effects to prevent jumpiness
             bubblingMouseEvents: false
           }).addTo(map).bindPopup(`
@@ -637,7 +639,8 @@ export function ColorCodedMapViewer({
             color: zone.color,
             weight: 1,
             opacity: 0.5,
-            dashArray: '4, 4'
+            dashArray: '4, 4',
+            renderer: canvasRenderer  // Use canvas renderer for better zoom stability
           }).addTo(map);
         }
       }
@@ -659,6 +662,9 @@ export function ColorCodedMapViewer({
       hasInitiallyFitted.current = true;
     }
   }, [project, visibleControllers, displayMode, markerSize, showZoneConnections, showControllerAreas, onControllerClick, onZoneClick]);
+
+  // Create shared canvas renderer for better zoom stability
+  const canvasRenderer = L.canvas();
 
   // Live location functionality
   const getUserLocation = () => {
