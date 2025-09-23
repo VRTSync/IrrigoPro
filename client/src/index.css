@@ -98,50 +98,14 @@
   line-height: 1.4 !important;
 }
 
-/* Better mobile marker visibility */
+/* Better mobile marker visibility - no transforms */
 .custom-div-icon {
   cursor: pointer !important;
-  transition: transform 0.2s ease !important;
-}
-
-.custom-div-icon:hover {
-  transform: scale(1.1) !important;
-  z-index: 1000 !important;
-}
-
-/* Stable marker positioning to prevent jumping */
-.custom-div-icon-stable {
-  transition: none !important;
-  position: relative !important;
-  cursor: pointer !important;
-}
-
-.marker-stable {
-  position: absolute !important;
-  left: 50% !important;
-  top: 50% !important;
-  transform: translate(-50%, -50%) !important;
-  transition: none !important;
-  pointer-events: auto !important;
-  backface-visibility: hidden !important;
-  will-change: auto !important;
-}
-
-/* Prevent hover effects that could cause jumping on stable markers */
-.custom-div-icon-stable:hover {
-  transform: none !important;
-  z-index: auto !important;
 }
 
 /* Ensure consistent layering for stability */
 .leaflet-marker-icon {
   transition: none !important;
-  transform-origin: center center !important;
-}
-
-/* Prevent z-index changes that cause visual jumping */
-.leaflet-marker-pane .leaflet-marker-icon {
-  z-index: auto !important;
 }
 
 /* Mobile-specific touch improvements */

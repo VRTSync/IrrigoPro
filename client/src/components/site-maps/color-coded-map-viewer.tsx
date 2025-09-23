@@ -228,12 +228,12 @@ export function ColorCodedMapViewer({
         case 'circles':
           controllerIcon = L.divIcon({
             html: `
-              <div class="rounded-full shadow-lg flex items-center justify-center text-white font-bold border-2 border-white marker-stable" 
+              <div class="rounded-full shadow-lg flex items-center justify-center text-white font-bold border-2 border-white" 
                    style="background-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'};">
                 ${controller.name.split(' ')[1] || 'C'}
               </div>
             `,
-            className: 'custom-div-icon-stable',
+            className: 'custom-div-icon',
             iconSize: [width, height],
             iconAnchor: centerAnchor
           });
@@ -241,11 +241,11 @@ export function ColorCodedMapViewer({
         case 'badges':
           controllerIcon = L.divIcon({
             html: `
-              <div class="bg-white rounded-lg shadow-lg px-2 py-1 border-l-4 text-xs font-bold whitespace-nowrap marker-stable" style="border-color: ${controller.color};">
+              <div class="bg-white rounded-lg shadow-lg px-2 py-1 border-l-4 text-xs font-bold whitespace-nowrap" style="border-color: ${controller.color};">
                 ${controller.name}
               </div>
             `,
-            className: 'custom-div-icon-stable',
+            className: 'custom-div-icon',
             iconSize: [80, 24],
             iconAnchor: [40, 12]
           });
@@ -253,11 +253,11 @@ export function ColorCodedMapViewer({
         case 'minimal':
           controllerIcon = L.divIcon({
             html: `
-              <div class="rounded-full border-2 border-white shadow-md marker-stable" 
+              <div class="rounded-full border-2 border-white shadow-md" 
                    style="background-color: ${controller.color}; width: ${width * 0.7}px; height: ${height * 0.7}px;">
               </div>
             `,
-            className: 'custom-div-icon-stable',
+            className: 'custom-div-icon',
             iconSize: [width * 0.7, height * 0.7],
             iconAnchor: [width * 0.35, height * 0.35]
           });
@@ -265,12 +265,12 @@ export function ColorCodedMapViewer({
         default: // markers
           controllerIcon = L.divIcon({
             html: `
-              <div class="bg-white text-gray-800 rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-4 marker-stable" 
+              <div class="bg-white text-gray-800 rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-4" 
                    style="border-color: ${controller.color}; width: ${width}px; height: ${height}px; font-size: ${markerSize === 'small' ? '10px' : markerSize === 'large' ? '16px' : '12px'};">
                 C
               </div>
             `,
-            className: 'custom-div-icon-stable',
+            className: 'custom-div-icon',
             iconSize: [width, height],
             iconAnchor: centerAnchor
           });
@@ -454,7 +454,10 @@ export function ColorCodedMapViewer({
               iconAnchor: [12, 12]
             });
 
-            L.marker([zoneLat, zoneLng], { icon: clusterIcon }).addTo(map).bindPopup(`
+            L.marker([zoneLat, zoneLng], { 
+              icon: clusterIcon,
+              riseOnHover: false // Prevent z-index changes that can cause jumping
+            }).addTo(map).bindPopup(`
               <div class="p-2">
                 <h4 class="font-bold text-sm">${zone.name}</h4>
                 <p class="text-xs">Station #${zone.stationNumber || 'N/A'}</p>
@@ -562,7 +565,8 @@ export function ColorCodedMapViewer({
       }
 
       const marker = L.marker([zoneLat, zoneLng], {
-        icon: zoneIcon
+        icon: zoneIcon,
+        riseOnHover: false // Prevent z-index changes that can cause jumping
       }).addTo(map);
 
       // Create enhanced popup content for zone
