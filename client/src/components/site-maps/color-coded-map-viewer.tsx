@@ -187,7 +187,9 @@ export function ColorCodedMapViewer({
               fillColor: controller.color,
               fillOpacity: 0.1,
               weight: 2,
-              radius: radius
+              radius: radius,
+              interactive: false,  // Disable hover effects to prevent jumpiness
+              bubblingMouseEvents: false
             }).addTo(map);
             
             circleRefs.current.set(controller.id, circle);
@@ -381,7 +383,9 @@ export function ColorCodedMapViewer({
             fillColor: zone.color,
             fillOpacity: 0.6,
             weight: 1,
-            radius: markerSize === 'small' ? 8 : markerSize === 'large' ? 20 : 15
+            radius: markerSize === 'small' ? 8 : markerSize === 'large' ? 20 : 15,
+            interactive: false,  // Disable hover effects to prevent jumpiness
+            bubblingMouseEvents: false
           }).addTo(map).bindPopup(`
             <div class="p-2">
               <h4 class="font-bold text-sm">${zone.name}</h4>
