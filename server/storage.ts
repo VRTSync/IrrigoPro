@@ -16,6 +16,7 @@ import {
   workOrderItems,
   invoices,
   invoiceItems,
+  invoicePdfs,
   billingSheets,
   billingSheetItems,
   notifications,
@@ -41,6 +42,7 @@ import {
   type WorkOrderItem,
   type Invoice,
   type InvoiceItem,
+  type InvoicePdf,
   type BillingSheet,
   type BillingSheetItem,
   type Notification,
@@ -65,6 +67,7 @@ import {
   type InsertWorkOrderItem,
   type InsertInvoice,
   type InsertInvoiceItem,
+  type InsertInvoicePdf,
   type InsertBillingSheet,
   type InsertBillingSheetItem,
   type InsertNotification,
@@ -256,6 +259,11 @@ export interface IStorage {
   deleteInvoice(id: number): Promise<boolean>;
   createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem>;
   getCustomerById(id: number): Promise<Customer | undefined>;
+  
+  // Invoice PDFs - detailed breakdowns
+  createInvoicePdf(pdf: InsertInvoicePdf): Promise<InvoicePdf>;
+  getInvoicePdfByInvoiceId(invoiceId: number): Promise<InvoicePdf | undefined>;
+  updateInvoicePdf(id: number, pdf: Partial<InsertInvoicePdf>): Promise<InvoicePdf | undefined>;
 
 
   // Site Maps for customers
@@ -2188,6 +2196,25 @@ export class DatabaseStorage implements IStorage {
 
   async getInvoiceItems(invoiceId: number): Promise<InvoiceItem[]> {
     return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  }
+
+  // Invoice PDF methods
+  async createInvoicePdf(pdf: InsertInvoicePdf): Promise<InvoicePdf> {
+    const [newPdf] = await db.insert(invoicePdfs).values(pdf).returning();
+    return newPdf;
+  }
+
+  async getInvoicePdfByInvoiceId(invoiceId: number): Promise<InvoicePdf | undefined> {
+    const [pdf] = await db.select().from(invoicePdfs).where(eq(invoicePdfs.invoiceId, invoiceId));
+    return pdf;
+  }
+
+  async updateInvoicePdf(id: number, pdf: Partial<InsertInvoicePdf>): Promise<InvoicePdf | undefined> {
+    const [updated] = await db.update(invoicePdfs)
+      .set(pdf)
+      .where(eq(invoicePdfs.id, id))
+      .returning();
+    return updated;
   }
 
   // Notification methods

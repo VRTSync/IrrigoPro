@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "./email-service";
 import { ObjectStorageService } from "./objectStorage";
+import { InvoicePdfService } from "./invoice-pdf-service";
 
 // Extend Express Request type to include session
 declare module 'express' {
@@ -117,6 +118,19 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
   if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
     return res.status(403).json({ 
       message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit or delete work orders and billing sheets." 
+    });
+  }
+  
+  next();
+};
+
+// Middleware for billing/invoice PDF access (billing_manager and company_admin only)
+const requireBillingAccess = (req: Request, res: any, next: any) => {
+  const userRole = req.headers['x-user-role'];
+  
+  if (userRole !== 'company_admin' && userRole !== 'billing_manager') {
+    return res.status(403).json({ 
+      message: "Access denied. Only company administrators and billing managers can access invoice PDFs." 
     });
   }
   
@@ -2388,6 +2402,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('Error connecting to QuickBooks:', qbError);
         quickbooksError = `QuickBooks connection error: ${qbError.message}`;
       }
+
+      // Generate invoice detail PDF automatically in background
+      const pdfService = new InvoicePdfService(storage);
+      pdfService.generateAndSaveInvoicePdf(invoice.id).then(result => {
+        if (result.success) {
+          console.log(`Invoice PDF generated successfully for invoice ${invoice.id}: ${result.pdfUrl}`);
+        } else {
+          console.error(`Failed to generate PDF for invoice ${invoice.id}:`, result.error);
+        }
+      }).catch(error => {
+        console.error(`Error generating PDF for invoice ${invoice.id}:`, error);
+      });
 
       res.json({
         message: quickbooksSuccess 
@@ -5458,6 +5484,101 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to sync invoice to QuickBooks" });
+    }
+  });
+
+  // Invoice PDF endpoints (require authentication + billing access)
+  app.get("/api/invoices/:invoiceId/pdf", requireAuthentication, requireBillingAccess, async (req, res) => {
+    try {
+      const invoiceId = parseInt(req.params.invoiceId);
+      const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
+      
+      if (!pdf) {
+        return res.status(404).json({ message: "PDF not found for this invoice" });
+      }
+      
+      res.json(pdf);
+    } catch (error) {
+      console.error('Error fetching invoice PDF:', error);
+      res.status(500).json({ message: "Failed to fetch invoice PDF" });
+    }
+  });
+
+  app.get("/api/invoices/:invoiceId/pdf/download", requireAuthentication, requireBillingAccess, async (req, res) => {
+    try {
+      const invoiceId = parseInt(req.params.invoiceId);
+      const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
+      
+      if (!pdf) {
+        return res.status(404).json({ message: "PDF not found for this invoice" });
+      }
+
+      // Get the PDF file from object storage
+      const objectStorageService = new ObjectStorageService();
+      const file = await objectStorageService.searchPublicObject(pdf.pdfUrl);
+      
+      if (!file) {
+        return res.status(404).json({ message: "PDF file not found in storage" });
+      }
+
+      // Set headers for download
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${pdf.filename}"`,
+      });
+
+      // Stream the file to the response
+      const stream = file.createReadStream();
+      stream.pipe(res);
+    } catch (error) {
+      console.error('Error downloading invoice PDF:', error);
+      res.status(500).json({ message: "Failed to download invoice PDF" });
+    }
+  });
+
+  app.post("/api/invoices/:invoiceId/pdf/send", requireAuthentication, requireBillingAccess, async (req, res) => {
+    try {
+      const invoiceId = parseInt(req.params.invoiceId);
+      const invoice = await storage.getInvoiceById(invoiceId);
+      
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
+      if (!pdf) {
+        return res.status(404).json({ message: "PDF not found for this invoice" });
+      }
+
+      // Send email to customer with PDF attachment
+      const emailService = new EmailService();
+      const emailResult = await emailService.sendInvoiceDetailPdf(
+        invoice.customerEmail,
+        invoice.customerName,
+        invoice.invoiceNumber,
+        pdf.pdfUrl
+      );
+
+      if (emailResult.success) {
+        // Update PDF status to mark it as sent
+        await storage.updateInvoicePdf(pdf.id, {
+          status: 'sent',
+          sentAt: new Date(),
+        });
+        
+        res.json({ 
+          message: "PDF sent successfully to customer",
+          email: invoice.customerEmail 
+        });
+      } else {
+        res.status(500).json({ 
+          message: "Failed to send PDF",
+          error: emailResult.error 
+        });
+      }
+    } catch (error) {
+      console.error('Error sending invoice PDF:', error);
+      res.status(500).json({ message: "Failed to send invoice PDF" });
     }
   });
 

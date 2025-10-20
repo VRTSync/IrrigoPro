@@ -480,6 +480,19 @@ export const invoiceItems = pgTable("invoice_items", {
   laborTotal: decimal("labor_total", { precision: 10, scale: 2 }).default("0"),
 });
 
+// Invoice PDFs - auto-generated detailed breakdowns for customer sharing
+export const invoicePdfs = pgTable("invoice_pdfs", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").references(() => invoices.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  pdfUrl: text("pdf_url").notNull(), // Google Cloud Storage URL
+  filename: text("filename").notNull(), // Format: "Invoice_12345_Jan2025-Jan2025_Detail.pdf"
+  status: text("status").notNull().default("generated"), // generated, sent, failed
+  sentAt: timestamp("sent_at"), // When PDF was sent to customer
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Notifications table for workflow notifications
 export const notifications = pgTable("notifications", {
   id: serial("id").primaryKey(),
@@ -559,6 +572,7 @@ export const insertWorkOrderSchema = createInsertSchema(workOrders)
 export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit({ id: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
+export const insertInvoicePdfSchema = createInsertSchema(invoicePdfs).omit({ id: true, createdAt: true });
 export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
 export const insertPartUsageSchema = createInsertSchema(partUsage).omit({ id: true, updatedAt: true });
@@ -583,6 +597,7 @@ export type WorkOrder = typeof workOrders.$inferSelect;
 export type WorkOrderItem = typeof workOrderItems.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
+export type InvoicePdf = typeof invoicePdfs.$inferSelect;
 export type BillingSheet = typeof billingSheets.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
 export type PartUsage = typeof partUsage.$inferSelect;
@@ -607,6 +622,7 @@ export type InsertWorkOrder = z.infer<typeof insertWorkOrderSchema>;
 export type InsertWorkOrderItem = z.infer<typeof insertWorkOrderItemSchema>;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
+export type InsertInvoicePdf = z.infer<typeof insertInvoicePdfSchema>;
 export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
 export type InsertPartUsage = z.infer<typeof insertPartUsageSchema>;

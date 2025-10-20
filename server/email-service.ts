@@ -504,4 +504,126 @@ The IrrigoPro Team
       throw error;
     }
   }
+
+  static async sendInvoiceDetailPdf(
+    customerEmail: string,
+    customerName: string,
+    invoiceNumber: string,
+    pdfUrl: string
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    try {
+      // Download PDF from object storage
+      const objectStorageService = new ObjectStorageService();
+      const file = await objectStorageService.searchPublicObject(pdfUrl);
+      
+      if (!file) {
+        return { success: false, error: 'PDF file not found in storage' };
+      }
+
+      // Read file content as buffer
+      const chunks: Buffer[] = [];
+      const stream = file.createReadStream();
+      
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      
+      const pdfBuffer = Buffer.concat(chunks);
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      // Send email with PDF attachment
+      await client.sendEmail({
+        From: process.env.FROM_EMAIL || 'billing@irrigopro.com',
+        To: customerEmail,
+        Subject: `Invoice Detail Report - ${invoiceNumber}`,
+        HtmlBody: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Invoice Detail Report</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="margin: 0; font-size: 28px;">Invoice Detail Report</h1>
+              <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">IrrigoPro</p>
+            </div>
+            
+            <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 30px;">
+              <h2 style="color: #1f2937; margin-top: 0;">Hello ${customerName},</h2>
+              
+              <p style="font-size: 16px; color: #4b5563;">
+                Please find attached the detailed work order breakdown for invoice <strong>${invoiceNumber}</strong>.
+              </p>
+              
+              <p style="font-size: 16px; color: #4b5563;">
+                This report provides a complete itemization of all work performed, parts used, labor hours, and associated costs for the billing period.
+              </p>
+
+              <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <p style="margin: 0; color: #1e40af; font-size: 14px;">
+                  <strong>📎 Attachment:</strong> The detailed PDF report is attached to this email.
+                </p>
+              </div>
+
+              <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                <p style="color: #6b7280; font-size: 14px; margin: 0;">
+                  If you have any questions about this invoice or the attached detail report, please don't hesitate to contact us.
+                </p>
+                <p style="color: #6b7280; font-size: 14px; margin: 8px 0 0 0;">
+                  Thank you for your business!
+                </p>
+              </div>
+
+              <div style="text-align: center; margin-top: 30px;">
+                <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                  This is an automated email from IrrigoPro
+                </p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        TextBody: `
+Invoice Detail Report - ${invoiceNumber}
+
+Hello ${customerName},
+
+Please find attached the detailed work order breakdown for invoice ${invoiceNumber}.
+
+This report provides a complete itemization of all work performed, parts used, labor hours, and associated costs for the billing period.
+
+If you have any questions about this invoice or the attached detail report, please don't hesitate to contact us.
+
+Thank you for your business!
+
+---
+This is an automated email from IrrigoPro
+        `,
+        Attachments: [
+          {
+            Name: `Invoice_${invoiceNumber}_Detail.pdf`,
+            Content: pdfBase64,
+            ContentType: 'application/pdf',
+          },
+        ],
+        Tag: 'invoice-detail-pdf',
+      });
+
+      console.log(`Invoice detail PDF sent to ${customerEmail} for invoice ${invoiceNumber}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send invoice detail PDF:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  }
 }
