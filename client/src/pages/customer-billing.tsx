@@ -31,6 +31,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@shared/schema";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
+import { InvoiceList } from "@/components/billing/invoice-list";
+import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 
 // Extended interfaces for billing data with transformed fields
 interface BillingWorkOrder extends WorkOrder {
@@ -101,6 +103,14 @@ export default function CustomerBilling() {
   const [amountFilter, setAmountFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
+  
+  // PDF modal state
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [selectedPdfInvoice, setSelectedPdfInvoice] = useState<{
+    invoiceId: number;
+    invoiceNumber: string;
+    customerEmail: string;
+  } | null>(null);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -349,6 +359,12 @@ export default function CustomerBilling() {
     statusFilter !== "all" ? 1 : 0,
     searchTerm ? 1 : 0
   ].reduce((sum, count) => sum + count, 0);
+
+  // Handle opening PDF modal
+  const handleOpenPdf = (invoiceId: number, invoiceNumber: string, customerEmail: string) => {
+    setSelectedPdfInvoice({ invoiceId, invoiceNumber, customerEmail });
+    setShowPdfModal(true);
+  };
 
   // Get detailed billing data for selected customer
   const { data: customerBillingData, isLoading: loadingCustomerData } = useQuery<CustomerBillingData>({
@@ -1239,7 +1255,7 @@ export default function CustomerBilling() {
 
               {/* Work Orders and Billing Data Tabs - Mobile optimized */}
               <Tabs defaultValue="unbilled" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 h-8">
+                <TabsList className="grid w-full grid-cols-5 h-8">
                   <TabsTrigger value="unbilled" className="text-xs px-2">
                     Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length})
                   </TabsTrigger>
@@ -1251,6 +1267,9 @@ export default function CustomerBilling() {
                   </TabsTrigger>
                   <TabsTrigger value="estimates" className="text-xs px-2">
                     Estimates ({customerBillingData.estimates.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="invoices" className="text-xs px-2">
+                    Invoices
                   </TabsTrigger>
                 </TabsList>
 
@@ -1740,6 +1759,16 @@ export default function CustomerBilling() {
                     )}
                   </div>
                 </TabsContent>
+
+                {/* Invoices Tab */}
+                <TabsContent value="invoices">
+                  <div className="mt-3">
+                    <InvoiceList 
+                      customerId={selectedCustomerId} 
+                      onOpenPdf={handleOpenPdf}
+                    />
+                  </div>
+                </TabsContent>
               </Tabs>
               </div>
             ) : (
@@ -2110,6 +2139,17 @@ export default function CustomerBilling() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Invoice PDF Preview Modal */}
+      {selectedPdfInvoice && (
+        <InvoicePdfPreviewModal
+          invoiceId={selectedPdfInvoice.invoiceId}
+          invoiceNumber={selectedPdfInvoice.invoiceNumber}
+          customerEmail={selectedPdfInvoice.customerEmail}
+          open={showPdfModal}
+          onOpenChange={setShowPdfModal}
+        />
+      )}
     </div>
   );
 }

@@ -1,19 +1,36 @@
+import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MapPin, Phone, Mail, Building, FileText } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt } from "lucide-react";
 import { Customer } from "@shared/schema";
+import { InvoiceList } from "@/components/billing/invoice-list";
+import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 
 export default function CustomerProfile() {
   const { id } = useParams();
   const [, setLocation] = useLocation();
 
+  // PDF modal state
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [selectedPdfInvoice, setSelectedPdfInvoice] = useState<{
+    invoiceId: number;
+    invoiceNumber: string;
+    customerEmail: string;
+  } | null>(null);
+
   const { data: customer, isLoading } = useQuery<Customer>({
     queryKey: [`/api/customers/${id}`],
   });
+
+  // Handle opening PDF modal
+  const handleOpenPdf = (invoiceId: number, invoiceNumber: string, customerEmail: string) => {
+    setSelectedPdfInvoice({ invoiceId, invoiceNumber, customerEmail });
+    setShowPdfModal(true);
+  };
 
   // Loading and error checks - moved after all hooks
   if (isLoading) {
@@ -195,7 +212,33 @@ export default function CustomerProfile() {
         </CardContent>
       </Card>
 
+      {/* Invoices */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Receipt className="w-5 h-5" />
+            Invoices
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <InvoiceList 
+            customerId={parseInt(id!)} 
+            limit={10}
+            onOpenPdf={handleOpenPdf}
+          />
+        </CardContent>
+      </Card>
 
+      {/* Invoice PDF Preview Modal */}
+      {selectedPdfInvoice && (
+        <InvoicePdfPreviewModal
+          invoiceId={selectedPdfInvoice.invoiceId}
+          invoiceNumber={selectedPdfInvoice.invoiceNumber}
+          customerEmail={selectedPdfInvoice.customerEmail}
+          open={showPdfModal}
+          onOpenChange={setShowPdfModal}
+        />
+      )}
     </div>
   );
 }
