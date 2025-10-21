@@ -916,6 +916,13 @@ export default function CustomerBilling() {
                         )}
                       </div>
                     </TabsContent>
+
+                    <TabsContent value="invoices" className="mt-3">
+                      <InvoiceList 
+                        customerId={selectedCustomerId} 
+                        onOpenPdf={handleOpenPdf}
+                      />
+                    </TabsContent>
                   </Tabs>
                 </div>
               ) : (
