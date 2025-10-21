@@ -246,11 +246,10 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
 // General authentication middleware that validates user identity and role
 const requireAuthentication = async (req: any, res: any, next: any) => {
   try {
-    // Get authenticated user ID and role
+    // Get authenticated user ID and role from headers
     let userId = req.headers['x-user-id'];
     let userRole = req.headers['x-user-role'];
     let userCompanyId = req.headers['x-user-company-id'];
-    
     
     // Production session-based authentication
     if (req.session && req.session.userId) {
@@ -262,13 +261,15 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
           userCompanyId = user.companyId;
         }
       } catch (dbError) {
-        // Continue to header fallback on database error
+        // Continue to fallback on database error
       }
     }
     
-    // Header fallback for development compatibility
-    if (!userId && req.headers['x-user-id']) {
-      // Headers are already set above
+    // Query parameter fallback (for PDF viewing in new tabs)
+    if (!userId && req.query['x-user-id']) {
+      userId = req.query['x-user-id'];
+      userRole = req.query['x-user-role'];
+      userCompanyId = req.query['x-user-company-id'];
     }
     
     // Authentication required

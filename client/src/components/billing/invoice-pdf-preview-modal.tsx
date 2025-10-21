@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -45,9 +45,6 @@ export function InvoicePdfPreviewModal({
 }: InvoicePdfPreviewModalProps) {
   const { toast } = useToast();
   const [showEmailConfirm, setShowEmailConfirm] = useState(false);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfError, setPdfError] = useState<string | null>(null);
 
   // Fetch PDF details
   const { data: pdf, isLoading, error } = useQuery<InvoicePdf>({
@@ -55,72 +52,16 @@ export function InvoicePdfPreviewModal({
     enabled: open,
   });
 
-  // Fetch PDF as blob when PDF metadata is available
-  useEffect(() => {
-    if (!pdf || !open) {
-      // Cleanup any existing blob URL when closing
-      if (pdfBlobUrl) {
-        URL.revokeObjectURL(pdfBlobUrl);
-        setPdfBlobUrl(null);
-      }
-      return;
-    }
-
-    const fetchPdfBlob = async () => {
-      setPdfLoading(true);
-      setPdfError(null);
-      
-      try {
-        // Get user from localStorage to add auth headers
-        const getCurrentUser = () => {
-          const savedUser = localStorage.getItem("user");
-          return savedUser ? JSON.parse(savedUser) : null;
-        };
-        
-        const user = getCurrentUser();
-        const headers: Record<string, string> = {};
-        
-        // Add auth headers (same as queryClient does)
-        if (user?.role) {
-          headers["x-user-role"] = user.role;
-          headers["x-user-id"] = user.id?.toString() || "";
-          headers["x-user-name"] = user.name || "";
-          headers["x-user-company-id"] = user.companyId?.toString() || "";
-        }
-
-        const response = await fetch(`/api/invoices/${invoiceId}/pdf/download`, {
-          credentials: 'include',
-          headers,
-        });
-        
-        if (!response.ok) {
-          throw new Error('Failed to load PDF');
-        }
-        
-        const blob = await response.blob();
-        console.log('PDF Blob received:', { type: blob.type, size: blob.size });
-        
-        const url = URL.createObjectURL(blob);
-        console.log('Blob URL created:', url);
-        setPdfBlobUrl(url);
-      } catch (err) {
-        console.error('Error fetching PDF blob:', err);
-        setPdfError(err instanceof Error ? err.message : 'Failed to load PDF');
-      } finally {
-        setPdfLoading(false);
-      }
-    };
-
-    fetchPdfBlob();
-    
-    // Cleanup function
-    return () => {
-      if (pdfBlobUrl) {
-        console.log('Cleaning up blob URL');
-        URL.revokeObjectURL(pdfBlobUrl);
-      }
-    };
-  }, [pdf, open, invoiceId]);
+  // Build PDF URL with auth headers as query params for better compatibility
+  const getPdfUrl = () => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const params = new URLSearchParams({
+      'user-id': user.id?.toString() || '',
+      'user-role': user.role || '',
+      'user-company-id': user.companyId?.toString() || '',
+    });
+    return `/api/invoices/${invoiceId}/pdf/download?${params.toString()}`;
+  };
 
   // Send email mutation
   const sendEmailMutation = useMutation({
@@ -156,13 +97,33 @@ export function InvoicePdfPreviewModal({
     },
   });
 
-  const handleDownload = () => {
-    if (!pdf || !pdfBlobUrl) return;
+  const handleViewPdf = () => {
+    // Open PDF in new tab
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const params = new URLSearchParams({
+      'x-user-id': user.id?.toString() || '',
+      'x-user-role': user.role || '',
+      'x-user-company-id': user.companyId?.toString() || '',
+    });
     
-    // Create a download link using the blob URL
+    window.open(`/api/invoices/${invoiceId}/pdf/download?${params.toString()}`, '_blank');
+  };
+
+  const handleDownload = () => {
+    if (!pdf) return;
+    
+    // Trigger download using a temporary link
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const params = new URLSearchParams({
+      'x-user-id': user.id?.toString() || '',
+      'x-user-role': user.role || '',
+      'x-user-company-id': user.companyId?.toString() || '',
+    });
+    
     const link = document.createElement("a");
-    link.href = pdfBlobUrl;
+    link.href = `/api/invoices/${invoiceId}/pdf/download?${params.toString()}`;
     link.download = pdf.filename;
+    link.target = '_blank';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -179,95 +140,109 @@ export function InvoicePdfPreviewModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] max-w-6xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col">
-          <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-50 p-2 rounded-lg">
-                  <FileText className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <DialogTitle className="text-xl font-semibold">
-                    Invoice Detail Report
-                  </DialogTitle>
-                  <p className="text-sm text-gray-600 font-normal mt-1">
-                    {invoiceNumber} - Work Order Breakdown
-                  </p>
-                </div>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="bg-blue-50 p-2 rounded-lg">
+                <FileText className="w-5 h-5 text-blue-600" />
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownload}
-                  disabled={!pdf || !pdfBlobUrl || pdfLoading}
-                  data-testid="button-download-pdf"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleSendEmail}
-                  disabled={!pdf || !pdfBlobUrl || pdfLoading || sendEmailMutation.isPending}
-                  data-testid="button-send-pdf-email"
-                >
-                  {sendEmailMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Mail className="w-4 h-4 mr-2" />
-                  )}
-                  Send to Customer
-                </Button>
+              <div>
+                <DialogTitle className="text-xl font-semibold">
+                  Invoice Detail Report
+                </DialogTitle>
+                <p className="text-sm text-gray-600 font-normal mt-1">
+                  {invoiceNumber} - Work Order Breakdown
+                </p>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-hidden bg-gray-100">
-            {(isLoading || pdfLoading) && (
-              <div className="flex items-center justify-center h-full">
+          <div className="py-6">
+            {isLoading && (
+              <div className="flex items-center justify-center">
                 <div className="text-center">
                   <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-blue-600" />
-                  <p className="text-sm text-gray-600">
-                    {isLoading ? 'Loading PDF details...' : 'Loading PDF document...'}
-                  </p>
+                  <p className="text-sm text-gray-600">Loading PDF details...</p>
                 </div>
               </div>
             )}
 
-            {(error || pdfError) && (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center max-w-md p-6">
-                  <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-600" />
-                  <h3 className="text-lg font-semibold mb-2">PDF Not Available</h3>
-                  <p className="text-sm text-gray-600 mb-4">
-                    {pdfError || 'The PDF for this invoice hasn\'t been generated yet or there was an error loading it.'}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    PDFs are automatically generated when invoices are created. If this invoice was just created, please wait a moment and try again.
-                  </p>
-                </div>
+            {error && (
+              <div className="text-center max-w-md mx-auto">
+                <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-600" />
+                <h3 className="text-lg font-semibold mb-2">PDF Not Available</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  The PDF for this invoice hasn't been generated yet or there was an error loading it.
+                </p>
+                <p className="text-xs text-gray-500">
+                  PDFs are automatically generated when invoices are created. If this invoice was just created, please wait a moment and try again.
+                </p>
               </div>
             )}
 
-            {pdf && pdfBlobUrl && !pdfLoading && !pdfError && (
-              <iframe
-                src={pdfBlobUrl}
-                className="w-full h-full border-0"
-                title="Invoice Detail PDF"
-                data-testid="iframe-pdf-preview"
-              />
+            {pdf && !isLoading && !error && (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <FileText className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-900 mb-1">PDF Ready</h4>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Invoice detail report with complete work order breakdown, parts, labor, and costs.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={handleViewPdf}
+                          size="sm"
+                          data-testid="button-view-pdf"
+                        >
+                          <FileText className="w-4 h-4 mr-2" />
+                          View PDF
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownload}
+                          data-testid="button-download-pdf"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSendEmail}
+                          disabled={sendEmailMutation.isPending}
+                          data-testid="button-send-pdf-email"
+                        >
+                          {sendEmailMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <Mail className="w-4 h-4 mr-2" />
+                          )}
+                          Send to Customer
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {pdf.sentAt && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <p className="text-sm text-gray-700">
+                      <Mail className="w-4 h-4 inline mr-2 text-gray-500" />
+                      Last sent on {new Date(pdf.sentAt).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+
+                <div className="text-xs text-gray-500">
+                  <p className="font-medium mb-1">Filename: {pdf.filename}</p>
+                  <p>This PDF contains detailed work order information for invoice {invoiceNumber}.</p>
+                </div>
+              </div>
             )}
           </div>
-
-          {pdf?.sentAt && (
-            <div className="p-3 bg-blue-50 border-t border-blue-100 flex-shrink-0">
-              <p className="text-sm text-blue-800">
-                <Mail className="w-4 h-4 inline mr-2" />
-                Last sent to customer on {new Date(pdf.sentAt).toLocaleString()}
-              </p>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 
