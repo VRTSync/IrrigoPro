@@ -754,7 +754,7 @@ export default function CustomerBilling() {
 
                   {/* Mobile Tabs for Work Orders, Billing Sheets, etc. */}
                   <Tabs defaultValue="unbilled" className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 text-xs h-10">
+                    <TabsList className="grid w-full grid-cols-5 text-xs h-10">
                       <TabsTrigger value="unbilled" className="text-xs">
                         Unbilled ({customerBillingData.unbilledWorkOrders.length + customerBillingData.unbilledBillingSheets.length})
                       </TabsTrigger>
@@ -766,6 +766,9 @@ export default function CustomerBilling() {
                       </TabsTrigger>
                       <TabsTrigger value="estimates" className="text-xs">
                         Estimates ({customerBillingData.estimates.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="invoices" className="text-xs">
+                        Invoices
                       </TabsTrigger>
                     </TabsList>
 
