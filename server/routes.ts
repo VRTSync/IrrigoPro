@@ -5554,10 +5554,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "PDF file not found in storage" });
       }
 
-      // Set headers for download
+      // Set headers for inline display (can still be downloaded via browser controls)
       res.set({
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${pdf.filename}"`,
+        'Content-Disposition': `inline; filename="${pdf.filename}"`,
       });
 
       // Stream the file to the response
