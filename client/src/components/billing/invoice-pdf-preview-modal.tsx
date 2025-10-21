@@ -66,8 +66,26 @@ export function InvoicePdfPreviewModal({
       setPdfError(null);
       
       try {
+        // Get user from localStorage to add auth headers
+        const getCurrentUser = () => {
+          const savedUser = localStorage.getItem("user");
+          return savedUser ? JSON.parse(savedUser) : null;
+        };
+        
+        const user = getCurrentUser();
+        const headers: Record<string, string> = {};
+        
+        // Add auth headers (same as queryClient does)
+        if (user?.role) {
+          headers["x-user-role"] = user.role;
+          headers["x-user-id"] = user.id?.toString() || "";
+          headers["x-user-name"] = user.name || "";
+          headers["x-user-company-id"] = user.companyId?.toString() || "";
+        }
+
         const response = await fetch(`/api/invoices/${invoiceId}/pdf/download`, {
           credentials: 'include',
+          headers,
         });
         
         if (!response.ok) {
