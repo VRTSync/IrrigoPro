@@ -5311,9 +5311,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Invoice routes (placeholder endpoints)
   app.get("/api/invoices", async (req, res) => {
     try {
-      // This would need to be implemented in storage
-      res.json({ message: "Invoices endpoint ready for implementation", invoices: [] });
+      const customerId = req.query.customerId ? parseInt(req.query.customerId as string) : undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      
+      const allInvoices = await storage.getInvoices();
+      
+      // Filter by customer if provided
+      let invoices = customerId 
+        ? allInvoices.filter(inv => inv.customerId === customerId)
+        : allInvoices;
+      
+      // Limit results
+      invoices = invoices.slice(0, limit);
+      
+      // Sort by creation date, newest first
+      invoices.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      res.json(invoices);
     } catch (error) {
+      console.error('Error fetching invoices:', error);
       res.status(500).json({ message: "Failed to fetch invoices" });
     }
   });
