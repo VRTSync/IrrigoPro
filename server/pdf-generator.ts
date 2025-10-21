@@ -1,7 +1,20 @@
 import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { execSync } from 'child_process';
 import type { Invoice, InvoiceItem, WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@shared/schema';
+
+// Get system chromium path for Replit
+function getChromiumPath(): string {
+  try {
+    const chromiumPath = execSync('which chromium').toString().trim();
+    return chromiumPath;
+  } catch (error) {
+    // Fallback to default behavior if chromium not found
+    console.warn('System chromium not found, using bundled Chrome');
+    return '';
+  }
+}
 
 interface InvoiceDetailData {
   invoice: Invoice;
@@ -24,8 +37,10 @@ interface InvoiceDetailData {
 
 export class PDFGenerator {
   static async generateInvoicePDF(invoiceHtmlPath: string): Promise<Buffer> {
+    const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
+      executablePath: chromiumPath || undefined,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     
@@ -59,8 +74,10 @@ export class PDFGenerator {
   }
   
   static async generateInvoicePDFFromUrl(url: string): Promise<Buffer> {
+    const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
+      executablePath: chromiumPath || undefined,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     
@@ -87,8 +104,10 @@ export class PDFGenerator {
   }
 
   static async generateInvoiceDetailPDF(data: InvoiceDetailData): Promise<Buffer> {
+    const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
+      executablePath: chromiumPath || undefined,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     

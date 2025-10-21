@@ -2422,7 +2422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice,
         invoiceNumber,
         totalAmount: totalAmount.toFixed(2),
-        itemCount: unbilledWorkOrders.length + unbilledBillingSheets.length,
+        itemCount: selectedWorkOrders.length + selectedBillingSheets.length,
         quickbooksId,
         quickbooksSuccess,
         quickbooksError
