@@ -58,6 +58,11 @@ export function InvoicePdfPreviewModal({
   // Fetch PDF as blob when PDF metadata is available
   useEffect(() => {
     if (!pdf || !open) {
+      // Cleanup any existing blob URL when closing
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl);
+        setPdfBlobUrl(null);
+      }
       return;
     }
 
@@ -93,7 +98,10 @@ export function InvoicePdfPreviewModal({
         }
         
         const blob = await response.blob();
+        console.log('PDF Blob received:', { type: blob.type, size: blob.size });
+        
         const url = URL.createObjectURL(blob);
+        console.log('Blob URL created:', url);
         setPdfBlobUrl(url);
       } catch (err) {
         console.error('Error fetching PDF blob:', err);
@@ -104,16 +112,15 @@ export function InvoicePdfPreviewModal({
     };
 
     fetchPdfBlob();
-  }, [pdf, open, invoiceId]);
-
-  // Cleanup blob URL when modal closes
-  useEffect(() => {
+    
+    // Cleanup function
     return () => {
       if (pdfBlobUrl) {
+        console.log('Cleaning up blob URL');
         URL.revokeObjectURL(pdfBlobUrl);
       }
     };
-  }, [pdfBlobUrl]);
+  }, [pdf, open, invoiceId]);
 
   // Send email mutation
   const sendEmailMutation = useMutation({
