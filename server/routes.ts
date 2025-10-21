@@ -1001,11 +1001,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const companyUsers = allUsers.filter(user => user.companyId === userCompanyId);
         const activeUsers = companyUsers.filter(user => user.isActive).length;
         
+        const allCustomers = await storage.getCustomers();
+        
         const allWorkOrders = await storage.getWorkOrders();
         const companyWorkOrders = allWorkOrders.filter(wo => wo.customerId && allCustomers.find(c => c.id === wo.customerId)?.companyId === userCompanyId);
         const openWorkOrders = companyWorkOrders.filter(wo => wo.status === "assigned" || wo.status === "in_progress").length;
-        
-        const allCustomers = await storage.getCustomers();
         
         // Include customers for this company OR customers with companyId 99 (QuickBooks sync default)
         // This handles cases where QuickBooks sync used a default company ID
