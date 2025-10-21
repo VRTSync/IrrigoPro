@@ -125,8 +125,9 @@ const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
 };
 
 // Middleware for billing/invoice PDF access (billing_manager and company_admin only)
-const requireBillingAccess = (req: Request, res: any, next: any) => {
-  const userRole = req.headers['x-user-role'];
+const requireBillingAccess = (req: any, res: any, next: any) => {
+  // Use the authenticated user role set by requireAuthentication middleware
+  const userRole = req.authenticatedUserRole;
   
   if (userRole !== 'company_admin' && userRole !== 'billing_manager') {
     return res.status(403).json({ 
