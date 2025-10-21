@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -45,12 +45,57 @@ export function InvoicePdfPreviewModal({
 }: InvoicePdfPreviewModalProps) {
   const { toast } = useToast();
   const [showEmailConfirm, setShowEmailConfirm] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   // Fetch PDF details
   const { data: pdf, isLoading, error } = useQuery<InvoicePdf>({
     queryKey: ["/api/invoices", invoiceId, "pdf"],
     enabled: open,
   });
+
+  // Fetch PDF as blob when PDF metadata is available
+  useEffect(() => {
+    if (!pdf || !open) {
+      return;
+    }
+
+    const fetchPdfBlob = async () => {
+      setPdfLoading(true);
+      setPdfError(null);
+      
+      try {
+        const response = await fetch(`/api/invoices/${invoiceId}/pdf/download`, {
+          credentials: 'include',
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to load PDF');
+        }
+        
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setPdfBlobUrl(url);
+      } catch (err) {
+        console.error('Error fetching PDF blob:', err);
+        setPdfError(err instanceof Error ? err.message : 'Failed to load PDF');
+      } finally {
+        setPdfLoading(false);
+      }
+    };
+
+    fetchPdfBlob();
+  }, [pdf, open, invoiceId]);
+
+  // Cleanup blob URL when modal closes
+  useEffect(() => {
+    return () => {
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl);
+      }
+    };
+  }, [pdfBlobUrl]);
 
   // Send email mutation
   const sendEmailMutation = useMutation({
@@ -87,11 +132,11 @@ export function InvoicePdfPreviewModal({
   });
 
   const handleDownload = () => {
-    if (!pdf) return;
+    if (!pdf || !pdfBlobUrl) return;
     
-    // Create a download link and trigger it
+    // Create a download link using the blob URL
     const link = document.createElement("a");
-    link.href = `/api/invoices/${invoiceId}/pdf/download`;
+    link.href = pdfBlobUrl;
     link.download = pdf.filename;
     document.body.appendChild(link);
     link.click();
@@ -130,7 +175,7 @@ export function InvoicePdfPreviewModal({
                   variant="outline"
                   size="sm"
                   onClick={handleDownload}
-                  disabled={!pdf}
+                  disabled={!pdf || !pdfBlobUrl || pdfLoading}
                   data-testid="button-download-pdf"
                 >
                   <Download className="w-4 h-4 mr-2" />
@@ -139,7 +184,7 @@ export function InvoicePdfPreviewModal({
                 <Button
                   size="sm"
                   onClick={handleSendEmail}
-                  disabled={!pdf || sendEmailMutation.isPending}
+                  disabled={!pdf || !pdfBlobUrl || pdfLoading || sendEmailMutation.isPending}
                   data-testid="button-send-pdf-email"
                 >
                   {sendEmailMutation.isPending ? (
@@ -154,22 +199,24 @@ export function InvoicePdfPreviewModal({
           </DialogHeader>
 
           <div className="flex-1 overflow-hidden bg-gray-100">
-            {isLoading && (
+            {(isLoading || pdfLoading) && (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-blue-600" />
-                  <p className="text-sm text-gray-600">Loading PDF...</p>
+                  <p className="text-sm text-gray-600">
+                    {isLoading ? 'Loading PDF details...' : 'Loading PDF document...'}
+                  </p>
                 </div>
               </div>
             )}
 
-            {error && (
+            {(error || pdfError) && (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center max-w-md p-6">
                   <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-600" />
                   <h3 className="text-lg font-semibold mb-2">PDF Not Available</h3>
                   <p className="text-sm text-gray-600 mb-4">
-                    The PDF for this invoice hasn't been generated yet or there was an error loading it.
+                    {pdfError || 'The PDF for this invoice hasn\'t been generated yet or there was an error loading it.'}
                   </p>
                   <p className="text-xs text-gray-500">
                     PDFs are automatically generated when invoices are created. If this invoice was just created, please wait a moment and try again.
@@ -178,9 +225,9 @@ export function InvoicePdfPreviewModal({
               </div>
             )}
 
-            {pdf && (
+            {pdf && pdfBlobUrl && !pdfLoading && !pdfError && (
               <iframe
-                src={`/api/invoices/${invoiceId}/pdf/download`}
+                src={pdfBlobUrl}
                 className="w-full h-full border-0"
                 title="Invoice Detail PDF"
                 data-testid="iframe-pdf-preview"
