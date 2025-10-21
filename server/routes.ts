@@ -5530,10 +5530,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Get the PDF file from object storage
+      // The pdfUrl is stored as a full path like: /bucket-name/public/invoice-pdfs/99/file.pdf
+      // But searchPublicObject expects a relative path like: invoice-pdfs/99/file.pdf
+      // Extract the relative path by removing the bucket and public prefix
+      let relativePath = pdf.pdfUrl;
+      
+      // Remove leading slash and extract path after "public/"
+      if (relativePath.startsWith('/')) {
+        relativePath = relativePath.substring(1);
+      }
+      
+      // Find and remove everything up to and including "public/"
+      const publicIndex = relativePath.indexOf('/public/');
+      if (publicIndex !== -1) {
+        relativePath = relativePath.substring(publicIndex + '/public/'.length);
+      }
+      
       const objectStorageService = new ObjectStorageService();
-      const file = await objectStorageService.searchPublicObject(pdf.pdfUrl);
+      const file = await objectStorageService.searchPublicObject(relativePath);
       
       if (!file) {
+        console.error(`PDF file not found in storage. Original path: ${pdf.pdfUrl}, Relative path: ${relativePath}`);
         return res.status(404).json({ message: "PDF file not found in storage" });
       }
 
