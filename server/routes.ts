@@ -6,6 +6,9 @@ import crypto from 'crypto';
 import { EmailService } from "./email-service";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
+import { db } from "./db";
+import { invoicePdfs } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 // Extend Express Request type to include session
 declare module 'express' {
@@ -2232,6 +2235,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           invoiceId: invoice.id,
           sourceType: 'work_order',
           sourceId: workOrder.id,
+          workOrderId: workOrder.id, // Add this for PDF generator
           description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
           workDate: workOrder.completedAt || workOrder.createdAt,
           technicianName: workOrder.assignedTechnicianName || 'Unknown',
@@ -2262,6 +2266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           invoiceId: invoice.id,
           sourceType: 'billing_sheet',
           sourceId: billingSheet.id,
+          billingSheetId: billingSheet.id, // Add this for PDF generator
           description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
           workDate: billingSheet.workDate,
           technicianName: billingSheet.technicianName,
@@ -5614,6 +5619,44 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error('Error sending invoice PDF:', error);
       res.status(500).json({ message: "Failed to send invoice PDF" });
+    }
+  });
+
+  // Regenerate invoice PDF (for fixing corrupted or incomplete PDFs)
+  app.post("/api/invoices/:invoiceId/pdf/regenerate", requireAuthentication, requireBillingAccess, async (req, res) => {
+    try {
+      const invoiceId = parseInt(req.params.invoiceId);
+      const invoice = await storage.getInvoiceById(invoiceId);
+      
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Delete old PDF from database if it exists (will regenerate with new data)
+      const existingPdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
+      if (existingPdf) {
+        // Delete the record from database (PDF file will be overwritten)
+        await db.delete(invoicePdfs).where(eq(invoicePdfs.id, existingPdf.id));
+      }
+
+      // Generate new PDF
+      const pdfService = new InvoicePdfService(storage);
+      const result = await pdfService.generateAndSaveInvoicePdf(invoiceId);
+
+      if (result.success) {
+        res.json({ 
+          message: "PDF regenerated successfully",
+          pdfUrl: result.pdfUrl 
+        });
+      } else {
+        res.status(500).json({ 
+          message: "Failed to regenerate PDF",
+          error: result.error 
+        });
+      }
+    } catch (error) {
+      console.error('Error regenerating invoice PDF:', error);
+      res.status(500).json({ message: "Failed to regenerate invoice PDF" });
     }
   });
 

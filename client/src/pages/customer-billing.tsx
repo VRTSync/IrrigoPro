@@ -265,9 +265,10 @@ export default function CustomerBilling() {
         title: "Invoice Created Successfully",
         description: `Monthly invoice ${data.invoiceNumber} has been created and synced to QuickBooks.`,
       });
-      // Refresh customer billing data and previews
+      // Refresh customer billing data, previews, and invoice list
       queryClient.invalidateQueries({ queryKey: ['customer-billing', customerId] });
       queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
     },
     onError: (error: any) => {
       toast({
