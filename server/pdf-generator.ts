@@ -511,10 +511,29 @@ export class PDFGenerator {
                 <div class="section-subtitle">${wo.workOrder.projectName || 'Service Work'}</div>
               </div>
               
+              <!-- Location Information -->
+              ${wo.workOrder.projectAddress || wo.workOrder.locationNotes ? `
+                <div class="work-order-details">
+                  ${wo.workOrder.projectAddress ? `
+                    <div class="detail-item">
+                      <div class="detail-label">Service Location</div>
+                      <div class="detail-value">${wo.workOrder.projectAddress}</div>
+                    </div>
+                  ` : ''}
+                  ${wo.workOrder.locationNotes ? `
+                    <div class="detail-item">
+                      <div class="detail-label">Location Notes</div>
+                      <div class="detail-value">${wo.workOrder.locationNotes}</div>
+                    </div>
+                  ` : ''}
+                </div>
+              ` : ''}
+              
+              <!-- Work Order Details -->
               <div class="work-order-details">
                 <div class="detail-item">
                   <div class="detail-label">Technician</div>
-                  <div class="detail-value">${wo.workOrder.assignedTechnicianName || 'N/A'}</div>
+                  <div class="detail-value">${wo.workOrder.completedByUserName || wo.workOrder.assignedTechnicianName || 'N/A'}</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Date Completed</div>
@@ -530,38 +549,63 @@ export class PDFGenerator {
                 </div>
               </div>
               
+              <!-- Work Summary if available -->
+              ${wo.workOrder.workSummary ? `
+                <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                  <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Work Summary</div>
+                  <div style="color: #1f2937; font-size: 13px;">${wo.workOrder.workSummary}</div>
+                </div>
+              ` : ''}
+              
+              <!-- Parts and Labor Breakdown -->
               ${wo.items && wo.items.length > 0 ? `
-                <table class="items-table">
-                  <thead>
-                    <tr>
-                      <th>Part Description</th>
-                      <th class="text-right">Qty</th>
-                      <th class="text-right">Unit Price</th>
-                      <th class="text-right">Labor Hrs</th>
-                      <th class="text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${wo.items.map(item => `
+                <div style="margin-bottom: 15px;">
+                  <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Parts & Labor Details</div>
+                  <table class="items-table">
+                    <thead>
                       <tr>
-                        <td>${item.partName}${item.notes ? `<br><small style="color: #6b7280;">${item.notes}</small>` : ''}</td>
-                        <td class="text-right">${item.quantity}</td>
-                        <td class="text-right">${formatCurrency(item.partPrice)}</td>
-                        <td class="text-right">${item.laborHours}</td>
-                        <td class="text-right">${formatCurrency(item.totalPrice)}</td>
+                        <th>Part Description</th>
+                        <th class="text-right">Qty</th>
+                        <th class="text-right">Unit Price</th>
+                        <th class="text-right">Labor Hrs</th>
+                        <th class="text-right">Total</th>
                       </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${wo.items.map(item => `
+                        <tr>
+                          <td>${item.partName}${item.notes ? `<br><small style="color: #6b7280;">${item.notes}</small>` : ''}</td>
+                          <td class="text-right">${item.quantity}</td>
+                          <td class="text-right">${formatCurrency(item.partPrice)}</td>
+                          <td class="text-right">${item.laborHours}</td>
+                          <td class="text-right">${formatCurrency(item.totalPrice)}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
               ` : '<p style="color: #6b7280; padding: 10px;">No line items</p>'}
               
+              <!-- Photos if available -->
+              ${wo.workOrder.photos && wo.workOrder.photos.length > 0 ? `
+                <div style="margin-bottom: 20px;">
+                  <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Work Photos</div>
+                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    ${wo.workOrder.photos.map(photo => `
+                      <img src="${photo}" alt="Work photo" style="width: 100%; height: 150px; object-fit: cover; border-radius: 6px; border: 1px solid #e5e7eb;">
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
+              
+              <!-- Work Order Totals -->
               <div class="work-order-totals">
                 <div class="totals-row subtotal">
                   <span>Parts Subtotal:</span>
                   <span>${formatCurrency(wo.workOrder.totalPartsCost || '0')}</span>
                 </div>
                 <div class="totals-row subtotal">
-                  <span>Labor Subtotal:</span>
+                  <span>Labor Subtotal (${wo.workOrder.totalHours || '0'} hrs × $45.00):</span>
                   <span>${formatCurrency((parseFloat(wo.workOrder.totalHours || '0') * 45).toFixed(2))}</span>
                 </div>
                 <div class="totals-row total">
@@ -580,6 +624,17 @@ export class PDFGenerator {
                 <div class="section-subtitle">${bs.billingSheet.workDescription || 'Additional Work'}</div>
               </div>
               
+              <!-- Location Information -->
+              ${bs.billingSheet.propertyAddress ? `
+                <div class="work-order-details">
+                  <div class="detail-item">
+                    <div class="detail-label">Service Location</div>
+                    <div class="detail-value">${bs.billingSheet.propertyAddress}</div>
+                  </div>
+                </div>
+              ` : ''}
+              
+              <!-- Billing Sheet Details -->
               <div class="work-order-details">
                 <div class="detail-item">
                   <div class="detail-label">Technician</div>
@@ -599,47 +654,157 @@ export class PDFGenerator {
                 </div>
               </div>
               
+              <!-- Work Description if available -->
+              ${bs.billingSheet.notes ? `
+                <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                  <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Additional Notes</div>
+                  <div style="color: #1f2937; font-size: 13px;">${bs.billingSheet.notes}</div>
+                </div>
+              ` : ''}
+              
+              <!-- Parts and Labor Breakdown -->
               ${bs.items && bs.items.length > 0 ? `
-                <table class="items-table">
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th class="text-right">Qty</th>
-                      <th class="text-right">Unit Price</th>
-                      <th class="text-right">Labor Hrs</th>
-                      <th class="text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${bs.items.map(item => `
+                <div style="margin-bottom: 15px;">
+                  <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Parts & Labor Details</div>
+                  <table class="items-table">
+                    <thead>
                       <tr>
-                        <td>${item.partName}${item.partDescription ? `<br><small style="color: #6b7280;">${item.partDescription}</small>` : ''}</td>
-                        <td class="text-right">${item.quantity}</td>
-                        <td class="text-right">${formatCurrency(item.unitPrice)}</td>
-                        <td class="text-right">${item.laborHours}</td>
-                        <td class="text-right">${formatCurrency(item.totalPrice)}</td>
+                        <th>Part Description</th>
+                        <th class="text-right">Qty</th>
+                        <th class="text-right">Unit Price</th>
+                        <th class="text-right">Labor Hrs</th>
+                        <th class="text-right">Total</th>
                       </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${bs.items.map(item => `
+                        <tr>
+                          <td>${item.partName}${item.partDescription ? `<br><small style="color: #6b7280;">${item.partDescription}</small>` : ''}${item.notes ? `<br><small style="color: #6b7280;">${item.notes}</small>` : ''}</td>
+                          <td class="text-right">${item.quantity}</td>
+                          <td class="text-right">${formatCurrency(item.unitPrice)}</td>
+                          <td class="text-right">${item.laborHours}</td>
+                          <td class="text-right">${formatCurrency(item.totalPrice)}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
               ` : '<p style="color: #6b7280; padding: 10px;">No line items</p>'}
               
+              <!-- Photos if available -->
+              ${bs.billingSheet.photos && bs.billingSheet.photos.length > 0 ? `
+                <div style="margin-bottom: 20px;">
+                  <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Work Photos</div>
+                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    ${bs.billingSheet.photos.map(photo => `
+                      <img src="${photo}" alt="Work photo" style="width: 100%; height: 150px; object-fit: cover; border-radius: 6px; border: 1px solid #e5e7eb;">
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
+              
+              <!-- Billing Sheet Totals -->
               <div class="work-order-totals">
                 <div class="totals-row subtotal">
                   <span>Parts Subtotal:</span>
                   <span>${formatCurrency(bs.billingSheet.partsSubtotal || '0')}</span>
                 </div>
                 <div class="totals-row subtotal">
-                  <span>Labor Subtotal:</span>
+                  <span>Labor Subtotal (${bs.billingSheet.totalHours || '0'} hrs × ${formatCurrency(bs.billingSheet.laborRate || '45')}):</span>
                   <span>${formatCurrency(bs.billingSheet.laborSubtotal || '0')}</span>
                 </div>
                 <div class="totals-row total">
                   <span>Billing Sheet Total:</span>
-                  <span>${formatCurrency(parseFloat(bs.billingSheet.partsSubtotal || '0') + parseFloat(bs.billingSheet.laborSubtotal || '0'))}</span>
+                  <span>${formatCurrency(bs.billingSheet.totalAmount || parseFloat(bs.billingSheet.partsSubtotal || '0') + parseFloat(bs.billingSheet.laborSubtotal || '0'))}</span>
                 </div>
               </div>
             </div>
           `).join('')}
+          
+          <!-- Summary Breakdown -->
+          <div style="margin-top: 40px; padding: 25px; background: #f9fafb; border-radius: 8px; border: 2px solid #e5e7eb;">
+            <div style="font-size: 20px; font-weight: bold; color: #1f2937; margin-bottom: 20px; border-bottom: 2px solid #3B82F6; padding-bottom: 10px;">
+              Invoice Summary
+            </div>
+            
+            <!-- Work Orders Summary -->
+            ${workOrders.length > 0 ? `
+              <div style="margin-bottom: 20px;">
+                <div style="font-size: 16px; font-weight: 600; color: #1f2937; margin-bottom: 10px;">
+                  Work Orders (${workOrders.length})
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                  <thead>
+                    <tr style="background: #e5e7eb;">
+                      <th style="padding: 10px; text-align: left; border-bottom: 2px solid #d1d5db;">Work Order #</th>
+                      <th style="padding: 10px; text-align: left; border-bottom: 2px solid #d1d5db;">Description</th>
+                      <th style="padding: 10px; text-align: right; border-bottom: 2px solid #d1d5db;">Parts</th>
+                      <th style="padding: 10px; text-align: right; border-bottom: 2px solid #d1d5db;">Labor</th>
+                      <th style="padding: 10px; text-align: right; border-bottom: 2px solid #d1d5db;">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${workOrders.map(wo => `
+                      <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <td style="padding: 10px;">${wo.workOrder.workOrderNumber}</td>
+                        <td style="padding: 10px;">${wo.workOrder.projectName || 'Service Work'}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(wo.workOrder.totalPartsCost || '0')}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency((parseFloat(wo.workOrder.totalHours || '0') * 45).toFixed(2))}</td>
+                        <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(wo.workOrder.totalAmount || '0')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : ''}
+            
+            <!-- Billing Sheets Summary -->
+            ${billingSheets.length > 0 ? `
+              <div style="margin-bottom: 20px;">
+                <div style="font-size: 16px; font-weight: 600; color: #1f2937; margin-bottom: 10px;">
+                  Billing Sheets (${billingSheets.length})
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                  <thead>
+                    <tr style="background: #e5e7eb;">
+                      <th style="padding: 10px; text-align: left; border-bottom: 2px solid #d1d5db;">Billing Sheet #</th>
+                      <th style="padding: 10px; text-align: left; border-bottom: 2px solid #d1d5db;">Description</th>
+                      <th style="padding: 10px; text-align: right; border-bottom: 2px solid #d1d5db;">Parts</th>
+                      <th style="padding: 10px; text-align: right; border-bottom: 2px solid #d1d5db;">Labor</th>
+                      <th style="padding: 10px; text-align: right; border-bottom: 2px solid #d1d5db;">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${billingSheets.map(bs => `
+                      <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <td style="padding: 10px;">${bs.billingSheet.billingNumber}</td>
+                        <td style="padding: 10px;">${bs.billingSheet.workDescription || 'Additional Work'}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(bs.billingSheet.partsSubtotal || '0')}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(bs.billingSheet.laborSubtotal || '0')}</td>
+                        <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(bs.billingSheet.totalAmount || parseFloat(bs.billingSheet.partsSubtotal || '0') + parseFloat(bs.billingSheet.laborSubtotal || '0'))}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : ''}
+            
+            <!-- Grand Totals -->
+            <div style="margin-top: 25px; padding: 20px; background: white; border-radius: 6px; border: 2px solid #3B82F6;">
+              <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: #6b7280;">
+                <span>Total Parts:</span>
+                <span>${formatCurrency(invoice.partsSubtotal)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: #6b7280;">
+                <span>Total Labor:</span>
+                <span>${formatCurrency(invoice.laborSubtotal)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 12px 0; margin-top: 10px; border-top: 2px solid #3B82F6; font-size: 18px; font-weight: bold; color: #1f2937;">
+                <span>Invoice Total:</span>
+                <span style="color: #3B82F6;">${formatCurrency(invoice.totalAmount)}</span>
+              </div>
+            </div>
+          </div>
           
           <!-- Grand Total -->
           <div class="grand-total-section">
