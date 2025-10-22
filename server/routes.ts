@@ -2187,12 +2187,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const invoiceNumber = `${Date.now().toString().slice(-5)}`;
       
       // Calculate totals - no markup on parts, tax only on labor
+      // Work orders have totalHours and totalPartsCost, not laborSubtotal/partsSubtotal
       const laborSubtotal = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
+        selectedWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
       // No markup on parts for invoices
@@ -2231,6 +2232,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create invoice items for work orders
       for (const workOrder of selectedWorkOrders) {
+        const woLaborAmount = parseFloat(workOrder.totalHours || '0') * 45; // Labor rate = $45/hr
+        const woPartsAmount = parseFloat(workOrder.totalPartsCost || '0');
+        const woTotalAmount = woLaborAmount + woPartsAmount;
+        
         await storage.createInvoiceItem({
           invoiceId: invoice.id,
           sourceType: 'work_order',
@@ -2238,18 +2243,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           workOrderId: workOrder.id, // Add this for PDF generator
           description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
           workDate: workOrder.completedAt || workOrder.createdAt,
-          technicianName: workOrder.assignedTechnicianName || 'Unknown',
+          technicianName: workOrder.completedByUserName || workOrder.assignedTechnicianName || 'Unknown',
           laborHours: (parseFloat(workOrder.totalHours || '0')).toString(),
-          laborRate: (parseFloat(workOrder.laborRate || '45')).toString(),
-          laborAmount: (parseFloat(workOrder.laborSubtotal || '0')).toString(),
-          laborTotal: (parseFloat(workOrder.laborSubtotal || '0')).toString(),
-          partsAmount: (parseFloat(workOrder.partsSubtotal || '0')).toString(),
+          laborRate: '45.00',
+          laborAmount: woLaborAmount.toString(),
+          laborTotal: woLaborAmount.toString(),
+          partsAmount: woPartsAmount.toString(),
           markupAmount: 0, // No markup on invoices
           taxAmount: 0, // No tax
-          totalAmount: (parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')).toString(),
+          totalAmount: woTotalAmount.toString(),
           quantity: 1, // Default quantity
-          unitPrice: (parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')).toString(),
-          totalPrice: (parseFloat(workOrder.laborSubtotal || '0') + parseFloat(workOrder.partsSubtotal || '0')).toString()
+          unitPrice: woTotalAmount.toString(),
+          totalPrice: woTotalAmount.toString()
         });
 
         // Update work order to mark as billed (we'll use notes to track billing status)
