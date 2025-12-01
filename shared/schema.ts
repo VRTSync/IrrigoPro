@@ -506,6 +506,20 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// External API Keys for CRM integrations
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(), // e.g., "Landscape CRM Integration"
+  apiKey: text("api_key").notNull().unique(), // The actual API key (hashed or plain)
+  keyPrefix: text("key_prefix").notNull(), // First 8 chars for display (e.g., "irpk_abc1...")
+  isActive: boolean("is_active").notNull().default(true),
+  lastUsedAt: timestamp("last_used_at"),
+  createdBy: integer("created_by").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"), // Optional expiration
+});
+
 // Drizzle insert schemas
 // Zod schemas for validation
 export const insertCompanySchema = createInsertSchema(companies).omit({
@@ -577,8 +591,10 @@ export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
 export const insertPartUsageSchema = createInsertSchema(partUsage).omit({ id: true, updatedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
+export const insertApiKeySchema = createInsertSchema(apiKeys).omit({ id: true, createdAt: true });
 
 export type Company = typeof companies.$inferSelect;
+export type ApiKey = typeof apiKeys.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
@@ -627,6 +643,7 @@ export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
 export type InsertPartUsage = z.infer<typeof insertPartUsageSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
 export type InsertController = z.infer<typeof insertControllerSchema>;
 export type InsertIrrigationZone = z.infer<typeof insertIrrigationZoneSchema>;
