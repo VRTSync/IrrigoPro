@@ -25,6 +25,7 @@ import {
   controllers,
   irrigationZones,
   partUsage,
+  apiKeys,
   type Company,
   type User,
   type Customer, 
@@ -50,6 +51,7 @@ import {
   type Controller,
   type IrrigationZone,
   type PartUsage,
+  type ApiKey,
   type InsertCompany,
   type InsertUser,
   type InsertCustomer, 
@@ -75,6 +77,7 @@ import {
   type InsertController,
   type InsertIrrigationZone,
   type InsertPartUsage,
+  type InsertApiKey,
   type EstimateWithItems,
   type EstimateWithZones,
   type PropertyZoneWithZones,
@@ -135,6 +138,14 @@ export interface IStorage {
   createNotification(notification: InsertNotification): Promise<Notification>;
   markNotificationAsRead(id: number): Promise<boolean>;
   markAllNotificationsAsRead(userId: number): Promise<boolean>;
+
+  // API Keys for External Integrations
+  getApiKeys(companyId: number): Promise<ApiKey[]>;
+  getApiKeyByKey(apiKey: string): Promise<ApiKey | undefined>;
+  createApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
+  deleteApiKey(id: number): Promise<boolean>;
+  updateApiKeyLastUsed(id: number): Promise<void>;
+  getIrrigationManagerForCompany(companyId: number): Promise<User | undefined>;
 
   // Customer Integrations
   syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
@@ -2262,6 +2273,44 @@ export class DatabaseStorage implements IStorage {
       .set({ isRead: true })
       .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
     return (result.rowCount || 0) > 0;
+  }
+
+  // API Keys methods
+  async getApiKeys(companyId: number): Promise<ApiKey[]> {
+    return await db.select().from(apiKeys)
+      .where(eq(apiKeys.companyId, companyId))
+      .orderBy(desc(apiKeys.createdAt));
+  }
+
+  async getApiKeyByKey(apiKey: string): Promise<ApiKey | undefined> {
+    const results = await db.select().from(apiKeys)
+      .where(and(eq(apiKeys.apiKey, apiKey), eq(apiKeys.isActive, true)));
+    return results[0];
+  }
+
+  async createApiKey(apiKey: InsertApiKey): Promise<ApiKey> {
+    const result = await db.insert(apiKeys).values(apiKey).returning();
+    return result[0];
+  }
+
+  async deleteApiKey(id: number): Promise<boolean> {
+    const result = await db.delete(apiKeys).where(eq(apiKeys.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  async updateApiKeyLastUsed(id: number): Promise<void> {
+    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, id));
+  }
+
+  async getIrrigationManagerForCompany(companyId: number): Promise<User | undefined> {
+    const results = await db.select().from(users)
+      .where(and(
+        eq(users.companyId, companyId),
+        eq(users.role, 'irrigation_manager'),
+        eq(users.isActive, true)
+      ))
+      .limit(1);
+    return results[0];
   }
 
   // Site Maps methods

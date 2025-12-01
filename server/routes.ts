@@ -6413,5 +6413,335 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // ============================================
+  // External API Key Management Routes
+  // ============================================
+  
+  // Get all API keys for the company (admin only)
+  app.get("/api/company/:companyId/api-keys", requireCompanyAdminAccess, async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const apiKeys = await storage.getApiKeys(companyId);
+      
+      // Return keys without the actual key value (only prefix for identification)
+      const safeKeys = apiKeys.map(key => ({
+        id: key.id,
+        name: key.name,
+        keyPrefix: key.keyPrefix,
+        isActive: key.isActive,
+        lastUsedAt: key.lastUsedAt,
+        createdAt: key.createdAt,
+        expiresAt: key.expiresAt
+      }));
+      
+      res.json(safeKeys);
+    } catch (error) {
+      console.error("Error fetching API keys:", error);
+      res.status(500).json({ message: "Failed to fetch API keys" });
+    }
+  });
+
+  // Create a new API key (admin only)
+  app.post("/api/company/:companyId/api-keys", requireCompanyAdminAccess, async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const userId = parseInt(req.headers['x-user-id'] as string) || req.session?.userId;
+      const { name, expiresAt } = req.body;
+
+      if (!name || name.trim().length === 0) {
+        return res.status(400).json({ message: "API key name is required" });
+      }
+
+      // Generate a secure API key
+      const rawKey = `irpk_${crypto.randomBytes(32).toString('hex')}`;
+      const keyPrefix = rawKey.substring(0, 12); // Store first 12 chars for identification
+
+      const apiKey = await storage.createApiKey({
+        companyId,
+        name: name.trim(),
+        apiKey: rawKey, // Store the raw key (could be hashed for extra security)
+        keyPrefix,
+        createdBy: userId,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        isActive: true,
+        lastUsedAt: null
+      });
+
+      // Return the full key ONLY on creation (user must save it now)
+      res.status(201).json({
+        id: apiKey.id,
+        name: apiKey.name,
+        apiKey: rawKey, // Full key shown only once
+        keyPrefix: apiKey.keyPrefix,
+        isActive: apiKey.isActive,
+        createdAt: apiKey.createdAt,
+        expiresAt: apiKey.expiresAt,
+        message: "IMPORTANT: Save this API key now. It will not be shown again."
+      });
+    } catch (error) {
+      console.error("Error creating API key:", error);
+      res.status(500).json({ message: "Failed to create API key" });
+    }
+  });
+
+  // Delete an API key (admin only)
+  app.delete("/api/company/:companyId/api-keys/:keyId", requireCompanyAdminAccess, async (req, res) => {
+    try {
+      const keyId = parseInt(req.params.keyId);
+      const deleted = await storage.deleteApiKey(keyId);
+      
+      if (deleted) {
+        res.json({ message: "API key deleted successfully" });
+      } else {
+        res.status(404).json({ message: "API key not found" });
+      }
+    } catch (error) {
+      console.error("Error deleting API key:", error);
+      res.status(500).json({ message: "Failed to delete API key" });
+    }
+  });
+
+  // ============================================
+  // External Work Order API (for CRM Integration)
+  // ============================================
+  
+  // Create work order via external API with API key authentication
+  app.post("/api/external/work-orders", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ 
+          error: "UNAUTHORIZED",
+          message: "API key required. Use Authorization: Bearer <your-api-key>" 
+        });
+      }
+
+      const apiKeyValue = authHeader.substring(7); // Remove 'Bearer ' prefix
+      
+      // Validate the API key
+      const apiKey = await storage.getApiKeyByKey(apiKeyValue);
+      
+      if (!apiKey) {
+        return res.status(401).json({ 
+          error: "INVALID_API_KEY",
+          message: "Invalid or inactive API key" 
+        });
+      }
+
+      // Check if key has expired
+      if (apiKey.expiresAt && new Date(apiKey.expiresAt) < new Date()) {
+        return res.status(401).json({ 
+          error: "API_KEY_EXPIRED",
+          message: "API key has expired" 
+        });
+      }
+
+      // Update last used timestamp
+      await storage.updateApiKeyLastUsed(apiKey.id);
+
+      // Parse and validate the request body
+      const externalWorkOrderSchema = z.object({
+        customer: z.object({
+          name: z.string().min(1, "Customer name is required"),
+          email: z.string().email().optional(),
+          phone: z.string().optional(),
+          address: z.string().optional(),
+          city: z.string().optional(),
+          state: z.string().optional(),
+          zip: z.string().optional()
+        }),
+        workOrder: z.object({
+          title: z.string().min(1, "Work order title is required"),
+          description: z.string().optional(),
+          priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
+          scheduledDate: z.string().optional(), // ISO date string
+          estimatedHours: z.number().optional(),
+          location: z.string().optional(),
+          notes: z.string().optional(),
+          externalReferenceId: z.string().optional() // ID from the external CRM
+        })
+      });
+
+      const validationResult = externalWorkOrderSchema.safeParse(req.body);
+      
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: "VALIDATION_ERROR",
+          message: "Invalid request data",
+          details: validationResult.error.flatten()
+        });
+      }
+
+      const { customer, workOrder } = validationResult.data;
+      const companyId = apiKey.companyId;
+
+      // Find or create the customer
+      let existingCustomer = null;
+      const allCustomers = await storage.getCustomers(companyId);
+      
+      // Try to match by email or name
+      if (customer.email) {
+        existingCustomer = allCustomers.find(c => 
+          c.email?.toLowerCase() === customer.email?.toLowerCase()
+        );
+      }
+      if (!existingCustomer) {
+        existingCustomer = allCustomers.find(c => 
+          c.name.toLowerCase() === customer.name.toLowerCase()
+        );
+      }
+
+      let customerId: number;
+      
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+      } else {
+        // Create new customer
+        const newCustomer = await storage.createCustomer({
+          companyId,
+          name: customer.name,
+          email: customer.email || null,
+          phone: customer.phone || null,
+          address: customer.address || null,
+          city: customer.city || null,
+          state: customer.state || null,
+          zipCode: customer.zip || null,
+          notes: `Created via API integration on ${new Date().toISOString()}`
+        });
+        customerId = newCustomer.id;
+      }
+
+      // Find the irrigation manager for auto-assignment
+      const irrigationManager = await storage.getIrrigationManagerForCompany(companyId);
+
+      // Create the work order
+      const newWorkOrder = await storage.createWorkOrder({
+        companyId,
+        customerId,
+        title: workOrder.title,
+        description: workOrder.description || null,
+        status: 'pending',
+        priority: workOrder.priority,
+        scheduledDate: workOrder.scheduledDate ? new Date(workOrder.scheduledDate) : null,
+        assignedTo: irrigationManager?.id || null, // Auto-assign to irrigation manager
+        location: workOrder.location || customer.address || null,
+        notes: workOrder.notes ? 
+          `${workOrder.notes}\n\n---\nExternal Reference: ${workOrder.externalReferenceId || 'N/A'}` : 
+          workOrder.externalReferenceId ? `External Reference: ${workOrder.externalReferenceId}` : null,
+        estimateId: null,
+        estimatedHours: workOrder.estimatedHours?.toString() || null
+      });
+
+      // Create notification for the assigned manager
+      if (irrigationManager) {
+        await storage.createNotification({
+          userId: irrigationManager.id,
+          type: 'work_order_assigned',
+          title: 'New Work Order Assigned via API',
+          message: `A new work order "${workOrder.title}" has been assigned to you for customer ${customer.name}`,
+          relatedEntityType: 'work_order',
+          relatedEntityId: newWorkOrder.id,
+          isRead: false
+        });
+      }
+
+      res.status(201).json({
+        success: true,
+        data: {
+          workOrderId: newWorkOrder.id,
+          workOrderNumber: newWorkOrder.workOrderNumber,
+          customerId,
+          customerName: existingCustomer ? existingCustomer.name : customer.name,
+          customerCreated: !existingCustomer,
+          assignedTo: irrigationManager ? {
+            id: irrigationManager.id,
+            name: irrigationManager.firstName + ' ' + irrigationManager.lastName
+          } : null,
+          status: newWorkOrder.status,
+          createdAt: newWorkOrder.createdAt
+        },
+        message: "Work order created successfully"
+      });
+
+    } catch (error) {
+      console.error("External API - Error creating work order:", error);
+      res.status(500).json({ 
+        error: "SERVER_ERROR",
+        message: "Failed to create work order" 
+      });
+    }
+  });
+
+  // Get work order status via external API
+  app.get("/api/external/work-orders/:workOrderId", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ 
+          error: "UNAUTHORIZED",
+          message: "API key required" 
+        });
+      }
+
+      const apiKeyValue = authHeader.substring(7);
+      const apiKey = await storage.getApiKeyByKey(apiKeyValue);
+      
+      if (!apiKey) {
+        return res.status(401).json({ 
+          error: "INVALID_API_KEY",
+          message: "Invalid or inactive API key" 
+        });
+      }
+
+      // Update last used timestamp
+      await storage.updateApiKeyLastUsed(apiKey.id);
+
+      const workOrderId = parseInt(req.params.workOrderId);
+      const workOrder = await storage.getWorkOrder(workOrderId);
+
+      if (!workOrder) {
+        return res.status(404).json({ 
+          error: "NOT_FOUND",
+          message: "Work order not found" 
+        });
+      }
+
+      // Verify the work order belongs to the API key's company
+      if (workOrder.companyId !== apiKey.companyId) {
+        return res.status(403).json({ 
+          error: "FORBIDDEN",
+          message: "Access denied to this work order" 
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          id: workOrder.id,
+          workOrderNumber: workOrder.workOrderNumber,
+          title: workOrder.title,
+          status: workOrder.status,
+          priority: workOrder.priority,
+          scheduledDate: workOrder.scheduledDate,
+          startedAt: workOrder.startedAt,
+          completedAt: workOrder.completedAt,
+          totalHours: workOrder.totalHours,
+          totalPartsCost: workOrder.totalPartsCost,
+          createdAt: workOrder.createdAt,
+          updatedAt: workOrder.updatedAt
+        }
+      });
+
+    } catch (error) {
+      console.error("External API - Error fetching work order:", error);
+      res.status(500).json({ 
+        error: "SERVER_ERROR",
+        message: "Failed to fetch work order" 
+      });
+    }
+  });
+
   return httpServer;
 }
