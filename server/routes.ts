@@ -6614,23 +6614,30 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       // Find the irrigation manager for auto-assignment
       const irrigationManager = await storage.getIrrigationManagerForCompany(companyId);
+      
+      // Get full customer data (either existing or newly created)
+      const customerData = existingCustomer || await storage.getCustomer(customerId);
 
-      // Create the work order
+      // Create the work order with all required fields
       const newWorkOrder = await storage.createWorkOrder({
         companyId,
         customerId,
-        title: workOrder.title,
-        description: workOrder.description || null,
+        customerName: customerData?.name || customer.name,
+        customerEmail: customerData?.email || customer.email || '',
+        customerPhone: customer.phone || customerData?.phone || null,
+        projectName: workOrder.title, // Use title as project name
+        projectAddress: workOrder.location || customer.address || null,
+        workType: 'direct_billing', // API-created work orders are direct billing
         status: 'pending',
         priority: workOrder.priority,
         scheduledDate: workOrder.scheduledDate ? new Date(workOrder.scheduledDate) : null,
-        assignedTo: irrigationManager?.id || null, // Auto-assign to irrigation manager
-        location: workOrder.location || customer.address || null,
+        assignedTechnicianId: irrigationManager?.id || null, // Auto-assign to irrigation manager
+        assignedTechnicianName: irrigationManager?.name || null,
+        description: workOrder.description || null,
         notes: workOrder.notes ? 
           `${workOrder.notes}\n\n---\nExternal Reference: ${workOrder.externalReferenceId || 'N/A'}` : 
           workOrder.externalReferenceId ? `External Reference: ${workOrder.externalReferenceId}` : null,
-        estimateId: null,
-        estimatedHours: workOrder.estimatedHours?.toString() || null
+        estimateId: null
       });
 
       // Create notification for the assigned manager
@@ -6656,7 +6663,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           customerCreated: !existingCustomer,
           assignedTo: irrigationManager ? {
             id: irrigationManager.id,
-            name: irrigationManager.firstName + ' ' + irrigationManager.lastName
+            name: irrigationManager.name
           } : null,
           status: newWorkOrder.status,
           createdAt: newWorkOrder.createdAt
@@ -6708,8 +6715,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      // Verify the work order belongs to the API key's company
-      if (workOrder.companyId !== apiKey.companyId) {
+      // Verify the work order belongs to the API key's company through customer
+      const customer = await storage.getCustomer(workOrder.customerId);
+      if (!customer || customer.companyId !== apiKey.companyId) {
         return res.status(403).json({ 
           error: "FORBIDDEN",
           message: "Access denied to this work order" 
@@ -6721,7 +6729,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         data: {
           id: workOrder.id,
           workOrderNumber: workOrder.workOrderNumber,
-          title: workOrder.title,
+          projectName: workOrder.projectName,
           status: workOrder.status,
           priority: workOrder.priority,
           scheduledDate: workOrder.scheduledDate,
