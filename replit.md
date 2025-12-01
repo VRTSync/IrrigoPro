@@ -51,6 +51,14 @@ Parts Catalog Access: Billing managers and irrigation managers have comprehensiv
 - **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based location picker.
 - **Authentication & Security**: Secure password reset, email verification, and Multi-Factor Authentication (MFA) using TOTP with backup codes. Comprehensive error tracking with QuickBooks transaction ID capture and a centralized logging system.
 - **User Management**: Company administrators have full user management capabilities within their own company.
+- **External Work Order API**: REST API for CRM integration allowing external systems to create work orders automatically. Features include:
+  - API key authentication with secure key management (keys shown only once at creation)
+  - Automatic customer creation if customer doesn't exist (matched by email or name)
+  - Auto-assignment to company's irrigation manager role
+  - Notification sent to assigned manager when work order is created
+  - Work order status retrieval via API
+  - Company-level access control through API keys
+  - Endpoints: POST/GET /api/external/work-orders, managed via /api/company/:companyId/api-keys
 
 ## External Dependencies
 
