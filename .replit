@@ -39,24 +39,4 @@ waitForPort = 5000
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 39675
-externalPort = 3000
-
-[[ports]]
-localPort = 40477
-externalPort = 3002
-
-[[ports]]
-localPort = 44961
-externalPort = 4200
-
-[[ports]]
-localPort = 45903
-externalPort = 3001
-
-[[ports]]
-localPort = 46189
-externalPort = 3003
-
 [agent]

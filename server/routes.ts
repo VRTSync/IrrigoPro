@@ -4823,11 +4823,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Only pending estimates can be approved" });
       }
       
-      const updatedEstimate = await storage.updateEstimate(id, { status: "approved" });
+      const updatedEstimate = await storage.updateEstimate(id, { status: "approved", approvedAt: new Date() });
+      
+      // Auto-convert to work order (per business rule: estimates auto-create work orders when approved)
+      let workOrder = null;
+      try {
+        workOrder = await storage.createWorkOrderFromEstimate(id);
+        
+        // Auto-assign to the company's irrigation manager
+        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId);
+        if (irrigationManager && workOrder) {
+          await storage.assignWorkOrder(workOrder.id, irrigationManager.id, irrigationManager.name);
+          
+          // Create notification for the assigned manager
+          await storage.createNotification({
+            userId: irrigationManager.id,
+            type: 'work_order_assigned',
+            title: 'New Work Order Assigned',
+            message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} has been auto-assigned to you from approved estimate.`,
+            data: { workOrderId: workOrder.id, estimateId: id },
+            isRead: false,
+          });
+        }
+      } catch (workOrderError) {
+        console.error('Auto work order creation failed:', workOrderError);
+        // Continue even if work order creation fails - estimate is still approved
+      }
       
       res.json({ 
         message: "Estimate approved successfully", 
-        estimate: updatedEstimate
+        estimate: updatedEstimate,
+        workOrderCreated: !!workOrder,
+        workOrderNumber: workOrder?.workOrderNumber
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to approve estimate" });
@@ -4957,6 +4984,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvedAt: new Date()
       });
 
+      // Auto-convert to work order (per business rule: estimates auto-create work orders when approved)
+      let workOrder = null;
+      try {
+        workOrder = await storage.createWorkOrderFromEstimate(estimate.id);
+        
+        // Auto-assign to the company's irrigation manager
+        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId);
+        if (irrigationManager && workOrder) {
+          await storage.assignWorkOrder(workOrder.id, irrigationManager.id, irrigationManager.name);
+          
+          // Create notification for the assigned manager
+          await storage.createNotification({
+            userId: irrigationManager.id,
+            type: 'work_order_assigned',
+            title: 'New Work Order Assigned',
+            message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} has been auto-assigned to you from approved estimate.`,
+            data: { workOrderId: workOrder.id, estimateId: estimate.id },
+            isRead: false,
+          });
+        }
+      } catch (workOrderError) {
+        console.error('Auto work order creation failed:', workOrderError);
+        // Continue even if work order creation fails - estimate is still approved
+      }
+
       // Send confirmation email
       const { EmailService } = await import('./email-service');
       await EmailService.sendApprovalConfirmation(
@@ -4970,7 +5022,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         success: true,
         message: "Estimate approved successfully",
         estimateNumber: estimate.estimateNumber,
-        customerEmail: estimate.customerEmail
+        customerEmail: estimate.customerEmail,
+        workOrderCreated: !!workOrder,
+        workOrderNumber: workOrder?.workOrderNumber
       });
     } catch (error) {
       console.error('Error approving estimate via token:', error);
