@@ -1,4 +1,4 @@
-import express, { type Express, type Request } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import bcrypt from 'bcrypt';
@@ -18,6 +18,53 @@ declare module 'express' {
     authenticatedUserRole?: string;
     authenticatedUserCompanyId?: number | null;
   }
+}
+
+// ============================================================================
+// FIELD TECH PRICING VISIBILITY - Critical Security Feature
+// Field technicians must NEVER see pricing/money values anywhere in the app
+// ============================================================================
+
+// Fields to strip from responses for field technicians
+const PRICING_FIELDS_TO_STRIP = new Set([
+  'laborRate', 'laborSubtotal', 'partsSubtotal', 'totalAmount', 'estimatedTotal',
+  'partPrice', 'totalPrice', 'unitPrice', 'price', 'cost',
+  'markupAmount', 'markupPercent', 'taxAmount', 'taxPercent',
+  'laborAmount', 'laborTotal', 'partsAmount', 'totalCost',
+  'laborCost', 'partsCost', 'totalUnbilledAmount'
+]);
+
+// Recursively strip pricing fields from objects/arrays
+function sanitizePricingFields(data: any): any {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizePricingFields(item));
+  }
+  
+  if (typeof data === 'object' && data !== null) {
+    const sanitized: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (PRICING_FIELDS_TO_STRIP.has(key)) {
+        continue; // Skip this field entirely
+      }
+      sanitized[key] = sanitizePricingFields(value);
+    }
+    return sanitized;
+  }
+  
+  return data;
+}
+
+// Helper to check if user is field tech and strip pricing if needed
+function applyPricingVisibility(req: Request, data: any): any {
+  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+  if (userRole === 'field_tech') {
+    return sanitizePricingFields(data);
+  }
+  return data;
 }
 import type { UploadedFile } from "express-fileupload";
 import { 
@@ -1778,13 +1825,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         completedDate: est.updatedAt
       }));
 
-      // Filter unbilled work (completed work orders and approved billing sheets that haven't been billed)
-      // Use the same billing detection logic as the invoice system (notes field with [BILLED: markers)
+      // Filter unbilled work (completed work orders and billing sheets without invoice linkage)
       const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
+        wo.status === 'completed' && !wo.invoiceId
       );
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
+        bs.status === 'completed' && !bs.invoiceId
       );
 
       // Calculate total unbilled amount
@@ -2026,7 +2072,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
           wo.status === 'completed' && 
-          (!wo.notes || !wo.notes.includes('[BILLED:'))
+          !wo.invoiceId
         );
       }
 
@@ -2034,17 +2080,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
           bs.status === 'completed' && 
-          (!bs.notes || !bs.notes.includes('[BILLED:'))
+          !bs.invoiceId
         );
       }
 
       // If no specific items selected, fall back to all unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
+          wo.status === 'completed' && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
+          bs.status === 'completed' && !bs.invoiceId
         );
       }
 
@@ -2156,7 +2202,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
           wo.status === 'completed' && 
-          (!wo.notes || !wo.notes.includes('[BILLED:'))
+          !wo.invoiceId
         );
       }
 
@@ -2164,17 +2210,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
           bs.status === 'completed' && 
-          (!bs.notes || !bs.notes.includes('[BILLED:'))
+          !bs.invoiceId
         );
       }
 
       // If no specific items selected, fall back to all unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          wo.status === 'completed' && (!wo.notes || !wo.notes.includes('[BILLED:'))
+          wo.status === 'completed' && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          bs.status === 'completed' && (!bs.notes || !bs.notes.includes('[BILLED:'))
+          bs.status === 'completed' && !bs.invoiceId
         );
       }
 
@@ -2257,11 +2303,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalPrice: woTotalAmount.toString()
         });
 
-        // Update work order to mark as billed (we'll use notes to track billing status)
-        const currentNotes = workOrder.notes || '';
-        const billingNote = `\n[BILLED: Invoice ${invoiceNumber} - ${currentDate.toLocaleDateString()}]`;
+        // Update work order with invoice linkage to prevent double billing
         await storage.updateWorkOrder(workOrder.id, { 
-          notes: currentNotes + billingNote
+          invoiceId: invoice.id,
+          billedAt: currentDate
         });
       }
 
@@ -2288,11 +2333,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString()
         });
 
-        // Update billing sheet to mark as billed (we'll use notes to track billing status)
-        const currentNotes = billingSheet.notes || '';
-        const billingNote = `\n[BILLED: Invoice ${invoiceNumber} - ${currentDate.toLocaleDateString()}]`;
+        // Update billing sheet with invoice linkage to prevent double billing
         await storage.updateBillingSheet(billingSheet.id, { 
-          notes: currentNotes + billingNote
+          invoiceId: invoice.id,
+          billedAt: currentDate,
+          status: 'billed'
         });
       }
 
@@ -3168,7 +3213,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/parts", async (req, res) => {
     try {
       const parts = await storage.getParts();
-      res.json(parts);
+      // Strip pricing fields for field technicians (they see names/quantities only)
+      res.json(applyPricingVisibility(req, parts));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch parts" });
     }
@@ -4823,7 +4869,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Only pending estimates can be approved" });
       }
       
-      const updatedEstimate = await storage.updateEstimate(id, { status: "approved", approvedAt: new Date() });
+      const updatedEstimate = await storage.updateEstimate(id, { 
+        status: "approved", 
+        approvalSource: "manual",
+        approvedAt: new Date() 
+      });
       
       // Auto-convert to work order (per business rule: estimates auto-create work orders when approved)
       let workOrder = null;
@@ -4901,13 +4951,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Only pending estimates can have approval emails sent" });
       }
 
-      // Generate secure approval token
+      // Generate secure approval token with 30-day expiration
       const crypto = await import('crypto');
       const approvalToken = crypto.randomBytes(32).toString('hex');
+      const tokenExpiresAt = new Date();
+      tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30); // Token expires in 30 days
       
-      // Update estimate with approval token and sent timestamp
+      // Update estimate with approval token, expiration, and sent timestamp
       await storage.updateEstimate(id, {
         approvalToken,
+        tokenExpiresAt,
         approvalSentAt: new Date()
       });
 
@@ -4968,6 +5021,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `);
       }
 
+      // Check if token has expired
+      if (estimate.tokenExpiresAt && new Date() > new Date(estimate.tokenExpiresAt)) {
+        // Mark estimate as expired
+        await storage.updateEstimate(estimate.id, { status: 'expired' });
+        return res.status(400).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2 style="color: #ef4444;">Link Expired</h2>
+            <p>This approval link has expired. Please contact us to request a new estimate.</p>
+          </body></html>
+        `);
+      }
+
       if (estimate.status !== "pending") {
         return res.status(400).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
@@ -4977,9 +5042,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `);
       }
 
-      // Approve the estimate
+      // Approve the estimate with approval source tracking
       await storage.updateEstimate(estimate.id, {
         status: "approved",
+        approvalSource: 'email_link',
         approvalRespondedAt: new Date(),
         approvedAt: new Date()
       });
@@ -5062,9 +5128,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `);
       }
 
-      // Reject the estimate
+      // Reject the estimate with approval source tracking
       await storage.updateEstimate(estimate.id, {
         status: "rejected",
+        approvalSource: 'email_link',
         approvalRespondedAt: new Date(),
         rejectedAt: new Date()
       });
@@ -5421,6 +5488,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Billing Sheets API - for work done without work orders
+  // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
   app.get("/api/billing-sheets", async (req, res) => {
     try {
       const { technician } = req.query;
@@ -5432,7 +5500,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         billingSheets = await storage.getAllBillingSheets();
       }
       
-      res.json(billingSheets);
+      // Strip pricing fields for field technicians
+      res.json(applyPricingVisibility(req, billingSheets));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch billing sheets" });
     }
@@ -5445,7 +5514,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!billingSheet) {
         return res.status(404).json({ message: "Billing sheet not found" });
       }
-      res.json(billingSheet);
+      // Strip pricing fields for field technicians
+      res.json(applyPricingVisibility(req, billingSheet));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch billing sheet" });
     }
@@ -5737,6 +5807,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Work Order routes - Enhanced
+  // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
   app.get("/api/work-orders", async (req, res) => {
     try {
       const { technician, customer, status } = req.query;
@@ -5752,7 +5823,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrders = await storage.getWorkOrders();
       }
       
-      res.json(workOrders);
+      // Strip pricing fields for field technicians
+      res.json(applyPricingVisibility(req, workOrders));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch work orders" });
     }
@@ -5765,7 +5837,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!workOrder) {
         return res.status(404).json({ message: "Work order not found" });
       }
-      res.json(workOrder);
+      // Strip pricing fields for field technicians
+      res.json(applyPricingVisibility(req, workOrder));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch work order" });
     }
@@ -5838,6 +5911,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Work Order Items routes
+  // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
   app.get("/api/work-orders/:id/items", async (req, res) => {
     try {
       const workOrderId = parseInt(req.params.id);
@@ -5847,7 +5921,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Invalid work order ID" });
       }
       const items = await storage.getWorkOrderItems(workOrderId);
-      res.json(items);
+      // Strip pricing fields for field technicians
+      res.json(applyPricingVisibility(req, items));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch work order items" });
     }

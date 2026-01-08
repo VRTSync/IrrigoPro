@@ -1703,7 +1703,7 @@ export class DatabaseStorage implements IStorage {
     // Generate work order number
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
-    // Create the work order
+    // Create the work order with full pricing snapshot from estimate
     const workOrderData: InsertWorkOrder = {
       workOrderNumber,
       estimateId: estimateId,
@@ -1718,6 +1718,11 @@ export class DatabaseStorage implements IStorage {
       workType: 'estimate_based',
       status: 'pending',
       priority: 'medium',
+      // Pricing snapshot from estimate
+      laborRate: estimate.laborRate,
+      laborSubtotal: estimate.laborSubtotal,
+      partsSubtotal: estimate.partsSubtotal,
+      estimatedTotal: estimate.totalAmount, // Original estimate total for comparison
       totalAmount: estimate.totalAmount,
       totalItems: estimate.zones?.reduce((sum, zone) => sum + zone.items.length, 0) || 0,
     };
@@ -1742,9 +1747,12 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Update estimate status to indicate it has been converted
+    // Update estimate with work order reference and mark as converted
     await db.update(estimates)
-      .set({ status: 'converted_to_work_order' })
+      .set({ 
+        status: 'approved', // Keep as approved, don't change status
+        workOrderId: newWorkOrder.id 
+      })
       .where(eq(estimates.id, estimateId));
 
     return newWorkOrder;

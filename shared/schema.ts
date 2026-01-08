@@ -185,7 +185,7 @@ export const billingSheets = pgTable("billing_sheets", {
   technicianName: text("technician_name").notNull(),
   technicianId: integer("technician_id").references(() => users.id),
   workDescription: text("work_description").notNull(),
-  status: text("status").notNull().default("draft"), // draft, submitted, approved, billed
+  status: text("status").notNull().default("draft"), // draft, submitted, completed, billed
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -193,6 +193,9 @@ export const billingSheets = pgTable("billing_sheets", {
   markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
   taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  // Invoice linkage - prevents double billing
+  invoiceId: integer("invoice_id").references(() => invoices.id),
+  billedAt: timestamp("billed_at"),
   photos: text("photos").array().default([]),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -252,6 +255,7 @@ export const partUsage = pgTable("part_usage", {
 export const estimates = pgTable("estimates", {
   id: serial("id").primaryKey(),
   estimateNumber: text("estimate_number").notNull().unique(),
+  companyId: integer("company_id").references(() => companies.id), // Company ownership
   customerId: integer("customer_id").references(() => customers.id),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
@@ -261,8 +265,9 @@ export const estimates = pgTable("estimates", {
   locationNotes: text("location_notes"), // Additional location details
   accessInstructions: text("access_instructions"), // How to access the property
   createdBy: text("created_by").notNull().default("Irrigation Manager"), // Who created the estimate
+  createdByUserId: integer("created_by_user_id").references(() => users.id), // User who created
   estimateDate: timestamp("estimate_date").defaultNow().notNull(), // Date of estimate creation
-  status: text("status").notNull().default("pending"), // pending, approved, rejected, converted_to_work_order
+  status: text("status").notNull().default("pending"), // pending, approved, rejected, expired
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
@@ -274,8 +279,12 @@ export const estimates = pgTable("estimates", {
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
   approvalToken: text("approval_token"), // Secure token for email approval links
+  tokenExpiresAt: timestamp("token_expires_at"), // When approval token expires
+  approvalSource: text("approval_source"), // 'email_link', 'manual', etc.
   approvalSentAt: timestamp("approval_sent_at"), // When approval email was sent
   approvalRespondedAt: timestamp("approval_responded_at"), // When customer responded
+  // Work order linkage - tracks conversion
+  workOrderId: integer("work_order_id"), // References work order created from this estimate
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -385,7 +394,7 @@ export const workOrders = pgTable("work_orders", {
   locationNotes: text("location_notes"), // Additional location details
   accessInstructions: text("access_instructions"), // How to access the property
   workType: text("work_type").notNull().default("estimate_based"), // estimate_based, direct_billing, maintenance
-  status: text("status").notNull().default("pending"), // pending, in_progress, completed, cancelled
+  status: text("status").notNull().default("pending"), // pending, assigned, in_progress, completed, cancelled
   priority: text("priority").notNull().default("medium"), // low, medium, high, urgent
   scheduledDate: timestamp("scheduled_date"),
   startedAt: timestamp("started_at"),
@@ -402,9 +411,16 @@ export const workOrders = pgTable("work_orders", {
   customerNotes: text("customer_notes"), // Notes to share with customer
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }), // Hours worked
   totalPartsCost: decimal("total_parts_cost", { precision: 10, scale: 2 }), // Cost of parts used
-  // Financial fields
+  // Financial snapshot fields - explicit pricing for billing
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }), // Rate used for this job
+  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }), // totalHours * laborRate
+  partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }), // Sum of parts costs
+  estimatedTotal: decimal("estimated_total", { precision: 10, scale: 2 }), // Original estimate total for comparison
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
   totalItems: integer("total_items").default(0),
+  // Invoice linkage - prevents double billing
+  invoiceId: integer("invoice_id").references(() => invoices.id),
+  billedAt: timestamp("billed_at"),
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   createdAt: timestamp("created_at").defaultNow().notNull(),
