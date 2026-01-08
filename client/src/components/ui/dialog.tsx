@@ -21,7 +21,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}
     {...props}
@@ -38,14 +38,26 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-[95vw] max-w-[95vw] sm:w-[95vw] sm:max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-5xl max-h-[95vh] translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-[5px] shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] overflow-y-auto rounded-lg",
+        "fixed z-50 bg-white shadow-xl duration-300 overflow-hidden",
+        "w-full max-h-[95vh] overflow-y-auto",
+        "inset-x-0 bottom-0 rounded-t-3xl",
+        "md:inset-auto md:left-[50%] md:top-[50%] md:translate-x-[-50%] md:translate-y-[-50%]",
+        "md:w-[95vw] md:max-w-2xl lg:max-w-4xl md:rounded-2xl",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out",
+        "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+        "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+        "md:data-[state=closed]:slide-out-to-bottom-0 md:data-[state=open]:slide-in-from-bottom-0",
+        "md:data-[state=closed]:zoom-out-95 md:data-[state=open]:zoom-in-95",
         className
       )}
       {...props}
     >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
+      <div className="md:hidden w-10 h-1 bg-slate-300 rounded-full mx-auto mt-3 mb-2" />
+      <div className="p-5 md:p-6">
+        {children}
+      </div>
+      <DialogPrimitive.Close className="absolute right-4 top-4 p-2 rounded-full bg-slate-100 hover:bg-slate-200 transition-colors touch-target focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2">
+        <X className="h-5 w-5 text-slate-600" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
@@ -59,7 +71,7 @@ const DialogHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col space-y-1.5 text-center sm:text-left",
+      "flex flex-col space-y-2 pr-10",
       className
     )}
     {...props}
@@ -73,7 +85,8 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+      "flex flex-col gap-3 mt-6 pt-4 border-t border-slate-100",
+      "sm:flex-row sm:justify-end",
       className
     )}
     {...props}
@@ -88,7 +101,7 @@ const DialogTitle = React.forwardRef<
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
-      "text-lg font-semibold leading-none tracking-tight",
+      "text-xl font-bold text-slate-900 tracking-tight",
       className
     )}
     {...props}
@@ -102,7 +115,7 @@ const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn("text-sm text-slate-500", className)}
     {...props}
   />
 ))

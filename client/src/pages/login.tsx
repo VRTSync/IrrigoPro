@@ -303,23 +303,23 @@ export default function Login() {
       <TopoLayers x={x} y={y} active={isPointerActive} />
 
       {/* Content */}
-      <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md bg-white/10 backdrop-blur-md border-white/20 shadow-2xl text-white">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
+      <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-5 md:p-8">
+        <Card className="w-full max-w-md bg-white/15 backdrop-blur-xl border-white/25 shadow-2xl text-white rounded-3xl">
+          <CardHeader className="text-center pt-8 pb-4">
+            <div className="flex justify-center mb-6">
               <img 
                 src={irrigoProLogo} 
                 alt="IrrigoPro Logo" 
-                className="h-24 w-auto drop-shadow-lg"
+                className="h-28 w-auto drop-shadow-2xl"
               />
             </div>
-            <CardTitle className="text-2xl font-bold text-white">IrrigoPro</CardTitle>
-            <p className="text-blue-100">Professional irrigation management platform</p>
+            <CardTitle className="text-3xl font-bold text-white tracking-tight">IrrigoPro</CardTitle>
+            <p className="text-blue-200 mt-2 text-base">Professional irrigation management</p>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
+          <CardContent className="px-6 pb-8">
+            <form onSubmit={handleLogin} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-blue-100">Username</Label>
+                <Label htmlFor="username" className="text-blue-100 text-sm font-medium">Username</Label>
                 <Input
                   id="username"
                   type="text"
@@ -327,12 +327,13 @@ export default function Login() {
                   value={credentials.username}
                   onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
                   required
-                  className="bg-white/10 border-white/20 text-white placeholder-white/50 focus:border-blue-400 focus:ring-blue-400"
+                  data-testid="input-username"
+                  className="h-14 bg-white/15 border-2 border-white/20 text-white placeholder-white/40 rounded-xl text-base focus:border-sky-400 focus:ring-2 focus:ring-sky-400/30"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-blue-100">Password</Label>
+                <Label htmlFor="password" className="text-blue-100 text-sm font-medium">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -340,19 +341,22 @@ export default function Login() {
                   value={credentials.password}
                   onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
                   required
-                  className="bg-white/10 border-white/20 text-white placeholder-white/50 focus:border-blue-400 focus:ring-blue-400"
+                  data-testid="input-password"
+                  className="h-14 bg-white/15 border-2 border-white/20 text-white placeholder-white/40 rounded-xl text-base focus:border-sky-400 focus:ring-2 focus:ring-sky-400/30"
                 />
               </div>
 
               <Button 
                 type="submit" 
-                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg transition-all duration-200" 
+                size="lg"
+                data-testid="button-login"
+                className="w-full h-14 bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-600 hover:to-sky-700 text-white font-semibold text-lg rounded-xl shadow-lg shadow-sky-500/30 transition-all duration-200 mt-2" 
                 disabled={isLoading}
               >
                 {isLoading ? (
-                  <Lock className="w-4 h-4 mr-2 animate-spin" />
+                  <Lock className="w-5 h-5 mr-2 animate-spin" />
                 ) : (
-                  <LogIn className="w-4 h-4 mr-2" />
+                  <LogIn className="w-5 h-5 mr-2" />
                 )}
                 Sign In
               </Button>
@@ -360,39 +364,39 @@ export default function Login() {
 
             {/* Email Verification Resend */}
             {emailVerificationNeeded && (
-              <div className="mt-4 p-4 bg-orange-500/10 border border-orange-400/20 rounded-lg">
-                <div className="flex items-center mb-2">
-                  <Mail className="w-4 h-4 mr-2 text-orange-400" />
-                  <span className="text-sm text-orange-100 font-medium">Email Verification Required</span>
+              <div className="mt-5 p-5 bg-amber-500/15 border border-amber-400/25 rounded-2xl">
+                <div className="flex items-center mb-3">
+                  <Mail className="w-5 h-5 mr-2 text-amber-400" />
+                  <span className="text-base text-amber-100 font-semibold">Email Verification Required</span>
                 </div>
-                <p className="text-xs text-orange-200 mb-3">
+                <p className="text-sm text-amber-200/80 mb-4">
                   Please verify your email address to access your account.
                 </p>
                 <Button 
                   onClick={handleResendVerification}
                   disabled={sendingVerification}
-                  className="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-2"
+                  data-testid="button-resend-verification"
+                  className="w-full h-12 bg-amber-500 hover:bg-amber-600 text-white rounded-xl"
                 >
                   {sendingVerification ? (
-                    <Lock className="w-3 h-3 mr-2 animate-spin" />
+                    <Lock className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
-                    <Mail className="w-3 h-3 mr-2" />
+                    <Mail className="w-4 h-4 mr-2" />
                   )}
                   Resend Verification Email
                 </Button>
               </div>
             )}
 
-            <div className="mt-4 text-center space-y-2">
+            <div className="mt-6 text-center">
               <Button 
                 variant="link" 
                 onClick={() => window.location.href = '/forgot-password'}
-                className="text-sm text-blue-200 hover:text-white transition-colors"
+                data-testid="link-forgot-password"
+                className="text-base text-blue-200 hover:text-white transition-colors"
               >
                 Forgot your password?
               </Button>
-              
-
             </div>
           </CardContent>
         </Card>
