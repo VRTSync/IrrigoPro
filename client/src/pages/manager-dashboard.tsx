@@ -1,9 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Wrench, Clock, CheckCircle, Receipt, Plus } from "lucide-react";
+import { MetricTile, MetricGrid, MetricTileSkeleton } from "@/components/ui/metric-tile";
+import { TaskCard, TaskCardSkeleton } from "@/components/ui/task-card";
+import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
+import { FAB } from "@/components/ui/fab";
+import { ActionSheet, ActionSheetItem, ActionSheetSection } from "@/components/ui/action-sheet";
+import { FileText, Wrench, Receipt, Clock, CheckCircle, Plus, ChevronRight, ArrowRight } from "lucide-react";
 import { useState } from "react";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
@@ -11,124 +16,200 @@ import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-
 import type { Estimate, WorkOrder } from "@shared/schema";
 
 export default function ManagerDashboard() {
-  // Modal states for quick creation
+  const [, setLocation] = useLocation();
+  const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [showEstimateModal, setShowEstimateModal] = useState(false);
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [showBillingSheetModal, setShowBillingSheetModal] = useState(false);
 
-  // Get dashboard stats from API
-  const { data: stats } = useQuery({
+  const { data: stats, isLoading } = useQuery({
     queryKey: ["/api/dashboard/stats"],
   });
 
-  const { data: estimates } = useQuery<Estimate[]>({
-    queryKey: ["/api/estimates"],
-  });
-
-  const { data: workOrders } = useQuery<WorkOrder[]>({
-    queryKey: ["/api/work-orders"],
-  });
-
-  // Calculate stats from API data
   const pendingEstimates = (stats as any)?.pendingEstimates || 0;
   const activeWorkOrders = (stats as any)?.workOrderStats?.inProgress || 0;
+  const assignedWorkOrders = (stats as any)?.workOrderStats?.assigned || 0;
+  const completedWorkOrders = (stats as any)?.workOrderStats?.completed || 0;
   const recentEstimates = (stats as any)?.recentEstimates?.slice(0, 3) || [];
   const recentWorkOrders = (stats as any)?.recentWorkOrders?.slice(0, 3) || [];
 
+  const getEstimateStatus = (status: string) => {
+    switch (status) {
+      case 'pending': return 'pending' as const;
+      case 'approved': return 'complete' as const;
+      case 'rejected': return 'urgent' as const;
+      case 'converted_to_work_order': return 'complete' as const;
+      default: return 'draft' as const;
+    }
+  };
+
+  const getWorkOrderStatus = (status: string) => {
+    switch (status) {
+      case 'in_progress': return 'active' as const;
+      case 'completed': return 'complete' as const;
+      case 'assigned': return 'pending' as const;
+      default: return 'pending' as const;
+    }
+  };
+
+  const formatStatus = (status: string) => {
+    if (status === 'converted_to_work_order') return 'Converted';
+    return status.replace('_', ' ').split(' ').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  };
+
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Manager Dashboard</h1>
-          <p className="text-gray-600 mt-2 text-sm sm:text-base">Choose an option to get started</p>
-        </div>
+    <PageContainer>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Choose an option to get started"
+      />
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          {/* Estimates */}
-          <Card className="hover:shadow-lg transition-shadow flex flex-col">
-            <CardHeader className="text-center relative">
-              <div className="bg-blue-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                <FileText className="w-8 h-8 text-blue-600" />
+      <PageContent className="space-y-6">
+        {/* Quick Stats */}
+        {isLoading ? (
+          <MetricGrid>
+            <MetricTileSkeleton />
+            <MetricTileSkeleton />
+            <MetricTileSkeleton />
+            <MetricTileSkeleton />
+          </MetricGrid>
+        ) : (
+          <MetricGrid>
+            <MetricTile
+              label="Pending Estimates"
+              value={pendingEstimates}
+              icon={FileText}
+              variant={pendingEstimates > 0 ? "warning" : "default"}
+              onClick={() => setLocation("/estimates")}
+              testId="metric-pending-estimates"
+            />
+            <MetricTile
+              label="Active Work"
+              value={activeWorkOrders}
+              icon={Wrench}
+              variant={activeWorkOrders > 0 ? "primary" : "default"}
+              onClick={() => setLocation("/work-orders")}
+              testId="metric-active-work"
+            />
+            <MetricTile
+              label="Assigned"
+              value={assignedWorkOrders}
+              icon={Clock}
+              variant="default"
+              onClick={() => setLocation("/work-orders")}
+              testId="metric-assigned"
+            />
+            <MetricTile
+              label="Completed"
+              value={completedWorkOrders}
+              icon={CheckCircle}
+              variant="success"
+              onClick={() => setLocation("/work-orders")}
+              testId="metric-completed"
+            />
+          </MetricGrid>
+        )}
+
+        {/* Quick Action Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Estimates Card */}
+          <Card className="hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-sky-50">
+                  <FileText className="w-6 h-6 text-sky-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Estimates</CardTitle>
+                  {pendingEstimates > 0 && (
+                    <Badge variant="warning" className="mt-1">{pendingEstimates} pending</Badge>
+                  )}
+                </div>
               </div>
-              {pendingEstimates > 0 && (
-                <Badge className="absolute top-2 left-2 bg-orange-100 text-orange-800">
-                  {pendingEstimates} pending
-                </Badge>
-              )}
               <Button
                 variant="ghost"
-                size="sm"
-                className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full bg-blue-50 hover:bg-blue-100"
+                size="icon-sm"
+                className="rounded-full bg-sky-50 hover:bg-sky-100"
                 onClick={() => setShowEstimateModal(true)}
-                title="Create New Estimate"
+                data-testid="button-new-estimate"
               >
-                <Plus className="w-4 h-4 text-blue-600" />
+                <Plus className="w-4 h-4 text-sky-600" />
               </Button>
-              <CardTitle className="text-xl">Estimates</CardTitle>
             </CardHeader>
-            <CardContent className="text-center flex-1 flex flex-col">
-              <p className="text-gray-600 mb-4 flex-1">View estimate list, create new estimates, and convert to work orders</p>
+            <CardContent className="pt-0">
+              <p className="text-sm text-slate-500 mb-4">Create, view, and convert estimates to work orders</p>
               <Link href="/estimates">
-                <Button className="w-full bg-blue-600 hover:bg-blue-700 mt-auto">
+                <Button className="w-full" data-testid="button-manage-estimates">
                   Manage Estimates
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </Link>
             </CardContent>
           </Card>
 
-          {/* Work Orders */}
-          <Card className="hover:shadow-lg transition-shadow flex flex-col">
-            <CardHeader className="text-center relative">
-              <div className="bg-green-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                <Wrench className="w-8 h-8 text-green-600" />
+          {/* Work Orders Card */}
+          <Card className="hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-emerald-50">
+                  <Wrench className="w-6 h-6 text-emerald-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Work Orders</CardTitle>
+                  {activeWorkOrders > 0 && (
+                    <Badge variant="info" className="mt-1">{activeWorkOrders} active</Badge>
+                  )}
+                </div>
               </div>
-              {activeWorkOrders > 0 && (
-                <Badge className="absolute top-2 left-2 bg-blue-100 text-blue-800">
-                  {activeWorkOrders} active
-                </Badge>
-              )}
               <Button
                 variant="ghost"
-                size="sm"
-                className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full bg-green-50 hover:bg-green-100"
+                size="icon-sm"
+                className="rounded-full bg-emerald-50 hover:bg-emerald-100"
                 onClick={() => setShowWorkOrderModal(true)}
-                title="Create New Work Order"
+                data-testid="button-new-work-order"
               >
-                <Plus className="w-4 h-4 text-green-600" />
+                <Plus className="w-4 h-4 text-emerald-600" />
               </Button>
-              <CardTitle className="text-xl">Work Orders</CardTitle>
             </CardHeader>
-            <CardContent className="text-center flex-1 flex flex-col">
-              <p className="text-gray-600 mb-4 flex-1">View work order list, create new orders, and assign to technicians</p>
+            <CardContent className="pt-0">
+              <p className="text-sm text-slate-500 mb-4">Create work orders and assign to technicians</p>
               <Link href="/work-orders">
-                <Button className="w-full bg-green-600 hover:bg-green-700 mt-auto">
+                <Button variant="success" className="w-full" data-testid="button-manage-work-orders">
                   Manage Work Orders
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </Link>
             </CardContent>
           </Card>
 
-          {/* Billing Sheets */}
-          <Card className="hover:shadow-lg transition-shadow flex flex-col">
-            <CardHeader className="text-center relative">
-              <div className="bg-orange-100 p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                <Receipt className="w-8 h-8 text-orange-600" />
+          {/* Billing Sheets Card */}
+          <Card className="hover:shadow-md transition-all duration-200 hover:-translate-y-0.5">
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-amber-50">
+                  <Receipt className="w-6 h-6 text-amber-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Billing Sheets</CardTitle>
+                </div>
               </div>
               <Button
                 variant="ghost"
-                size="sm"
-                className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full bg-orange-50 hover:bg-orange-100"
+                size="icon-sm"
+                className="rounded-full bg-amber-50 hover:bg-amber-100"
                 onClick={() => setShowBillingSheetModal(true)}
-                title="Create New Billing Sheet"
+                data-testid="button-new-billing-sheet"
               >
-                <Plus className="w-4 h-4 text-orange-600" />
+                <Plus className="w-4 h-4 text-amber-600" />
               </Button>
-              <CardTitle className="text-xl">Billing Sheets</CardTitle>
             </CardHeader>
-            <CardContent className="text-center flex-1 flex flex-col">
-              <p className="text-gray-600 mb-4 flex-1">Create billing sheets for work done without work orders</p>
+            <CardContent className="pt-0">
+              <p className="text-sm text-slate-500 mb-4">Create billing sheets for work without orders</p>
               <Link href="/billing-sheets">
-                <Button className="w-full bg-orange-600 hover:bg-orange-700 mt-auto">
+                <Button variant="outline" className="w-full border-amber-200 text-amber-700 hover:bg-amber-50" data-testid="button-manage-billing">
                   Manage Billing
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </Link>
             </CardContent>
@@ -139,43 +220,50 @@ export default function ManagerDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Estimates */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-blue-600" />
-                  Recent Estimates
+                  <Clock className="w-5 h-5 text-sky-500" />
+                  <CardTitle className="text-base">Recent Estimates</CardTitle>
                 </div>
                 <Link href="/estimates">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                  >
-                    View List
+                  <Button variant="ghost" size="sm" className="text-sky-600 hover:text-sky-700" data-testid="link-view-estimates">
+                    View All <ArrowRight className="w-4 h-4 ml-1" />
                   </Button>
                 </Link>
-              </CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
-              {recentEstimates.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No recent estimates</p>
+            <CardContent className="pt-0">
+              {isLoading ? (
+                <div className="space-y-3">
+                  <TaskCardSkeleton />
+                  <TaskCardSkeleton />
+                </div>
+              ) : recentEstimates.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                  <p className="text-slate-500">No recent estimates</p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   {recentEstimates.map((estimate: any) => (
                     <Link key={estimate.id} href="/estimates">
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors">
-                        <div>
-                          <p className="font-medium">{estimate.estimateNumber}</p>
-                          <p className="text-sm text-gray-600">{estimate.customerName}</p>
+                      <div 
+                        className="flex items-center justify-between p-4 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer"
+                        data-testid={`card-estimate-${estimate.id}`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-900 truncate">{estimate.estimateNumber}</p>
+                          <p className="text-sm text-slate-500 truncate">{estimate.customerName}</p>
                         </div>
-                        <Badge className={
-                          estimate.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                          estimate.status === 'approved' ? 'bg-green-100 text-green-800' :
-                          estimate.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                          estimate.status === 'converted_to_work_order' ? 'bg-green-100 text-green-800' :
-                          'bg-gray-100 text-gray-800'
-                        }>
-                          {estimate.status === 'converted_to_work_order' ? 'Converted' : 
-                           estimate.status.charAt(0).toUpperCase() + estimate.status.slice(1)}
+                        <Badge 
+                          variant={
+                            estimate.status === 'pending' ? 'warning' : 
+                            estimate.status === 'approved' || estimate.status === 'converted_to_work_order' ? 'success' :
+                            estimate.status === 'rejected' ? 'destructive' : 'secondary'
+                          }
+                        >
+                          {formatStatus(estimate.status)}
                         </Badge>
                       </div>
                     </Link>
@@ -187,42 +275,50 @@ export default function ManagerDashboard() {
 
           {/* Recent Work Orders */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  Recent Work Orders
+                  <CheckCircle className="w-5 h-5 text-emerald-500" />
+                  <CardTitle className="text-base">Recent Work Orders</CardTitle>
                 </div>
                 <Link href="/work-orders">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                  >
-                    View List
+                  <Button variant="ghost" size="sm" className="text-emerald-600 hover:text-emerald-700" data-testid="link-view-work-orders">
+                    View All <ArrowRight className="w-4 h-4 ml-1" />
                   </Button>
                 </Link>
-              </CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
-              {recentWorkOrders.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">No recent work orders</p>
+            <CardContent className="pt-0">
+              {isLoading ? (
+                <div className="space-y-3">
+                  <TaskCardSkeleton />
+                  <TaskCardSkeleton />
+                </div>
+              ) : recentWorkOrders.length === 0 ? (
+                <div className="text-center py-8">
+                  <Wrench className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                  <p className="text-slate-500">No recent work orders</p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   {recentWorkOrders.map((workOrder: any) => (
                     <Link key={workOrder.id} href="/work-orders">
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors">
-                        <div>
-                          <p className="font-medium">{workOrder.workOrderNumber}</p>
-                          <p className="text-sm text-gray-600">{workOrder.customerName}</p>
+                      <div 
+                        className="flex items-center justify-between p-4 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer"
+                        data-testid={`card-work-order-${workOrder.id}`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-900 truncate">{workOrder.workOrderNumber}</p>
+                          <p className="text-sm text-slate-500 truncate">{workOrder.customerName}</p>
                         </div>
-                        <Badge className={
-                          workOrder.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
-                          workOrder.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                          workOrder.status === 'assigned' ? 'bg-orange-100 text-orange-800' :
-                          'bg-yellow-100 text-yellow-800'
-                        }>
-                          {workOrder.status.replace('_', ' ').split(' ').map((word: string) => 
-                            word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                        <Badge 
+                          variant={
+                            workOrder.status === 'in_progress' ? 'info' : 
+                            workOrder.status === 'completed' ? 'success' : 
+                            workOrder.status === 'assigned' ? 'warning' : 'secondary'
+                          }
+                        >
+                          {formatStatus(workOrder.status)}
                         </Badge>
                       </div>
                     </Link>
@@ -232,40 +328,82 @@ export default function ManagerDashboard() {
             </CardContent>
           </Card>
         </div>
+      </PageContent>
 
-        {/* Modals for Quick Creation */}
-        <EstimateModal
-          open={showEstimateModal}
-          onOpenChange={(open) => {
-            setShowEstimateModal(open);
-            if (!open) {
-              // Refresh dashboard data when closed after successful creation
-              window.location.reload();
-            }
-          }}
-        />
+      {/* Floating Action Button */}
+      <FAB
+        onClick={() => setShowCreateSheet(true)}
+        testId="fab-create"
+      />
 
-        {showWorkOrderModal && (
-          <WorkOrderForm
-            onClose={() => setShowWorkOrderModal(false)}
-            onSuccess={() => {
-              setShowWorkOrderModal(false);
-              // Refresh dashboard data
-              window.location.reload();
+      {/* Create Action Sheet */}
+      <ActionSheet
+        open={showCreateSheet}
+        onOpenChange={setShowCreateSheet}
+        title="Create New"
+        description="Choose what you want to create"
+      >
+        <ActionSheetSection>
+          <ActionSheetItem
+            icon={<FileText className="w-5 h-5" />}
+            onClick={() => {
+              setShowCreateSheet(false);
+              setShowEstimateModal(true);
             }}
-          />
-        )}
+          >
+            New Estimate
+          </ActionSheetItem>
+          <ActionSheetItem
+            icon={<Wrench className="w-5 h-5" />}
+            onClick={() => {
+              setShowCreateSheet(false);
+              setShowWorkOrderModal(true);
+            }}
+          >
+            New Work Order
+          </ActionSheetItem>
+          <ActionSheetItem
+            icon={<Receipt className="w-5 h-5" />}
+            onClick={() => {
+              setShowCreateSheet(false);
+              setShowBillingSheetModal(true);
+            }}
+          >
+            New Billing Sheet
+          </ActionSheetItem>
+        </ActionSheetSection>
+      </ActionSheet>
 
-        <StandaloneBillingSheet
-          open={showBillingSheetModal}
-          onOpenChange={(open) => {
-            setShowBillingSheetModal(open);
-            if (!open) {
-              // Refresh dashboard data when closed after successful creation
-              window.location.reload();
-            }
+      {/* Modals */}
+      <EstimateModal
+        open={showEstimateModal}
+        onOpenChange={(open) => {
+          setShowEstimateModal(open);
+          if (!open) {
+            window.location.reload();
+          }
+        }}
+      />
+
+      {showWorkOrderModal && (
+        <WorkOrderForm
+          onClose={() => setShowWorkOrderModal(false)}
+          onSuccess={() => {
+            setShowWorkOrderModal(false);
+            window.location.reload();
           }}
         />
-    </div>
+      )}
+
+      <StandaloneBillingSheet
+        open={showBillingSheetModal}
+        onOpenChange={(open) => {
+          setShowBillingSheetModal(open);
+          if (!open) {
+            window.location.reload();
+          }
+        }}
+      />
+    </PageContainer>
   );
 }
