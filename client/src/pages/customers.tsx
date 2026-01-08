@@ -4,9 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerListSkeleton } from "@/components/ui/loading-skeleton";
+import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
+import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
+import { FAB } from "@/components/ui/fab";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye } from "lucide-react";
+import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, Building2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@shared/schema";
@@ -136,104 +139,118 @@ export default function Customers() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
+    <PageContainer>
+      <PageHeader
+        title="Customers"
+        subtitle="Manage your customer database"
+        actions={
+          (userRole === 'company_admin' || userRole === 'super_admin') && (
+            <CustomerForm
+              trigger={
+                <Button className="hidden sm:flex" data-testid="button-add-customer">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Customer
+                </Button>
+              }
+            />
+          )
+        }
+      />
 
-      
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
-            <p className="text-gray-600 mt-1">Manage your customer database</p>
-          </div>
-          {(userRole === 'company_admin' || userRole === 'super_admin') && (
-            <div className="mt-4 sm:mt-0">
-              <CustomerForm
-                trigger={
-                  <Button className="bg-primary text-white hover:bg-blue-700">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add New Customer
-                  </Button>
-                }
+      <PageContent className="space-y-5">
+        {/* Stats Row */}
+        <MetricGrid className="grid-cols-2 sm:grid-cols-3">
+          <MetricTile
+            label="Total Customers"
+            value={customers?.length || 0}
+            icon={Users}
+            variant="primary"
+            testId="metric-total-customers"
+          />
+          <MetricTile
+            label="Active"
+            value={customers?.length || 0}
+            icon={Building2}
+            variant="success"
+            testId="metric-active-customers"
+          />
+        </MetricGrid>
+
+        <Tabs defaultValue="customers" className="w-full">
+          <TabsList className={(userRole === 'company_admin' || userRole === 'super_admin') ? "grid w-full grid-cols-2 rounded-xl h-12" : "grid w-full grid-cols-1 rounded-xl h-12"}>
+            <TabsTrigger value="customers" className="text-sm rounded-lg data-[state=active]:shadow-sm">Customer List</TabsTrigger>
+            {(userRole === 'company_admin' || userRole === 'super_admin') && (
+              <TabsTrigger value="integrations" className="text-sm rounded-lg data-[state=active]:shadow-sm">
+                <Settings className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">Integrations</span>
+                <span className="sm:hidden">Setup</span>
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          <TabsContent value="customers" className="space-y-4 mt-4">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+              <Input
+                placeholder="Search customers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-12"
+                data-testid="input-search-customers"
               />
             </div>
-          )}
-        </div>
-      </div>
 
-      <Tabs defaultValue="customers" className="w-full">
-        <TabsList className={(userRole === 'company_admin' || userRole === 'super_admin') ? "grid w-full grid-cols-2" : "grid w-full grid-cols-1"}>
-          <TabsTrigger value="customers" className="text-sm">Customer List</TabsTrigger>
-          {(userRole === 'company_admin' || userRole === 'super_admin') && (
-            <TabsTrigger value="integrations" className="text-sm">
-              <Settings className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-              <span className="hidden sm:inline">Integrations</span>
-              <span className="sm:hidden">Setup</span>
-            </TabsTrigger>
-          )}
-        </TabsList>
-
-        <TabsContent value="customers" className="space-y-4">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search customers..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-
-          {/* Customers List - Responsive Design */}
-          {/* Mobile Card View */}
-          <div className="lg:hidden space-y-3">
-            {filteredCustomers?.map((customer) => (
-                <Card key={customer.id} className="p-4 hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3 flex-1 min-w-0">
-                      <div className="bg-blue-50 p-2 rounded-lg flex-shrink-0">
-                        <Users className="w-4 h-4 text-blue-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-gray-900 truncate">{customer.name}</div>
-                        {userRole !== 'field_tech' && (
-                          <div className="text-xs text-gray-500 truncate">{customer.email}</div>
-                        )}
-                        {customer.phone && (
-                          <div className="text-xs text-gray-500">{customer.phone}</div>
-                        )}
-                      </div>
+            {/* Customers List - Mobile Card View */}
+            <div className="lg:hidden space-y-3">
+              {filteredCustomers?.map((customer) => (
+                <Card 
+                  key={customer.id} 
+                  className="glass-card p-4 active:scale-[0.98] transition-all duration-200"
+                  onClick={() => userRole === 'field_tech' 
+                    ? setLocation(`/customers/${customer.id}/profile`)
+                    : setSelectedCustomer(customer)
+                  }
+                  data-testid={`card-customer-${customer.id}`}
+                >
+                  <div className="flex items-center gap-4">
+                    {/* Avatar */}
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <span className="text-white font-semibold text-lg">
+                        {customer.name.charAt(0).toUpperCase()}
+                      </span>
                     </div>
-                    <div className="flex-shrink-0">
-                      {userRole === 'field_tech' ? (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-blue-600 hover:text-blue-900"
-                          onClick={() => setLocation(`/customers/${customer.id}/profile`)}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                      ) : (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-blue-600 hover:text-blue-900"
-                          onClick={() => setSelectedCustomer(customer)}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
+                    
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-base font-semibold text-slate-900 truncate">{customer.name}</div>
+                      {userRole !== 'field_tech' && customer.email && (
+                        <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
+                          <Mail className="w-3.5 h-3.5" />
+                          <span className="truncate">{customer.email}</span>
+                        </div>
+                      )}
+                      {customer.phone && (
+                        <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>{customer.phone}</span>
+                        </div>
                       )}
                     </div>
+                    
+                    {/* Chevron */}
+                    <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
                   </div>
+                  
                   {customer.address && (
-                    <div className="mt-2 text-xs text-gray-600 truncate">{customer.address}</div>
+                    <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-sm text-slate-500">
+                      <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">{customer.address}</span>
+                    </div>
                   )}
                 </Card>
-              ))
-            }
-          </div>
+              ))}
+            </div>
 
           {/* Desktop Table View */}
           <div className="hidden lg:block">
@@ -374,41 +391,51 @@ export default function Customers() {
             </Card>
           </div>
 
-          {/* Empty State */}
-          {!isLoading && filteredCustomers?.length === 0 && (
-            <Card className="bg-white shadow-sm border border-gray-200">
-              <CardContent className="p-12 text-center">
-                <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No customers found</h3>
-                <p className="text-gray-600 mb-4">
-                  {searchQuery 
-                    ? "No customers match your search criteria." 
-                    : userRole === 'field_tech' 
-                      ? "No customers available to view." 
-                      : "Get started by adding your first customer."
-                  }
-                </p>
-                {(userRole === 'company_admin' || userRole === 'super_admin') && (
-                  <CustomerForm
-                    trigger={
-                      <Button className="bg-primary text-white hover:bg-blue-700">
-                        <Plus className="w-4 h-4 mr-2" />
-                        Add New Customer
-                      </Button>
+            {/* Empty State */}
+            {!isLoading && filteredCustomers?.length === 0 && (
+              <Card className="glass-card">
+                <CardContent className="p-12 text-center">
+                  <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">No customers found</h3>
+                  <p className="text-slate-500 mb-6">
+                    {searchQuery 
+                      ? "No customers match your search criteria." 
+                      : userRole === 'field_tech' 
+                        ? "No customers available to view." 
+                        : "Get started by adding your first customer."
                     }
-                  />
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        {(userRole === 'company_admin' || userRole === 'super_admin') && (
-          <TabsContent value="integrations">
-            <CustomerIntegration />
+                  </p>
+                  {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                    <CustomerForm
+                      trigger={
+                        <Button data-testid="button-add-customer-empty">
+                          <Plus className="w-4 h-4 mr-2" />
+                          Add New Customer
+                        </Button>
+                      }
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
-        )}
-      </Tabs>
-    </div>
+
+          {(userRole === 'company_admin' || userRole === 'super_admin') && (
+            <TabsContent value="integrations">
+              <CustomerIntegration />
+            </TabsContent>
+          )}
+        </Tabs>
+      </PageContent>
+
+      {/* FAB for Mobile - Admin Users Only */}
+      {(userRole === 'company_admin' || userRole === 'super_admin') && (
+        <CustomerForm
+          trigger={
+            <FAB testId="fab-add-customer" className="sm:hidden" />
+          }
+        />
+      )}
+    </PageContainer>
   );
 }

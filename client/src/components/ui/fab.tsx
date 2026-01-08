@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 
 interface FABProps {
-  onClick: () => void;
+  onClick?: () => void;
   icon?: React.ReactNode;
   label?: string;
   className?: string;

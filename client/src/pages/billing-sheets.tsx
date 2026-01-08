@@ -5,9 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
+import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
+import { FAB } from "@/components/ui/fab";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2 } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { BillingSheet } from "@shared/schema";
@@ -223,43 +226,62 @@ export default function BillingSheets() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-            {currentUser?.role === 'field_tech' ? 'My Billing Sheets' : 'Billing Sheets'}
-          </h1>
-          <p className="text-gray-600 mt-1 sm:mt-2 text-sm sm:text-base">
-            {currentUser?.role === 'field_tech' 
-              ? 'Create billing for your standalone work'
-              : 'Manage billing for work performed without work orders'
-            }
-          </p>
-        </div>
-        <Button 
-          onClick={() => setShowBillingModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          New Billing Sheet
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title={currentUser?.role === 'field_tech' ? 'My Billing Sheets' : 'Billing Sheets'}
+        subtitle={currentUser?.role === 'field_tech' 
+          ? 'Create billing for your standalone work'
+          : 'Manage billing for work performed without work orders'
+        }
+        actions={
+          <Button 
+            onClick={() => setShowBillingModal(true)}
+            className="hidden sm:flex"
+            data-testid="button-new-billing-sheet"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Billing Sheet
+          </Button>
+        }
+      />
 
-      {/* Search */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              placeholder="Search by customer, property, technician, or billing number..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <PageContent className="space-y-5">
+        {/* Stats Row */}
+        <MetricGrid className="grid-cols-3">
+          <MetricTile
+            label="Drafts"
+            value={draftSheets.length}
+            icon={FileText}
+            variant={draftSheets.length > 0 ? "warning" : "default"}
+            testId="metric-drafts"
+          />
+          <MetricTile
+            label="Submitted"
+            value={submittedSheets.filter(s => s.status === 'submitted').length}
+            icon={Send}
+            variant="primary"
+            testId="metric-submitted"
+          />
+          <MetricTile
+            label="Approved"
+            value={submittedSheets.filter(s => s.status === 'approved' || s.status === 'billed').length}
+            icon={Check}
+            variant="success"
+            testId="metric-approved"
+          />
+        </MetricGrid>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+          <Input
+            placeholder="Search billing sheets..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-12"
+            data-testid="input-search-billing"
+          />
+        </div>
 
       {/* Billing Sheets List */}
       {isLoading ? (
@@ -582,6 +604,14 @@ export default function BillingSheets() {
           onOpenChange={() => setViewingSheet(null)}
         />
       )}
-    </div>
+      </PageContent>
+
+      {/* FAB for Mobile */}
+      <FAB
+        onClick={() => setShowBillingModal(true)}
+        testId="fab-new-billing-sheet"
+        className="sm:hidden"
+      />
+    </PageContainer>
   );
 }
