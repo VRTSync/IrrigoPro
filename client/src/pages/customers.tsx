@@ -432,7 +432,13 @@ export default function Customers() {
       {(userRole === 'company_admin' || userRole === 'super_admin') && (
         <CustomerForm
           trigger={
-            <FAB testId="fab-add-customer" className="sm:hidden" />
+            <button 
+              className="fab sm:hidden"
+              data-testid="fab-add-customer"
+              type="button"
+            >
+              <Plus className="w-7 h-7" />
+            </button>
           }
         />
       )}
