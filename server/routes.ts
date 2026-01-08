@@ -31,7 +31,7 @@ const PRICING_FIELDS_TO_STRIP = new Set([
   'partPrice', 'totalPrice', 'unitPrice', 'price', 'cost',
   'markupAmount', 'markupPercent', 'taxAmount', 'taxPercent',
   'laborAmount', 'laborTotal', 'partsAmount', 'totalCost',
-  'laborCost', 'partsCost', 'totalUnbilledAmount'
+  'laborCost', 'partsCost', 'totalUnbilledAmount', 'totalPartsCost'
 ]);
 
 // Recursively strip pricing fields from objects/arrays
