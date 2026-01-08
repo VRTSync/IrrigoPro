@@ -1,102 +1,284 @@
-# IrrigoPro Design Guidelines
+# IrrigoPro Design Guidelines - Mobile-First System
 
-## Design Approach
-**System:** Material Design principles adapted for productivity tools, customized with irrigation industry aesthetics. Focus on efficiency, data clarity, and mobile-first workflows.
+## Design Philosophy
+**Approach:** Mobile-first, touch-optimized interface designed for field technicians working outdoors. Every element prioritizes thumb reachability, glanceable information, and one-handed operation.
 
-**Visual Direction:** Clean, professional interface inspired by modern field service apps (ServiceTitan, Jobber) with water/nature imagery establishing trust and industry relevance.
+**Visual Language:** Sleek, modern glassmorphism with water-inspired color palette. Clean surfaces with subtle depth, smooth animations, and generous white space.
 
-## Core Design Elements
+## Color System
 
-### Typography
-- **Primary Font:** Inter (Google Fonts) - excellent legibility on mobile devices
-- **Hierarchy:**
-  - H1: 32px/bold (mobile: 24px) - Dashboard headers
-  - H2: 24px/semibold (mobile: 20px) - Section titles
-  - H3: 18px/semibold (mobile: 16px) - Card headers
-  - Body: 16px/regular (mobile: 16px) - Main content
-  - Small: 14px/regular - Labels, captions
-  - Button text: 16px/medium
+### Primary Palette (Water-Inspired)
+- **Primary Blue:** `#0EA5E9` (sky-500) - Main actions, active states
+- **Primary Dark:** `#0284C7` (sky-600) - Pressed states
+- **Primary Light:** `#38BDF8` (sky-400) - Highlights, gradients
+- **Teal Accent:** `#14B8A6` (teal-500) - Secondary actions
 
-### Layout System
-**Spacing Units:** Tailwind units of 3, 4, 6, 8, 12, 16
-- Mobile padding: p-4, p-6
-- Desktop containers: px-8, py-12
-- Card spacing: p-4 (mobile), p-6 (desktop)
-- Touch target minimum: h-11 (44px), w-11 for icon buttons
+### Neutral Palette
+- **Background:** `#F8FAFC` (slate-50) - Page backgrounds
+- **Surface:** `#FFFFFF` - Cards, modals
+- **Surface Elevated:** `rgba(255,255,255,0.8)` - Glassmorphism cards
+- **Border:** `#E2E8F0` (slate-200) - Subtle dividers
+- **Text Primary:** `#0F172A` (slate-900) - Headings
+- **Text Secondary:** `#64748B` (slate-500) - Body text
+- **Text Muted:** `#94A3B8` (slate-400) - Captions
 
-**Responsive Breakpoints:**
-- Mobile-first design: base (0-768px)
-- Desktop enhancement: md: (768px+)
+### Semantic Colors
+- **Success:** `#10B981` (emerald-500) - Completed, approved
+- **Warning:** `#F59E0B` (amber-500) - Pending, attention
+- **Danger:** `#EF4444` (red-500) - Errors, urgent
+- **Info:** `#3B82F6` (blue-500) - Information
 
-### Component Library
+### Gradients
+- **Hero Gradient:** `linear-gradient(135deg, #0EA5E9 0%, #14B8A6 100%)`
+- **Card Glow:** `linear-gradient(135deg, rgba(14,165,233,0.1) 0%, rgba(20,184,166,0.05) 100%)`
+- **Glass Overlay:** `linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.7) 100%)`
 
-**Hero Section:**
-- Full-width hero with high-quality irrigation imagery (sprinkler system, lush green lawn with water droplets)
-- Height: 60vh (mobile), 70vh (desktop)
-- Overlay: Dark gradient (bottom to top, opacity 0.6)
-- Content: Centered white text with blurred background button (backdrop-blur-md, bg-white/20)
-- CTA: "Get Started" - rounded-full, min-h-11, px-8
+## Typography Scale
 
-**Navigation:**
-- Desktop: Horizontal top bar, logo left, menu items center, user profile right
-- Mobile: Bottom fixed bar with 4-5 icons, active state with primary blue indicator, safe-area-inset-bottom for iOS
-- Height: 64px (desktop), 56px + safe area (mobile)
+### Mobile-Optimized Hierarchy
+```
+Display:    32px / 700 / -0.02em  (Hero headings)
+H1:         24px / 700 / -0.01em  (Page titles)
+H2:         20px / 600 / 0        (Section headers)
+H3:         18px / 600 / 0        (Card titles)
+Body Large: 17px / 400 / 0        (Primary content)
+Body:       15px / 400 / 0        (Standard text)
+Caption:    13px / 500 / 0.01em   (Labels, metadata)
+Micro:      11px / 500 / 0.02em   (Badges, timestamps)
+```
 
-**Data Display - Dual Layout:**
-- Desktop: Full-width tables with sticky headers, alternating row backgrounds (bg-gray-50), hover states
-- Mobile: Cards with rounded-xl corners, shadow-sm, p-4, vertical stack of key info, tap to expand pattern
-- Job cards include: status badge (top-right), client name (text-lg/semibold), address, scheduled date/time, action button (bottom)
+### Font Stack
+```css
+font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+```
 
-**Forms & Inputs:**
-- Rounded-lg borders, h-11 minimum
-- Focus: ring-2 ring-primary (#3B82F6)
-- Labels: text-sm, text-gray-700, mb-2
-- Error states: ring-red-500, text-red-600 helper text
-- Dropdowns: Chevron icons, full-width on mobile
+## Spacing System
 
-**Buttons:**
-- Primary: bg-primary (#3B82F6), text-white, rounded-lg, min-h-11, px-6
-- Secondary: border-2 border-primary, text-primary
-- Success: bg-green-500 (accent actions)
-- Disabled: opacity-50, cursor-not-allowed
+### Base Unit: 4px
+```
+xs:   4px   (Micro gaps)
+sm:   8px   (Tight spacing)
+md:   12px  (Standard gaps)
+lg:   16px  (Section spacing)
+xl:   24px  (Major sections)
+2xl:  32px  (Page margins)
+3xl:  48px  (Hero spacing)
+```
 
-**Status Badges:**
-- Rounded-full, px-3, py-1, text-sm/medium
-- Scheduled: bg-blue-100, text-blue-800
-- In Progress: bg-yellow-100, text-yellow-800
-- Completed: bg-green-100, text-green-800
-- Overdue: bg-red-100, text-red-800
+### Touch Targets
+- **Minimum tap size:** 48px × 48px
+- **Button height:** 52px (large), 44px (default), 36px (compact)
+- **Icon buttons:** 48px × 48px
+- **List item height:** 72px minimum
+- **Inter-element spacing:** 12px minimum
 
-**Dashboard Widgets:**
-- Grid layout: grid-cols-1 (mobile), md:grid-cols-2 lg:grid-cols-3 (desktop)
-- Cards: bg-white, rounded-xl, shadow-md, p-6
-- Stat cards: Large number (text-3xl/bold), label below (text-sm/gray-600), icon top-right
+## Component Patterns
 
-**Modals/Overlays:**
-- Mobile: Full-screen slide-up with rounded top corners (rounded-t-3xl)
-- Desktop: Centered, max-w-2xl, rounded-xl, backdrop blur
-- Header with close button (h-11, w-11)
+### Cards - Glassmorphism Style
+```css
+.card-glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 20px;
+  box-shadow: 
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 10px 15px -3px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+```
 
-## Images Section
+### Task Cards (Work Orders, Billing Sheets)
+- **Height:** Auto, minimum 120px
+- **Padding:** 20px
+- **Border radius:** 20px
+- **Status indicator:** Left border accent (4px) or top badge
+- **Layout:** 
+  - Top: Customer name + Status badge
+  - Middle: Address, description (2 lines max)
+  - Bottom: Date/time + Quick action button
 
-**Hero Image:**
-- Large hero image: Professional irrigation system in action - close-up of sprinkler head with water droplets catching sunlight against vibrant green lawn
-- Placement: Full-width background, object-cover, positioned center
-- Treatment: Subtle dark overlay for text readability
+### Metric Tiles
+- **Size:** Full-width on mobile, 1/2 or 1/3 on tablet+
+- **Content:** Large number (32px bold), label below (13px)
+- **Icon:** Top-right, 24px, muted color
+- **Background:** Subtle gradient based on metric type
 
-**Dashboard Enhancement:**
-- Empty state illustrations: Simple line art water/irrigation themed graphics for when no jobs scheduled
-- Profile placeholders: Circular avatar containers (w-10, h-10 for lists, w-16, h-16 for profiles)
+### Action Sheets (Bottom Drawers)
+```css
+.action-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-radius: 24px 24px 0 0;
+  padding: 8px 20px 32px;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.15);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+```
+- **Handle:** 40px × 4px centered bar, slate-300
+- **Safe area:** Account for iOS home indicator
 
-## Animations
-Minimal, performance-focused:
-- Page transitions: Slide animations for mobile navigation (150ms)
-- Card interactions: Subtle scale on tap (scale-[0.98])
-- Loading states: Skeleton screens (pulse animation) rather than spinners
+### Floating Action Button (FAB)
+```css
+.fab {
+  position: fixed;
+  bottom: 100px; /* Above bottom nav */
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%);
+  box-shadow: 
+    0 8px 24px rgba(14, 165, 233, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+}
+```
 
-## Mobile-Specific Patterns
-- Pull-to-refresh on job lists
-- Swipe actions on cards (swipe left: complete, swipe right: edit)
-- Floating action button for quick job creation (bottom-right, mb-20 to clear nav bar)
-- Large tap areas for calendar date selection (min h-11, w-full)
-- Bottom sheet patterns for filters/sorting
+### Bottom Navigation
+- **Height:** 72px + safe area
+- **Background:** Glassmorphism (white/80%, blur 20px)
+- **Icons:** 28px, with labels below (11px)
+- **Active state:** Primary color icon + subtle background pill
+- **Center button:** Elevated 60×60 pill for primary action
+
+### Forms - Mobile Optimized
+- **Input height:** 52px
+- **Border radius:** 14px
+- **Label:** Above input, 13px semibold, slate-600
+- **Focus state:** 2px primary ring, subtle glow
+- **Spacing:** 20px between fields
+- **Keyboard handling:** Inputs scroll into view, sticky submit button
+
+### Buttons
+```css
+/* Primary - Large touch target */
+.btn-primary {
+  height: 52px;
+  padding: 0 28px;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 16px;
+  background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%);
+  color: white;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
+}
+
+/* Secondary */
+.btn-secondary {
+  height: 52px;
+  padding: 0 28px;
+  border-radius: 14px;
+  background: white;
+  border: 2px solid #E2E8F0;
+  color: #0F172A;
+}
+
+/* Ghost - for inline actions */
+.btn-ghost {
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: transparent;
+  color: #0EA5E9;
+}
+```
+
+### Status Badges
+```css
+/* Pill style with subtle backgrounds */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-pending { background: #FEF3C7; color: #B45309; }
+.badge-active { background: #DBEAFE; color: #1D4ED8; }
+.badge-complete { background: #D1FAE5; color: #047857; }
+.badge-urgent { background: #FEE2E2; color: #DC2626; }
+```
+
+## Animation Specifications
+
+### Transitions
+- **Default:** 200ms ease-out
+- **Quick:** 150ms ease-out (micro-interactions)
+- **Smooth:** 300ms cubic-bezier(0.4, 0, 0.2, 1) (page transitions)
+
+### Micro-interactions
+- **Button press:** scale(0.97) on touch
+- **Card tap:** opacity 0.9 + subtle scale(0.99)
+- **Swipe hint:** translateX animation on touch start
+
+### Page Transitions
+- **Enter:** Fade in + slide up 20px
+- **Exit:** Fade out + slide down 10px
+
+### Loading States
+- **Skeleton:** Shimmer animation (1.5s infinite)
+- **Spinner:** Primary color, 24px, subtle rotation
+
+## Layout Patterns
+
+### Page Structure
+```
+┌─────────────────────────────┐
+│  Status Bar (transparent)   │
+├─────────────────────────────┤
+│  Header (sticky, glass)     │
+│  - Title left               │
+│  - Actions right            │
+├─────────────────────────────┤
+│                             │
+│  Content Area               │
+│  (scrollable)               │
+│  - 20px horizontal padding  │
+│  - 16px vertical gaps       │
+│                             │
+├─────────────────────────────┤
+│  FAB (if applicable)        │
+├─────────────────────────────┤
+│  Bottom Nav (fixed, glass)  │
+│  + Safe Area                │
+└─────────────────────────────┘
+```
+
+### Grid System
+- **Mobile:** Single column, full-width cards
+- **Tablet (768px+):** 2-column grid for cards
+- **Desktop (1024px+):** 3-4 column grid, max-width container
+
+### Content Hierarchy
+1. Most critical info at top (today's work)
+2. Quick actions within thumb reach (bottom third)
+3. Secondary info below fold
+4. Historical/reference data at bottom
+
+## Responsive Breakpoints
+```css
+/* Mobile-first */
+sm: 640px   /* Large phones, landscape */
+md: 768px   /* Tablets */
+lg: 1024px  /* Desktop */
+xl: 1280px  /* Wide screens */
+```
+
+## Accessibility
+- **Color contrast:** Minimum 4.5:1 for text
+- **Touch targets:** 48px minimum
+- **Focus indicators:** Visible 2px rings
+- **Motion:** Respect prefers-reduced-motion
+- **Screen reader:** Semantic HTML, ARIA labels
+
+## Dark Mode (Future)
+Reserved for future implementation with inverted color tokens.

@@ -2,64 +2,80 @@
 @tailwind components;
 @tailwind utilities;
 
-/* iOS Safe Area Support for Navigation */
+/* iOS Safe Area Support */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
 }
 
-/* Enhanced mobile navigation styles */
-.mobile-nav-gradient {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(249, 250, 251, 0.95) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
+/* Mobile-First Design Tokens */
 :root {
-  --background: hsl(0, 0%, 100%);
-  --foreground: hsl(20, 14.3%, 4.1%);
-  --muted: hsl(60, 4.8%, 95.9%);
-  --muted-foreground: hsl(25, 5.3%, 44.7%);
-  --popover: hsl(0, 0%, 100%);
-  --popover-foreground: hsl(20, 14.3%, 4.1%);
-  --card: hsl(0, 0%, 100%);
-  --card-foreground: hsl(20, 14.3%, 4.1%);
-  --border: hsl(20, 5.9%, 90%);
-  --input: hsl(20, 5.9%, 90%);
-  --primary: hsl(214, 95%, 58%);
-  --primary-foreground: hsl(211, 100%, 99%);
-  --secondary: hsl(214, 85%, 45%);
-  --secondary-foreground: hsl(60, 9.1%, 97.8%);
-  --accent: hsl(85, 81%, 61%);
-  --accent-foreground: hsl(24, 9.8%, 10%);
-  --destructive: hsl(0, 84.2%, 60.2%);
-  --destructive-foreground: hsl(60, 9.1%, 97.8%);
-  --ring: hsl(20, 14.3%, 4.1%);
-  --radius: 0.5rem;
+  /* Primary - Water-inspired blues */
+  --primary: 199 89% 48%;
+  --primary-foreground: 0 0% 100%;
+  --primary-light: 199 92% 59%;
+  --primary-dark: 200 95% 39%;
+  
+  /* Teal accent */
+  --accent: 168 76% 40%;
+  --accent-foreground: 0 0% 100%;
+  
+  /* Neutral palette */
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 199 89% 48%;
+  --radius: 0.875rem;
+  
+  /* Semantic colors */
+  --success: 160 84% 39%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 8px 24px rgba(14, 165, 233, 0.25);
 }
 
 .dark {
-  --background: hsl(240, 10%, 3.9%);
-  --foreground: hsl(0, 0%, 98%);
-  --muted: hsl(240, 3.7%, 15.9%);
-  --muted-foreground: hsl(240, 5%, 64.9%);
-  --popover: hsl(240, 10%, 3.9%);
-  --popover-foreground: hsl(0, 0%, 98%);
-  --card: hsl(240, 10%, 3.9%);
-  --card-foreground: hsl(0, 0%, 98%);
-  --border: hsl(240, 3.7%, 15.9%);
-  --input: hsl(240, 3.7%, 15.9%);
-  --primary: hsl(214, 95%, 58%);
-  --primary-foreground: hsl(211, 100%, 99%);
-  --secondary: hsl(214, 85%, 45%);
-  --secondary-foreground: hsl(0, 0%, 98%);
-  --accent: hsl(85, 81%, 61%);
-  --accent-foreground: hsl(0, 0%, 98%);
-  --destructive: hsl(0, 62.8%, 30.6%);
-  --destructive-foreground: hsl(0, 0%, 98%);
-  --ring: hsl(240, 4.9%, 83.9%);
-  --radius: 0.5rem;
+  --background: 222 47% 6%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 9%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222 47% 9%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 199 89% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 168 76% 40%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 62% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 217 33% 17%;
+  --input: 217 33% 17%;
+  --ring: 199 89% 48%;
 }
 
 @layer base {
@@ -67,102 +83,293 @@
     @apply border-border;
   }
 
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Mobile map touch optimization */
-.leaflet-container {
-  touch-action: pan-x pan-y;
-}
+@layer components {
+  /* Glassmorphism Card */
+  .glass-card {
+    @apply bg-white/85 backdrop-blur-xl border border-white/50 rounded-2xl;
+    box-shadow: 
+      0 4px 6px -1px rgba(0, 0, 0, 0.05),
+      0 10px 15px -3px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
 
-/* Improve mobile touch targets */
-.leaflet-control-zoom a {
-  width: 32px !important;
-  height: 32px !important;
-  line-height: 30px !important;
-  font-size: 18px !important;
-}
+  .glass-card-elevated {
+    @apply bg-white/90 backdrop-blur-2xl border border-white/60 rounded-2xl;
+    box-shadow: 
+      0 10px 40px -10px rgba(0, 0, 0, 0.12),
+      0 4px 6px -2px rgba(0, 0, 0, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
 
-/* Mobile-optimized popup styles */
-.leaflet-popup-content-wrapper {
-  border-radius: 8px !important;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
-}
+  /* Mobile Navigation Glass */
+  .mobile-nav-glass {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.9) 100%);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.5);
+  }
 
-.leaflet-popup-content {
-  margin: 8px 12px !important;
-  font-size: 13px !important;
-  line-height: 1.4 !important;
-}
+  /* Header Glass */
+  .header-glass {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  }
 
-/* Better mobile marker visibility - no transforms */
-.custom-div-icon {
-  cursor: pointer !important;
-}
+  /* Task Card Styles */
+  .task-card {
+    @apply bg-white rounded-2xl p-5 relative overflow-hidden transition-all duration-200;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
 
-/* Ensure consistent layering for stability */
-.leaflet-marker-icon {
-  transition: none !important;
-}
+  .task-card:active {
+    transform: scale(0.98);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
 
-/* Mobile-specific touch improvements */
-@media (max-width: 768px) {
-  .leaflet-popup-content {
-    font-size: 12px !important;
-    margin: 6px 10px !important;
+  .task-card-pending {
+    @apply border-l-4 border-l-amber-400;
   }
-  
-  .leaflet-popup-content-wrapper {
-    min-width: 200px !important;
-    max-width: 280px !important;
+
+  .task-card-active {
+    @apply border-l-4 border-l-sky-500;
   }
-  
-  /* Larger touch targets on mobile */
-  .custom-div-icon {
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2)) !important;
+
+  .task-card-complete {
+    @apply border-l-4 border-l-emerald-500;
   }
-  
-  /* Ensure mobile fullscreen maps use full viewport */
-  .mobile-fullscreen-map {
-    height: 100vh !important;
-    max-height: 100vh !important;
+
+  .task-card-urgent {
+    @apply border-l-4 border-l-red-500;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1), 0 4px 16px rgba(239, 68, 68, 0.08);
   }
-  
-  /* Hide mobile browser UI in fullscreen */
-  .mobile-fullscreen-container {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    z-index: 9999 !important;
-    background: white !important;
+
+  /* Metric Tile */
+  .metric-tile {
+    @apply bg-white rounded-2xl p-5 relative;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   }
-  
-  /* Ensure map containers adapt to content */
-  .leaflet-container {
-    height: 100% !important;
-    width: 100% !important;
+
+  .metric-tile-primary {
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(20, 184, 166, 0.04) 100%);
+    border: 1px solid rgba(14, 165, 233, 0.15);
   }
-  
-  /* Dynamic site map cards that truly adapt to content */
-  .site-map-card {
-    height: auto !important;
-    min-height: auto !important;
+
+  /* Primary Button with Gradient */
+  .btn-primary-gradient {
+    @apply text-white font-semibold rounded-xl h-13 px-7 transition-all duration-200;
+    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary-dark)) 100%);
+    box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
   }
-  
-  /* Mobile fullscreen optimization */
-  @supports (-webkit-touch-callout: none) {
-    .mobile-fullscreen-map {
-      height: calc(100vh - 80px) !important;
-    }
+
+  .btn-primary-gradient:hover {
+    box-shadow: 0 6px 20px rgba(14, 165, 233, 0.45);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary-gradient:active {
+    transform: scale(0.97);
+    box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+  }
+
+  /* Floating Action Button */
+  .fab {
+    @apply fixed z-40 flex items-center justify-center rounded-2xl text-white transition-all duration-200;
+    width: 60px;
+    height: 60px;
+    right: 20px;
+    bottom: 100px;
+    background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%);
+    box-shadow: 
+      0 8px 24px rgba(14, 165, 233, 0.4),
+      0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .fab:active {
+    transform: scale(0.92);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+  }
+
+  /* Action Sheet / Bottom Drawer */
+  .action-sheet {
+    @apply fixed inset-x-0 bottom-0 z-50 bg-white overflow-hidden;
+    border-radius: 24px 24px 0 0;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.15);
+    max-height: 90vh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .action-sheet-handle {
+    @apply mx-auto mt-3 mb-2 bg-slate-300 rounded-full;
+    width: 40px;
+    height: 4px;
+  }
+
+  /* Form Input Styles */
+  .input-mobile {
+    @apply w-full h-13 px-4 bg-white border border-slate-200 rounded-xl text-base transition-all duration-200;
+  }
+
+  .input-mobile:focus {
+    @apply border-sky-400 ring-2 ring-sky-100 outline-none;
+  }
+
+  .input-mobile::placeholder {
+    @apply text-slate-400;
+  }
+
+  /* Status Badges */
+  .badge-status {
+    @apply inline-flex items-center h-7 px-3 rounded-full text-xs font-semibold tracking-wide;
+  }
+
+  .badge-pending {
+    @apply bg-amber-100 text-amber-700;
+  }
+
+  .badge-active {
+    @apply bg-sky-100 text-sky-700;
+  }
+
+  .badge-complete {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+
+  .badge-urgent {
+    @apply bg-red-100 text-red-700;
+  }
+
+  .badge-draft {
+    @apply bg-slate-100 text-slate-600;
+  }
+
+  /* Loading Skeleton Shimmer */
+  .skeleton-shimmer {
+    @apply bg-slate-200 rounded-lg;
+    background: linear-gradient(
+      90deg,
+      hsl(210 40% 96%) 0%,
+      hsl(210 40% 92%) 50%,
+      hsl(210 40% 96%) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  /* Page Header */
+  .page-header {
+    @apply sticky top-0 z-30 px-5 py-4 header-glass;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold text-slate-900 tracking-tight;
+  }
+
+  .page-subtitle {
+    @apply text-sm text-slate-500 mt-0.5;
+  }
+
+  /* Content Container */
+  .content-container {
+    @apply px-5 py-4 pb-32;
+  }
+
+  /* Card List Layout */
+  .card-list {
+    @apply space-y-4;
   }
 }
 
 @layer utilities {
+  /* Touch Target Utilities */
+  .touch-target {
+    @apply min-h-[48px] min-w-[48px];
+  }
+
+  .touch-target-lg {
+    @apply min-h-[52px] min-w-[52px];
+  }
+
+  /* Height utilities */
+  .h-13 {
+    height: 52px;
+  }
+
+  /* Gradient Text */
+  .text-gradient-primary {
+    background: linear-gradient(135deg, #0EA5E9 0%, #14B8A6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Pulse animation for urgent items */
+  .pulse-urgent {
+    animation: pulse-urgent 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-urgent {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+  }
+
+  /* Fade in animation */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Slide up animation */
+  .animate-slide-up {
+    animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Border pulse for pending items */
   .border-pulse {
     animation: border-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
@@ -176,6 +383,7 @@
     }
   }
 
+  /* Status utilities */
   .status-pending {
     @apply bg-amber-50 text-amber-700 border-amber-200;
   }
@@ -190,5 +398,98 @@
   
   .status-converted {
     @apply bg-purple-50 text-purple-700 border-purple-200;
+  }
+}
+
+/* Enhanced mobile navigation styles (legacy support) */
+.mobile-nav-gradient {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(249, 250, 251, 0.95) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Map Styles */
+.leaflet-container {
+  touch-action: pan-x pan-y;
+}
+
+.leaflet-control-zoom a {
+  width: 40px !important;
+  height: 40px !important;
+  line-height: 38px !important;
+  font-size: 18px !important;
+  border-radius: 12px !important;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 16px !important;
+  box-shadow: 0 10px 40px -5px rgba(0, 0, 0, 0.15) !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px 16px !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+.custom-div-icon {
+  cursor: pointer !important;
+}
+
+.leaflet-marker-icon {
+  transition: none !important;
+}
+
+/* Mobile-specific optimizations */
+@media (max-width: 768px) {
+  .leaflet-popup-content-wrapper {
+    min-width: 220px !important;
+    max-width: 300px !important;
+  }
+  
+  .custom-div-icon {
+    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.2)) !important;
+  }
+  
+  .mobile-fullscreen-map {
+    height: 100vh !important;
+    max-height: 100vh !important;
+  }
+  
+  .mobile-fullscreen-container {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 9999 !important;
+    background: white !important;
+  }
+  
+  .leaflet-container {
+    height: 100% !important;
+    width: 100% !important;
+  }
+  
+  .site-map-card {
+    height: auto !important;
+    min-height: auto !important;
+  }
+  
+  @supports (-webkit-touch-callout: none) {
+    .mobile-fullscreen-map {
+      height: calc(100vh - 80px) !important;
+    }
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
