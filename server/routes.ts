@@ -162,8 +162,8 @@ const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
 };
 
 // Middleware to check if user can edit/delete work orders and billing sheets
-const requireWorkOrderBillingAccess = (req: Request, res: any, next: any) => {
-  const userRole = req.headers['x-user-role'];
+const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
   
   if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
     return res.status(403).json({ 
@@ -189,9 +189,9 @@ const requireBillingAccess = (req: any, res: any, next: any) => {
 };
 
 // More granular middleware for work order updates that allows field techs to start their own work orders
-const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) => {
-  const userRole = req.headers['x-user-role'];
-  const userId = req.headers['x-user-id'];
+const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+  const userId = req.authenticatedUserId || req.headers['x-user-id'];
   const workOrderId = parseInt(req.params.id);
   const updateData = req.body;
   
@@ -234,8 +234,8 @@ const requireWorkOrderUpdateAccess = async (req: Request, res: any, next: any) =
 // Authentication middleware for notifications - ensures users can only access their own notifications
 const requireNotificationAccess = async (req: any, res: any, next: any) => {
   try {
-    // Get authenticated user ID
-    let authenticatedUserId = req.headers['x-user-id'];
+    // Get authenticated user ID - prefer session-based auth
+    let authenticatedUserId = req.authenticatedUserId || req.headers['x-user-id'];
     
     // If headers not available, try to get from session (production approach)
     if (!authenticatedUserId && req.session && req.session.userId) {
@@ -428,8 +428,8 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
 };
 
 // QuickBooks access control middleware - irrigation managers and field techs cannot access QuickBooks
-const requireQuickBooksAccess = (req: Request, res: any, next: any) => {
-  const userRole = req.headers['x-user-role'];
+const requireQuickBooksAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
   
   if (userRole === 'irrigation_manager' || userRole === 'field_tech') {
     return res.status(403).json({ 
@@ -487,18 +487,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/companies", async (req, res) => {
+  app.post("/api/companies", requireAuthentication, async (req, res) => {
     try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Access denied. Super admin only." });
+      }
       const company = await storage.createCompany(req.body);
       res.status(201).json(company);
     } catch (error) {
+      console.error("Error creating company:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to create company" });
     }
   });
 
   // Super admin routes for companies
-  app.put("/api/companies/:id", async (req, res) => {
+  app.put("/api/companies/:id", requireAuthentication, async (req, res) => {
     try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'super_admin' && userRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied." });
+      }
       const companyId = parseInt(req.params.id);
       const updatedCompany = await storage.updateCompany(companyId, req.body);
       if (!updatedCompany) {
@@ -506,12 +515,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(updatedCompany);
     } catch (error) {
+      console.error("Error updating company:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to update company" });
     }
   });
 
-  app.delete("/api/companies/:id", async (req, res) => {
+  app.delete("/api/companies/:id", requireAuthentication, async (req, res) => {
     try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Access denied. Super admin only." });
+      }
       const companyId = parseInt(req.params.id);
       const success = await storage.deleteCompany(companyId);
       if (!success) {
@@ -519,6 +533,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ message: "Company deleted successfully" });
     } catch (error) {
+      console.error("Error deleting company:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to delete company" });
     }
   });
@@ -547,11 +562,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create company profile (for first-time setup)
-  app.post("/api/company/:companyId/profile", async (req, res) => {
+  app.post("/api/company/:companyId/profile", requireAuthentication, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userRole = req.headers['x-user-role'];
-      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
 
       // Only company admins can create their own company profile
       if (userRole !== 'company_admin' || userCompanyId !== companyId) {
@@ -576,11 +591,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Check if company profile setup is required
-  app.get("/api/company/:companyId/setup-status", async (req, res) => {
+  app.get("/api/company/:companyId/setup-status", requireAuthentication, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userRole = req.headers['x-user-role'];
-      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
 
       // Only company admins can check their own company setup status
       if (userRole !== 'company_admin' || userCompanyId !== companyId) {
@@ -594,11 +609,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/company/:companyId/profile", async (req, res) => {
+  app.put("/api/company/:companyId/profile", requireAuthentication, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userRole = req.headers['x-user-role'];
-      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
 
       // Only company admins can update their own company profile
       if (userRole !== 'company_admin' || userCompanyId !== companyId) {
@@ -624,9 +639,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company logo upload endpoint
-  app.post("/api/company/logo/upload", async (req, res) => {
+  app.post("/api/company/logo/upload", requireAuthentication, async (req, res) => {
     try {
-      const userRole = req.headers['x-user-role'];
+      const userRole = req.authenticatedUserRole;
       
       // Only company admins can upload logos
       if (userRole !== 'company_admin') {
@@ -647,9 +662,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Reset/clear company logo
-  app.put("/api/company/:companyId/logo-reset", async (req, res) => {
+  app.put("/api/company/:companyId/logo-reset", requireAuthentication, async (req, res) => {
     try {
-      const userRole = req.headers['x-user-role'];
+      const userRole = req.authenticatedUserRole;
       const companyId = parseInt(req.params.companyId);
       
       if (userRole !== 'company_admin') {
@@ -678,9 +693,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update company logo after upload
-  app.put("/api/company/:companyId/logo", async (req, res) => {
+  app.put("/api/company/:companyId/logo", requireAuthentication, async (req, res) => {
     try {
-      const userRole = req.headers['x-user-role'];
+      const userRole = req.authenticatedUserRole;
       const companyId = parseInt(req.params.companyId);
       const { logoUrl } = req.body;
       
@@ -728,8 +743,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check if company profile setup is complete
   const requireCompanySetup = async (req: any, res: any, next: any) => {
     try {
-      const userRole = req.headers['x-user-role'];
-      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+      let userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      let userCompanyId = req.authenticatedUserCompanyId || (req.headers['x-user-company-id'] ? parseInt(req.headers['x-user-company-id'] as string) : null);
+
+      // Production session-based fallback
+      if (!userRole && req.session && req.session.userId) {
+        try {
+          const user = await storage.getUser(parseInt(req.session.userId));
+          if (user) {
+            userRole = user.role;
+            userCompanyId = user.companyId;
+          }
+        } catch (dbError) {
+          // Continue
+        }
+      }
 
       if (userRole === 'company_admin' && userCompanyId) {
         const companyExists = await storage.checkCompanyProfileExists(userCompanyId);
@@ -748,9 +776,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Super Admin: Create company admin (placeholder company + admin user)
-  app.post("/api/super-admin/create-company-admin", async (req, res) => {
+  app.post("/api/super-admin/create-company-admin", requireAuthentication, async (req, res) => {
     try {
-      const userRole = req.headers['x-user-role'];
+      const userRole = req.authenticatedUserRole;
       
       if (userRole !== 'super_admin') {
         return res.status(403).json({ message: "Access denied. Super admin only." });
@@ -836,7 +864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User management routes for system admin
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", requireAuthentication, async (req, res) => {
     try {
       const userData = insertUserSchema.parse(req.body);
       const user = await storage.createUser(userData);
@@ -852,7 +880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Super admin routes for users
-  app.put("/api/users/:id", async (req, res) => {
+  app.put("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
       const userData = insertUserSchema.partial().parse(req.body);
@@ -872,7 +900,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Check user's data dependencies before deletion
-  app.get("/api/users/:id/dependencies", async (req, res) => {
+  app.get("/api/users/:id/dependencies", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
       const dependencies = await storage.getUserDataDependencies(userId);
@@ -884,7 +912,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Soft delete user (recommended for users with completed work)
-  app.post("/api/users/:id/soft-delete", async (req, res) => {
+  app.post("/api/users/:id/soft-delete", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
@@ -908,7 +936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Hard delete user with cascade (use with caution)
-  app.delete("/api/users/:id/hard-delete", async (req, res) => {
+  app.delete("/api/users/:id/hard-delete", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
@@ -1027,11 +1055,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Dashboard statistics endpoint
-  app.get("/api/dashboard/stats", async (req, res) => {
+  app.get("/api/dashboard/stats", requireAuthentication, async (req, res) => {
     try {
-      console.log("Fetching dashboard statistics...");
-      const userRole = req.headers['x-user-role'];
-      const userCompanyId = parseInt(req.headers['x-user-company-id'] as string);
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
       
       let stats;
       
@@ -2046,7 +2073,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Invoice preview (no creation, just calculation)
-  app.post("/api/invoices/preview", async (req, res) => {
+  app.post("/api/invoices/preview", requireAuthentication, async (req, res) => {
     try {
       const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
       
@@ -2176,7 +2203,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create monthly invoice for customer - consolidates selected or all unbilled work
-  app.post("/api/invoices/monthly", async (req, res) => {
+  app.post("/api/invoices/monthly", requireAuthentication, async (req, res) => {
     try {
       const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
       
@@ -2535,7 +2562,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/customers/:id", async (req, res) => {
+  app.patch("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customerData = insertCustomerSchema.partial().parse(req.body);
@@ -2701,10 +2728,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Parts routes
   // Get popular parts (frequently used) - this must come before /api/parts/:id
-  app.get("/api/parts/popular", async (req, res) => {
+  app.get("/api/parts/popular", requireAuthentication, async (req, res) => {
     try {
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      const companyId = req.authenticatedUserCompanyId || 1;
       const limit = parseInt(req.query.limit as string) || 10;
       const popularParts = await storage.getPopularParts(companyId, limit);
       res.json(popularParts);
@@ -2745,12 +2771,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/parts", async (req, res) => {
+  app.post("/api/parts", requireAuthentication, async (req, res) => {
     try {
-      const partData = insertPartSchema.parse(req.body);
+      const userRole = req.authenticatedUserRole;
+      const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
+      if (!allowedRoles.includes(userRole)) {
+        return res.status(403).json({ message: "Access denied. You don't have permission to create parts." });
+      }
+
+      const rawData = req.body;
+      const processedData = {
+        ...rawData,
+        price: rawData.price !== undefined ? Number(rawData.price).toFixed(2) : undefined,
+        cost: rawData.cost !== undefined && rawData.cost !== "" ? Number(rawData.cost).toFixed(2) : undefined,
+        companyId: req.authenticatedUserCompanyId || rawData.companyId,
+      };
+
+      const partData = insertPartSchema.parse(processedData);
       const part = await storage.createPart(partData);
       res.status(201).json(part);
     } catch (error) {
+      console.error("Error creating part:", error instanceof Error ? error.message : error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid part data", errors: error.errors });
       }
@@ -3128,9 +3169,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             partData.sku = `${categoryPrefix}-${namePrefix}-${Date.now().toString().slice(-6)}`;
           }
 
-          // Add required fields for part creation - get company ID from request headers
-          const userCompanyId = req.headers['x-user-company-id'];
-          partData.companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+          partData.companyId = req.authenticatedUserCompanyId || 1;
           partData.price = partData.price?.toString() || "0";
           
           // Set default category if not provided
@@ -3211,17 +3250,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Track part usage (called when a part is used in work order or billing sheet)
-  app.post("/api/parts/:id/track-usage", async (req, res) => {
+  app.post("/api/parts/:id/track-usage", requireAuthentication, async (req, res) => {
     try {
       const partId = parseInt(req.params.id);
-      
-      // Validate part ID is a valid number
       if (isNaN(partId) || partId <= 0) {
         return res.status(400).json({ message: "Invalid part ID" });
       }
-      
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      const companyId = req.authenticatedUserCompanyId || 1;
       await storage.trackPartUsage(companyId, partId);
       res.json({ message: "Part usage tracked successfully" });
     } catch (error) {
@@ -3229,69 +3264,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/parts/:id", async (req, res) => {
+  app.delete("/api/parts/:id", requireAuthentication, async (req, res) => {
     try {
+      const userRole = req.authenticatedUserRole;
+      const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
+      if (!allowedRoles.includes(userRole)) {
+        return res.status(403).json({ message: "Access denied. You don't have permission to delete parts." });
+      }
+
       const id = parseInt(req.params.id);
-      
-      // Validate part ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid part ID" });
       }
-      
+
+      const existingPart = await storage.getPart(id);
+      if (!existingPart) {
+        return res.status(404).json({ message: "Part not found" });
+      }
+
+      const authenticatedCompanyId = req.authenticatedUserCompanyId;
+      if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
+        return res.status(403).json({ message: "Access denied. You can only delete parts from your company." });
+      }
+
       const success = await storage.deletePart(id);
       if (!success) {
         return res.status(404).json({ message: "Part not found" });
       }
       res.json({ message: "Part deleted successfully" });
     } catch (error) {
+      console.error("Error deleting part:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to delete part" });
     }
   });
 
   // Assembly routes
-  app.get("/api/assemblies", async (req, res) => {
+  app.get("/api/assemblies", requireAuthentication, async (req, res) => {
     try {
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
+      const companyId = req.authenticatedUserCompanyId || 1;
       const assemblies = await storage.getAssemblies(companyId);
       res.json(assemblies);
     } catch (error) {
+      console.error("Error fetching assemblies:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to fetch assemblies" });
     }
   });
 
-  app.get("/api/assemblies/:id", async (req, res) => {
+  app.get("/api/assemblies/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      
-      // Validate assembly ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid assembly ID" });
       }
-      
       const assembly = await storage.getAssembly(id);
       if (!assembly) {
         return res.status(404).json({ message: "Assembly not found" });
       }
       res.json(assembly);
     } catch (error) {
+      console.error("Error fetching assembly:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to fetch assembly" });
     }
   });
 
-  app.post("/api/assemblies", async (req, res) => {
+  app.post("/api/assemblies", requireAuthentication, async (req, res) => {
     try {
-      const { assembly: assemblyData, parts: partsData } = req.body;
-      
-      // Validate assembly data
-      const validatedAssembly = insertAssemblySchema.parse(assemblyData);
-      
-      // Validate parts data
-      const validatedParts = z.array(insertAssemblyPartSchema.omit({ assemblyId: true })).parse(partsData);
-      
-      const assembly = await storage.createAssembly(validatedAssembly, validatedParts);
-      res.status(201).json(assembly);
+      const { assembly, parts } = req.body;
+      const assemblyData = insertAssemblySchema.parse({
+        ...assembly,
+        companyId: req.authenticatedUserCompanyId || assembly.companyId || 1,
+        createdBy: req.authenticatedUserId || assembly.createdBy || 1,
+      });
+      const partsData = parts.map((p: any) => insertAssemblyPartSchema.parse(p));
+      const createdAssembly = await storage.createAssembly(assemblyData, partsData);
+      res.status(201).json(createdAssembly);
     } catch (error) {
+      console.error("Error creating assembly:", error instanceof Error ? error.message : error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
       }
@@ -3299,32 +3347,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/assemblies/:id", async (req, res) => {
+  app.put("/api/assemblies/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      
-      // Validate assembly ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid assembly ID" });
       }
-      
-      const { assembly: assemblyData, parts: partsData } = req.body;
-      
-      // Validate assembly data (partial update)
-      const validatedAssembly = insertAssemblySchema.partial().parse(assemblyData);
-      
-      // Validate parts data if provided
-      let validatedParts;
-      if (partsData) {
-        validatedParts = z.array(insertAssemblyPartSchema.omit({ assemblyId: true })).parse(partsData);
-      }
-      
-      const assembly = await storage.updateAssembly(id, validatedAssembly, validatedParts);
-      if (!assembly) {
+      const { assembly, parts } = req.body;
+      const assemblyData = insertAssemblySchema.partial().parse(assembly);
+      const partsData = parts ? parts.map((p: any) => insertAssemblyPartSchema.parse(p)) : undefined;
+      const updatedAssembly = await storage.updateAssembly(id, assemblyData, partsData);
+      if (!updatedAssembly) {
         return res.status(404).json({ message: "Assembly not found" });
       }
-      res.json(assembly);
+      res.json(updatedAssembly);
     } catch (error) {
+      console.error("Error updating assembly:", error instanceof Error ? error.message : error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
       }
@@ -3332,39 +3370,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/assemblies/:id", async (req, res) => {
+  app.delete("/api/assemblies/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      
-      // Validate assembly ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid assembly ID" });
       }
-      
       const success = await storage.deleteAssembly(id);
       if (!success) {
         return res.status(404).json({ message: "Assembly not found" });
       }
       res.json({ message: "Assembly deleted successfully" });
     } catch (error) {
+      console.error("Error deleting assembly:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to delete assembly" });
     }
   });
 
-  app.post("/api/assemblies/:id/track-usage", async (req, res) => {
+  app.post("/api/assemblies/:id/track-usage", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
-      
+      const companyId = req.authenticatedUserCompanyId || 1;
       await storage.trackAssemblyUsage(companyId, id);
       res.json({ message: "Assembly usage tracked successfully" });
     } catch (error) {
+      console.error("Error tracking assembly usage:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to track assembly usage" });
     }
   });
 
-  app.post("/api/parts/import/google-sheets", async (req, res) => {
+  app.post("/api/parts/import/google-sheets", requireAuthentication, async (req, res) => {
     try {
       const { sheetsUrl } = req.body;
       if (!sheetsUrl) {
@@ -3474,7 +3509,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Google Docs sync
-  app.post("/api/parts/sync-google-docs", async (req, res) => {
+  app.post("/api/parts/sync-google-docs", requireAuthentication, async (req, res) => {
     try {
       const { docUrl } = req.body;
       if (!docUrl) {
@@ -3487,112 +3522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Assembly routes - parts assemblies management
-  app.get("/api/assemblies", async (req, res) => {
-    try {
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
-      const assemblies = await storage.getAssemblies(companyId);
-      res.json(assemblies);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch assemblies" });
-    }
-  });
-
-  app.get("/api/assemblies/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      // Validate assembly ID is a valid number
-      if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assembly ID" });
-      }
-      
-      const assembly = await storage.getAssembly(id);
-      if (!assembly) {
-        return res.status(404).json({ message: "Assembly not found" });
-      }
-      res.json(assembly);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch assembly" });
-    }
-  });
-
-  app.post("/api/assemblies", async (req, res) => {
-    try {
-      const { assembly, parts } = req.body;
-      const userCompanyId = req.headers['x-user-company-id'];
-      const userId = req.headers['x-user-id'];
-      
-      const assemblyData = insertAssemblySchema.parse({
-        ...assembly,
-        companyId: userCompanyId ? parseInt(userCompanyId as string) : 1,
-        createdBy: userId ? parseInt(userId as string) : 1,
-      });
-      
-      const partsData = parts.map((p: any) => insertAssemblyPartSchema.parse(p));
-      const createdAssembly = await storage.createAssembly(assemblyData, partsData);
-      res.status(201).json(createdAssembly);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to create assembly" });
-    }
-  });
-
-  app.put("/api/assemblies/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { assembly, parts } = req.body;
-      
-      const assemblyData = insertAssemblySchema.partial().parse(assembly);
-      const partsData = parts ? parts.map((p: any) => insertAssemblyPartSchema.parse(p)) : undefined;
-      
-      const updatedAssembly = await storage.updateAssembly(id, assemblyData, partsData);
-      if (!updatedAssembly) {
-        return res.status(404).json({ message: "Assembly not found" });
-      }
-      res.json(updatedAssembly);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to update assembly" });
-    }
-  });
-
-  app.delete("/api/assemblies/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      // Validate assembly ID is a valid number
-      if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assembly ID" });
-      }
-      
-      const success = await storage.deleteAssembly(id);
-      if (!success) {
-        return res.status(404).json({ message: "Assembly not found" });
-      }
-      res.json({ message: "Assembly deleted successfully" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete assembly" });
-    }
-  });
-
-  // Track assembly usage (called when an assembly is used in work order or billing sheet)
-  app.post("/api/assemblies/:id/track-usage", async (req, res) => {
-    try {
-      const assemblyId = parseInt(req.params.id);
-      const userCompanyId = req.headers['x-user-company-id'];
-      const companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
-      await storage.trackAssemblyUsage(companyId, assemblyId);
-      res.json({ message: "Assembly usage tracked successfully" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to track assembly usage" });
-    }
-  });
+  // Duplicate assembly routes removed - consolidated above in Assembly routes section
 
   // Estimate routes
   app.get("/api/estimates", async (req, res) => {
@@ -3627,9 +3557,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/estimates", async (req, res) => {
+  app.post("/api/estimates", requireAuthentication, async (req, res) => {
     try {
-      console.log("Received estimate data:", JSON.stringify(req.body, null, 2));
       const parsed = createEstimateWithZonesSchema.parse(req.body);
       
       // Process zones and items first to calculate totals
@@ -3709,14 +3638,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/estimates/:id", async (req, res) => {
+  app.put("/api/estimates/:id", requireAuthentication, async (req, res) => {
     try {
       const estimateId = parseInt(req.params.id);
       if (isNaN(estimateId)) {
         return res.status(400).json({ message: "Invalid estimate ID" });
       }
-
-      console.log("Updating estimate data:", JSON.stringify(req.body, null, 2));
       const parsed = createEstimateWithZonesSchema.parse(req.body);
       
       // Process zones and items first to calculate totals
@@ -3798,7 +3725,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
 
-  app.delete("/api/estimates/:id", async (req, res) => {
+  app.delete("/api/estimates/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const success = await storage.deleteEstimate(id);
@@ -3807,12 +3734,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ message: "Estimate deleted successfully" });
     } catch (error) {
+      console.error("Error deleting estimate:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to delete estimate" });
     }
   });
 
   // Email estimate
-  app.post("/api/estimates/:id/email", async (req, res) => {
+  app.post("/api/estimates/:id/email", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
@@ -3851,7 +3779,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/property-zones", async (req, res) => {
+  app.post("/api/property-zones", requireAuthentication, async (req, res) => {
     try {
       const propertyZoneData = insertPropertyZoneSchema.parse(req.body);
       const propertyZone = await storage.createPropertyZone(propertyZoneData);
@@ -3864,7 +3792,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/property-zones/sync-google-sheets", async (req, res) => {
+  app.post("/api/property-zones/sync-google-sheets", requireAuthentication, async (req, res) => {
     try {
       const { sheetsUrl } = req.body;
       if (!sheetsUrl) {
@@ -3900,7 +3828,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/field-work-sessions", async (req, res) => {
+  app.post("/api/field-work-sessions", requireAuthentication, async (req, res) => {
     try {
       const sessionData = insertFieldWorkSessionSchema.parse(req.body);
       const session = await storage.createFieldWorkSession(sessionData);
@@ -3913,7 +3841,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/field-work-sessions/:id/complete", async (req, res) => {
+  app.post("/api/field-work-sessions/:id/complete", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const session = await storage.completeFieldWorkSession(id);
@@ -3926,7 +3854,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/field-work-sessions/:sessionId/items", async (req, res) => {
+  app.post("/api/field-work-sessions/:sessionId/items", requireAuthentication, async (req, res) => {
     try {
       const sessionId = parseInt(req.params.sessionId);
       const itemData = insertFieldWorkItemSchema.parse(req.body);
@@ -4621,7 +4549,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // QuickBooks Parts Sync - Only irrigation-related items
-  app.post('/api/quickbooks/sync-parts', async (req, res) => {
+  app.post('/api/quickbooks/sync-parts', requireAuthentication, async (req, res) => {
     try {
       
       const integration = await storage.getQuickBooksIntegration();
@@ -4682,7 +4610,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             sku: item.Sku || item.Name || `QB-${item.Id}`,
             description: item.Description || '',
             price: (item.UnitPrice || 0).toString(),
-            companyId: req.headers['x-user-company-id'] ? parseInt(req.headers['x-user-company-id'] as string) : 1,
+            companyId: req.authenticatedUserCompanyId || 1,
             quickbooksId: item.Id
           };
 
@@ -4926,7 +4854,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Send approval email to customer
-  app.post("/api/estimates/:id/send-approval-email", async (req, res) => {
+  app.post("/api/estimates/:id/send-approval-email", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
@@ -5158,7 +5086,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Convert estimate to work order
-  app.post("/api/estimates/:id/convert-to-work-order", async (req, res) => {
+  app.post("/api/estimates/:id/convert-to-work-order", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -5298,7 +5226,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Work order completion route
-  app.post("/api/work-orders/complete", async (req, res) => {
+  app.post("/api/work-orders/complete", requireAuthentication, async (req, res) => {
     try {
       const {
         workOrderId,
@@ -5311,9 +5239,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalPartsCost
       } = req.body;
 
-      // Get current user from headers
-      const completedByUserId = req.headers['x-user-id'];
-      const completedByUserName = req.headers['x-user-name'];
+      const completedByUserId = req.authenticatedUserId;
+      const completedByUser = await storage.getUser(completedByUserId);
+      const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
 
       // Calculate totals
       const laborRate = 45; // Default labor rate per hour
@@ -5334,7 +5262,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const workOrder = await storage.updateWorkOrder(workOrderId, {
         status: 'completed',
         completedAt: new Date(completedAt),
-        completedByUserId: completedByUserId ? parseInt(completedByUserId as string) : undefined,
+        completedByUserId: completedByUserId || undefined,
         completedByUserName: completedByUserName as string,
         workSummary,
         customerNotes,
@@ -5360,7 +5288,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             partPrice: partDetails.price,
             quantity: part.quantity,
             totalPrice: part.totalCost,
-            laborHours: partDetails.laborHours || "0"
+            laborHours: "0"
           });
         }
       }
@@ -5387,18 +5315,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/work-orders/:id/complete", async (req, res) => {
+  app.post("/api/work-orders/:id/complete", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
-      // Get current user from headers
-      const completedByUserId = req.headers['x-user-id'];
-      const completedByUserName = req.headers['x-user-name'];
+      const completedByUserId = req.authenticatedUserId;
+      const completedByUser = await storage.getUser(completedByUserId);
+      const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
       
       const workOrder = await storage.updateWorkOrder(id, { 
         status: "completed", 
         completedAt: new Date(),
-        completedByUserId: completedByUserId ? parseInt(completedByUserId as string) : undefined,
+        completedByUserId: completedByUserId || undefined,
         completedByUserName: completedByUserName as string
       });
       if (!workOrder) {
