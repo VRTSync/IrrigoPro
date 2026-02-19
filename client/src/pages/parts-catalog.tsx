@@ -64,12 +64,11 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   const form = useForm<z.infer<typeof PartFormSchema>>({
     resolver: zodResolver(PartFormSchema),
     defaultValues: {
-      companyId: 1, // Default company ID
+      companyId: 1,
       name: "",
       description: "",
       price: "0.00",
       cost: "",
-      laborHours: "1.00",
       sku: "",
       category: "",
       material: "",
@@ -90,7 +89,6 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
         description: part.description || "",
         price: part.price?.toString() || "0.00",
         cost: part.cost?.toString() || "",
-        laborHours: part.laborHours?.toString() || "1.00",
         sku: part.sku || "",
         category: part.category || "",
         material: part.material || "",
@@ -108,7 +106,6 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
         description: "",
         price: "0.00",
         cost: "",
-        laborHours: "1.00",
         sku: "",
         category: "",
         material: "",
@@ -373,20 +370,9 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 )}
               />
               
-              <FormField
-                control={form.control}
-                name="price"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Price ($) *</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="number" step="any" min="0" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
                 name="cost"
@@ -403,10 +389,10 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
               
               <FormField
                 control={form.control}
-                name="laborHours"
+                name="price"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Labor Hours *</FormLabel>
+                    <FormLabel>Price ($) *</FormLabel>
                     <FormControl>
                       <Input {...field} type="number" step="any" min="0" />
                     </FormControl>
@@ -670,9 +656,7 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
 
     selectedParts.forEach(sp => {
       const partPrice = parseFloat(sp.part.price.toString());
-      const partLabor = parseFloat(sp.part.laborHours.toString());
       totalPrice += partPrice * sp.quantity;
-      totalLaborHours += partLabor * sp.quantity;
     });
 
     return { totalPrice, totalLaborHours };
@@ -856,7 +840,7 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
                       <div className="flex-1">
                         <div className="font-medium text-sm">{part.name}</div>
                         <div className="text-xs text-muted-foreground">
-                          {part.category} • ${parseFloat(part.price.toString()).toFixed(2)} • {parseFloat(part.laborHours.toString()).toFixed(1)}h labor
+                          {part.category} • ${parseFloat(part.price.toString()).toFixed(2)}
                         </div>
                         {part.brand && (
                           <div className="text-xs text-blue-600 mt-1">{part.brand}</div>
@@ -1199,7 +1183,6 @@ export default function PartsCatalog() {
                             <TableHead className="font-semibold text-white text-sm py-2">Description</TableHead>
                             <TableHead className="font-semibold text-white text-sm py-2 text-right">Cost</TableHead>
                             <TableHead className="font-semibold text-white text-sm py-2 text-right">Price</TableHead>
-                            <TableHead className="font-semibold text-white text-sm py-2 text-center">Labor</TableHead>
                             <TableHead className="font-semibold text-white text-sm py-2 text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1236,14 +1219,6 @@ export default function PartsCatalog() {
                                   <DollarSign className="h-3 w-3 text-green-600" />
                                   <span className="font-semibold text-sm text-green-700 dark:text-green-400">
                                     {formatCurrency(part.price)}
-                                  </span>
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-3 text-center">
-                                <div className="flex items-center justify-center gap-1">
-                                  <Clock className="h-3 w-3 text-blue-600" />
-                                  <span className="font-medium text-xs text-blue-700 dark:text-blue-400">
-                                    {part.laborHours}h
                                   </span>
                                 </div>
                               </TableCell>
@@ -1334,26 +1309,18 @@ export default function PartsCatalog() {
                         )}
                         
                         <div className="flex justify-between items-center pt-2 border-t border-muted/30">
-                          <div className="flex flex-col gap-1">
-                            {part.cost && (
-                              <div className="flex items-center gap-2">
-                                <DollarSign className="h-4 w-4 text-orange-600" />
-                                <span className="text-sm text-orange-700 dark:text-orange-400">
-                                  Cost: {formatCurrency(part.cost)}
-                                </span>
-                              </div>
-                            )}
+                          {part.cost && (
                             <div className="flex items-center gap-2">
-                              <DollarSign className="h-4 w-4 text-green-600" />
-                              <span className="font-semibold text-green-700 dark:text-green-400 text-base">
-                                Price: {formatCurrency(part.price)}
+                              <DollarSign className="h-4 w-4 text-orange-600" />
+                              <span className="text-sm text-orange-700 dark:text-orange-400">
+                                Cost: {formatCurrency(part.cost)}
                               </span>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-4 w-4 text-blue-600" />
-                            <span className="font-medium text-blue-700 dark:text-blue-400">
-                              {part.laborHours}h
+                          )}
+                          <div className="flex items-center gap-2">
+                            <DollarSign className="h-4 w-4 text-green-600" />
+                            <span className="font-semibold text-green-700 dark:text-green-400 text-base">
+                              Price: {formatCurrency(part.price)}
                             </span>
                           </div>
                         </div>

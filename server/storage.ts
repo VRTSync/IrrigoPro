@@ -784,10 +784,8 @@ export class DatabaseStorage implements IStorage {
       if (part) {
         const quantity = parseFloat(assemblyPart.quantity.toString());
         const partPrice = parseFloat(part.price.toString());
-        const partLaborHours = parseFloat(part.laborHours.toString());
         
         totalPrice += partPrice * quantity;
-        totalLaborHours += partLaborHours * quantity;
       }
     }
 
@@ -828,10 +826,8 @@ export class DatabaseStorage implements IStorage {
         if (part) {
           const quantity = parseFloat(assemblyPart.quantity.toString());
           const partPrice = parseFloat(part.price.toString());
-          const partLaborHours = parseFloat(part.laborHours.toString());
           
           totalPrice += partPrice * quantity;
-          totalLaborHours += partLaborHours * quantity;
         }
       }
 
@@ -2444,7 +2440,6 @@ export class DatabaseStorage implements IStorage {
       sku: parts.sku,
       category: parts.category,
       price: parts.price,
-      laborHours: parts.laborHours,
       usageCount: partUsage.usageCount
     })
     .from(parts)

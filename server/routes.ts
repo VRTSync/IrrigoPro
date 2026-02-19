@@ -2860,7 +2860,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...rawData,
           price: rawData.price !== undefined ? Number(rawData.price).toFixed(2) : undefined,
           cost: rawData.cost !== undefined ? Number(rawData.cost).toFixed(2) : undefined,
-          laborHours: rawData.laborHours !== undefined ? Number(rawData.laborHours).toFixed(2) : undefined,
         };
         
         // Use the authenticated user's company ID instead of form data
@@ -3119,9 +3118,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               case 'sku':
                 partData.sku = value || null;
                 break;
-              case 'laborHours':
-                partData.laborHours = value ? parseFloat(value) : 0.25;
-                break;
             }
           });
 
@@ -3132,16 +3128,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             partData.sku = `${categoryPrefix}-${namePrefix}-${Date.now().toString().slice(-6)}`;
           }
 
-          // Set default labor hours
-          if (!partData.laborHours) {
-            partData.laborHours = 0.25; // Default 15 minutes
-          }
-
           // Add required fields for part creation - get company ID from request headers
           const userCompanyId = req.headers['x-user-company-id'];
           partData.companyId = userCompanyId ? parseInt(userCompanyId as string) : 1;
           partData.price = partData.price?.toString() || "0";
-          partData.laborHours = partData.laborHours?.toString() || "0.25";
           
           // Set default category if not provided
           if (!partData.category) {
@@ -3449,7 +3439,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const sku = (skuField ? rowData[skuField] : rowData.sku) || `AUTO-${Date.now()}-${i}`;
           const description = (descField ? rowData[descField] : rowData.description) || '';
           const category = (categoryField ? rowData[categoryField] : rowData.category) || 'General';
-          const laborHours = (laborField ? rowData[laborField] : rowData.laborhours) || '0.5';
 
           // Validate required fields
           if (!name || !price) {
@@ -3462,7 +3451,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             name: name.trim(),
             description: description.trim(),
             price: price.toString(),
-            laborHours: laborHours.toString(),
             sku: sku.trim(),
             category: category.trim(),
           };
@@ -3652,7 +3640,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const partData = (item as any).part;
           const quantity = (item as any).quantity || 1;
           const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
-          const laborHours = parseFloat(String(partData?.laborHours || item.laborHours || 0));
+          const laborHours = parseFloat(String(item.laborHours || 0));
           return {
             partId: partData?.id || item.partId,
             partName: partData?.name || item.partName || '',
@@ -3739,7 +3727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const partData = (item as any).part;
           const quantity = (item as any).quantity || 1;
           const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
-          const laborHours = parseFloat(String(partData?.laborHours || item.laborHours || 0));
+          const laborHours = parseFloat(String(item.laborHours || 0));
           return {
             partId: partData?.id || item.partId,
             partName: partData?.name || item.partName || '',
@@ -3962,8 +3950,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: part.name,
         description: part.description,
         sku: part.sku,
-        category: part.category,
-        laborHours: part.laborHours
+        category: part.category
         // price is intentionally excluded
       }));
       res.json(fieldTechParts);
@@ -4695,8 +4682,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             sku: item.Sku || item.Name || `QB-${item.Id}`,
             description: item.Description || '',
             price: (item.UnitPrice || 0).toString(),
-            laborHours: 1.0, // Default labor hours
-            companyId: req.headers['x-user-company-id'] ? parseInt(req.headers['x-user-company-id'] as string) : 1, // Use actual company ID from user session
+            companyId: req.headers['x-user-company-id'] ? parseInt(req.headers['x-user-company-id'] as string) : 1,
             quickbooksId: item.Id
           };
 

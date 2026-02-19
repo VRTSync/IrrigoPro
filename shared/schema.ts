@@ -159,7 +159,6 @@ export const parts = pgTable("parts", {
   description: text("description"),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   cost: decimal("cost", { precision: 10, scale: 2 }),
-  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
   sku: text("sku").notNull(),
   // Enhanced categorization based on your irrigation parts structure
   category: text("category").notNull(), // Main category: Backflow, Bushing, Controller, etc.
@@ -560,10 +559,6 @@ export const insertPartSchema = createInsertSchema(parts).omit({
     const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]/g, '')) : val;
     return isNaN(num) ? null : num;
   }).optional(),
-  laborHours: z.union([z.string(), z.number()]).transform(val => {
-    const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]/g, '')) : val;
-    return isNaN(num) ? 1.0 : num;
-  }),
 });
 export const insertAssemblySchema = createInsertSchema(assemblies).omit({ 
   id: true, 

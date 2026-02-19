@@ -16,7 +16,6 @@ interface PartWithoutPrice {
   description: string;
   sku: string;
   category: string;
-  laborHours: string;
 }
 
 export function PartsListManager({ onBack }: PartsListManagerProps) {
@@ -112,15 +111,9 @@ export function PartsListManager({ onBack }: PartsListManagerProps) {
                   {part.description || 'No description available'}
                 </p>
                 
-                <div className="flex justify-between items-end">
-                  <div>
-                    <p className="text-xs text-gray-500">SKU</p>
-                    <p className="text-sm font-medium text-gray-900">{part.sku}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-500">Labor Hours</p>
-                    <p className="text-sm font-medium text-gray-900">{part.laborHours}h</p>
-                  </div>
+                <div>
+                  <p className="text-xs text-gray-500">SKU</p>
+                  <p className="text-sm font-medium text-gray-900">{part.sku}</p>
                 </div>
               </CardContent>
             </Card>
