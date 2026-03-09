@@ -293,7 +293,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         )}
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-1">

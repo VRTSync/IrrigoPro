@@ -450,7 +450,7 @@ export function StandaloneBillingSheet({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent 
-        className="w-[95vw] max-w-4xl h-[95vh] max-h-[95vh] overflow-hidden p-0 flex flex-col"
+        className="w-screen h-screen sm:w-[95vw] sm:max-w-4xl sm:h-[95vh] sm:max-h-[95vh] sm:rounded-lg overflow-hidden p-0 flex flex-col m-0 sm:m-auto"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <DialogHeader className="p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
@@ -478,7 +478,7 @@ export function StandaloneBillingSheet({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
           <Form {...form}>
             <form id="billing-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
               {showReview ? (
@@ -833,7 +833,8 @@ export function StandaloneBillingSheet({
                                 <FormControl>
                                   <Input 
                                     {...field} 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.25" 
                                     min="0" 
                                     placeholder="0.00"
@@ -854,7 +855,8 @@ export function StandaloneBillingSheet({
                                   <FormControl>
                                     <Input 
                                       {...field} 
-                                      type="number" 
+                                      type="number"
+                                      inputMode="decimal"
                                       step="0.01" 
                                       min="0" 
                                       placeholder="45.00"
@@ -987,7 +989,7 @@ export function StandaloneBillingSheet({
                                 />
                               </div>
                               
-                              <div className="max-h-48 overflow-y-auto">
+                              <div>
                                 {(filteredParts?.length ?? 0) > 0 ? (
                                   <div className="divide-y">
                                     {filteredParts!.map((part) => {
@@ -1019,12 +1021,11 @@ export function StandaloneBillingSheet({
                                             
                                             <Button
                                               type="button"
-                                              size="sm"
                                               onClick={() => addPart(part, 1)}
-                                              className="bg-blue-600 hover:bg-blue-700 text-white h-8 w-8 p-0"
+                                              className="bg-blue-600 hover:bg-blue-700 text-white h-11 w-11 p-0 flex-shrink-0"
                                               title="Add part"
                                             >
-                                              <Plus className="w-4 h-4" />
+                                              <Plus className="w-5 h-5" />
                                             </Button>
                                           </div>
                                         </div>
@@ -1147,7 +1148,8 @@ export function StandaloneBillingSheet({
                                             <FormControl>
                                               <Input 
                                                 {...field} 
-                                                type="number" 
+                                                type="number"
+                                                inputMode="decimal"
                                                 step="0.01" 
                                                 min="0" 
                                                 placeholder="0.00"
@@ -1169,7 +1171,8 @@ export function StandaloneBillingSheet({
                                               <FormControl>
                                                 <Input 
                                                   {...field} 
-                                                  type="number" 
+                                                  type="number"
+                                                  inputMode="decimal"
                                                   step="0.01" 
                                                   min="0" 
                                                   placeholder="0.00"
@@ -1195,7 +1198,8 @@ export function StandaloneBillingSheet({
                                           <FormControl>
                                             <Input 
                                               {...field} 
-                                              type="number" 
+                                              type="number"
+                                              inputMode="decimal"
                                               step="0.25" 
                                               min="0" 
                                               placeholder="0.00"

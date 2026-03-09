@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -48,6 +48,7 @@ const billingSheetSchema = z.object({
   finishedPhoto: z.string().optional(),
   actualStartTime: z.string(),
   actualEndTime: z.string(),
+  laborRate: z.number().min(0, "Labor rate must be 0 or greater").default(0),
   materialItems: z.array(billingItemSchema),
   laborItems: z.array(billingItemSchema),
   additionalCharges: z.array(billingItemSchema),
@@ -64,6 +65,8 @@ interface BillingSheetProps {
 
 export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const arrivalPhotoRef = useRef<HTMLInputElement>(null);
+  const finishedPhotoRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -79,6 +82,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
       finishedPhoto: "",
       actualStartTime: workOrder.startedAt ? new Date(workOrder.startedAt).toISOString().slice(0, 16) : "",
       actualEndTime: workOrder.completedAt ? new Date(workOrder.completedAt).toISOString().slice(0, 16) : "",
+      laborRate: 0,
       materialItems: [{ description: "", quantity: 1, unitPrice: 0, laborHours: 0, notes: "" }],
       laborItems: [{ description: "", quantity: 1, unitPrice: 0, laborHours: 0, notes: "" }],
       additionalCharges: [],
@@ -176,7 +180,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header with Logo */}
       <Card className="bg-white shadow-sm">
         <CardHeader className="pb-4">
@@ -277,6 +281,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               <span className="absolute left-3 top-3 text-gray-500">$</span>
                               <Input 
                                 type="number"
+                                inputMode="decimal"
                                 step="0.01"
                                 {...field}
                                 onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -310,12 +315,19 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                           <FormItem>
                             <FormLabel className="font-semibold">Arrival Picture</FormLabel>
                             <FormControl>
-                              <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
-                                <Camera className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                <p className="text-sm text-gray-500">Click to upload arrival photo</p>
-                                <Input 
+                              <div 
+                                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors min-h-[80px] flex flex-col items-center justify-center"
+                                onClick={() => arrivalPhotoRef.current?.click()}
+                              >
+                                <Camera className="w-8 h-8 text-gray-400 mb-2" />
+                                <p className="text-sm text-gray-500">
+                                  {field.value ? field.value : "Tap to take or upload photo"}
+                                </p>
+                                <input 
+                                  ref={arrivalPhotoRef}
                                   type="file" 
                                   accept="image/*"
+                                  capture="environment"
                                   className="hidden"
                                   onChange={(e) => {
                                     const file = e.target.files?.[0];
@@ -340,12 +352,19 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                           <FormItem>
                             <FormLabel className="font-semibold">Finished Photo</FormLabel>
                             <FormControl>
-                              <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
-                                <Camera className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                <p className="text-sm text-gray-500">Click to upload finished photo</p>
-                                <Input 
+                              <div 
+                                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors min-h-[80px] flex flex-col items-center justify-center"
+                                onClick={() => finishedPhotoRef.current?.click()}
+                              >
+                                <Camera className="w-8 h-8 text-gray-400 mb-2" />
+                                <p className="text-sm text-gray-500">
+                                  {field.value ? field.value : "Tap to take or upload photo"}
+                                </p>
+                                <input 
+                                  ref={finishedPhotoRef}
                                   type="file" 
                                   accept="image/*"
+                                  capture="environment"
                                   className="hidden"
                                   onChange={(e) => {
                                     const file = e.target.files?.[0];
@@ -409,7 +428,8 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                           <FormLabel>Labor Rate ($/hour)</FormLabel>
                           <FormControl>
                             <Input 
-                              type="number" 
+                              type="number"
+                              inputMode="decimal"
                               step="0.01" 
                               {...field}
                               onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -445,14 +465,14 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                 <CardContent>
                   <div className="space-y-4">
                     {materialFields.map((field, index) => (
-                      <div key={field.id} className="grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-lg">
-                        <div className="md:col-span-2">
+                      <div key={field.id} className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
+                        <div className="flex items-start justify-between gap-2">
                           <FormField
                             control={form.control}
                             name={`materialItems.${index}.description`}
                             render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Description</FormLabel>
+                              <FormItem className="flex-1">
+                                <FormLabel className="text-xs font-medium text-gray-600">Description</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Material description" {...field} />
                                 </FormControl>
@@ -460,17 +480,26 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => removeMaterial(index)}
+                            className="text-red-600 hover:text-red-700 h-11 w-11 p-0 flex-shrink-0 mt-5"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </Button>
                         </div>
-                        <div>
+                        <div className="grid grid-cols-3 gap-2">
                           <FormField
                             control={form.control}
                             name={`materialItems.${index}.quantity`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Qty</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Qty</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -480,17 +509,16 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div>
                           <FormField
                             control={form.control}
                             name={`materialItems.${index}.unitPrice`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Unit Price</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Unit Price</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -500,17 +528,16 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div>
                           <FormField
                             control={form.control}
                             name={`materialItems.${index}.laborHours`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Labor Hours</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Labor Hrs</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -520,17 +547,6 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div className="flex items-end">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => removeMaterial(index)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Minus className="w-4 h-4" />
-                          </Button>
                         </div>
                       </div>
                     ))}
@@ -558,14 +574,14 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                 <CardContent>
                   <div className="space-y-4">
                     {laborFields.map((field, index) => (
-                      <div key={field.id} className="grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-lg">
-                        <div className="md:col-span-2">
+                      <div key={field.id} className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
+                        <div className="flex items-start justify-between gap-2">
                           <FormField
                             control={form.control}
                             name={`laborItems.${index}.description`}
                             render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Service Description</FormLabel>
+                              <FormItem className="flex-1">
+                                <FormLabel className="text-xs font-medium text-gray-600">Service Description</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Labor service description" {...field} />
                                 </FormControl>
@@ -573,17 +589,26 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => removeLabor(index)}
+                            className="text-red-600 hover:text-red-700 h-11 w-11 p-0 flex-shrink-0 mt-5"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </Button>
                         </div>
-                        <div>
+                        <div className="grid grid-cols-3 gap-2">
                           <FormField
                             control={form.control}
                             name={`laborItems.${index}.quantity`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Qty</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Qty</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -593,17 +618,16 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div>
                           <FormField
                             control={form.control}
                             name={`laborItems.${index}.unitPrice`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Unit Price</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Unit Price</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -613,17 +637,16 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div>
                           <FormField
                             control={form.control}
                             name={`laborItems.${index}.laborHours`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Labor Hours</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Labor Hrs</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -633,17 +656,6 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div className="flex items-end">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => removeLabor(index)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Minus className="w-4 h-4" />
-                          </Button>
                         </div>
                       </div>
                     ))}
@@ -671,14 +683,14 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                 <CardContent>
                   <div className="space-y-4">
                     {additionalFields.map((field, index) => (
-                      <div key={field.id} className="grid grid-cols-1 md:grid-cols-5 gap-4 p-4 bg-gray-50 rounded-lg">
-                        <div className="md:col-span-2">
+                      <div key={field.id} className="p-3 bg-gray-50 rounded-lg space-y-3 border border-gray-200">
+                        <div className="flex items-start justify-between gap-2">
                           <FormField
                             control={form.control}
                             name={`additionalCharges.${index}.description`}
                             render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Description</FormLabel>
+                              <FormItem className="flex-1">
+                                <FormLabel className="text-xs font-medium text-gray-600">Description</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Additional charge description" {...field} />
                                 </FormControl>
@@ -686,17 +698,26 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => removeAdditional(index)}
+                            className="text-red-600 hover:text-red-700 h-11 w-11 p-0 flex-shrink-0 mt-5"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </Button>
                         </div>
-                        <div>
+                        <div className="grid grid-cols-2 gap-2">
                           <FormField
                             control={form.control}
                             name={`additionalCharges.${index}.quantity`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Qty</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Qty</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -706,17 +727,16 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div>
                           <FormField
                             control={form.control}
                             name={`additionalCharges.${index}.unitPrice`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Unit Price</FormLabel>
+                                <FormLabel className="text-xs font-medium text-gray-600">Unit Price</FormLabel>
                                 <FormControl>
                                   <Input 
-                                    type="number" 
+                                    type="number"
+                                    inputMode="decimal"
                                     step="0.01" 
                                     {...field}
                                     onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
@@ -726,17 +746,6 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                               </FormItem>
                             )}
                           />
-                        </div>
-                        <div className="flex items-end">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => removeAdditional(index)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Minus className="w-4 h-4" />
-                          </Button>
                         </div>
                       </div>
                     ))}
@@ -823,7 +832,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                 <Button
                   type="submit"
                   disabled={isSubmitting || saveBillingSheet.isPending}
-                  className="bg-primary text-white hover:bg-blue-700"
+                  className="bg-primary text-white hover:bg-blue-700 min-h-[44px] px-6"
                 >
                   {isSubmitting || saveBillingSheet.isPending ? (
                     <>

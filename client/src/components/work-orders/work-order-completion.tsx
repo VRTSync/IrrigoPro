@@ -360,7 +360,7 @@ export function WorkOrderCompletion({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
           {showSummary ? (
             // Summary View
             <div className="space-y-6">
@@ -518,10 +518,10 @@ export function WorkOrderCompletion({
                       <FormControl>
                         <Input
                           type="number"
+                          inputMode="decimal"
                           step="0.1"
                           min="0.1"
                           placeholder="Enter hours (e.g., 2.5)"
-                          className="max-w-xs"
                           {...field}
                           onChange={e => field.onChange(parseFloat(e.target.value))}
                         />
@@ -566,10 +566,10 @@ export function WorkOrderCompletion({
                   <div className="border rounded-lg bg-white">
                     <div className="p-3 border-b bg-gray-50">
                       <h4 className="font-medium text-gray-900">Quick Add Parts</h4>
-                      <p className="text-sm text-gray-600">Click + to add parts directly</p>
+                      <p className="text-sm text-gray-600">Tap + to add parts</p>
                     </div>
                     
-                    <div className="max-h-48 overflow-y-auto">
+                    <div>
                       {filteredParts.length > 0 ? (
                         <div className="divide-y">
                           {filteredParts.map((part) => {
@@ -600,12 +600,11 @@ export function WorkOrderCompletion({
                                   
                                   <Button
                                     type="button"
-                                    size="sm"
                                     onClick={() => addUsedPart(part)}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white h-8 w-8 p-0"
+                                    className="bg-blue-600 hover:bg-blue-700 text-white h-11 w-11 p-0 flex-shrink-0"
                                     title="Add part"
                                   >
-                                    <Plus className="w-4 h-4" />
+                                    <Plus className="w-5 h-5" />
                                   </Button>
                                 </div>
                               </div>
@@ -657,21 +656,19 @@ export function WorkOrderCompletion({
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  size="sm"
                                   onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity - 1)}
-                                  className="border-blue-300 hover:bg-blue-100"
+                                  className="border-blue-300 hover:bg-blue-100 h-11 w-11 p-0"
                                 >
-                                  <Minus className="w-3 h-3" />
+                                  <Minus className="w-4 h-4" />
                                 </Button>
                                 <span className="w-8 text-center font-medium text-blue-800">{usedPart.quantity}</span>
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  size="sm"
                                   onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity + 1)}
-                                  className="border-blue-300 hover:bg-blue-100"
+                                  className="border-blue-300 hover:bg-blue-100 h-11 w-11 p-0"
                                 >
-                                  <Plus className="w-3 h-3" />
+                                  <Plus className="w-4 h-4" />
                                 </Button>
                               </div>
                             </div>
@@ -709,21 +706,19 @@ export function WorkOrderCompletion({
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  size="sm"
                                   onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity - 1)}
-                                  className="border-orange-300 hover:bg-orange-100"
+                                  className="border-orange-300 hover:bg-orange-100 h-11 w-11 p-0"
                                 >
-                                  <Minus className="w-3 h-3" />
+                                  <Minus className="w-4 h-4" />
                                 </Button>
                                 <span className="w-8 text-center font-medium text-orange-800">{usedPart.quantity}</span>
                                 <Button
                                   type="button"
                                   variant="outline"
-                                  size="sm"
                                   onClick={() => updatePartQuantity(usedPart.id, usedPart.quantity + 1)}
-                                  className="border-orange-300 hover:bg-orange-100"
+                                  className="border-orange-300 hover:bg-orange-100 h-11 w-11 p-0"
                                 >
-                                  <Plus className="w-3 h-3" />
+                                  <Plus className="w-4 h-4" />
                                 </Button>
                               </div>
                             </div>
