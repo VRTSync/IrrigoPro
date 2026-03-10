@@ -62,6 +62,26 @@ export function usePushNotifications(userId: number | undefined) {
             'completed'
           );
         }
+        // Show push for estimate approved by customer
+        else if (notification.type === 'estimate_approved') {
+          notificationService.showNotification(notification.title, {
+            body: notification.message,
+            tag: `estimate-approved-${notification.id}`,
+            data: { notificationId: notification.id, type: notification.type }
+          });
+        }
+        // Show push for estimate rejected by customer
+        else if (notification.type === 'estimate_rejected') {
+          notificationService.showNotification(notification.title, {
+            body: notification.message,
+            tag: `estimate-rejected-${notification.id}`,
+            data: { notificationId: notification.id, type: notification.type }
+          });
+        }
+        // Show push for billing sheet submitted
+        else if (notification.type === 'billing_sheet_submitted') {
+          notificationService.showBillingNotification(notification.message, 'submitted');
+        }
         // Show generic notification for other types
         else {
           notificationService.showNotification(notification.title, {

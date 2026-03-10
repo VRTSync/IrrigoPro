@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, X, CheckCircle, Clock, FileText } from "lucide-react";
+import { Bell, X, CheckCircle, Clock, FileText, XCircle, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -75,6 +75,12 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         return <Clock className="h-4 w-4 text-blue-600" />;
       case "work_order_completed":
         return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case "estimate_approved":
+        return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case "estimate_rejected":
+        return <XCircle className="h-4 w-4 text-red-500" />;
+      case "billing_sheet_submitted":
+        return <Receipt className="h-4 w-4 text-orange-600" />;
       case "estimate_pending_approval":
         return <FileText className="h-4 w-4 text-orange-600" />;
       default:
@@ -88,6 +94,12 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         return "bg-blue-50 border-blue-200";
       case "work_order_completed":
         return "bg-green-50 border-green-200";
+      case "estimate_approved":
+        return "bg-green-50 border-green-200";
+      case "estimate_rejected":
+        return "bg-red-50 border-red-200";
+      case "billing_sheet_submitted":
+        return "bg-orange-50 border-orange-200";
       case "estimate_pending_approval":
         return "bg-orange-50 border-orange-200";
       default:

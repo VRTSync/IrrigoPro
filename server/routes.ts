@@ -4989,6 +4989,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         // Continue even if work order creation fails - estimate is still approved
       }
 
+      // Notify company admins that the customer approved the estimate
+      try {
+        const allUsers = await storage.getUsers();
+        const adminUsers = allUsers.filter(u =>
+          u.role === "company_admin" &&
+          u.companyId === estimate.companyId
+        );
+        for (const admin of adminUsers) {
+          await storage.createNotification({
+            userId: admin.id,
+            type: "estimate_approved",
+            title: "Estimate Approved by Customer",
+            message: `Customer approved estimate ${estimate.estimateNumber} for ${estimate.customerName}.${workOrder ? ` Work order ${workOrder.workOrderNumber} has been created.` : ''}`,
+            relatedEntityType: "estimate",
+            relatedEntityId: estimate.id,
+            isRead: false,
+          });
+        }
+      } catch (notifError) {
+        console.error('Failed to send approval notifications:', notifError);
+      }
+
       // Send confirmation email
       const { EmailService } = await import('./email-service');
       await EmailService.sendApprovalConfirmation(
@@ -5049,6 +5071,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvalRespondedAt: new Date(),
         rejectedAt: new Date()
       });
+
+      // Notify company admins and managers that customer rejected the estimate
+      try {
+        const allUsers = await storage.getUsers();
+        const notifyUsers = allUsers.filter(u =>
+          (u.role === "company_admin" || u.role === "irrigation_manager") &&
+          u.companyId === estimate.companyId
+        );
+        for (const user of notifyUsers) {
+          await storage.createNotification({
+            userId: user.id,
+            type: "estimate_rejected",
+            title: "Estimate Rejected by Customer",
+            message: `Customer declined estimate ${estimate.estimateNumber} for ${estimate.customerName}.`,
+            relatedEntityType: "estimate",
+            relatedEntityId: estimate.id,
+            isRead: false,
+          });
+        }
+      } catch (notifError) {
+        console.error('Failed to send rejection notifications:', notifError);
+      }
 
       // Send confirmation email
       const { EmailService } = await import('./email-service');
@@ -5475,7 +5519,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ...cleanData,
         billingNumber
       });
-      
+
+      // Notify irrigation managers and admins that a billing sheet was submitted
+      try {
+        const allUsers = await storage.getUsers();
+        const notifyUsers = allUsers.filter(u =>
+          u.role === "company_admin" || u.role === "irrigation_manager"
+        );
+        for (const user of notifyUsers) {
+          await storage.createNotification({
+            userId: user.id,
+            type: "billing_sheet_submitted",
+            title: "Billing Sheet Submitted",
+            message: `Billing sheet ${billingNumber} for ${cleanData.customerName || 'a customer'} has been submitted${cleanData.technicianName ? ` by ${cleanData.technicianName}` : ''}.`,
+            relatedEntityType: "billing_sheet",
+            relatedEntityId: billingSheet.id,
+            isRead: false,
+          });
+        }
+      } catch (notifError) {
+        console.error('Failed to send billing sheet notifications:', notifError);
+      }
+
       res.json(billingSheet);
     } catch (error) {
       console.error('Error creating billing sheet:', error);
