@@ -186,19 +186,14 @@ export function StandaloneBillingSheet({
         photos: uploadedPhotos.map(photo => photo.url),
       };
       
-      console.log('API payload:', payload);
-      
       try {
         const result = await apiRequest("/api/billing-sheets", "POST", payload);
-        console.log('API success:', result);
         return result;
       } catch (error) {
-        console.error('API request failed:', error);
         throw error;
       }
     },
     onSuccess: () => {
-      console.log('Billing sheet created successfully');
       toast({
         title: "Success",
         description: isFieldTech 
@@ -439,8 +434,7 @@ export function StandaloneBillingSheet({
         }
         return response.json();
       })
-      .then(data => {
-        console.log(`Billing sheet ${isUpdating ? 'updated' : 'created'}:`, data);
+      .then(() => {
         toast({
           title: "Success",
           description: isFieldTech 
@@ -451,7 +445,7 @@ export function StandaloneBillingSheet({
         if (currentUser?.role === 'field_tech' && currentUser?.id) {
           queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
         }
-        handleClose();
+        forceClose();
       })
       .catch(error => {
         console.error('Submission error:', error);
@@ -465,8 +459,6 @@ export function StandaloneBillingSheet({
         setIsSubmitting(false);
       });
     } else {
-      // Go to review screen
-      console.log('Going to review screen');
       setShowReview(true);
     }
   };
@@ -1366,8 +1358,8 @@ export function StandaloneBillingSheet({
               </Button>
               
               <Button
-                type="submit"
-                form="billing-form"
+                type="button"
+                onClick={() => form.handleSubmit(onSubmit, onValidationError)()}
                 disabled={isSubmitting}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
