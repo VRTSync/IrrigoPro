@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Upload, X, Image, FileText, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -22,6 +23,8 @@ export interface UploadedFile {
 
 export function FileUpload({ type, label, accept, multiple = true, files = [], onFilesChange }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightboxName, setLightboxName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -77,8 +80,13 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
     onFilesChange(updatedFiles);
   };
 
-  const openFile = (url: string) => {
-    window.open(url, '_blank');
+  const openFile = (file: UploadedFile) => {
+    if (type === 'photo') {
+      setLightboxUrl(file.url);
+      setLightboxName(file.originalName);
+    } else {
+      window.open(file.url, '_blank');
+    }
   };
 
   return (
@@ -132,7 +140,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => openFile(file.url)}
+                      onClick={() => openFile(file)}
                       className="h-6 w-6 p-0"
                     >
                       <Eye className="w-3 h-3" />
@@ -149,7 +157,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
                   </div>
                 </div>
                 {type === 'photo' && (
-                  <div className="mt-2">
+                  <div className="mt-2 cursor-pointer" onClick={() => openFile(file)}>
                     <img
                       src={file.url}
                       alt={file.originalName}
@@ -172,6 +180,23 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
           {type === 'attachment' && <span>Attachments available for download and reference</span>}
         </div>
       )}
+
+      <Dialog open={!!lightboxUrl} onOpenChange={() => setLightboxUrl(null)}>
+        <DialogContent className="max-w-3xl w-[95vw] p-4">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-medium truncate pr-8">{lightboxName}</DialogTitle>
+          </DialogHeader>
+          {lightboxUrl && (
+            <div className="flex items-center justify-center">
+              <img
+                src={lightboxUrl}
+                alt={lightboxName}
+                className="max-w-full max-h-[75vh] object-contain rounded"
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

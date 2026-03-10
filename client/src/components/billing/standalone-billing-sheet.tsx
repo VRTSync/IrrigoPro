@@ -95,6 +95,7 @@ export function StandaloneBillingSheet({
   prefillFromWorkOrder 
 }: StandaloneBillingSheetProps) {
   const [showReview, setShowReview] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedFile[]>([]);
@@ -416,7 +417,7 @@ export function StandaloneBillingSheet({
       const url = isUpdating ? `/api/billing-sheets/${draftData.id}` : "/api/billing-sheets";
       const method = isUpdating ? "PATCH" : "POST";
 
-      // Use direct fetch since mutation system has issues
+      setIsSubmitting(true);
       fetch(url, {
         method: method,
         headers: {
@@ -439,7 +440,6 @@ export function StandaloneBillingSheet({
             ? "Billing sheet submitted successfully"
             : "Billing sheet saved successfully",
         });
-        // Invalidate both general and technician-specific queries
         queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
         if (currentUser?.role === 'field_tech' && currentUser?.id) {
           queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
@@ -453,6 +453,9 @@ export function StandaloneBillingSheet({
           description: error.message || "Failed to save billing sheet",
           variant: "destructive",
         });
+      })
+      .finally(() => {
+        setIsSubmitting(false);
       });
     } else {
       // Go to review screen
@@ -1357,10 +1360,10 @@ export function StandaloneBillingSheet({
               <Button
                 type="submit"
                 form="billing-form"
-                disabled={createBillingSheet.isPending || updateBillingSheet.isPending}
+                disabled={isSubmitting}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {createBillingSheet.isPending || updateBillingSheet.isPending ? (
+                {isSubmitting ? (
                   "Saving..."
                 ) : showReview ? (
                   <>
