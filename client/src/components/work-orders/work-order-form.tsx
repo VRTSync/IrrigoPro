@@ -137,7 +137,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="w-screen h-screen sm:w-[95vw] sm:max-w-4xl sm:h-[95vh] sm:max-h-[95vh] sm:rounded-lg overflow-hidden p-0 flex flex-col m-0 sm:m-auto">
+      <DialogContent className="w-screen h-screen sm:w-[95vw] sm:max-w-4xl sm:h-[95vh] sm:max-h-[95vh] sm:rounded-lg overflow-hidden p-0 flex flex-col">
         <DialogHeader className="p-3 sm:p-6 border-b border-gray-200 flex-shrink-0">
           <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
             <FileText className="w-5 h-5 text-blue-600" />
