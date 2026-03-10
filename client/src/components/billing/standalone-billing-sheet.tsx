@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -96,6 +96,7 @@ export function StandaloneBillingSheet({
 }: StandaloneBillingSheetProps) {
   const [showReview, setShowReview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedFile[]>([]);
@@ -347,6 +348,7 @@ export function StandaloneBillingSheet({
   };
 
   const forceClose = () => {
+    isSubmittingRef.current = false;
     onOpenChange(false);
     resetForm();
     setShowCancelDialog(false);
@@ -397,7 +399,9 @@ export function StandaloneBillingSheet({
   const onSubmit = (data: BillingSheetData) => {
     
     if (showReview) {
-      // Submit the billing sheet
+      if (isSubmittingRef.current) return;
+      isSubmittingRef.current = true;
+
       const submissionData = {
         ...data,
         // Ensure laborRate is set for field techs (use default if hidden)
@@ -456,6 +460,7 @@ export function StandaloneBillingSheet({
         });
       })
       .finally(() => {
+        isSubmittingRef.current = false;
         setIsSubmitting(false);
       });
     } else {
