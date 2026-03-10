@@ -1,38 +1,49 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign, Edit } from "lucide-react";
 import { Customer } from "@shared/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
+import { CustomerForm } from "@/components/customer-form";
 
 export default function CustomerProfile() {
   const { id } = useParams();
   const [, setLocation] = useLocation();
 
-  // PDF modal state
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [selectedPdfInvoice, setSelectedPdfInvoice] = useState<{
     invoiceId: number;
     invoiceNumber: string;
     customerEmail: string;
   } | null>(null);
+  const [userRole, setUserRole] = useState<string>("");
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUserRole(userData.role || "");
+      } catch {}
+    }
+  }, []);
 
   const { data: customer, isLoading } = useQuery<Customer>({
     queryKey: [`/api/customers/${id}`],
   });
 
-  // Handle opening PDF modal
+  const isAdmin = userRole === "company_admin" || userRole === "super_admin";
+
   const handleOpenPdf = (invoiceId: number, invoiceNumber: string, customerEmail: string) => {
     setSelectedPdfInvoice({ invoiceId, invoiceNumber, customerEmail });
     setShowPdfModal(true);
   };
 
-  // Loading and error checks - moved after all hooks
   if (isLoading) {
     return (
       <div className="container mx-auto p-4">
@@ -64,8 +75,8 @@ export default function CustomerProfile() {
     <div className="container mx-auto p-4 max-w-4xl space-y-4 lg:space-y-6">
       {/* Mobile Header */}
       <div className="lg:hidden">
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           size="sm"
           onClick={() => setLocation("/customers")}
           className="mb-4"
@@ -81,21 +92,34 @@ export default function CustomerProfile() {
               <Badge variant="outline">QuickBooks Synced</Badge>
             )}
           </div>
-          <Button 
-            onClick={() => setLocation(`/customers/${id}/site-maps`)}
-            className="w-full bg-blue-600 hover:bg-blue-700"
-          >
-            <MapPin className="w-4 h-4 mr-2" />
-            View Site Map
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              onClick={() => setLocation(`/customers/${id}/site-maps`)}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+            >
+              <MapPin className="w-4 h-4 mr-2" />
+              View Site Map
+            </Button>
+            {isAdmin && (
+              <CustomerForm
+                customer={customer}
+                trigger={
+                  <Button variant="outline" className="w-full">
+                    <Edit className="w-4 h-4 mr-2" />
+                    Edit Customer
+                  </Button>
+                }
+              />
+            )}
+          </div>
         </div>
       </div>
 
       {/* Desktop Header */}
       <div className="hidden lg:flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="sm"
             onClick={() => setLocation("/customers")}
           >
@@ -113,13 +137,26 @@ export default function CustomerProfile() {
           </div>
         </div>
 
-        <Button 
-          onClick={() => setLocation(`/customers/${id}/site-maps`)}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          <MapPin className="w-4 h-4 mr-2" />
-          View Site Map
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <CustomerForm
+              customer={customer}
+              trigger={
+                <Button variant="outline">
+                  <Edit className="w-4 h-4 mr-2" />
+                  Edit Customer
+                </Button>
+              }
+            />
+          )}
+          <Button
+            onClick={() => setLocation(`/customers/${id}/site-maps`)}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <MapPin className="w-4 h-4 mr-2" />
+            View Site Map
+          </Button>
+        </div>
       </div>
 
       {/* Customer Information */}
@@ -134,21 +171,18 @@ export default function CustomerProfile() {
           {/* Mobile Layout */}
           <div className="lg:hidden space-y-4">
             <h3 className="font-semibold text-gray-900 text-lg">Contact Details</h3>
-            
             {customer.email && (
               <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                 <Mail className="w-5 h-5 text-blue-600" />
                 <span className="text-sm font-medium">{customer.email}</span>
               </div>
             )}
-            
             {customer.phone && (
               <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                 <Phone className="w-5 h-5 text-blue-600" />
                 <span className="text-sm font-medium">{customer.phone}</span>
               </div>
             )}
-            
             {customer.address && (
               <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
                 <MapPin className="w-5 h-5 text-blue-600 mt-0.5" />
@@ -160,21 +194,18 @@ export default function CustomerProfile() {
           {/* Desktop Layout */}
           <div className="hidden lg:block space-y-3">
             <h3 className="font-semibold text-gray-900">Contact Details</h3>
-            
             {customer.email && (
               <div className="flex items-center gap-3">
                 <Mail className="w-4 h-4 text-gray-500" />
                 <span className="text-sm">{customer.email}</span>
               </div>
             )}
-            
             {customer.phone && (
               <div className="flex items-center gap-3">
                 <Phone className="w-4 h-4 text-gray-500" />
                 <span className="text-sm">{customer.phone}</span>
               </div>
             )}
-            
             {customer.address && (
               <div className="flex items-start gap-3">
                 <MapPin className="w-4 h-4 text-gray-500 mt-1" />
@@ -184,6 +215,50 @@ export default function CustomerProfile() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Billing Settings — admin only */}
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <DollarSign className="w-5 h-5" />
+              Billing Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Labor Rate</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  ${parseFloat(customer.laborRate || "45").toFixed(2)}
+                  <span className="text-sm font-normal text-gray-500">/hr</span>
+                </p>
+              </div>
+              {customer.markupPercent && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Markup</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {parseFloat(customer.markupPercent).toFixed(0)}
+                    <span className="text-sm font-normal text-gray-500">%</span>
+                  </p>
+                </div>
+              )}
+              {customer.discountPercent && parseFloat(customer.discountPercent) > 0 && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Discount</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {parseFloat(customer.discountPercent).toFixed(0)}
+                    <span className="text-sm font-normal text-gray-500">%</span>
+                  </p>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-3">
+              These rates are applied automatically when invoices are generated. Use Edit Customer to update.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Property Notes */}
       <Card>
@@ -196,9 +271,9 @@ export default function CustomerProfile() {
         <CardContent>
           {customer.propertyNotes ? (
             <div className="lg:prose lg:prose-sm max-w-none">
-              <div 
+              <div
                 className="whitespace-pre-wrap text-gray-700 leading-relaxed text-sm lg:text-base p-4 lg:p-0 bg-gray-50 lg:bg-transparent rounded-lg lg:rounded-none"
-                style={{ wordBreak: 'break-word' }}
+                style={{ wordBreak: "break-word" }}
               >
                 {customer.propertyNotes}
               </div>
@@ -221,8 +296,8 @@ export default function CustomerProfile() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <InvoiceList 
-            customerId={parseInt(id!)} 
+          <InvoiceList
+            customerId={parseInt(id!)}
             limit={10}
             onOpenPdf={handleOpenPdf}
           />

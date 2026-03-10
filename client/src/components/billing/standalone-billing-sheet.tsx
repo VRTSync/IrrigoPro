@@ -129,6 +129,8 @@ export function StandaloneBillingSheet({
 
   const form = useForm<BillingSheetData>({
     resolver: zodResolver(billingSheetSchema),
+    mode: "onSubmit",
+    reValidateMode: "onSubmit",
     defaultValues: {
       customerId: prefillFromWorkOrder?.customerId || 0,
       customerName: prefillFromWorkOrder?.customerName || "",
@@ -673,6 +675,7 @@ export function StandaloneBillingSheet({
                                   onSelectCustomer={(customer) => {
                                     field.onChange(customer.id);
                                     setSelectedCustomer(customer);
+                                    form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
                                   }}
                                   disabled={isFieldTech}
                                   placeholder={isFieldTech ? "Customer will be set by office" : "Select customer"}
@@ -844,14 +847,6 @@ export function StandaloneBillingSheet({
 
                         </div>
 
-                        {!isFieldTech && (
-                          <div className="bg-white p-3 rounded border">
-                            <p className="text-sm text-gray-600">Labor Cost</p>
-                            <p className="text-lg font-semibold text-gray-900">
-                              {formatCurrency(totals.laborSubtotal)}
-                            </p>
-                          </div>
-                        )}
                       </div>
                     </CardContent>
                   </Card>
