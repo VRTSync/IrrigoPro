@@ -38,8 +38,8 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed z-50 bg-white shadow-xl duration-300 overflow-hidden",
-        "w-full max-h-[95vh] overflow-y-auto",
+        "fixed z-50 bg-white shadow-xl duration-300",
+        "w-full max-h-[95vh] overflow-y-auto p-5 md:p-6",
         "inset-x-0 bottom-0 rounded-t-3xl",
         "md:inset-auto md:left-[50%] md:top-[50%] md:translate-x-[-50%] md:translate-y-[-50%]",
         "md:w-[95vw] md:max-w-2xl lg:max-w-4xl md:rounded-2xl",
@@ -52,10 +52,8 @@ const DialogContent = React.forwardRef<
       )}
       {...props}
     >
-      <div className="md:hidden w-10 h-1 bg-slate-300 rounded-full mx-auto mt-3 mb-2" />
-      <div className="p-5 md:p-6">
-        {children}
-      </div>
+      <div className="md:hidden flex-shrink-0 w-10 h-1 bg-slate-300 rounded-full mx-auto mt-3 mb-2" />
+      {children}
       <DialogPrimitive.Close className="absolute right-4 top-4 p-2 rounded-full bg-slate-100 hover:bg-slate-200 transition-colors touch-target focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2">
         <X className="h-5 w-5 text-slate-600" />
         <span className="sr-only">Close</span>
