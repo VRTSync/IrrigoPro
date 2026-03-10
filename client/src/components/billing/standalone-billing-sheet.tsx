@@ -390,10 +390,16 @@ export function StandaloneBillingSheet({
     });
   };
 
+  const onValidationError = (errors: any) => {
+    const firstError = Object.values(errors)[0] as any;
+    toast({
+      title: "Please complete all required fields",
+      description: firstError?.message || "Some required information is missing",
+      variant: "destructive",
+    });
+  };
+
   const onSubmit = (data: BillingSheetData) => {
-    console.log('Form submission triggered, showReview:', showReview);
-    console.log('Form data:', data);
-    console.log('Form errors:', form.formState.errors);
     
     if (showReview) {
       // Submit the billing sheet
@@ -420,6 +426,7 @@ export function StandaloneBillingSheet({
       setIsSubmitting(true);
       fetch(url, {
         method: method,
+        credentials: 'include',
         headers: {
           "Content-Type": "application/json",
           "X-User-Role": currentUser?.role || ""
@@ -497,7 +504,7 @@ export function StandaloneBillingSheet({
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
           <Form {...form}>
-            <form id="billing-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
+            <form id="billing-form" onSubmit={form.handleSubmit(onSubmit, onValidationError)} className="space-y-4 sm:space-y-6">
               {showReview ? (
                 // Review Screen
                 <div className="space-y-4 sm:space-y-6">
@@ -689,6 +696,7 @@ export function StandaloneBillingSheet({
                                   selectedCustomer={selectedCustomer}
                                   onSelectCustomer={(customer) => {
                                     field.onChange(customer.id);
+                                    form.setValue("customerName", customer.name);
                                     setSelectedCustomer(customer);
                                     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
                                   }}
