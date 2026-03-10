@@ -18,13 +18,15 @@ import {
   DollarSign,
   Clock,
   Package,
-  Map
+  Map,
+  Pencil
 } from "lucide-react";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
+import { CustomerForm } from "@/components/customer-form";
 
 interface CustomerProfileProps {
   customer: Customer;
@@ -40,6 +42,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
   const [showSiteMaps, setShowSiteMaps] = useState(false);
 
   const [activeView, setActiveView] = useState<'estimates' | 'work-orders' | 'billing-sheets'>('estimates');
+  const isAdmin = userRole === "company_admin" || userRole === "super_admin";
 
   // Fetch customer-related data
   const { data: estimates = [] } = useQuery<Estimate[]>({
@@ -117,11 +120,22 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center gap-3 mb-4">
             <Button variant="outline" onClick={onBack} className="flex items-center gap-2">
               <ArrowLeft className="w-4 h-4" />
               Back to Customers
             </Button>
+            {isAdmin && (
+              <CustomerForm
+                customer={customer}
+                trigger={
+                  <Button variant="outline" className="flex items-center gap-2">
+                    <Pencil className="w-4 h-4" />
+                    Edit Customer
+                  </Button>
+                }
+              />
+            )}
           </div>
           
           <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border shadow-lg p-4 sm:p-6 lg:p-8">
