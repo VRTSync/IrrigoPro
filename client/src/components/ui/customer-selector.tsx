@@ -35,6 +35,7 @@ interface CustomerSelectorProps {
   className?: string;
   disabled?: boolean;
   hideLabel?: boolean;
+  canCreateCustomer?: boolean;
 }
 
 export function CustomerSelector({ 
@@ -43,7 +44,8 @@ export function CustomerSelector({
   placeholder = "Search and select a customer...",
   className = "",
   disabled = false,
-  hideLabel = false
+  hideLabel = false,
+  canCreateCustomer = true,
 }: CustomerSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewCustomerDialog, setShowNewCustomerDialog] = useState(false);
@@ -207,13 +209,15 @@ export function CustomerSelector({
             </div>
 
             {/* Create New Customer Button */}
-            <Button
-              onClick={() => setShowNewCustomerDialog(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Create New Customer
-            </Button>
+            {canCreateCustomer && (
+              <Button
+                onClick={() => setShowNewCustomerDialog(true)}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create New Customer
+              </Button>
+            )}
 
             {/* Customer List */}
             <div className="space-y-2">

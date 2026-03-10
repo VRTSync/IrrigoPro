@@ -677,9 +677,9 @@ export function StandaloneBillingSheet({
                                     setSelectedCustomer(customer);
                                     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
                                   }}
-                                  disabled={isFieldTech}
-                                  placeholder={isFieldTech ? "Customer will be set by office" : "Select customer"}
+                                  placeholder="Select customer"
                                   hideLabel={true}
+                                  canCreateCustomer={currentUser?.role !== 'field_tech' && currentUser?.role !== 'irrigation_manager'}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -1232,11 +1232,12 @@ export function StandaloneBillingSheet({
                     </CardHeader>
                     <CardContent>
                       <FileUpload
-                        onFilesUploaded={setUploadedPhotos}
+                        type="photo"
+                        label="Photos"
                         accept="image/*"
                         multiple
-                        maxFiles={10}
-                        existingFiles={uploadedPhotos}
+                        files={uploadedPhotos}
+                        onFilesChange={setUploadedPhotos}
                       />
                     </CardContent>
                   </Card>
