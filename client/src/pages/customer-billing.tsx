@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { 
@@ -89,6 +90,8 @@ export default function CustomerBilling() {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<BillingWorkOrder | null>(null);
   const [selectedBillingSheet, setSelectedBillingSheet] = useState<BillingBillingSheet | null>(null);
   const [selectedEstimate, setSelectedEstimate] = useState<BillingEstimate | null>(null);
+  const [showWorkOrderDetail, setShowWorkOrderDetail] = useState(false);
+  const [showBillingSheetDetail, setShowBillingSheetDetail] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
   const [previewInvoiceData, setPreviewInvoiceData] = useState<any>(null);
   
@@ -1328,58 +1331,14 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-orange-700">
                                     {formatCurrency(wo.laborCost + wo.partsCost)}
                                   </div>
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setSelectedWorkOrder(wo)}
-                                        className="h-6 px-2 text-xs hover:bg-orange-50"
-                                      >
-                                        View
-                                      </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                                      <DialogHeader>
-                                        <DialogTitle className="flex items-center gap-2">
-                                          <FileText className="w-4 h-4" />
-                                          Work Order #{wo.id}
-                                          {getStatusBadge(wo.status)}
-                                        </DialogTitle>
-                                      </DialogHeader>
-                                      {/* Work order details content would go here */}
-                                      <div className="space-y-4">
-                                        <div>
-                                          <h4 className="font-medium mb-2">Description</h4>
-                                          <p className="text-sm text-gray-600">{wo.description}</p>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div>
-                                            <h4 className="font-medium mb-1">Scheduled Date</h4>
-                                            <p className="text-sm text-gray-600">{formatDate(wo.scheduledDate)}</p>
-                                          </div>
-                                          <div>
-                                            <h4 className="font-medium mb-1">Status</h4>
-                                            <p className="text-sm text-gray-600">{wo.status.replace('_', ' ')}</p>
-                                          </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div>
-                                            <h4 className="font-medium mb-1">Labor Cost</h4>
-                                            <p className="text-sm text-gray-600">{formatCurrency(wo.laborCost)}</p>
-                                          </div>
-                                          <div>
-                                            <h4 className="font-medium mb-1">Parts Cost</h4>
-                                            <p className="text-sm text-gray-600">{formatCurrency(wo.partsCost)}</p>
-                                          </div>
-                                        </div>
-                                        <div>
-                                          <h4 className="font-medium mb-1">Total Cost</h4>
-                                          <p className="text-lg font-bold text-orange-700">{formatCurrency(wo.laborCost + wo.partsCost)}</p>
-                                        </div>
-                                      </div>
-                                    </DialogContent>
-                                  </Dialog>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
+                                    className="h-6 px-2 text-xs hover:bg-orange-50"
+                                  >
+                                    View
+                                  </Button>
                                 </div>
                               </div>
                             </CardContent>
@@ -1411,58 +1370,14 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-orange-700">
                                     {formatCurrency(bs.laborCost + bs.partsCost)}
                                   </div>
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setSelectedBillingSheet(bs)}
-                                        className="h-6 px-2 text-xs hover:bg-orange-50"
-                                      >
-                                        View
-                                      </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                                      <DialogHeader>
-                                        <DialogTitle className="flex items-center gap-2">
-                                          <Receipt className="w-4 h-4" />
-                                          Billing Sheet #{bs.id}
-                                          {getStatusBadge(bs.status)}
-                                        </DialogTitle>
-                                      </DialogHeader>
-                                      {/* Billing sheet details content would go here */}
-                                      <div className="space-y-4">
-                                        <div>
-                                          <h4 className="font-medium mb-2">Description</h4>
-                                          <p className="text-sm text-gray-600">{bs.description || 'No description provided'}</p>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div>
-                                            <h4 className="font-medium mb-1">Created Date</h4>
-                                            <p className="text-sm text-gray-600">{formatDate(bs.workDate)}</p>
-                                          </div>
-                                          <div>
-                                            <h4 className="font-medium mb-1">Status</h4>
-                                            <p className="text-sm text-gray-600">{bs.status.replace('_', ' ')}</p>
-                                          </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div>
-                                            <h4 className="font-medium mb-1">Labor Cost</h4>
-                                            <p className="text-sm text-gray-600">{formatCurrency(bs.laborCost)}</p>
-                                          </div>
-                                          <div>
-                                            <h4 className="font-medium mb-1">Parts Cost</h4>
-                                            <p className="text-sm text-gray-600">{formatCurrency(bs.partsCost)}</p>
-                                          </div>
-                                        </div>
-                                        <div>
-                                          <h4 className="font-medium mb-1">Total Cost</h4>
-                                          <p className="text-lg font-bold text-orange-700">{formatCurrency(bs.laborCost + bs.partsCost)}</p>
-                                        </div>
-                                      </div>
-                                    </DialogContent>
-                                  </Dialog>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
+                                    className="h-6 px-2 text-xs hover:bg-orange-50"
+                                  >
+                                    View
+                                  </Button>
                                 </div>
                               </div>
                             </CardContent>
@@ -1802,6 +1717,30 @@ export default function CustomerBilling() {
           )}
         </div>
       </div>
+
+      {/* Work Order Detail Modal */}
+      {selectedWorkOrder && (
+        <CompletedWorkDetailModal
+          type="work_order"
+          id={selectedWorkOrder.id}
+          data={selectedWorkOrder}
+          open={showWorkOrderDetail}
+          onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
+          showPricing={true}
+        />
+      )}
+
+      {/* Billing Sheet Detail Modal */}
+      {selectedBillingSheet && (
+        <CompletedWorkDetailModal
+          type="billing_sheet"
+          id={selectedBillingSheet.id}
+          data={selectedBillingSheet}
+          open={showBillingSheetDetail}
+          onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
+          showPricing={true}
+        />
+      )}
 
       {/* Invoice Preview Dialog */}
       <Dialog open={showInvoicePreview} onOpenChange={setShowInvoicePreview}>

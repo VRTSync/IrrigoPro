@@ -35,7 +35,9 @@ import {
   Package,
   Wrench,
   List,
-  Activity
+  Activity,
+  Camera,
+  DollarSign
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -57,6 +59,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [showAssignmentConfirmation, setShowAssignmentConfirmation] = useState(false);
   const [pendingTechnicianId, setPendingTechnicianId] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -673,6 +676,170 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   )}
                 </CardContent>
               </Card>
+            )}
+
+            {/* Completion Details — only shown when WO is completed */}
+            {workOrder.status === 'completed' && (() => {
+              const showPricing = currentUser?.role !== 'field_tech';
+              const items = (workOrderItems as any[]) || [];
+              const completedItems = items.filter((item: any) => item.actualQuantityUsed != null || item.partPrice != null);
+              const photos: string[] = workOrder.photos || [];
+              const laborRate = parseFloat(workOrder.laborRate || '0');
+              const totalHours = parseFloat(workOrder.totalHours || '0');
+              const laborSubtotal = parseFloat((workOrder as any).laborSubtotal || String(laborRate * totalHours));
+              const partsCost = parseFloat((workOrder as any).totalPartsCost || '0');
+              const total = laborSubtotal + partsCost;
+
+              return (
+                <Card className="border-green-200 bg-green-50/30">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2 text-green-800">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      Completion Details
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+
+                    {/* Completion Summary Row */}
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      {workOrder.completedAt && (
+                        <div>
+                          <p className="text-gray-500 font-medium mb-1">Completed On</p>
+                          <p className="text-gray-900">
+                            {new Date(workOrder.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        </div>
+                      )}
+                      {workOrder.completedByUserName && (
+                        <div>
+                          <p className="text-gray-500 font-medium mb-1">Completed By</p>
+                          <p className="text-gray-900">{workOrder.completedByUserName}</p>
+                        </div>
+                      )}
+                      {totalHours > 0 && (
+                        <div>
+                          <p className="text-gray-500 font-medium mb-1">Total Hours</p>
+                          <p className="text-gray-900">{totalHours.toFixed(2)} hrs</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Work Summary */}
+                    {workOrder.workSummary && (
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 mb-1">Work Summary</p>
+                        <p className="text-sm text-gray-700 bg-white border border-green-200 p-3 rounded-lg">{workOrder.workSummary}</p>
+                      </div>
+                    )}
+
+                    {/* Customer Notes */}
+                    {workOrder.customerNotes && (
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 mb-1">Customer Notes</p>
+                        <p className="text-sm text-gray-700 bg-white border border-green-200 p-3 rounded-lg">{workOrder.customerNotes}</p>
+                      </div>
+                    )}
+
+                    {/* Parts Used Table */}
+                    {completedItems.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                          <Package className="w-4 h-4" /> Parts Used
+                        </p>
+                        <div className="rounded-lg border border-green-200 overflow-hidden bg-white">
+                          <table className="w-full text-sm">
+                            <thead className="bg-green-50 text-green-800">
+                              <tr>
+                                <th className="text-left p-2 font-medium">Part</th>
+                                <th className="text-right p-2 font-medium">Qty</th>
+                                <th className="text-right p-2 font-medium">Labor Hrs</th>
+                                {showPricing && <th className="text-right p-2 font-medium">Unit Price</th>}
+                                {showPricing && <th className="text-right p-2 font-medium">Total</th>}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-green-100">
+                              {completedItems.map((item: any, idx: number) => {
+                                const qty = item.actualQuantityUsed ?? item.quantity ?? 0;
+                                const price = parseFloat(item.partPrice || '0');
+                                const lineTotal = price * qty;
+                                return (
+                                  <tr key={idx} className="hover:bg-green-50/50">
+                                    <td className="p-2">
+                                      <p className="font-medium text-gray-900">{item.partName}</p>
+                                      {item.partDescription && <p className="text-xs text-gray-500">{item.partDescription}</p>}
+                                    </td>
+                                    <td className="p-2 text-right text-gray-700">{qty}</td>
+                                    <td className="p-2 text-right text-gray-700">{item.actualLaborHours ? parseFloat(item.actualLaborHours).toFixed(2) : '—'}</td>
+                                    {showPricing && <td className="p-2 text-right text-gray-700">${price.toFixed(2)}</td>}
+                                    {showPricing && <td className="p-2 text-right font-medium text-gray-900">${lineTotal.toFixed(2)}</td>}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Photos */}
+                    {photos.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                          <Camera className="w-4 h-4" /> Photos ({photos.length})
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {photos.map((url, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => setLightboxPhoto(url)}
+                              className="aspect-square rounded-lg overflow-hidden border border-green-200 hover:border-green-400 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500"
+                            >
+                              <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Financial Summary */}
+                    {showPricing && (totalHours > 0 || partsCost > 0) && (
+                      <div className="border-t border-green-200 pt-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                          <DollarSign className="w-4 h-4" /> Financial Summary
+                        </p>
+                        <div className="bg-white border border-green-200 rounded-lg p-3 space-y-2 text-sm">
+                          {totalHours > 0 && (
+                            <div className="flex justify-between text-gray-700">
+                              <span>Labor ({totalHours.toFixed(2)} hrs × ${laborRate.toFixed(2)}/hr)</span>
+                              <span>${laborSubtotal.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {partsCost > 0 && (
+                            <div className="flex justify-between text-gray-700">
+                              <span>Parts</span>
+                              <span>${partsCost.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-bold text-gray-900 border-t border-green-200 pt-2 text-base">
+                            <span>Total</span>
+                            <span className="text-green-700">${total.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
+            {/* Lightbox */}
+            {lightboxPhoto && (
+              <Dialog open={!!lightboxPhoto} onOpenChange={() => setLightboxPhoto(null)}>
+                <DialogContent className="max-w-3xl p-2 bg-black border-0">
+                  <img src={lightboxPhoto} alt="Full size" className="w-full h-auto max-h-[85vh] object-contain rounded" />
+                </DialogContent>
+              </Dialog>
             )}
           </TabsContent>
         </Tabs>
