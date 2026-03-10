@@ -282,6 +282,18 @@ export function StandaloneBillingSheet({
     }
   }, [draftData, open, form, today, customers]);
 
+  // Auto-fill technician name for field techs and irrigation managers
+  useEffect(() => {
+    if (
+      currentUser &&
+      (currentUser.role === 'field_tech' || currentUser.role === 'irrigation_manager') &&
+      !form.getValues('technicianName') &&
+      currentUser.name
+    ) {
+      form.setValue('technicianName', currentUser.name);
+    }
+  }, [currentUser, open]);
+
   // Calculate totals
   const items = form.watch("items") || [];
   const totalHours = form.watch("totalHours") || 0;
