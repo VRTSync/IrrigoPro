@@ -1127,38 +1127,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/company/:companyId/users", requireCompanySetup, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
+
+      // Phone is required for new users — it becomes the username
+      const { phone, email, name, password, role } = req.body;
+      if (!phone || !phone.trim()) {
+        return res.status(400).json({ message: "Phone number is required" });
+      }
+
       const userData = insertUserSchema.parse({
         ...req.body,
+        username: phone.trim(), // phone number is the login username
         companyId
       });
-      
+
       // Generate email verification token if email is provided
       let emailVerificationToken = null;
       let emailVerificationExpires = null;
-      
+
       if (userData.email) {
         emailVerificationToken = crypto.randomBytes(32).toString('hex');
         emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
       }
-      
+
       const user = await storage.createUser({
         ...userData,
-        emailVerified: false,
+        // If no email, mark as verified so login is not blocked
+        emailVerified: userData.email ? false : true,
         emailVerificationToken,
         emailVerificationExpires
       });
-      
+
       // Send verification email if email is provided
       if (userData.email && emailVerificationToken) {
         try {
           await EmailService.sendEmailVerification(userData.email, emailVerificationToken, userData.name);
-          console.log(`Verification email sent to ${userData.email}`);
         } catch (emailError) {
           console.error('Failed to send verification email:', emailError);
           // Don't fail user creation if email fails
         }
       }
-      
+
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
@@ -1183,7 +1191,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const userData = insertUserSchema.partial().parse(req.body);
-      const user = await storage.updateUser(userId, userData);
+
+      // If phone is being updated, also update username to match (phone = username for new-style accounts)
+      const updatePayload: any = { ...userData };
+      if (req.body.phone && req.body.phone.trim() && req.body.phone.trim() !== existingUser.username) {
+        updatePayload.username = req.body.phone.trim();
+      }
+
+      // If email is being cleared, ensure emailVerified is set to true so login isn't blocked
+      if (updatePayload.email === '' || updatePayload.email === null) {
+        updatePayload.email = null;
+        updatePayload.emailVerified = true;
+      }
+
+      const user = await storage.updateUser(userId, updatePayload);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }

@@ -20,17 +20,17 @@ import { apiRequest, queryClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 const userFormSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  phone: z.string().min(10, "Phone number is required (minimum 10 digits)"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   name: z.string().min(1, "Name is required"),
-  email: z.string().email("Valid email is required"),
+  email: z.string().email("Must be a valid email").optional().or(z.literal("")),
   role: z.enum(["irrigation_manager", "field_tech", "billing_manager"]),
 });
 
 const editUserFormSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  phone: z.string().optional().or(z.literal("")),
   name: z.string().min(1, "Name is required"),
-  email: z.string().email("Valid email is required"),
+  email: z.string().email("Must be a valid email").optional().or(z.literal("")),
   role: z.enum(["irrigation_manager", "field_tech", "billing_manager"]),
 });
 
@@ -51,6 +51,7 @@ interface User {
   username: string;
   name: string;
   email: string;
+  phone?: string;
   role: string;
   companyId: number;
   isActive: boolean;
@@ -129,7 +130,7 @@ export default function CompanyUserManagement() {
   const createForm = useForm<UserFormData>({
     resolver: zodResolver(userFormSchema),
     defaultValues: {
-      username: "",
+      phone: "",
       password: "",
       name: "",
       email: "",
@@ -140,7 +141,7 @@ export default function CompanyUserManagement() {
   const editForm = useForm<EditUserFormData>({
     resolver: zodResolver(editUserFormSchema),
     defaultValues: {
-      username: "",
+      phone: "",
       name: "",
       email: "",
       role: "field_tech",
@@ -325,9 +326,9 @@ export default function CompanyUserManagement() {
 
   const handleEditUser = (user: User) => {
     setEditingUser(user);
-    editForm.setValue("username", user.username);
+    editForm.setValue("phone", user.phone || "");
     editForm.setValue("name", user.name);
-    editForm.setValue("email", user.email);
+    editForm.setValue("email", user.email || "");
     editForm.setValue("role", user.role as "irrigation_manager" | "field_tech" | "billing_manager");
   };
 
@@ -470,26 +471,14 @@ export default function CompanyUserManagement() {
                 />
                 <FormField
                   control={createForm.control}
-                  name="username"
+                  name="phone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Username</FormLabel>
+                      <FormLabel>Phone Number</FormLabel>
                       <FormControl>
-                        <Input placeholder="jdoe" {...field} />
+                        <Input type="tel" placeholder="5551234567" {...field} />
                       </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={createForm.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="john@example.com" {...field} />
-                      </FormControl>
+                      <p className="text-xs text-gray-500">Used as their login username</p>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -525,6 +514,19 @@ export default function CompanyUserManagement() {
                           <SelectItem value="billing_manager">Billing Manager</SelectItem>
                         </SelectContent>
                       </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email <span className="text-gray-400 font-normal">(optional)</span></FormLabel>
+                      <FormControl>
+                        <Input type="email" placeholder="john@example.com" {...field} />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -610,9 +612,12 @@ export default function CompanyUserManagement() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">{user.name}</div>
-                    <div className="text-xs text-gray-500 truncate flex items-center gap-1">
-                      {user.email}
-                      {user.email && (
+                    <div className="text-xs text-gray-500 truncate">
+                      {user.phone ? user.phone : `@${user.username}`}
+                    </div>
+                    {user.email && (
+                      <div className="text-xs text-gray-400 truncate flex items-center gap-1">
+                        {user.email}
                         <span className="flex items-center">
                           {user.emailVerified ? (
                             <CheckCircle className="w-3 h-3 text-green-600" title="Email verified" />
@@ -620,9 +625,8 @@ export default function CompanyUserManagement() {
                             <Mail className="w-3 h-3 text-orange-500" title="Email not verified" />
                           )}
                         </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-400">@{user.username}</div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex-shrink-0">
@@ -726,9 +730,12 @@ export default function CompanyUserManagement() {
                           </div>
                           <div>
                             <div className="font-medium">{user.name}</div>
-                            <div className="text-sm text-muted-foreground flex items-center gap-1">
-                              {user.email}
-                              {user.email && (
+                            <div className="text-sm text-muted-foreground">
+                              {user.phone ? user.phone : `@${user.username}`}
+                            </div>
+                            {user.email && (
+                              <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                {user.email}
                                 <span className="flex items-center">
                                   {user.emailVerified ? (
                                     <CheckCircle className="w-3 h-3 text-green-600" title="Email verified" />
@@ -736,9 +743,8 @@ export default function CompanyUserManagement() {
                                     <Mail className="w-3 h-3 text-orange-500" title="Email not verified" />
                                   )}
                                 </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground">@{user.username}</div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </TableCell>
@@ -895,26 +901,14 @@ export default function CompanyUserManagement() {
               />
               <FormField
                 control={editForm.control}
-                name="username"
+                name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Username</FormLabel>
+                    <FormLabel>Phone Number <span className="text-gray-400 font-normal">(optional)</span></FormLabel>
                     <FormControl>
-                      <Input placeholder="jdoe" {...field} />
+                      <Input type="tel" placeholder="5551234567" {...field} />
                     </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={editForm.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input type="email" placeholder="john@example.com" {...field} />
-                    </FormControl>
+                    <p className="text-xs text-gray-500">Updating phone also updates their login username</p>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -937,6 +931,19 @@ export default function CompanyUserManagement() {
                         <SelectItem value="billing_manager">Billing Manager</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editForm.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email <span className="text-gray-400 font-normal">(optional)</span></FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="john@example.com" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
