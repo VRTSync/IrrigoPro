@@ -420,25 +420,6 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={form.control}
-                      name="laborRate"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Labor Rate ($/hour)</FormLabel>
-                          <FormControl>
-                            <Input 
-                              type="number"
-                              inputMode="decimal"
-                              step="0.01" 
-                              {...field}
-                              onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
                   </div>
                   
                   {timeDifference > 0 && (
@@ -789,7 +770,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                       <span>{totals.totalLaborHours.toFixed(2)} hrs</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span>Labor Charges ({watchedData.laborRate}/hr):</span>
+                      <span>Labor Charges:</span>
                       <span>${totals.laborCharges.toFixed(2)}</span>
                     </div>
                     <Separator />

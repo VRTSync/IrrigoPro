@@ -525,9 +525,6 @@ export function StandaloneBillingSheet({
                         <p className="text-sm font-medium text-gray-600">Hours Worked</p>
                         <p className="text-gray-900">
                           {form.watch('totalHours')} hours
-                          {!isFieldTech && (
-                            <> @ {formatCurrency(form.watch('laborRate'))}/hour</>
-                          )}
                         </p>
                       </div>
                       <div>
@@ -845,28 +842,6 @@ export function StandaloneBillingSheet({
                             )}
                           />
 
-                          {!isFieldTech && (
-                            <FormField
-                              control={form.control}
-                              name="laborRate"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Labor Rate ($/hour) *</FormLabel>
-                                  <FormControl>
-                                    <Input 
-                                      {...field} 
-                                      type="number"
-                                      inputMode="decimal"
-                                      step="0.01" 
-                                      min="0" 
-                                      placeholder="45.00"
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          )}
                         </div>
 
                         {!isFieldTech && (

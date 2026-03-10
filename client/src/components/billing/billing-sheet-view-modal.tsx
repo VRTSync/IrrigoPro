@@ -246,7 +246,7 @@ export function BillingSheetViewModal({ sheet, open, onOpenChange }: BillingShee
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">
-                      Labor ({sheet.totalHours} hours @ {formatCurrency(Number(sheet.laborRate))}/hr):
+                      Labor ({sheet.totalHours} hours):
                     </span>
                     <span className="font-medium">{formatCurrency(Number(sheet.laborSubtotal))}</span>
                   </div>
