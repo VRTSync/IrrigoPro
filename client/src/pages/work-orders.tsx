@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
@@ -50,8 +52,18 @@ export default function WorkOrders() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [groupByCustomer, setGroupByCustomer] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   // Get current user from localStorage and refresh user data
   useEffect(() => {
@@ -255,8 +267,32 @@ export default function WorkOrders() {
     },
   });
 
+  // Bulk delete work orders mutation
+  const bulkDeleteWorkOrders = useMutation({
+    mutationFn: async (ids: number[]) => {
+      return apiRequest("/api/work-orders/bulk", "DELETE", { ids });
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Work Orders Deleted",
+        description: `${data?.deleted ?? 0} work order(s) deleted successfully`,
+      });
+      setSelectedIds(new Set());
+      setShowBulkDeleteDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete work orders",
+        variant: "destructive",
+      });
+      setShowBulkDeleteDialog(false);
+    },
+  });
+
   // Check if user can edit/delete work orders
-  const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager';
+  const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager' || currentUser?.role === 'irrigation_manager';
 
   // Handle loading state for currentUser
   if (!currentUser) {
@@ -426,6 +462,22 @@ export default function WorkOrders() {
         {/* View Options */}
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
+            {canEditDelete && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (selectedIds.size === filteredWorkOrders.length && filteredWorkOrders.length > 0) {
+                    setSelectedIds(new Set());
+                  } else {
+                    setSelectedIds(new Set(filteredWorkOrders.map(wo => wo.id)));
+                  }
+                }}
+                className="text-gray-600 text-xs"
+              >
+                {selectedIds.size === filteredWorkOrders.length && filteredWorkOrders.length > 0 ? 'Deselect All' : 'Select All'}
+              </Button>
+            )}
             <span className="text-sm font-medium text-slate-600 hidden sm:inline">View:</span>
             <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
               <Button
@@ -454,6 +506,29 @@ export default function WorkOrders() {
             {filteredWorkOrders.length} work order{filteredWorkOrders.length !== 1 ? 's' : ''}
           </div>
         </div>
+
+        {/* Selection Toolbar */}
+        {canEditDelete && selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+            <span className="text-sm font-medium text-blue-700">{selectedIds.size} selected</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectedIds(new Set())}
+              className="text-blue-600 border-blue-300 hover:bg-blue-100 text-xs"
+            >
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setShowBulkDeleteDialog(true)}
+              className="bg-red-600 hover:bg-red-700 text-white ml-auto text-xs"
+            >
+              <Trash2 className="w-3 h-3 mr-1" />
+              Delete {selectedIds.size} Selected
+            </Button>
+          </div>
+        )}
 
         {/* Work Orders Grid */}
         {filteredWorkOrders?.length === 0 ? (
@@ -498,9 +573,18 @@ export default function WorkOrders() {
                             <div className="flex flex-col h-full">
                               {/* Header: Work Order # and Status */}
                               <div className="flex items-center justify-between mb-3">
-                                <h4 className="font-semibold text-gray-900 text-base">
-                                  {workOrder.workOrderNumber}
-                                </h4>
+                                <div className="flex items-center gap-2">
+                                  {canEditDelete && (
+                                    <Checkbox
+                                      checked={selectedIds.has(workOrder.id)}
+                                      onCheckedChange={() => toggleSelect(workOrder.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  )}
+                                  <h4 className="font-semibold text-gray-900 text-base">
+                                    {workOrder.workOrderNumber}
+                                  </h4>
+                                </div>
                                 {getStatusBadge(workOrder.status)}
                               </div>
 
@@ -672,16 +756,25 @@ export default function WorkOrders() {
                   <div className="flex flex-col h-full">
                     {/* Header: Work Order # and Status */}
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className={`font-semibold text-base ${
-                        workOrder.status === 'completed' && currentUser?.role === 'field_tech'
-                          ? 'text-green-800'
-                          : 'text-gray-900'
-                      }`}>
-                        {workOrder.workOrderNumber}
-                        {workOrder.status === 'completed' && currentUser?.role === 'field_tech' && (
-                          <span className="ml-2 text-sm font-medium text-green-600">✓ COMPLETED</span>
+                      <div className="flex items-center gap-2">
+                        {canEditDelete && (
+                          <Checkbox
+                            checked={selectedIds.has(workOrder.id)}
+                            onCheckedChange={() => toggleSelect(workOrder.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                         )}
-                      </h3>
+                        <h3 className={`font-semibold text-base ${
+                          workOrder.status === 'completed' && currentUser?.role === 'field_tech'
+                            ? 'text-green-800'
+                            : 'text-gray-900'
+                        }`}>
+                          {workOrder.workOrderNumber}
+                          {workOrder.status === 'completed' && currentUser?.role === 'field_tech' && (
+                            <span className="ml-2 text-sm font-medium text-green-600">✓ COMPLETED</span>
+                          )}
+                        </h3>
+                      </div>
                       {getStatusBadge(workOrder.status)}
                     </div>
 
@@ -895,6 +988,28 @@ export default function WorkOrders() {
             ))}
           </div>
         )}
+
+        {/* Bulk Delete Confirmation Dialog */}
+        <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {selectedIds.size} Work Order{selectedIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete {selectedIds.size} work order{selectedIds.size !== 1 ? 's' : ''}. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => bulkDeleteWorkOrders.mutate([...selectedIds])}
+                className="bg-red-600 hover:bg-red-700"
+                disabled={bulkDeleteWorkOrders.isPending}
+              >
+                Delete {selectedIds.size} Work Order{selectedIds.size !== 1 ? 's' : ''}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Work Order Form Dialog */}
         {(showWorkOrderForm || editingWorkOrder) && (

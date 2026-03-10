@@ -5594,6 +5594,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  app.delete("/api/billing-sheets/bulk", requireWorkOrderBillingAccess, async (req, res) => {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+      }
+      const validIds = ids.filter((id: any) => typeof id === 'number' && id > 0);
+      if (validIds.length === 0) {
+        return res.status(400).json({ message: "No valid IDs provided" });
+      }
+      for (const id of validIds) {
+        await storage.deleteBillingSheet(id);
+      }
+      res.json({ deleted: validIds.length });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to bulk delete billing sheets" });
+    }
+  });
+
   app.delete("/api/billing-sheets/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -5868,6 +5887,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to update work order" });
+    }
+  });
+
+  app.delete("/api/work-orders/bulk", requireWorkOrderBillingAccess, async (req, res) => {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+      }
+      const validIds = ids.filter((id: any) => typeof id === 'number' && id > 0);
+      if (validIds.length === 0) {
+        return res.status(400).json({ message: "No valid IDs provided" });
+      }
+      let deleted = 0;
+      for (const id of validIds) {
+        const success = await storage.deleteWorkOrder(id);
+        if (success) deleted++;
+      }
+      res.json({ deleted });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to bulk delete work orders" });
     }
   });
 

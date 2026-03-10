@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
@@ -20,8 +22,18 @@ export default function BillingSheets() {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewingSheet, setViewingSheet] = useState<BillingSheet | null>(null);
   const [editingDraft, setEditingDraft] = useState<BillingSheet | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   // Get current user from localStorage  
   const getCurrentUser = () => {
@@ -141,8 +153,41 @@ export default function BillingSheets() {
     },
   });
 
+  // Bulk delete billing sheets mutation
+  const bulkDeleteBillingSheets = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const response = await fetch('/api/billing-sheets/bulk', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser?.role,
+        },
+        body: JSON.stringify({ ids }),
+      });
+      if (!response.ok) throw new Error('Failed to bulk delete billing sheets');
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Billing Sheets Deleted",
+        description: `${data?.deleted ?? 0} billing sheet(s) deleted successfully`,
+      });
+      setSelectedIds(new Set());
+      setShowBulkDeleteDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete billing sheets",
+        variant: "destructive",
+      });
+      setShowBulkDeleteDialog(false);
+    },
+  });
+
   // Check if user can edit/delete billing sheets
-  const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager';
+  const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager' || currentUser?.role === 'irrigation_manager';
 
   // Billing sheet approval mutation
   const approveBillingSheet = useMutation({
@@ -322,6 +367,29 @@ export default function BillingSheets() {
         </Card>
       ) : (
         <>
+          {/* Selection Toolbar */}
+          {canEditDelete && selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+              <span className="text-sm font-medium text-blue-700">{selectedIds.size} selected</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-blue-600 border-blue-300 hover:bg-blue-100 text-xs"
+              >
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setShowBulkDeleteDialog(true)}
+                className="bg-red-600 hover:bg-red-700 text-white ml-auto text-xs"
+              >
+                <Trash2 className="w-3 h-3 mr-1" />
+                Delete {selectedIds.size} Selected
+              </Button>
+            </div>
+          )}
+
           {/* Draft Billing Sheets Section */}
           {filteredDrafts.length > 0 && (
             <div className="mb-8">
@@ -331,6 +399,28 @@ export default function BillingSheets() {
                 <Badge variant="secondary" className="bg-orange-100 text-orange-800">
                   {filteredDrafts.length}
                 </Badge>
+                {canEditDelete && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const allDraftIds = filteredDrafts.map(s => s.id);
+                      const allSelected = allDraftIds.every(id => selectedIds.has(id));
+                      setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        if (allSelected) {
+                          allDraftIds.forEach(id => next.delete(id));
+                        } else {
+                          allDraftIds.forEach(id => next.add(id));
+                        }
+                        return next;
+                      });
+                    }}
+                    className="text-xs text-gray-500 ml-auto"
+                  >
+                    {filteredDrafts.every(s => selectedIds.has(s.id)) ? 'Deselect All Drafts' : 'Select All Drafts'}
+                  </Button>
+                )}
               </div>
               <div className="space-y-4">
                 {filteredDrafts.map((sheet) => (
@@ -339,6 +429,14 @@ export default function BillingSheets() {
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3 mb-3">
+                            {canEditDelete && (
+                              <Checkbox
+                                checked={selectedIds.has(sheet.id)}
+                                onCheckedChange={() => toggleSelect(sheet.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex-shrink-0"
+                              />
+                            )}
                             <FileText className="w-5 h-5 text-orange-600 flex-shrink-0" />
                             <div className="min-w-0 flex-1">
                               <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
@@ -416,6 +514,28 @@ export default function BillingSheets() {
                 <Badge variant="secondary" className="bg-green-100 text-green-800">
                   {filteredSubmitted.length}
                 </Badge>
+                {canEditDelete && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const allSubmittedIds = filteredSubmitted.map(s => s.id);
+                      const allSelected = allSubmittedIds.every(id => selectedIds.has(id));
+                      setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        if (allSelected) {
+                          allSubmittedIds.forEach(id => next.delete(id));
+                        } else {
+                          allSubmittedIds.forEach(id => next.add(id));
+                        }
+                        return next;
+                      });
+                    }}
+                    className="text-xs text-gray-500 ml-auto"
+                  >
+                    {filteredSubmitted.every(s => selectedIds.has(s.id)) ? 'Deselect All Submitted' : 'Select All Submitted'}
+                  </Button>
+                )}
               </div>
               <div className="space-y-4">
                 {filteredSubmitted.map((sheet) => (
@@ -424,6 +544,14 @@ export default function BillingSheets() {
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                         <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-3">
+                      {canEditDelete && (
+                        <Checkbox
+                          checked={selectedIds.has(sheet.id)}
+                          onCheckedChange={() => toggleSelect(sheet.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-shrink-0"
+                        />
+                      )}
                       <FileText className="w-5 h-5 text-blue-600 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
                         <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
@@ -580,6 +708,28 @@ export default function BillingSheets() {
           )}
         </>
       )}
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} Billing Sheet{selectedIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {selectedIds.size} billing sheet{selectedIds.size !== 1 ? 's' : ''}. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkDeleteBillingSheets.mutate([...selectedIds])}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={bulkDeleteBillingSheets.isPending}
+            >
+              Delete {selectedIds.size} Billing Sheet{selectedIds.size !== 1 ? 's' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Standalone Billing Sheet Modal */}
       <StandaloneBillingSheet
