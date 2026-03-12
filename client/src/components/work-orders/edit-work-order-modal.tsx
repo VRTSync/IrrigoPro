@@ -72,18 +72,18 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
 
   const updateWorkOrder = useMutation({
     mutationFn: async (data: EditWorkOrderFormData) => {
-      const submitData: any = { ...data };
-      if (data.scheduledDate) {
-        submitData.scheduledDate = new Date(data.scheduledDate).toISOString();
-      } else {
-        submitData.scheduledDate = null;
-      }
-      if (data.assignedTechnicianId) {
-        submitData.assignedTechnicianId = Number(data.assignedTechnicianId);
-      } else {
-        submitData.assignedTechnicianId = null;
-        submitData.assignedTechnicianName = "";
-      }
+      const submitData: Partial<WorkOrder> & { scheduledDate: string | null } = {
+        projectName: data.projectName,
+        description: data.description || "",
+        projectAddress: data.projectAddress || "",
+        locationNotes: data.locationNotes || "",
+        scheduledDate: data.scheduledDate ? new Date(data.scheduledDate).toISOString() : null,
+        priority: data.priority,
+        specialInstructions: data.specialInstructions || "",
+        notes: data.notes || "",
+        assignedTechnicianId: data.assignedTechnicianId ? Number(data.assignedTechnicianId) : null,
+        assignedTechnicianName: data.assignedTechnicianId ? (data.assignedTechnicianName || "") : "",
+      };
       return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", submitData);
     },
     onSuccess: () => {
@@ -95,7 +95,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
       onSuccess();
       onClose();
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({
         title: "Error",
         description: error.message || "Failed to update work order",
