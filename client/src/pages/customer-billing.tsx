@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
+import { EditWorkOrderModal } from "@/components/work-orders/edit-work-order-modal";
+import { EditBillingSheetModal } from "@/components/billing/edit-billing-sheet-modal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { 
@@ -26,7 +28,8 @@ import {
   ChevronDown,
   ChevronUp,
   Filter,
-  X
+  X,
+  Edit
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -92,6 +95,8 @@ export default function CustomerBilling() {
   const [selectedEstimate, setSelectedEstimate] = useState<BillingEstimate | null>(null);
   const [showWorkOrderDetail, setShowWorkOrderDetail] = useState(false);
   const [showBillingSheetDetail, setShowBillingSheetDetail] = useState(false);
+  const [showEditWorkOrder, setShowEditWorkOrder] = useState(false);
+  const [showEditBillingSheet, setShowEditBillingSheet] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
   const [previewInvoiceData, setPreviewInvoiceData] = useState<any>(null);
   
@@ -1357,6 +1362,15 @@ export default function CustomerBilling() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
+                                    onClick={() => { setSelectedWorkOrder(wo); setShowEditWorkOrder(true); }}
+                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
+                                  >
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
                                     onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
                                     className="h-6 px-2 text-xs hover:bg-orange-50"
                                   >
@@ -1393,6 +1407,15 @@ export default function CustomerBilling() {
                                   <div className="text-sm font-medium text-orange-700">
                                     {formatCurrency(bs.laborCost + bs.partsCost)}
                                   </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setSelectedBillingSheet(bs); setShowEditBillingSheet(true); }}
+                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
+                                  >
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Edit
+                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1750,6 +1773,7 @@ export default function CustomerBilling() {
           open={showWorkOrderDetail}
           onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
           showPricing={true}
+          onEdit={() => { setShowWorkOrderDetail(false); setShowEditWorkOrder(true); }}
         />
       )}
 
@@ -1762,6 +1786,27 @@ export default function CustomerBilling() {
           open={showBillingSheetDetail}
           onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
           showPricing={true}
+          onEdit={() => { setShowBillingSheetDetail(false); setShowEditBillingSheet(true); }}
+        />
+      )}
+
+      {/* Edit Work Order Modal */}
+      {selectedWorkOrder && showEditWorkOrder && (
+        <EditWorkOrderModal
+          workOrder={selectedWorkOrder}
+          open={showEditWorkOrder}
+          onClose={() => { setShowEditWorkOrder(false); setSelectedWorkOrder(null); }}
+          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] }); }}
+        />
+      )}
+
+      {/* Edit Billing Sheet Modal */}
+      {selectedBillingSheet && showEditBillingSheet && (
+        <EditBillingSheetModal
+          billingSheet={selectedBillingSheet}
+          open={showEditBillingSheet}
+          onClose={() => { setShowEditBillingSheet(false); setSelectedBillingSheet(null); }}
+          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] }); }}
         />
       )}
 

@@ -22,7 +22,7 @@ Animated Loading Skeletons: Comprehensive loading skeleton system implemented ac
 QuickBooks Access Restrictions: Complete QuickBooks access removal implemented for irrigation managers and field technicians. All QuickBooks API endpoints protected with role-based middleware, QuickBooks tab removed from estimates page for restricted roles, and backend routes return 403 access denied errors for unauthorized access attempts. Only company administrators, super administrators, and billing managers have QuickBooks integration access.
 Field Tech Pricing Visibility: CRITICAL SECURITY FEATURE - Field technicians NEVER see pricing or money values anywhere in the app. All pricing fields (laborRate, laborSubtotal, partsSubtotal, totalAmount, unitPrice, cost, price, markupAmount, taxAmount, etc.) are automatically stripped from API responses when the user role is field_tech. This is implemented via the applyPricingVisibility() function in server/routes.ts which recursively sanitizes objects and arrays. Applies to work orders, work order items, billing sheets, and parts endpoints. Field techs can see work details and quantities but not any financial data.
 Production Optimizations: Site map system fully optimized for production deployment with hybrid authentication approach. Site map routes support both development header-based authentication and production session-based authentication. Production middleware performs database user lookups only when session data is available, falling back to header authentication for development compatibility. This ensures reliable operation in production while maintaining development workflow compatibility.
-Work Order and Billing Sheet Management: Company administrators and billing managers have full edit and delete permissions for work orders and billing sheets. Backend API routes are protected with role-based middleware (requireWorkOrderBillingAccess) ensuring only authorized users can modify or delete these critical business documents. Frontend UI provides Edit and Delete buttons for authorized roles with confirmation dialogs for destructive actions.
+Work Order and Billing Sheet Management: Company administrators and billing managers have full edit and delete permissions for work orders and billing sheets. Backend API routes are protected with role-based middleware (requireWorkOrderBillingAccess) ensuring only authorized users can modify or delete these critical business documents. Frontend UI provides Edit and Delete buttons for authorized roles with confirmation dialogs for destructive actions. Billing managers can edit work orders and billing sheets directly from the customer billing review page via Edit buttons on unbilled item cards and inside the detail view modal. EditWorkOrderModal is reused for work orders; EditBillingSheetModal (client/src/components/billing/edit-billing-sheet-modal.tsx) handles billing sheet edits with fields for work description, work date, total hours, labor rate, property address, and notes. Labor subtotal and total amount are recalculated on save.
 Parts Catalog Access: Billing managers and irrigation managers have comprehensive parts catalog access with full CRUD permissions. This includes viewing all parts with pricing information, creating and editing individual parts, advanced filtering and search, and QuickBooks integration for parts sync. Bulk import functionality is restricted to company administrators and super administrators only. Additionally, irrigation managers have access to both the full Parts Catalog and a simplified Parts List view through a dropdown navigation menu, providing flexibility for different use cases. The parts catalog provides extensive inventory management capabilities for all management-level personnel while maintaining appropriate permission controls.
 Work Order Photo Uploads: Photos can be attached during work order creation via the FileUpload component. Uploaded photos are stored in the work order's `photos` array field and displayed in the Photos section of the work order details view for all statuses. Billing sheets also support photo uploads at creation time. Managers (irrigation_manager) and admins (company_admin, super_admin) can add and remove photos on any existing work order at any time via the "Add Photos" button and X remove overlay in the work order detail view. Photo changes are saved immediately via PATCH /api/work-orders/:id. Field techs and billing managers see photos as read-only with no edit controls.
 Work Order Editing: Full work order editing available for irrigation managers and admins (company_admin, super_admin) on non-completed/non-cancelled work orders. An "Edit" button in the work order detail header opens the EditWorkOrderModal with all editable fields: project name, description, project address, location notes, scheduled date, priority, technician assignment, special instructions, and internal notes. Changes saved via PATCH /api/work-orders/:id. Field techs and billing managers do not see the edit button. Customer assignment and work order items are not editable through this form.
@@ -33,9 +33,9 @@ Phone-Based User Login: New company team members use their phone number as their
 ## System Architecture
 
 ### Frontend Architecture
-- **Framework**: React with TypeScript, Vite as build tool.
-- **UI/UX**: shadcn/ui components with Radix UI primitives, Tailwind CSS for styling. Responsive design with a mobile-first approach, utilizing a dual-layout system (desktop table views + mobile card layouts). Mobile navigation uses a bottom navigation bar with role-based buttons.
-- **State Management**: TanStack React Query for server state.
+- **Framework**: React with TypeScript, Vite.
+- **UI/UX**: shadcn/ui components with Radix UI, Tailwind CSS. Responsive design with a mobile-first approach, dual-layout system (desktop table views + mobile card layouts), and role-based mobile navigation.
+- **State Management**: TanStack React Query.
 - **Routing**: Wouter.
 - **Forms**: React Hook Form with Zod validation.
 
@@ -51,7 +51,7 @@ Phone-Based User Login: New company team members use their phone number as their
 - **Monthly Invoice Consolidation**: Consolidates customer work into single monthly, tax-free QuickBooks invoices.
 - **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions.
 - **Site Maps & Controller Management System**: KML import for interactive irrigation maps using Leaflet.
-- **Customer Email Approval System**: Token-based estimate approval with Postmark email integration and dedicated approval pages.
+- **Customer Email Approval System**: Token-based estimate approval with Postmark email integration.
 - **Notification System**: Database-driven notifications for work order assignments, completions, and estimate approvals.
 - **iOS PWA Push Notifications**: PWA implementation with service worker and push notifications.
 - **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based picker.
@@ -76,7 +76,4 @@ Phone-Based User Login: New company team members use their phone number as their
 - **Session Management**: connect-pg-simple
 - **Email Service**: Postmark API
 - **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
-- **PDF Generation**: Puppeteer (uses system chromium or bundled Chrome fallback). Invoice PDFs are generated on demand and streamed directly to the client — no cloud storage dependency.
-
-## Development Seed Data
-- `POST /api/dev/seed-billing-month` — creates 2 completed work orders and 1 approved billing sheet for the first customer in the current calendar month, with realistic parts and labor hours. Only available in development.
+- **PDF Generation**: Puppeteer (uses system chromium or bundled Chrome fallback). Invoice PDFs are generated on demand and streamed directly to the client.

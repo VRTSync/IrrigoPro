@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Hash,
+  Edit,
 } from "lucide-react";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
 import { format } from "date-fns";
@@ -29,6 +30,7 @@ interface CompletedWorkDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   showPricing?: boolean;
+  onEdit?: () => void;
 }
 
 const fmt = (date: string | Date | null | undefined) => {
@@ -95,6 +97,7 @@ export function CompletedWorkDetailModal({
   open,
   onOpenChange,
   showPricing,
+  onEdit,
 }: CompletedWorkDetailModalProps) {
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -473,10 +476,18 @@ export function CompletedWorkDetailModal({
                 <Hash className="w-3.5 h-3.5" />
                 <span>{title}</span>
               </div>
-              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-                <X className="w-4 h-4 mr-1.5" />
-                Close
-              </Button>
+              <div className="flex items-center gap-2">
+                {onEdit && (
+                  <Button variant="outline" size="sm" onClick={onEdit} className="text-blue-600 hover:text-blue-700">
+                    <Edit className="w-4 h-4 mr-1.5" />
+                    Edit
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+                  <X className="w-4 h-4 mr-1.5" />
+                  Close
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
