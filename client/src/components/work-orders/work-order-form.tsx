@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { LocationPicker } from "@/components/ui/location-picker";
-import { Calendar, User, AlertCircle, FileText, Target, MapPin } from "lucide-react";
+import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
+import { Calendar, User, AlertCircle, FileText, Target, MapPin, Camera } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertWorkOrderSchema } from "@shared/schema";
@@ -37,6 +38,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [uploadedPhotos, setUploadedPhotos] = useState<UploadedFile[]>([]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -125,11 +127,11 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
       return;
     }
 
-    // Ensure we have location data
     const finalData = {
       ...data,
       projectName: data.projectName || "Work Order",
       projectAddress: selectedLocation?.address || data.projectAddress || selectedCustomer.address || "",
+      photos: uploadedPhotos.map(photo => photo.url),
     };
 
     createWorkOrder.mutate(finalData);
@@ -346,39 +348,57 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
                   <FormField
                     control={form.control}
                     name="assignedTechnicianId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Assigned Technician</FormLabel>
-                        <Select 
-                          onValueChange={(value) => {
-                            const techId = value ? parseInt(value) : null;
-                            field.onChange(techId);
-                            // Auto-fill technician name
-                            const selectedTech = fieldTechs?.find(tech => tech.id === techId);
-                            if (selectedTech) {
-                              form.setValue("assignedTechnicianName", selectedTech.name);
-                            } else {
-                              form.setValue("assignedTechnicianName", "");
-                            }
-                          }}
-                          value={field.value?.toString() || ""}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select technician (optional)" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {fieldTechs?.map((tech) => (
-                              <SelectItem key={tech.id} value={tech.id.toString()}>
-                                {tech.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+                    render={({ field }) => {
+                      const managers = fieldTechs?.filter(u => u.role === 'irrigation_manager') || [];
+                      const techs = fieldTechs?.filter(u => u.role === 'field_tech') || [];
+                      return (
+                        <FormItem>
+                          <FormLabel>Assign To</FormLabel>
+                          <Select 
+                            onValueChange={(value) => {
+                              const techId = value ? parseInt(value) : null;
+                              field.onChange(techId);
+                              const selectedTech = fieldTechs?.find(tech => tech.id === techId);
+                              if (selectedTech) {
+                                form.setValue("assignedTechnicianName", selectedTech.name);
+                              } else {
+                                form.setValue("assignedTechnicianName", "");
+                              }
+                            }}
+                            value={field.value?.toString() || ""}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select person (optional)" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {managers.length > 0 && (
+                                <>
+                                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Managers</div>
+                                  {managers.map((user) => (
+                                    <SelectItem key={user.id} value={user.id.toString()}>
+                                      {user.name}
+                                    </SelectItem>
+                                  ))}
+                                </>
+                              )}
+                              {techs.length > 0 && (
+                                <>
+                                  <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wider border-t mt-1 pt-1">Field Techs</div>
+                                  {techs.map((user) => (
+                                    <SelectItem key={user.id} value={user.id.toString()}>
+                                      {user.name}
+                                    </SelectItem>
+                                  ))}
+                                </>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
                   />
                 </div>
               </CardContent>
@@ -426,6 +446,26 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
                       <FormMessage />
                     </FormItem>
                   )}
+                />
+              </CardContent>
+            </Card>
+
+            {/* Step 6: Site Photos */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Camera className="w-5 h-5 text-blue-600" />
+                  Site Photos
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <FileUpload
+                  type="photo"
+                  label="Photos"
+                  accept="image/*"
+                  multiple={true}
+                  files={uploadedPhotos}
+                  onFilesChange={setUploadedPhotos}
                 />
               </CardContent>
             </Card>

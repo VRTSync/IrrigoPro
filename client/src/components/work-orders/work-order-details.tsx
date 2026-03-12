@@ -591,54 +591,96 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             </Card>
 
             {/* Reassignment Section - Show for managers only, not field technicians, and not for completed work orders */}
-            {fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'completed' && (
+            {fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'completed' && (() => {
+              const managers = fieldTechs.filter(u => u.role === 'irrigation_manager');
+              const techs = fieldTechs.filter(u => u.role === 'field_tech');
+              return (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Users className="w-5 h-5 text-blue-600" />
+                      Assign Work Order
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-gray-600">
+                      Current assignment: <span className="font-medium">{workOrder.assignedTechnicianName || "Unassigned"}</span>. 
+                      Select a person to reassign this work order.
+                    </p>
+                    <div className="flex gap-3">
+                      <Select 
+                        value={selectedTechnicianId} 
+                        onValueChange={setSelectedTechnicianId}
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Choose a person..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {currentUser?.id && (
+                            <SelectItem value={currentUser.id.toString()}>
+                              Assign to Me
+                            </SelectItem>
+                          )}
+                          {managers.length > 0 && (
+                            <>
+                              <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wider border-t mt-1 pt-1">Managers</div>
+                              {managers.map((user) => (
+                                <SelectItem key={user.id} value={user.id.toString()}>
+                                  {user.name}
+                                </SelectItem>
+                              ))}
+                            </>
+                          )}
+                          {techs.length > 0 && (
+                            <>
+                              <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wider border-t mt-1 pt-1">Field Techs</div>
+                              {techs.map((user) => (
+                                <SelectItem key={user.id} value={user.id.toString()}>
+                                  {user.name}
+                                </SelectItem>
+                              ))}
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Button 
+                        onClick={() => {
+                          if (selectedTechnicianId) {
+                            setPendingTechnicianId(selectedTechnicianId);
+                            setShowAssignmentConfirmation(true);
+                          }
+                        }}
+                        disabled={!selectedTechnicianId || reassignWorkOrder.isPending}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        Assign
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
+            {/* Site Photos (attached at creation) */}
+            {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 && workOrder.status !== 'completed' && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Users className="w-5 h-5 text-blue-600" />
-                    Assign to Field Technician
+                    <Camera className="w-5 h-5 text-blue-600" />
+                    Site Photos ({workOrder.photos.length})
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-gray-600">
-                    Current assignment: <span className="font-medium">{workOrder.assignedTechnicianName || "Unassigned"}</span>. 
-                    Select a different technician to reassign this work order.
-                  </p>
-                  <div className="flex gap-3">
-                    <Select 
-                      value={selectedTechnicianId} 
-                      onValueChange={setSelectedTechnicianId}
-                    >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Choose field technician..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {currentUser?.id && (
-                          <SelectItem value={currentUser.id.toString()}>
-                            Assign to Me
-                          </SelectItem>
-                        )}
-                        {fieldTechs.map((tech) => (
-                          <SelectItem key={tech.id} value={tech.id.toString()}>
-                            {tech.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button 
-                      onClick={() => {
-                        console.log('Assign button clicked, selectedTechnicianId:', selectedTechnicianId);
-                        if (selectedTechnicianId) {
-                          console.log('Setting pending technician ID and showing confirmation');
-                          setPendingTechnicianId(selectedTechnicianId);
-                          setShowAssignmentConfirmation(true);
-                        }
-                      }}
-                      disabled={!selectedTechnicianId || reassignWorkOrder.isPending}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      Assign
-                    </Button>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {workOrder.photos.map((url: string, idx: number) => (
+                      <button
+                        key={idx}
+                        onClick={() => setLightboxPhoto(url)}
+                        className="aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <img src={url} alt={`Site photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
@@ -851,8 +893,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             <div className="flex justify-center">
               <Button
                 onClick={() => {
-                  console.log('Start Work Order button clicked, opening completion form');
-                  
                   // Use callback if provided, otherwise fall back to internal state
                   if (onStartWork) {
                     onClose();
@@ -900,20 +940,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     )}
 
     {/* Assignment Confirmation Modal */}
-    {console.log('Assignment confirmation modal render check:', {
-      showAssignmentConfirmation,
-      pendingTechnicianId,
-      selectedTechnician: fieldTechs?.find(tech => tech.id.toString() === pendingTechnicianId)
-    })}
     <AssignmentConfirmationModal
       isOpen={showAssignmentConfirmation}
       onClose={() => {
-        console.log('Assignment confirmation modal closed');
         setShowAssignmentConfirmation(false);
         setPendingTechnicianId("");
       }}
       onConfirm={() => {
-        console.log('Assignment confirmed for technician:', pendingTechnicianId);
         if (pendingTechnicianId) {
           reassignWorkOrder.mutate(pendingTechnicianId);
           setShowAssignmentConfirmation(false);
