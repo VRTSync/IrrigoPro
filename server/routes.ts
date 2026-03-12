@@ -2226,7 +2226,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/invoices/monthly", requireAuthentication, async (req, res) => {
     try {
       const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
-      
+
+      // Pre-flight: verify QuickBooks connection before doing anything
+      const user = req.user as any;
+      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      const integration = await storage.getQuickBooksIntegration(userCompanyId);
+      if (!integration || !integration.accessToken) {
+        return res.status(400).json({
+          message: "QuickBooks is not connected. Please connect QuickBooks before creating invoices.",
+          quickbooksError: "QuickBooks integration is not configured or the access token is missing. Go to the QuickBooks section to connect your account."
+        });
+      }
+
+      if (integration.expiresAt && new Date(integration.expiresAt) <= new Date()) {
+        return res.status(400).json({
+          message: "QuickBooks access token has expired. Please reconnect QuickBooks before creating invoices.",
+          quickbooksError: "Your QuickBooks session has expired. Go to the QuickBooks section to reconnect your account."
+        });
+      }
+
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
       if (!customer) {
@@ -2279,8 +2297,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currentDate = new Date();
       const invoiceNumber = `${Date.now().toString().slice(-5)}`;
       
-      // Calculate totals - no markup on parts, tax only on labor
-      // Work orders have totalHours and totalPartsCost, not laborSubtotal/partsSubtotal
       const laborSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
@@ -2289,16 +2305,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
-      // No markup on parts for invoices
       const markupAmount = 0;
-      
-      // No tax at all (business rule)
       const taxAmount = 0;
-      
-      // Total = Labor + Parts (no tax)
       const totalAmount = laborSubtotal + partsSubtotal;
 
-      // Create the invoice
+      // Create the invoice record (not yet marking items as billed)
       const invoice = await storage.createInvoice({
         invoiceNumber,
         customerId,
@@ -2323,9 +2334,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error("Failed to create invoice");
       }
 
-      // Create invoice items for work orders
+      // Create invoice items for work orders (without marking as billed yet)
       for (const workOrder of selectedWorkOrders) {
-        const woLaborAmount = parseFloat(workOrder.totalHours || '0') * 45; // Labor rate = $45/hr
+        const woLaborAmount = parseFloat(workOrder.totalHours || '0') * 45;
         const woPartsAmount = parseFloat(workOrder.totalPartsCost || '0');
         const woTotalAmount = woLaborAmount + woPartsAmount;
         
@@ -2333,7 +2344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           invoiceId: invoice.id,
           sourceType: 'work_order',
           sourceId: workOrder.id,
-          workOrderId: workOrder.id, // Add this for PDF generator
+          workOrderId: workOrder.id,
           description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
           workDate: workOrder.completedAt || workOrder.createdAt,
           technicianName: workOrder.completedByUserName || workOrder.assignedTechnicianName || 'Unknown',
@@ -2342,28 +2353,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborAmount: woLaborAmount.toString(),
           laborTotal: woLaborAmount.toString(),
           partsAmount: woPartsAmount.toString(),
-          markupAmount: 0, // No markup on invoices
-          taxAmount: 0, // No tax
+          markupAmount: 0,
+          taxAmount: 0,
           totalAmount: woTotalAmount.toString(),
-          quantity: 1, // Default quantity
+          quantity: 1,
           unitPrice: woTotalAmount.toString(),
           totalPrice: woTotalAmount.toString()
         });
-
-        // Update work order with invoice linkage to prevent double billing
-        await storage.updateWorkOrder(workOrder.id, { 
-          invoiceId: invoice.id,
-          billedAt: currentDate
-        });
       }
 
-      // Create invoice items for billing sheets
+      // Create invoice items for billing sheets (without marking as billed yet)
       for (const billingSheet of selectedBillingSheets) {
         await storage.createInvoiceItem({
           invoiceId: invoice.id,
           sourceType: 'billing_sheet',
           sourceId: billingSheet.id,
-          billingSheetId: billingSheet.id, // Add this for PDF generator
+          billingSheetId: billingSheet.id,
           description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
           workDate: billingSheet.workDate,
           technicianName: billingSheet.technicianName,
@@ -2372,139 +2377,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborAmount: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
           laborTotal: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
           partsAmount: (parseFloat(billingSheet.partsSubtotal || '0')).toString(),
-          markupAmount: 0, // No markup on invoices
-          taxAmount: 0, // No tax
+          markupAmount: 0,
+          taxAmount: 0,
           totalAmount: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
-          quantity: 1, // Default quantity  
+          quantity: 1,
           unitPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
           totalPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString()
-        });
-
-        // Update billing sheet with invoice linkage to prevent double billing
-        await storage.updateBillingSheet(billingSheet.id, { 
-          invoiceId: invoice.id,
-          billedAt: currentDate,
-          status: 'billed'
         });
       }
 
       // Send invoice to QuickBooks
       let quickbooksId = null;
-      let quickbooksSuccess = false;
       let quickbooksError = null;
 
       try {
-        // Get QuickBooks integration data for this user's company
-        const user = req.user as any;
-        const userCompanyId = user?.companyId ? user.companyId.toString() : null;
-        const integration = await storage.getQuickBooksIntegration(userCompanyId);
-        if (integration && integration.accessToken) {
-          console.log("Creating invoice in QuickBooks...");
+        console.log("Creating invoice in QuickBooks...");
+        
+        const apiBase = process.env.NODE_ENV === 'production' 
+          ? 'https://quickbooks.api.intuit.com' 
+          : 'https://sandbox-quickbooks.api.intuit.com';
+        
+        const qbLineItems = [];
+        
+        for (const workOrder of selectedWorkOrders) {
+          const laborAmount = parseFloat(workOrder.totalHours || '0') * 45;
+          const partsAmount = parseFloat(workOrder.totalPartsCost || '0');
+          const totalLineAmount = laborAmount + partsAmount;
           
-          // Use production QuickBooks API for deployment, sandbox for development
-          const apiBase = process.env.NODE_ENV === 'production' 
-            ? 'https://quickbooks.api.intuit.com' 
-            : 'https://sandbox-quickbooks.api.intuit.com';
-          
-          // Create detailed line items for QuickBooks
-          const qbLineItems = [];
-          
-          // Add work order line items
-          for (const workOrder of selectedWorkOrders) {
-            const laborAmount = parseFloat(workOrder.totalHours || '0') * 45; // $45/hour rate
-            const partsAmount = parseFloat(workOrder.totalPartsCost || '0');
-            const totalLineAmount = laborAmount + partsAmount;
-            
-            if (totalLineAmount > 0) {
-              qbLineItems.push({
-                Amount: totalLineAmount,
-                DetailType: "SalesItemLineDetail",
-                SalesItemLineDetail: {
-                  ItemRef: {
-                    value: "1", // Default service item
-                    name: "Services"
-                  }
-                },
-                Description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor, $${partsAmount} parts)`
-              });
-            }
+          if (totalLineAmount > 0) {
+            qbLineItems.push({
+              Amount: totalLineAmount,
+              DetailType: "SalesItemLineDetail",
+              SalesItemLineDetail: {
+                ItemRef: {
+                  value: "1",
+                  name: "Services"
+                }
+              },
+              Description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor, $${partsAmount} parts)`
+            });
           }
+        }
 
-          // Add billing sheet line items
-          for (const billingSheet of selectedBillingSheets) {
-            const lineTotal = parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0');
-            if (lineTotal > 0) {
-              qbLineItems.push({
-                Amount: lineTotal,
-                DetailType: "SalesItemLineDetail", 
-                SalesItemLineDetail: {
-                  ItemRef: {
-                    value: "1", // Default service item
-                    name: "Services"
-                  }
-                },
-                Description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`
-              });
-            }
+        for (const billingSheet of selectedBillingSheets) {
+          const lineTotal = parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0');
+          if (lineTotal > 0) {
+            qbLineItems.push({
+              Amount: lineTotal,
+              DetailType: "SalesItemLineDetail", 
+              SalesItemLineDetail: {
+                ItemRef: {
+                  value: "1",
+                  name: "Services"
+                }
+              },
+              Description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`
+            });
           }
+        }
 
-          // Prepare invoice data for QuickBooks
-          const invoiceData = {
-            Line: qbLineItems,
-            CustomerRef: {
-              value: customer.quickbooksId || integration.defaultCustomerId || "1" // Use customer's QB ID, integration default, or fallback
-            },
-            DocNumber: invoiceNumber,
-            TxnDate: currentDate.toISOString().split('T')[0], // YYYY-MM-DD format
-            DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
-            SalesTermRef: {
-              value: "3" // Net 30 terms
-            }
-          };
+        const invoiceData = {
+          Line: qbLineItems,
+          CustomerRef: {
+            value: customer.quickbooksId || integration.defaultCustomerId || "1"
+          },
+          DocNumber: invoiceNumber,
+          TxnDate: currentDate.toISOString().split('T')[0],
+          DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          SalesTermRef: {
+            value: "3"
+          }
+        };
 
-          console.log("Sending invoice to QuickBooks:", JSON.stringify(invoiceData, null, 2));
+        console.log("Sending invoice to QuickBooks:", JSON.stringify(invoiceData, null, 2));
 
-          const invoiceResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${integration.accessToken}`,
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(invoiceData)
-          }, 'Monthly Invoice Creation');
+        const invoiceResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${integration.accessToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(invoiceData)
+        }, 'Monthly Invoice Creation');
 
-          if (invoiceResponse.ok) {
-            const invoiceResult = await invoiceResponse.json();
-            quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
-            quickbooksSuccess = true;
-            console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
-            
-            // Update local invoice with QuickBooks ID
-            if (quickbooksId) {
-              await storage.updateInvoice(invoice.id, { quickbooksInvoiceId: quickbooksId.toString() });
-            }
-          } else {
-            const errorText = await invoiceResponse.text();
-            const intuitTid = invoiceResponse.headers.get('intuit_tid');
-            
-            // Check for customer not found errors
-            if (errorText.includes('InvalidRef') || errorText.includes('Customer')) {
-              quickbooksError = `Customer not found in QuickBooks. Please sync customers first or verify the customer exists in your QuickBooks account.${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
-              console.error('QuickBooks customer reference error - customer may not exist:', errorText);
-            } else {
-              quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
-            }
-            
-            console.error('Failed to create QuickBooks invoice:', invoiceResponse.status, errorText);
-            console.error('QuickBooks error details:', errorText);
+        if (invoiceResponse.ok) {
+          const invoiceResult = await invoiceResponse.json();
+          quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
+          console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
+          
+          if (quickbooksId) {
+            await storage.updateInvoice(invoice.id, { quickbooksInvoiceId: quickbooksId.toString() });
           }
         } else {
-          console.log("QuickBooks not connected - invoice created locally only");
+          const errorText = await invoiceResponse.text();
+          const intuitTid = invoiceResponse.headers.get('intuit_tid');
+          
+          if (errorText.includes('InvalidRef') || errorText.includes('Customer')) {
+            quickbooksError = `Customer not found in QuickBooks. Please sync customers first or verify the customer exists in your QuickBooks account.${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+          } else {
+            quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+          }
+          
+          console.error('Failed to create QuickBooks invoice:', invoiceResponse.status, errorText);
         }
-      } catch (qbError) {
+      } catch (qbError: any) {
         console.error('Error connecting to QuickBooks:', qbError);
         quickbooksError = `QuickBooks connection error: ${qbError.message}`;
+      }
+
+      // If QuickBooks failed, roll back the local invoice and items
+      if (quickbooksError) {
+        console.log(`Rolling back local invoice ${invoice.id} due to QuickBooks failure`);
+        try {
+          await storage.deleteInvoiceItemsByInvoiceId(invoice.id);
+          await storage.deleteInvoice(invoice.id);
+        } catch (rollbackError) {
+          console.error('Error during invoice rollback:', rollbackError);
+        }
+        return res.status(502).json({
+          message: "Failed to create invoice in QuickBooks. No items were billed. Please try again.",
+          quickbooksError
+        });
+      }
+
+      // QuickBooks succeeded — now mark items as billed
+      for (const workOrder of selectedWorkOrders) {
+        await storage.updateWorkOrder(workOrder.id, { 
+          invoiceId: invoice.id,
+          billedAt: currentDate
+        });
+      }
+
+      for (const billingSheet of selectedBillingSheets) {
+        await storage.updateBillingSheet(billingSheet.id, { 
+          invoiceId: invoice.id,
+          billedAt: currentDate,
+          status: 'billed'
+        });
       }
 
       // Generate invoice detail PDF automatically in background
@@ -2520,16 +2530,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       res.json({
-        message: quickbooksSuccess 
-          ? "Monthly invoice created successfully and synced to QuickBooks" 
-          : "Monthly invoice created successfully (local only - QuickBooks sync failed)",
+        message: "Monthly invoice created successfully and synced to QuickBooks",
         invoice,
         invoiceNumber,
         totalAmount: totalAmount.toFixed(2),
         itemCount: selectedWorkOrders.length + selectedBillingSheets.length,
         quickbooksId,
-        quickbooksSuccess,
-        quickbooksError
+        quickbooksSuccess: true,
+        quickbooksError: null
       });
     } catch (error) {
       console.error("Error creating monthly invoice:", error);

@@ -252,6 +252,16 @@ export default function CustomerBilling() {
       workOrderIds?: number[], 
       billingSheetIds?: number[] 
     }) => {
+      try {
+        const connectionData = await apiRequest("/api/quickbooks/connection");
+        if (!connectionData.isConnected) {
+          throw new Error("QuickBooks is not connected. Please reconnect QuickBooks in the integrations section before creating invoices.");
+        }
+      } catch (err: any) {
+        if (err.message?.includes("QuickBooks is not connected")) throw err;
+        throw new Error("Unable to verify QuickBooks connection. Please check your QuickBooks integration and try again.");
+      }
+
       return await apiRequest("/api/invoices/monthly", "POST", {
         customerId,
         workOrderIds,
@@ -261,14 +271,12 @@ export default function CustomerBilling() {
     onSuccess: (data, { customerId }) => {
       setShowInvoicePreview(false);
       setPreviewInvoiceData(null);
-      // Clear selections after successful invoice creation
       setSelectedWorkOrderIds(new Set());
       setSelectedBillingSheetIds(new Set());
       toast({
         title: "Invoice Created Successfully",
         description: `Monthly invoice ${data.invoiceNumber} has been created and synced to QuickBooks.`,
       });
-      // Refresh customer billing data, previews, and invoice list
       queryClient.invalidateQueries({ queryKey: ['customer-billing', customerId] });
       queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });
       queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
@@ -379,6 +387,16 @@ export default function CustomerBilling() {
   // Create monthly invoice mutation
   const createMonthlyInvoice = useMutation({
     mutationFn: async (customerId: number) => {
+      try {
+        const connectionData = await apiRequest("/api/quickbooks/connection");
+        if (!connectionData.isConnected) {
+          throw new Error("QuickBooks is not connected. Please reconnect QuickBooks in the integrations section before creating invoices.");
+        }
+      } catch (err: any) {
+        if (err.message?.includes("QuickBooks is not connected")) throw err;
+        throw new Error("Unable to verify QuickBooks connection. Please check your QuickBooks integration and try again.");
+      }
+
       return apiRequest("/api/invoices/monthly", "POST", { customerId });
     },
     onSuccess: (data) => {
