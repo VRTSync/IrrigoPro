@@ -114,7 +114,15 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
                   {formatMonthYear(invoice.periodStart)}
                 </h3>
               </div>
-              {getStatusBadge(invoice.status)}
+              <div className="flex flex-col items-end gap-1">
+                {getStatusBadge(invoice.status)}
+                {invoice.quickbooksInvoiceId && (
+                  <Badge className="bg-purple-100 text-purple-800 text-xs">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    QB Synced
+                  </Badge>
+                )}
+              </div>
             </div>
 
             <div className="space-y-2 text-sm mb-4">

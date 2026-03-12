@@ -273,9 +273,14 @@ export default function CustomerBilling() {
       setPreviewInvoiceData(null);
       setSelectedWorkOrderIds(new Set());
       setSelectedBillingSheetIds(new Set());
+      const qbMessage = data.quickbooksSuccess
+        ? ` and synced to QuickBooks (ID: ${data.quickbooksId})`
+        : data.quickbooksError
+          ? ` (QuickBooks sync skipped: ${data.quickbooksError})`
+          : '';
       toast({
         title: "Invoice Created Successfully",
-        description: `Monthly invoice ${data.invoiceNumber} has been created and synced to QuickBooks.`,
+        description: `Monthly invoice ${data.invoiceNumber} has been created${qbMessage}.`,
       });
       queryClient.invalidateQueries({ queryKey: ['customer-billing', customerId] });
       queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });

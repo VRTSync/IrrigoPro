@@ -33,6 +33,7 @@ interface InvoiceDetailData {
     billingSheet: BillingSheet;
     items: BillingSheetItem[];
   }>;
+  laborRate?: string;
 }
 
 export class PDFGenerator {
@@ -141,7 +142,8 @@ export class PDFGenerator {
   }
 
   private static generateInvoiceDetailHTML(data: InvoiceDetailData): string {
-    const { invoice, company, workOrders, billingSheets } = data;
+    const { invoice, company, workOrders, billingSheets, laborRate: passedLaborRate } = data;
+    const laborRateNum = parseFloat(passedLaborRate || '45.00');
     
     const formatDate = (date: Date | string) => {
       const d = new Date(date);
@@ -545,7 +547,7 @@ export class PDFGenerator {
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Labor Rate</div>
-                  <div class="detail-value">$45.00/hr</div>
+                  <div class="detail-value">${formatCurrency(parseFloat(wo.workOrder.laborRate || '0') || laborRateNum)}/hr</div>
                 </div>
               </div>
               
@@ -605,8 +607,8 @@ export class PDFGenerator {
                   <span>${formatCurrency(wo.workOrder.totalPartsCost || '0')}</span>
                 </div>
                 <div class="totals-row subtotal">
-                  <span>Labor Subtotal (${wo.workOrder.totalHours || '0'} hrs × $45.00):</span>
-                  <span>${formatCurrency((parseFloat(wo.workOrder.totalHours || '0') * 45).toFixed(2))}</span>
+                  <span>Labor Subtotal (${wo.workOrder.totalHours || '0'} hrs × ${formatCurrency(parseFloat(wo.workOrder.laborRate || '0') || laborRateNum)}):</span>
+                  <span>${formatCurrency(wo.workOrder.laborSubtotal || (parseFloat(wo.workOrder.totalHours || '0') * laborRateNum).toFixed(2))}</span>
                 </div>
                 <div class="totals-row total">
                   <span>Work Order Total:</span>
@@ -749,7 +751,7 @@ export class PDFGenerator {
                         <td style="padding: 10px;">${wo.workOrder.workOrderNumber}</td>
                         <td style="padding: 10px;">${wo.workOrder.projectName || 'Service Work'}</td>
                         <td style="padding: 10px; text-align: right;">${formatCurrency(wo.workOrder.totalPartsCost || '0')}</td>
-                        <td style="padding: 10px; text-align: right;">${formatCurrency((parseFloat(wo.workOrder.totalHours || '0') * 45).toFixed(2))}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(wo.workOrder.laborSubtotal || (parseFloat(wo.workOrder.totalHours || '0') * laborRateNum).toFixed(2))}</td>
                         <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(wo.workOrder.totalAmount || '0')}</td>
                       </tr>
                     `).join('')}

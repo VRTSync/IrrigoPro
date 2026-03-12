@@ -76,3 +76,7 @@ Phone-Based User Login: New company team members use their phone number as their
 - **Session Management**: connect-pg-simple
 - **Email Service**: Postmark API
 - **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
+- **PDF Generation**: Puppeteer (uses system chromium or bundled Chrome fallback). Invoice PDFs are generated on demand and streamed directly to the client — no cloud storage dependency.
+
+## Development Seed Data
+- `POST /api/dev/seed-billing-month` — creates 2 completed work orders and 1 approved billing sheet for the first customer in the current calendar month, with realistic parts and labor hours. Only available in development.

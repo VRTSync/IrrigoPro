@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users, workOrders } from "@shared/schema";
+import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users, workOrders, workOrderItems, billingSheets, billingSheetItems } from "@shared/schema";
 
 export async function seedDatabase() {
   console.log("Starting database seeding...");
@@ -291,6 +291,187 @@ export async function seedDatabase() {
     console.log("Database seeding completed successfully!");
   } catch (error) {
     console.error("Error seeding database:", error);
+    throw error;
+  }
+}
+
+export async function seedBillingMonth() {
+  console.log("Seeding billing month data...");
+
+  try {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const existingCustomers = await db.select().from(customers).limit(1);
+    if (existingCustomers.length === 0) {
+      console.log("No customers found. Run seedDatabase() first.");
+      return;
+    }
+    const customer = existingCustomers[0];
+
+    const existingParts = await db.select().from(parts).limit(3);
+    if (existingParts.length < 2) {
+      console.log("Not enough parts found. Run seedDatabase() first.");
+      return;
+    }
+
+    const woDate1 = new Date(currentYear, currentMonth, 5);
+    const woDate2 = new Date(currentYear, currentMonth, 12);
+
+    const insertedWOs = await db.insert(workOrders).values([
+      {
+        workOrderNumber: `WO-SEED-${currentYear}${String(currentMonth+1).padStart(2,'0')}-A`,
+        customerId: customer.id,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone,
+        projectName: "Monthly Sprinkler Inspection",
+        projectAddress: customer.address,
+        workType: "direct_billing",
+        status: "completed",
+        priority: "medium",
+        scheduledDate: woDate1,
+        completedAt: woDate1,
+        assignedTechnicianId: null,
+        assignedTechnicianName: "John Tech",
+        completedByUserName: "John Tech",
+        totalHours: "3.50",
+        totalPartsCost: "74.50",
+        laborRate: customer.laborRate || "45.00",
+        laborSubtotal: (3.5 * parseFloat(customer.laborRate || "45.00")).toFixed(2),
+        partsSubtotal: "74.50",
+        totalAmount: (3.5 * parseFloat(customer.laborRate || "45.00") + 74.50).toFixed(2),
+        totalItems: 3,
+        workSummary: "Inspected and repaired sprinkler heads in front yard. Replaced 2 damaged nozzles and adjusted spray patterns.",
+        createdAt: woDate1,
+        updatedAt: woDate1,
+      },
+      {
+        workOrderNumber: `WO-SEED-${currentYear}${String(currentMonth+1).padStart(2,'0')}-B`,
+        customerId: customer.id,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone,
+        projectName: "Valve Replacement - Back Yard",
+        projectAddress: customer.address,
+        workType: "direct_billing",
+        status: "completed",
+        priority: "high",
+        scheduledDate: woDate2,
+        completedAt: woDate2,
+        assignedTechnicianId: null,
+        assignedTechnicianName: "John Tech",
+        completedByUserName: "John Tech",
+        totalHours: "2.00",
+        totalPartsCost: "65.00",
+        laborRate: customer.laborRate || "45.00",
+        laborSubtotal: (2.0 * parseFloat(customer.laborRate || "45.00")).toFixed(2),
+        partsSubtotal: "65.00",
+        totalAmount: (2.0 * parseFloat(customer.laborRate || "45.00") + 65.00).toFixed(2),
+        totalItems: 2,
+        workSummary: "Replaced faulty irrigation valve in back yard zone. Tested system pressure and verified operation.",
+        createdAt: woDate2,
+        updatedAt: woDate2,
+      },
+    ]).returning();
+
+    console.log(`Inserted ${insertedWOs.length} completed work orders for current month`);
+
+    await db.insert(workOrderItems).values([
+      {
+        workOrderId: insertedWOs[0].id,
+        partId: existingParts[0].id,
+        partName: existingParts[0].name,
+        partPrice: existingParts[0].price,
+        quantity: 2,
+        laborHours: "1.00",
+        totalPrice: (2 * parseFloat(existingParts[0].price)).toFixed(2),
+      },
+      {
+        workOrderId: insertedWOs[0].id,
+        partId: existingParts[1].id,
+        partName: existingParts[1].name,
+        partPrice: existingParts[1].price,
+        quantity: 1,
+        laborHours: "0.75",
+        totalPrice: existingParts[1].price,
+      },
+      {
+        workOrderId: insertedWOs[1].id,
+        partId: existingParts[2] ? existingParts[2].id : existingParts[0].id,
+        partName: existingParts[2] ? existingParts[2].name : existingParts[0].name,
+        partPrice: existingParts[2] ? existingParts[2].price : existingParts[0].price,
+        quantity: 2,
+        laborHours: "0.50",
+        totalPrice: (2 * parseFloat(existingParts[2] ? existingParts[2].price : existingParts[0].price)).toFixed(2),
+      },
+    ]);
+
+    console.log("Inserted work order items");
+
+    const bsDate = new Date(currentYear, currentMonth, 18);
+    const bsLaborRate = customer.laborRate || "45.00";
+    const bsTotalHours = "4.00";
+    const bsLaborSubtotal = (4.0 * parseFloat(bsLaborRate)).toFixed(2);
+    const bsPartsSubtotal = "99.75";
+    const bsMarkupAmount = (parseFloat(bsPartsSubtotal) * parseFloat(customer.markupPercent || "20.00") / 100).toFixed(2);
+    const bsTaxAmount = ((parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal) + parseFloat(bsMarkupAmount)) * parseFloat(customer.taxPercent || "8.25") / 100).toFixed(2);
+    const bsTotalAmount = (parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal) + parseFloat(bsMarkupAmount) + parseFloat(bsTaxAmount)).toFixed(2);
+
+    const insertedBS = await db.insert(billingSheets).values([
+      {
+        billingNumber: `BS-SEED-${currentYear}${String(currentMonth+1).padStart(2,'0')}-A`,
+        customerId: customer.id,
+        customerName: customer.name,
+        propertyAddress: customer.address || "123 Oak Street",
+        workDate: bsDate,
+        technicianName: "John Tech",
+        workDescription: "Emergency drip line repair and winterization prep for garden beds",
+        status: "approved",
+        totalHours: bsTotalHours,
+        laborRate: bsLaborRate,
+        laborSubtotal: bsLaborSubtotal,
+        partsSubtotal: bsPartsSubtotal,
+        markupAmount: bsMarkupAmount,
+        taxAmount: bsTaxAmount,
+        totalAmount: bsTotalAmount,
+        notes: "Customer reported leaking drip lines. Replaced damaged sections and added frost protection.",
+        createdAt: bsDate,
+        updatedAt: bsDate,
+      },
+    ]).returning();
+
+    console.log(`Inserted ${insertedBS.length} approved billing sheet for current month`);
+
+    await db.insert(billingSheetItems).values([
+      {
+        billingSheetId: insertedBS[0].id,
+        partId: existingParts[0].id,
+        partName: existingParts[0].name,
+        partDescription: existingParts[0].description,
+        quantity: "3",
+        unitPrice: existingParts[0].price,
+        totalPrice: (3 * parseFloat(existingParts[0].price)).toFixed(2),
+        laborHours: "1.50",
+      },
+      {
+        billingSheetId: insertedBS[0].id,
+        partId: existingParts[1].id,
+        partName: existingParts[1].name,
+        partDescription: existingParts[1].description,
+        quantity: "1",
+        unitPrice: existingParts[1].price,
+        totalPrice: existingParts[1].price,
+        laborHours: "0.75",
+      },
+    ]);
+
+    console.log("Inserted billing sheet items");
+    console.log(`\nBilling month seed complete for ${customer.name} in ${now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`);
+    console.log("Created: 2 completed work orders + 1 approved billing sheet with realistic parts and labor");
+  } catch (error) {
+    console.error("Error seeding billing month data:", error);
     throw error;
   }
 }

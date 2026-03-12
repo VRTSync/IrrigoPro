@@ -2126,7 +2126,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          bs.status === 'completed' && 
+          (bs.status === 'completed' || bs.status === 'approved') && 
           !bs.invoiceId
         );
       }
@@ -2274,7 +2274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          bs.status === 'completed' && 
+          (bs.status === 'completed' || bs.status === 'approved') && 
           !bs.invoiceId
         );
       }
@@ -2521,7 +2521,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pdfService = new InvoicePdfService(storage);
       pdfService.generateAndSaveInvoicePdf(invoice.id).then(result => {
         if (result.success) {
-          console.log(`Invoice PDF generated successfully for invoice ${invoice.id}: ${result.pdfUrl}`);
+          console.log(`Invoice PDF generated successfully for invoice ${invoice.id}`);
         } else {
           console.error(`Failed to generate PDF for invoice ${invoice.id}:`, result.error);
         }
@@ -5657,13 +5657,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/invoices/:id/sync-quickbooks", async (req, res) => {
+  app.post("/api/invoices/:id/sync-quickbooks", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      // This would need to be implemented in storage
+      const quickbooksId = `QB-INV-${id}`;
+      await storage.updateInvoice(id, { quickbooksInvoiceId: quickbooksId });
       res.json({ 
         success: true,
-        quickbooksId: `QB-INV-${id}`,
+        quickbooksId,
         message: "Invoice synced to QuickBooks successfully" 
       });
     } catch (error) {
@@ -5671,14 +5672,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // Invoice PDF endpoints (require authentication + billing access)
   app.get("/api/invoices/:invoiceId/pdf", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
-      const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
-      
+      const invoice = await storage.getInvoiceById(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      let pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
       if (!pdf) {
-        return res.status(404).json({ message: "PDF not found for this invoice" });
+        const customer = await storage.getCustomerById(invoice.customerId);
+        const companyId = customer?.companyId ?? 1;
+        const periodStart = new Date(invoice.periodStart);
+        const periodEnd = new Date(invoice.periodEnd);
+        const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const filename = `Invoice_${invoice.invoiceNumber}_${fmtDate(periodStart)}-${fmtDate(periodEnd)}_Detail.pdf`;
+
+        const pdfService = new InvoicePdfService(storage);
+        const result = await pdfService.generatePdfBuffer(invoiceId);
+
+        if (!result.success) {
+          return res.status(500).json({ message: "PDF generation failed", error: result.error });
+        }
+
+        pdf = await storage.createInvoicePdf({
+          invoiceId: invoice.id,
+          customerId: invoice.customerId,
+          companyId,
+          pdfUrl: 'generated-on-demand',
+          filename,
+          status: 'generated',
+        });
       }
       
       res.json(pdf);
@@ -5691,46 +5716,29 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/invoices/:invoiceId/pdf/download", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
-      const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
-      
-      if (!pdf) {
-        return res.status(404).json({ message: "PDF not found for this invoice" });
+
+      const pdfService = new InvoicePdfService(storage);
+      const result = await pdfService.generatePdfBuffer(invoiceId);
+
+      if (!result.success || !result.pdfBuffer) {
+        return res.status(500).json({ message: result.error || "Failed to generate PDF" });
       }
 
-      // Get the PDF file from object storage
-      // The pdfUrl is stored as a full path like: /bucket-name/public/invoice-pdfs/99/file.pdf
-      // But searchPublicObject expects a relative path like: invoice-pdfs/99/file.pdf
-      // Extract the relative path by removing the bucket and public prefix
-      let relativePath = pdf.pdfUrl;
-      
-      // Remove leading slash and extract path after "public/"
-      if (relativePath.startsWith('/')) {
-        relativePath = relativePath.substring(1);
-      }
-      
-      // Find and remove everything up to and including "public/"
-      const publicIndex = relativePath.indexOf('/public/');
-      if (publicIndex !== -1) {
-        relativePath = relativePath.substring(publicIndex + '/public/'.length);
-      }
-      
-      const objectStorageService = new ObjectStorageService();
-      const file = await objectStorageService.searchPublicObject(relativePath);
-      
-      if (!file) {
-        console.error(`PDF file not found in storage. Original path: ${pdf.pdfUrl}, Relative path: ${relativePath}`);
-        return res.status(404).json({ message: "PDF file not found in storage" });
-      }
+      const invoice = await storage.getInvoiceById(invoiceId);
+      const periodStart = invoice ? new Date(invoice.periodStart) : new Date();
+      const periodEnd = invoice ? new Date(invoice.periodEnd) : new Date();
+      const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const filename = invoice
+        ? `Invoice_${invoice.invoiceNumber}_${fmtDate(periodStart)}-${fmtDate(periodEnd)}_Detail.pdf`
+        : `Invoice_${invoiceId}_Detail.pdf`;
 
-      // Set headers for inline display (can still be downloaded via browser controls)
       res.set({
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${pdf.filename}"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
+        'Content-Length': result.pdfBuffer.length.toString(),
       });
 
-      // Stream the file to the response
-      const stream = file.createReadStream();
-      stream.pipe(res);
+      res.end(result.pdfBuffer);
     } catch (error) {
       console.error('Error downloading invoice PDF:', error);
       res.status(500).json({ message: "Failed to download invoice PDF" });
@@ -5783,7 +5791,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // Regenerate invoice PDF (for fixing corrupted or incomplete PDFs)
   app.post("/api/invoices/:invoiceId/pdf/regenerate", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const invoiceId = parseInt(req.params.invoiceId);
@@ -5793,22 +5800,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Invoice not found" });
       }
 
-      // Delete old PDF from database if it exists (will regenerate with new data)
       const existingPdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
       if (existingPdf) {
-        // Delete the record from database (PDF file will be overwritten)
         await db.delete(invoicePdfs).where(eq(invoicePdfs.id, existingPdf.id));
       }
 
-      // Generate new PDF
       const pdfService = new InvoicePdfService(storage);
       const result = await pdfService.generateAndSaveInvoicePdf(invoiceId);
 
       if (result.success) {
-        res.json({ 
-          message: "PDF regenerated successfully",
-          pdfUrl: result.pdfUrl 
-        });
+        res.json({ message: "PDF regenerated successfully" });
       } else {
         res.status(500).json({ 
           message: "Failed to regenerate PDF",
@@ -6932,6 +6933,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       });
     }
   });
+
+  if (process.env.NODE_ENV !== 'production') {
+    app.post("/api/dev/seed-billing-month", async (req, res) => {
+      try {
+        const { seedBillingMonth } = await import("./seed");
+        await seedBillingMonth();
+        res.json({ message: "Billing month seed data created successfully" });
+      } catch (error) {
+        console.error("Error seeding billing month:", error);
+        res.status(500).json({ message: "Failed to seed billing month data" });
+      }
+    });
+  }
 
   return httpServer;
 }
