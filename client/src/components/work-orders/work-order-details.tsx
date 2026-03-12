@@ -64,6 +64,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -250,10 +251,12 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     }
   };
 
-  const handleRemovePhoto = (indexToRemove: number) => {
+  const handleConfirmRemovePhoto = () => {
+    if (photoToRemove === null) return;
     const existingPhotos: string[] = Array.isArray(workOrder.photos) ? workOrder.photos as string[] : [];
-    const updatedPhotos = existingPhotos.filter((_, i) => i !== indexToRemove);
+    const updatedPhotos = existingPhotos.filter((_, i) => i !== photoToRemove);
     updatePhotos.mutate(updatedPhotos);
+    setPhotoToRemove(null);
     toast({ title: "Photo Removed", description: "Photo has been removed from this work order" });
   };
 
@@ -772,7 +775,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                           </button>
                           {canEditPhotos && (
                             <button
-                              onClick={() => handleRemovePhoto(idx)}
+                              onClick={() => setPhotoToRemove(idx)}
                               disabled={updatePhotos.isPending}
                               className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
                               title="Remove photo"
@@ -1022,6 +1025,24 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         onComplete={onUpdate}
       />
     )}
+
+    {/* Photo Remove Confirmation */}
+    <Dialog open={photoToRemove !== null} onOpenChange={() => setPhotoToRemove(null)}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Remove Photo</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to remove this photo? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={() => setPhotoToRemove(null)}>Cancel</Button>
+          <Button variant="destructive" onClick={handleConfirmRemovePhoto} disabled={updatePhotos.isPending}>
+            Remove
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     {/* Assignment Confirmation Modal */}
     <AssignmentConfirmationModal

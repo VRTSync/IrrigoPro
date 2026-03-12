@@ -195,8 +195,8 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
   const workOrderId = parseInt(req.params.id);
   const updateData = req.body;
   
-  // Company admins, billing managers, and irrigation managers have full access
-  if (userRole === 'company_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
+  // Company admins, super admins, billing managers, and irrigation managers have full access
+  if (userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
     return next();
   }
   
