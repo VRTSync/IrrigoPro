@@ -62,7 +62,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
 
       const submitData: Record<string, string | number | null> = {
         workDescription: data.workDescription,
-        workDate: new Date(data.workDate).toISOString(),
+        workDate: data.workDate,
         totalHours: data.totalHours,
         laborRate: data.laborRate,
         laborSubtotal: laborSubtotal.toFixed(2),

@@ -1796,7 +1796,10 @@ export default function CustomerBilling() {
           workOrder={selectedWorkOrder}
           open={showEditWorkOrder}
           onClose={() => { setShowEditWorkOrder(false); setSelectedWorkOrder(null); }}
-          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] }); }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+          }}
         />
       )}
 
@@ -1806,7 +1809,10 @@ export default function CustomerBilling() {
           billingSheet={selectedBillingSheet}
           open={showEditBillingSheet}
           onClose={() => { setShowEditBillingSheet(false); setSelectedBillingSheet(null); }}
-          onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] }); }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+          }}
         />
       )}
 
