@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 
 import { WorkOrderCompletion } from "./work-order-completion";
 import { AssignmentConfirmationModal } from "./assignment-confirmation-modal";
+import { EditWorkOrderModal } from "./edit-work-order-modal";
 import { 
   FileText, 
   Calendar, 
@@ -65,6 +66,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -416,6 +418,17 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 )}
               </div>
               <div className="flex gap-2">
+                {canEditPhotos && workOrder.status !== 'completed' && workOrder.status !== 'cancelled' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowEditModal(true)}
+                    className="text-blue-600 hover:text-blue-700"
+                  >
+                    <Edit className="w-4 h-4 mr-1" />
+                    Edit
+                  </Button>
+                )}
                 {getStatusActions()}
               </div>
             </div>
@@ -1063,6 +1076,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       selectedTechnician={fieldTechs?.find(tech => tech.id.toString() === pendingTechnicianId) || null}
       isLoading={reassignWorkOrder.isPending}
     />
+
+    {/* Edit Work Order Modal */}
+    {showEditModal && (
+      <EditWorkOrderModal
+        workOrder={workOrder}
+        open={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        onSuccess={onUpdate}
+      />
+    )}
     </>
   );
 }
