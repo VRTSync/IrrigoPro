@@ -245,28 +245,29 @@ export function CompletedWorkDetailModal({
 
             {/* Time & Labor */}
             <SectionCard title="Time & Labor" icon={<Clock className="w-4 h-4" />}>
-              <div className="flex flex-wrap gap-4 sm:gap-8">
+              {canSeePricing ? (
+                <div className="flex items-center flex-wrap gap-3">
+                  <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                    <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Hours</p>
+                  </div>
+                  <span className="text-xl font-semibold text-gray-400">×</span>
+                  <div className="bg-gray-50 rounded-lg px-4 py-3 text-center min-w-[80px]">
+                    <p className="text-2xl font-bold text-gray-900">{currency(laborRate ?? 0)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Rate / hr</p>
+                  </div>
+                  <span className="text-xl font-semibold text-gray-400">=</span>
+                  <div className="bg-blue-50 rounded-lg px-4 py-3 text-center min-w-[80px] border border-blue-100">
+                    <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Labor Total</p>
+                  </div>
+                </div>
+              ) : (
                 <div className="text-center">
                   <p className="text-2xl font-bold text-gray-900">{totalHours ?? "0"}</p>
                   <p className="text-xs text-gray-500 mt-0.5">Hours Worked</p>
                 </div>
-                {canSeePricing && laborRate && (
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-gray-900">{currency(laborRate)}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Labor Rate / hr</p>
-                  </div>
-                )}
-                {canSeePricing && laborSubtotal && (
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-blue-700">{currency(laborSubtotal)}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Labor Subtotal</p>
-                  </div>
-                )}
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-gray-900">{items.length}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">Parts Used</p>
-                </div>
-              </div>
+              )}
             </SectionCard>
 
             {/* Parts & Materials */}
@@ -281,7 +282,6 @@ export function CompletedWorkDetailModal({
                       <tr className="border-b border-gray-100">
                         <th className="text-left pb-2 font-medium text-gray-600 pr-3">Part</th>
                         <th className="text-center pb-2 font-medium text-gray-600 px-2 whitespace-nowrap">Qty</th>
-                        <th className="text-center pb-2 font-medium text-gray-600 px-2 whitespace-nowrap">Labor hrs</th>
                         {canSeePricing && (
                           <>
                             <th className="text-right pb-2 font-medium text-gray-600 px-2 whitespace-nowrap">Unit $</th>
@@ -299,7 +299,6 @@ export function CompletedWorkDetailModal({
                           ? (item as any).totalPrice
                           : null;
                         const qty = (item as BillingSheetItem).quantity ?? (item as WorkOrderItem).quantity;
-                        const laborHrs = item.laborHours;
                         const desc = (item as BillingSheetItem).partDescription;
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
@@ -311,7 +310,6 @@ export function CompletedWorkDetailModal({
                               )}
                             </td>
                             <td className="py-2.5 px-2 text-center text-gray-700">{qty}</td>
-                            <td className="py-2.5 px-2 text-center text-gray-700">{laborHrs ?? "—"}</td>
                             {canSeePricing && (
                               <>
                                 <td className="py-2.5 px-2 text-right text-gray-700">
@@ -329,7 +327,7 @@ export function CompletedWorkDetailModal({
                     {canSeePricing && (
                       <tfoot>
                         <tr className="border-t border-gray-200">
-                          <td colSpan={canSeePricing ? 4 : 3} className="pt-2 text-sm text-gray-600 font-medium">
+                          <td colSpan={canSeePricing ? 3 : 2} className="pt-2 text-sm text-gray-600 font-medium">
                             Parts Subtotal
                           </td>
                           <td className="pt-2 text-right font-semibold text-gray-900">
@@ -339,6 +337,33 @@ export function CompletedWorkDetailModal({
                       </tfoot>
                     )}
                   </table>
+                </div>
+              </SectionCard>
+            )}
+
+            {/* Total Bill */}
+            {canSeePricing && (
+              <SectionCard title="Total Bill" icon={<DollarSign className="w-4 h-4" />}>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Labor Subtotal</span>
+                    <span className="font-medium text-gray-900">{currency(laborSubtotal ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Parts Subtotal</span>
+                    <span className="font-medium text-gray-900">{currency(partsSubtotal ?? itemsPartsTotal)}</span>
+                  </div>
+                  <Separator className="my-2" />
+                  <div className="flex justify-between items-center">
+                    <span className="text-base font-semibold text-gray-900">Grand Total</span>
+                    <span className="text-xl font-bold text-blue-700">
+                      {currency(
+                        totalAmount ??
+                          (parseFloat(String(laborSubtotal ?? 0)) +
+                            parseFloat(String(partsSubtotal ?? itemsPartsTotal)))
+                      )}
+                    </span>
+                  </div>
                 </div>
               </SectionCard>
             )}
