@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Loader2, AlertCircle, Calendar, CheckCircle2, CloudOff } from "lucide-react";
+import { FileText, Loader2, AlertCircle, Calendar, CheckCircle2, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface Invoice {
   id: number;
@@ -24,6 +26,25 @@ interface InvoiceListProps {
 }
 
 export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListProps) {
+  const { toast } = useToast();
+
+  const syncMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      return apiRequest(`/api/invoices/${invoiceId}/sync-quickbooks`, "POST");
+    },
+    onSuccess: () => {
+      toast({ title: "Invoice synced to QuickBooks successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "QuickBooks sync failed",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const { data: invoices = [], isLoading, error } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices", { customerId, limit }],
     queryFn: async () => {
@@ -152,10 +173,29 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
                     Synced
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-xs text-gray-400">
-                    <CloudOff className="w-3.5 h-3.5" />
-                    Not synced
-                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto py-0.5 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                    disabled={syncMutation.isPending}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      syncMutation.mutate(invoice.id);
+                    }}
+                    data-testid={`button-sync-qb-${invoice.id}`}
+                  >
+                    {syncMutation.isPending && syncMutation.variables === invoice.id ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-3 h-3 mr-1" />
+                        Sync to QuickBooks
+                      </>
+                    )}
+                  </Button>
                 )}
               </div>
             </div>
