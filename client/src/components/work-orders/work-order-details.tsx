@@ -661,13 +661,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               );
             })()}
 
-            {/* Site Photos (attached at creation) */}
-            {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 && workOrder.status !== 'completed' && (
+            {/* Site Photos (all photos including creation and completion) */}
+            {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Camera className="w-5 h-5 text-blue-600" />
-                    Site Photos ({workOrder.photos.length})
+                    Photos ({workOrder.photos.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -678,7 +678,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                         onClick={() => setLightboxPhoto(url)}
                         className="aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
-                        <img src={url} alt={`Site photo ${idx + 1}`} className="w-full h-full object-cover" />
+                        <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                       </button>
                     ))}
                   </div>
@@ -819,26 +819,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                               })}
                             </tbody>
                           </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Photos */}
-                    {photos.length > 0 && (
-                      <div>
-                        <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-                          <Camera className="w-4 h-4" /> Photos ({photos.length})
-                        </p>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {photos.map((url, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => setLightboxPhoto(url)}
-                              className="aspect-square rounded-lg overflow-hidden border border-green-200 hover:border-green-400 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500"
-                            >
-                              <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
-                            </button>
-                          ))}
                         </div>
                       </div>
                     )}

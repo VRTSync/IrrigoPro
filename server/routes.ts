@@ -5322,6 +5322,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const taxAmount = subtotal * taxRate;
       const totalAmount = subtotal + taxAmount;
 
+      // Merge creation photos with completion photos (don't overwrite)
+      const existingWorkOrder = await storage.getWorkOrder(workOrderId);
+      const creationPhotos: string[] = existingWorkOrder?.photos || [];
+      const completionPhotos: string[] = photos || [];
+      const mergedPhotos = [...creationPhotos, ...completionPhotos];
+
       // Update work order with completion details and calculated totals
       const workOrder = await storage.updateWorkOrder(workOrderId, {
         status: 'completed',
@@ -5331,7 +5337,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workSummary,
         customerNotes,
         totalHours: laborHours,
-        photos: photos || [],
+        photos: mergedPhotos,
         totalPartsCost: partsCost,
         totalAmount: totalAmount.toFixed(2)
       });
