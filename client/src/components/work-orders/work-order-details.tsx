@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,10 @@ import {
   List,
   Activity,
   Camera,
-  DollarSign
+  DollarSign,
+  Upload,
+  X,
+  Plus
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -60,6 +63,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [pendingTechnicianId, setPendingTechnicianId] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -200,6 +205,57 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       });
     },
   });
+
+  const canEditPhotos = currentUser?.role === 'company_admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'irrigation_manager';
+
+  const updatePhotos = useMutation({
+    mutationFn: async (photos: string[]) => {
+      return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { photos });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      onUpdate();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update photos",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handlePhotoUpload = async (selectedFiles: FileList | null) => {
+    if (!selectedFiles?.length) return;
+    setIsUploadingPhoto(true);
+
+    try {
+      const newUrls: string[] = [];
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const formData = new FormData();
+        formData.append('photo', selectedFiles[i]);
+        const response = await fetch('/api/upload/photo', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error(`Failed to upload ${selectedFiles[i].name}`);
+        const uploaded = await response.json();
+        newUrls.push(uploaded.url);
+      }
+      const existingPhotos: string[] = Array.isArray(workOrder.photos) ? workOrder.photos as string[] : [];
+      updatePhotos.mutate([...existingPhotos, ...newUrls]);
+      toast({ title: "Photos Added", description: `${newUrls.length} photo${newUrls.length > 1 ? 's' : ''} uploaded successfully` });
+    } catch (error: any) {
+      toast({ title: "Upload Failed", description: error.message || "Failed to upload photos", variant: "destructive" });
+    } finally {
+      setIsUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
+  const handleRemovePhoto = (indexToRemove: number) => {
+    const existingPhotos: string[] = Array.isArray(workOrder.photos) ? workOrder.photos as string[] : [];
+    const updatedPhotos = existingPhotos.filter((_, i) => i !== indexToRemove);
+    updatePhotos.mutate(updatedPhotos);
+    toast({ title: "Photo Removed", description: "Photo has been removed from this work order" });
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -661,27 +717,75 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               );
             })()}
 
-            {/* Site Photos (all photos including creation and completion) */}
-            {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 && (
+            {/* Photos section - editable for managers/admins */}
+            {(( workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0) || canEditPhotos) && (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Camera className="w-5 h-5 text-blue-600" />
-                    Photos ({workOrder.photos.length})
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Camera className="w-5 h-5 text-blue-600" />
+                      Photos {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 ? `(${workOrder.photos.length})` : ''}
+                    </CardTitle>
+                    {canEditPhotos && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => photoInputRef.current?.click()}
+                          disabled={isUploadingPhoto || updatePhotos.isPending}
+                          className="flex items-center gap-1.5"
+                        >
+                          {isUploadingPhoto ? (
+                            <>
+                              <Upload className="w-4 h-4 animate-pulse" />
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="w-4 h-4" />
+                              Add Photos
+                            </>
+                          )}
+                        </Button>
+                        <input
+                          ref={photoInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/gif,image/webp"
+                          multiple
+                          onChange={(e) => handlePhotoUpload(e.target.files)}
+                          className="hidden"
+                        />
+                      </>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {workOrder.photos.map((url: string, idx: number) => (
-                      <button
-                        key={idx}
-                        onClick={() => setLightboxPhoto(url)}
-                        className="aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
+                  {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {(workOrder.photos as string[]).map((url: string, idx: number) => (
+                        <div key={idx} className="relative group">
+                          <button
+                            onClick={() => setLightboxPhoto(url)}
+                            className="aspect-square w-full rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                          </button>
+                          {canEditPhotos && (
+                            <button
+                              onClick={() => handleRemovePhoto(idx)}
+                              disabled={updatePhotos.isPending}
+                              className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                              title="Remove photo"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 text-center py-4">No photos yet. Click "Add Photos" to upload.</p>
+                  )}
                 </CardContent>
               </Card>
             )}

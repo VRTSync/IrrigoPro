@@ -1,12 +1,12 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. Key capabilities include zone-based estimates, customer integrations, and a modern user interface, aiming to be a complete solution for managing field services, billing, and customer interactions.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, offering zone-based estimates, customer integrations, and a modern user interface.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 Site Map Display Preferences: Default display mode set to solid markers with zone/controller identifiers in the center, enhanced popups with detailed information. Maintain original styling and functionality unless explicitly requested to change.
-App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details. Complete visual rebrand implemented across all interfaces, icons, and PWA assets. Production-ready company logo upload system with secure file storage, production domain handling (irrigopro.com), session-based authentication, comprehensive branding integration throughout pages (below header), customer approval emails, and email template management in company profile for professional communications.
+App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details. Production-ready company logo upload system with secure file storage, production domain handling (irrigopro.com), session-based authentication, comprehensive branding integration throughout pages (below header), customer approval emails, and email template management in company profile for professional communications.
 Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request).
 Customer Approval System: Complete email approval workflow with individual estimate status check buttons, proper production domain URLs (irrigopro.com/estimate-approval), and professional customer-facing success pages that avoid admin interface confusion.
 Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching.
@@ -24,7 +24,7 @@ Field Tech Pricing Visibility: CRITICAL SECURITY FEATURE - Field technicians NEV
 Production Optimizations: Site map system fully optimized for production deployment with hybrid authentication approach. Site map routes support both development header-based authentication and production session-based authentication. Production middleware performs database user lookups only when session data is available, falling back to header authentication for development compatibility. This ensures reliable operation in production while maintaining development workflow compatibility.
 Work Order and Billing Sheet Management: Company administrators and billing managers have full edit and delete permissions for work orders and billing sheets. Backend API routes are protected with role-based middleware (requireWorkOrderBillingAccess) ensuring only authorized users can modify or delete these critical business documents. Frontend UI provides Edit and Delete buttons for authorized roles with confirmation dialogs for destructive actions.
 Parts Catalog Access: Billing managers and irrigation managers have comprehensive parts catalog access with full CRUD permissions. This includes viewing all parts with pricing information, creating and editing individual parts, advanced filtering and search, and QuickBooks integration for parts sync. Bulk import functionality is restricted to company administrators and super administrators only. Additionally, irrigation managers have access to both the full Parts Catalog and a simplified Parts List view through a dropdown navigation menu, providing flexibility for different use cases. The parts catalog provides extensive inventory management capabilities for all management-level personnel while maintaining appropriate permission controls.
-Work Order Photo Uploads: Photos can be attached during work order creation via the FileUpload component. Uploaded photos are stored in the work order's `photos` array field and displayed as a "Site Photos" section in the work order details view for all statuses. Billing sheets also support photo uploads at creation time.
+Work Order Photo Uploads: Photos can be attached during work order creation via the FileUpload component. Uploaded photos are stored in the work order's `photos` array field and displayed in the Photos section of the work order details view for all statuses. Billing sheets also support photo uploads at creation time. Managers (irrigation_manager) and admins (company_admin, super_admin) can add and remove photos on any existing work order at any time via the "Add Photos" button and X remove overlay in the work order detail view. Photo changes are saved immediately via PATCH /api/work-orders/:id. Field techs and billing managers see photos as read-only with no edit controls.
 Work Order Assignment: The assignment dropdown on work orders includes both irrigation managers and field technicians, grouped by role (Managers / Field Techs). The `/api/users/field-techs` endpoint returns both `field_tech` and `irrigation_manager` active users. Reassignment in work order details also shows grouped managers and field techs.
 Location Picker Enhancements: The LocationPicker component features a live GPS tracking dot (pulsing blue circle) that continuously shows the user's real-time position on the map. A "Use My Location" button snaps the work location pin to the user's GPS coordinates with reverse geocoding. The map automatically re-centers when the customer/community selection changes using `map.flyTo()` for smooth transitions.
 Phone-Based User Login: New company team members use their phone number as their login username. The phone field is required when creating new users, and the username is automatically set to the phone number. Email is optional. Existing users with text-slug usernames are completely unaffected.
@@ -41,29 +41,22 @@ Phone-Based User Login: New company team members use their phone number as their
 ### Backend Architecture
 - **Runtime**: Node.js with Express.js.
 - **Language**: TypeScript with ES modules.
-- **Database**: PostgreSQL with Drizzle ORM, hosted on Neon Database (@neondatabase/serverless).
+- **Database**: PostgreSQL with Drizzle ORM.
 - **Schema Management**: Drizzle Kit for migrations.
 - **API Design**: RESTful API with JSON responses.
 
 ### Core Features
-- **Complete Business Workflow**: Supports estimate creation, customer approval, work order generation, field work management, invoice creation, and QuickBooks integration. Includes standalone billing sheets.
-- **Monthly Invoice Consolidation**: Consolidates all customer work into single monthly QuickBooks invoices with tax-free calculations.
-- **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions and interfaces.
-- **Site Maps & Controller Management System**: KML file import for visualizing irrigation controllers and zones on an interactive map using Leaflet. Site map builder is accessible through individual customer profiles.
-- **Customer Email Approval System**: Complete token-based customer estimate approval system with Postmark email integration. Features dedicated customer approval pages at /estimate-approval/:token with professional success confirmations, proper production domain handling (irrigopro.com), and individual estimate status checking capabilities. Customers receive clean approval experiences without access to admin interfaces.
-- **Notification System**: Database-driven notifications with real-time updates for work order assignments, completions, and estimate approvals.
-- **iOS PWA Push Notifications**: Progressive Web App implementation with service worker, push notifications, and iOS-specific optimizations.
-- **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based location picker.
-- **Authentication & Security**: Secure password reset, email verification, and Multi-Factor Authentication (MFA) using TOTP with backup codes. Comprehensive error tracking with QuickBooks transaction ID capture and a centralized logging system.
-- **User Management**: Company administrators have full user management capabilities within their own company.
-- **External Work Order API**: REST API for CRM integration allowing external systems to create work orders automatically. Features include:
-  - API key authentication with secure key management (keys shown only once at creation)
-  - Automatic customer creation if customer doesn't exist (matched by email or name)
-  - Auto-assignment to company's irrigation manager role
-  - Notification sent to assigned manager when work order is created
-  - Work order status retrieval via API
-  - Company-level access control through API keys
-  - Endpoints: POST/GET /api/external/work-orders, managed via /api/company/:companyId/api-keys
+- **Complete Business Workflow**: Estimates, customer approval, work order generation, field work, invoicing, and standalone billing sheets.
+- **Monthly Invoice Consolidation**: Consolidates customer work into single monthly, tax-free QuickBooks invoices.
+- **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions.
+- **Site Maps & Controller Management System**: KML import for interactive irrigation maps using Leaflet.
+- **Customer Email Approval System**: Token-based estimate approval with Postmark email integration and dedicated approval pages.
+- **Notification System**: Database-driven notifications for work order assignments, completions, and estimate approvals.
+- **iOS PWA Push Notifications**: PWA implementation with service worker and push notifications.
+- **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based picker.
+- **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes).
+- **User Management**: Company administrators manage users within their company.
+- **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
 
 ## External Dependencies
 
@@ -81,4 +74,4 @@ Phone-Based User Login: New company team members use their phone number as their
 - **ORM**: Drizzle ORM
 - **Session Management**: connect-pg-simple
 - **Email Service**: Postmark API
-- **QuickBooks Integration**: OAuth2 authentication, customer sync with active-only filtering, invoice creation. Prioritizes company names over individual names for business customers.
+- **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
