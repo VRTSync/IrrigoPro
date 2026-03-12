@@ -772,7 +772,7 @@ export default function CustomerBilling() {
                         Estimates ({customerBillingData.estimates.length})
                       </TabsTrigger>
                       <TabsTrigger value="invoices" className="text-xs">
-                        Invoices
+                        Monthly Invoices
                       </TabsTrigger>
                     </TabsList>
 
@@ -1283,7 +1283,7 @@ export default function CustomerBilling() {
                     Estimates ({customerBillingData.estimates.length})
                   </TabsTrigger>
                   <TabsTrigger value="invoices" className="text-xs px-2">
-                    Invoices
+                    Monthly Invoices
                   </TabsTrigger>
                 </TabsList>
 
