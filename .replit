@@ -44,3 +44,7 @@ localPort = 5904
 externalPort = 3000
 
 [agent]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
