@@ -173,7 +173,11 @@ export function LocationPicker({
           (position) => {
             updateLiveLocationMarker(position.coords.latitude, position.coords.longitude);
           },
-          () => {},
+          (error) => {
+            if (error.code === error.PERMISSION_DENIED) {
+              setLocationError("Location access denied. Enable it in browser settings for live tracking.");
+            }
+          },
           { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
         );
         watchIdRef.current = wId;
