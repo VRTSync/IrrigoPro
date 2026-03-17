@@ -360,7 +360,7 @@ export function WorkOrderCompletion({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 sm:p-6 min-w-0">
           {showSummary ? (
             // Summary View
             <div className="space-y-6">
@@ -406,8 +406,8 @@ export function WorkOrderCompletion({
               <CardContent>
                 <div className="space-y-3">
                   {usedParts.map((part) => (
-                    <div key={part.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
-                      <div className="flex-1">
+                    <div key={part.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50 min-w-0">
+                      <div className="flex-1 min-w-0">
                         <div className="font-medium">{part.partName}</div>
                         {currentUser?.role !== 'field_tech' ? (
                           <div className="text-sm text-gray-500">
@@ -440,7 +440,7 @@ export function WorkOrderCompletion({
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 min-w-0">
                     {photos.map((photo, index) => (
                       <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
                         <img 
@@ -636,8 +636,8 @@ export function WorkOrderCompletion({
                         </div>
                         <div className="space-y-2">
                           {usedParts.filter(part => part.source === 'estimate').map((usedPart) => (
-                            <div key={usedPart.id} className="flex items-center justify-between p-3 border border-blue-200 rounded-lg bg-blue-50">
-                              <div className="flex-1">
+                            <div key={usedPart.id} className="flex items-center justify-between p-3 border border-blue-200 rounded-lg bg-blue-50 min-w-0">
+                              <div className="flex-1 min-w-0">
                                 <div className="font-medium flex items-center gap-2">
                                   {usedPart.partName}
                                   <span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded">Estimate</span>
@@ -686,8 +686,8 @@ export function WorkOrderCompletion({
                         </div>
                         <div className="space-y-2">
                           {usedParts.filter(part => part.source === 'field_added').map((usedPart) => (
-                            <div key={usedPart.id} className="flex items-center justify-between p-3 border border-orange-200 rounded-lg bg-orange-50">
-                              <div className="flex-1">
+                            <div key={usedPart.id} className="flex items-center justify-between p-3 border border-orange-200 rounded-lg bg-orange-50 min-w-0">
+                              <div className="flex-1 min-w-0">
                                 <div className="font-medium flex items-center gap-2">
                                   {usedPart.partName}
                                   <span className="text-xs bg-orange-200 text-orange-800 px-2 py-1 rounded">Field Added</span>

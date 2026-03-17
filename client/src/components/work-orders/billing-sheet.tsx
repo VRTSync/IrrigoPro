@@ -180,20 +180,20 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6 w-full overflow-x-hidden">
       {/* Header with Logo */}
       <Card className="bg-white shadow-sm">
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <img src={logoPath} alt="Company Logo" className="h-16 w-auto" />
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">High Plains Property</h1>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center space-x-4 min-w-0">
+              <img src={logoPath} alt="Company Logo" className="h-16 w-auto flex-shrink-0" />
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold text-gray-900 truncate">High Plains Property</h1>
                 <p className="text-sm text-gray-600">Maintenance</p>
-                <p className="text-sm text-gray-600">14847 Madison St Brighton CO 80602</p>
+                <p className="text-sm text-gray-600 truncate">14847 Madison St Brighton CO 80602</p>
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right flex-shrink-0">
               <h2 className="text-lg font-semibold text-blue-600">Irrigation Billing Sheet - Live</h2>
               <p className="text-sm text-gray-500">{new Date().toLocaleDateString()}</p>
             </div>
@@ -206,7 +206,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
               {/* Tech Information */}
               <Card className="border-2 border-gray-200">
                 <CardContent className="p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
                     <FormField
                       control={form.control}
                       name="techName"
@@ -306,7 +306,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 min-w-0">
                     <div>
                       <FormField
                         control={form.control}
@@ -393,7 +393,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 min-w-0">
                     <FormField
                       control={form.control}
                       name="actualStartTime"
@@ -452,7 +452,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             control={form.control}
                             name={`materialItems.${index}.description`}
                             render={({ field }) => (
-                              <FormItem className="flex-1">
+                              <FormItem className="flex-1 min-w-0">
                                 <FormLabel className="text-xs font-medium text-gray-600">Description</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Material description" {...field} />
@@ -470,7 +470,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             <Minus className="w-4 h-4" />
                           </Button>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0">
                           <FormField
                             control={form.control}
                             name={`materialItems.${index}.quantity`}
@@ -561,7 +561,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             control={form.control}
                             name={`laborItems.${index}.description`}
                             render={({ field }) => (
-                              <FormItem className="flex-1">
+                              <FormItem className="flex-1 min-w-0">
                                 <FormLabel className="text-xs font-medium text-gray-600">Service Description</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Labor service description" {...field} />
@@ -579,7 +579,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             <Minus className="w-4 h-4" />
                           </Button>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0">
                           <FormField
                             control={form.control}
                             name={`laborItems.${index}.quantity`}
@@ -670,7 +670,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             control={form.control}
                             name={`additionalCharges.${index}.description`}
                             render={({ field }) => (
-                              <FormItem className="flex-1">
+                              <FormItem className="flex-1 min-w-0">
                                 <FormLabel className="text-xs font-medium text-gray-600">Description</FormLabel>
                                 <FormControl>
                                   <Input placeholder="Additional charge description" {...field} />
@@ -688,7 +688,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             <Minus className="w-4 h-4" />
                           </Button>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
                           <FormField
                             control={form.control}
                             name={`additionalCharges.${index}.quantity`}

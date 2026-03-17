@@ -410,8 +410,8 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 lg:p-6">
-        <DialogHeader>
+      <DialogContent className="w-[95vw] max-w-[95vw] sm:max-w-3xl md:max-w-4xl lg:max-w-6xl max-h-[95vh] overflow-hidden p-0 flex flex-col">
+        <DialogHeader className="p-3 sm:p-4 lg:p-6 pb-0 flex-shrink-0">
           <DialogTitle>
             {estimateId ? "Edit Estimate" : "Create New Estimate"}
           </DialogTitle>
@@ -423,6 +423,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
           </DialogDescription>
         </DialogHeader>
 
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 lg:p-6 min-w-0">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             {/* Customer Selection */}
@@ -592,7 +593,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {/* Add New Zone Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg min-w-0">
                     <Select
                       value={newZoneForm.controllerId}
                       onValueChange={(value) => setNewZoneForm(prev => ({ ...prev, controllerId: value }))}
@@ -713,7 +714,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                 <CardTitle>Pricing Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 min-w-0">
                   <FormField
                     control={form.control}
                     name="laborRate"
@@ -814,6 +815,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
           onOpenChange={setShowPartsModal}
           onSelectPart={addPart}
         />
+        </div>
       </DialogContent>
     </Dialog>
   );

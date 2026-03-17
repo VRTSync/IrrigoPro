@@ -150,7 +150,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 sm:p-6 min-w-0">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             
@@ -306,7 +306,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 min-w-0">
                   <FormField
                     control={form.control}
                     name="priority"

@@ -499,7 +499,7 @@ export function StandaloneBillingSheet({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6 min-w-0">
           <Form {...form}>
             <form id="billing-form" onSubmit={form.handleSubmit(onSubmit, onValidationError)} className="space-y-4 sm:space-y-6">
               {showReview ? (
@@ -575,7 +575,7 @@ export function StandaloneBillingSheet({
                           {items.map((item, index) => (
                             <div key={index} className="border rounded-lg p-3">
                               <div className="flex justify-between items-start">
-                                <div className="flex-1">
+                                <div className="flex-1 min-w-0">
                                   <p className="font-medium">{item.partName}</p>
                                   {item.partDescription && (
                                     <p className="text-sm text-gray-600">{item.partDescription}</p>
@@ -681,7 +681,7 @@ export function StandaloneBillingSheet({
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="space-y-4 sm:space-y-0 sm:grid sm:grid-cols-2 sm:gap-4">
+                      <div className="space-y-4 sm:space-y-0 sm:grid sm:grid-cols-2 sm:gap-4 min-w-0">
                         <FormField
                           control={form.control}
                           name="customerId"
@@ -787,7 +787,7 @@ export function StandaloneBillingSheet({
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {/* Basic Info */}
-                      <div className="space-y-4 sm:space-y-0 sm:grid sm:grid-cols-2 sm:gap-4">
+                      <div className="space-y-4 sm:space-y-0 sm:grid sm:grid-cols-2 sm:gap-4 min-w-0">
                         <FormField
                           control={form.control}
                           name="workDate"
@@ -1085,7 +1085,7 @@ export function StandaloneBillingSheet({
                                   <div className="space-y-4">
                                     {/* Item header with name and remove button */}
                                     <div className="flex items-start justify-between gap-3">
-                                      <div className="flex-1">
+                                      <div className="flex-1 min-w-0">
                                         <FormField
                                           control={form.control}
                                           name={`items.${index}.partName`}
@@ -1128,7 +1128,7 @@ export function StandaloneBillingSheet({
                                     )}
 
                                     {/* Quantity and price in grid */}
-                                    <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-2 gap-3 min-w-0">
                                       <FormField
                                         control={form.control}
                                         name={`items.${index}.quantity`}
