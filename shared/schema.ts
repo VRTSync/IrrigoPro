@@ -432,7 +432,7 @@ export const workOrderItems = pgTable("work_order_items", {
   id: serial("id").primaryKey(),
   workOrderId: integer("work_order_id").references(() => workOrders.id).notNull(),
   zoneId: integer("zone_id").references(() => estimateZones.id),
-  partId: integer("part_id").references(() => parts.id).notNull(),
+  partId: integer("part_id").references(() => parts.id),
   partName: text("part_name").notNull(),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),

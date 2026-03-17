@@ -5895,11 +5895,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid work order ID" });
       }
-      const workOrderData = insertWorkOrderSchema.partial().parse(req.body);
+      const { items, ...workOrderBody } = req.body;
+      const workOrderData = insertWorkOrderSchema.partial().parse(workOrderBody);
       const workOrder = await storage.updateWorkOrder(id, workOrderData);
       if (!workOrder) {
         return res.status(404).json({ message: "Work order not found" });
       }
+
+      // Handle items if provided (delete-and-recreate pattern)
+      if (items !== undefined && Array.isArray(items)) {
+        await storage.deleteWorkOrderItems(id);
+        let computedPartsCost = 0;
+        for (const item of items) {
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.unitPrice) || 0;
+          const lineTotal = qty * price;
+          computedPartsCost += lineTotal;
+          await storage.addWorkOrderItem({
+            workOrderId: id,
+            partId: item.partId || null,
+            partName: item.partName,
+            partPrice: price.toString(),
+            quantity: qty,
+            laborHours: (Number(item.laborHours) || 0).toString(),
+            totalPrice: lineTotal.toString(),
+            notes: item.notes || null,
+            zoneId: item.zoneId || null,
+          });
+        }
+        // Persist the recomputed parts cost back to the work order
+        await storage.updateWorkOrder(id, { totalPartsCost: computedPartsCost.toFixed(2) });
+      }
+
       res.json(workOrder);
     } catch (error) {
       if (error instanceof z.ZodError) {

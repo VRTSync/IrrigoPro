@@ -249,6 +249,7 @@ export interface IStorage {
   addWorkOrderItem(item: InsertWorkOrderItem): Promise<WorkOrderItem>;
   updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined>;
   deleteWorkOrderItem(id: number): Promise<boolean>;
+  deleteWorkOrderItems(workOrderId: number): Promise<boolean>;
   
   // Billing Sheets - for work done without work orders
   getAllBillingSheets(): Promise<BillingSheetWithItems[]>;
@@ -1801,6 +1802,11 @@ export class DatabaseStorage implements IStorage {
   async deleteWorkOrderItem(id: number): Promise<boolean> {
     const result = await db.delete(workOrderItems).where(eq(workOrderItems.id, id));
     return (result.rowCount || 0) > 0;
+  }
+
+  async deleteWorkOrderItems(workOrderId: number): Promise<boolean> {
+    await db.delete(workOrderItems).where(eq(workOrderItems.workOrderId, workOrderId));
+    return true;
   }
 
   // Standalone Billing Sheets - for work done without work orders

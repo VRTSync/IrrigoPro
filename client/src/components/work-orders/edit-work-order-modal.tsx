@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,7 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder, User as UserType } from "@shared/schema";
+import { Trash2, Plus } from "lucide-react";
+import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
 
 const editWorkOrderSchema = z.object({
   projectName: z.string().min(1, "Project name is required"),
@@ -19,6 +21,7 @@ const editWorkOrderSchema = z.object({
   locationNotes: z.string().optional(),
   scheduledDate: z.string().optional(),
   priority: z.string(),
+  totalHours: z.string().optional(),
   specialInstructions: z.string().optional(),
   notes: z.string().optional(),
   assignedTechnicianId: z.number().nullable().optional(),
@@ -26,6 +29,16 @@ const editWorkOrderSchema = z.object({
 });
 
 type EditWorkOrderFormData = z.infer<typeof editWorkOrderSchema>;
+
+interface PartRow {
+  partId: number | null;
+  partName: string;
+  quantity: string;
+  unitPrice: string;
+  laborHours: string;
+  zoneId: number | null;
+  notes: string;
+}
 
 interface EditWorkOrderModalProps {
   workOrder: WorkOrder;
@@ -37,10 +50,37 @@ interface EditWorkOrderModalProps {
 export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: EditWorkOrderModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [parts, setParts] = useState<PartRow[]>([]);
+  const [partsLoaded, setPartsLoaded] = useState(false);
 
   const { data: fieldTechs } = useQuery<UserType[]>({
     queryKey: ["/api/users/field-techs"],
   });
+
+  const { data: existingItems } = useQuery<WorkOrderItem[]>({
+    queryKey: ["/api/work-orders", workOrder.id, "items"],
+    queryFn: async () => {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/items`);
+      if (!res.ok) throw new Error("Failed to fetch items");
+      return res.json();
+    },
+    enabled: open && !partsLoaded,
+  });
+
+  useEffect(() => {
+    if (existingItems && !partsLoaded) {
+      setParts(existingItems.map(item => ({
+        partId: item.partId ?? null,
+        partName: item.partName,
+        quantity: String(item.quantity),
+        unitPrice: String(item.partPrice),
+        laborHours: String(item.laborHours),
+        zoneId: item.zoneId ?? null,
+        notes: item.notes ?? "",
+      })));
+      setPartsLoaded(true);
+    }
+  }, [existingItems, partsLoaded]);
 
   const formatDateForInput = (date: string | Date | null | undefined): string => {
     if (!date) return "";
@@ -63,6 +103,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
       locationNotes: workOrder.locationNotes || "",
       scheduledDate: formatDateForInput(workOrder.scheduledDate),
       priority: workOrder.priority || "medium",
+      totalHours: workOrder.totalHours?.toString() || "",
       specialInstructions: workOrder.specialInstructions || "",
       notes: workOrder.notes || "",
       assignedTechnicianId: workOrder.assignedTechnicianId || null,
@@ -72,17 +113,33 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
 
   const updateWorkOrder = useMutation({
     mutationFn: async (data: EditWorkOrderFormData) => {
-      const submitData: Partial<WorkOrder> & { scheduledDate: string | null } = {
+      const submitData: Record<string, unknown> = {
         projectName: data.projectName,
         description: data.description || "",
         projectAddress: data.projectAddress || "",
         locationNotes: data.locationNotes || "",
         scheduledDate: data.scheduledDate ? new Date(data.scheduledDate).toISOString() : null,
         priority: data.priority,
+        totalHours: data.totalHours ? data.totalHours : null,
         specialInstructions: data.specialInstructions || "",
         notes: data.notes || "",
         assignedTechnicianId: data.assignedTechnicianId ? Number(data.assignedTechnicianId) : null,
         assignedTechnicianName: data.assignedTechnicianId ? (data.assignedTechnicianName || "") : "",
+        items: parts
+          .filter(p => p.partName.trim())
+          .map(p => ({
+            partId: p.partId,
+            partName: p.partName,
+            quantity: Number(p.quantity) || 0,
+            unitPrice: Number(p.unitPrice) || 0,
+            laborHours: Number(p.laborHours) || 0,
+            zoneId: p.zoneId,
+            notes: p.notes || null,
+          })),
+        totalPartsCost: parts
+          .filter(p => p.partName.trim())
+          .reduce((sum, p) => sum + (Number(p.quantity) || 0) * (Number(p.unitPrice) || 0), 0)
+          .toFixed(2),
       };
       return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", submitData);
     },
@@ -92,6 +149,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
         description: "Work order has been updated successfully.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders", workOrder.id, "items"] });
       onSuccess();
       onClose();
     },
@@ -107,6 +165,22 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const onSubmit = (data: EditWorkOrderFormData) => {
     updateWorkOrder.mutate(data);
   };
+
+  const addPart = () => {
+    setParts(prev => [...prev, { partId: null, partName: "", quantity: "1", unitPrice: "0", laborHours: "0", zoneId: null, notes: "" }]);
+  };
+
+  const removePart = (index: number) => {
+    setParts(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updatePart = (index: number, field: keyof PartRow, value: string) => {
+    setParts(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p));
+  };
+
+  const partsTotal = parts.reduce((sum, p) => {
+    return sum + (Number(p.quantity) || 0) * (Number(p.unitPrice) || 0);
+  }, 0);
 
   const managers = fieldTechs?.filter(u => u.role === 'irrigation_manager') || [];
   const techs = fieldTechs?.filter(u => u.role === 'field_tech') || [];
@@ -190,7 +264,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                 )}
               />
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <FormField
                   control={form.control}
                   name="priority"
@@ -223,6 +297,27 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                       <FormLabel>Scheduled Date</FormLabel>
                       <FormControl>
                         <Input type="datetime-local" {...field} value={field.value || ""} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="totalHours"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Hours</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.25"
+                          min="0"
+                          placeholder="0"
+                          {...field}
+                          value={field.value || ""}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -323,6 +418,95 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                   </FormItem>
                 )}
               />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-700">Parts / Materials</h3>
+                  <Button type="button" variant="outline" size="sm" onClick={addPart} className="gap-1">
+                    <Plus className="h-4 w-4" />
+                    Add Part
+                  </Button>
+                </div>
+
+                {parts.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600">Part Name</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600 w-20">Qty</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600 w-28">Unit Price</th>
+                          <th className="text-right px-3 py-2 font-medium text-gray-600 w-24">Total</th>
+                          <th className="w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {parts.map((part, index) => {
+                          const lineTotal = (Number(part.quantity) || 0) * (Number(part.unitPrice) || 0);
+                          return (
+                            <tr key={index} className="bg-white">
+                              <td className="px-3 py-2">
+                                <Input
+                                  value={part.partName}
+                                  onChange={e => updatePart(index, "partName", e.target.value)}
+                                  placeholder="Part name"
+                                  className="h-8 text-sm"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={part.quantity}
+                                  onChange={e => updatePart(index, "quantity", e.target.value)}
+                                  className="h-8 text-sm"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={part.unitPrice}
+                                  onChange={e => updatePart(index, "unitPrice", e.target.value)}
+                                  placeholder="0.00"
+                                  className="h-8 text-sm"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-700 font-medium">
+                                ${lineTotal.toFixed(2)}
+                              </td>
+                              <td className="px-2 py-2">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removePart(index)}
+                                  className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t">
+                        <tr>
+                          <td colSpan={3} className="px-3 py-2 text-right text-sm font-semibold text-gray-700">Parts Total:</td>
+                          <td className="px-3 py-2 text-right text-sm font-bold text-gray-900">${partsTotal.toFixed(2)}</td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+
+                {parts.length === 0 && (
+                  <p className="text-sm text-gray-400 italic">No parts added. Click "Add Part" to add materials used.</p>
+                )}
+              </div>
 
               <div className="flex gap-3 pt-4 border-t">
                 <Button
