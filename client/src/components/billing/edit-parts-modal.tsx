@@ -87,7 +87,11 @@ export function EditPartsModal({
   };
 
   const handleDone = () => {
-    onSave(parts.filter((p) => p.partName.trim()));
+    onSave(
+      parts
+        .filter((p) => p.partName.trim())
+        .map((p) => ({ ...p, quantity: String(Math.max(1, Number(p.quantity) || 1)) }))
+    );
     onOpenChange(false);
   };
 
@@ -171,7 +175,7 @@ export function EditPartsModal({
                           <td className="px-3 py-2">
                             <Input
                               type="number"
-                              min="0"
+                              min="1"
                               step="1"
                               value={part.quantity}
                               onChange={(e) => updatePart(index, "quantity", e.target.value)}

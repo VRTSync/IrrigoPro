@@ -241,7 +241,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                     {isGreen ? (
                       <CheckCircle className="w-5 h-5 text-green-600" />
                     ) : (
-                      <Edit className="w-5 h-5 text-blue-600" />
+                      <FileText className="w-5 h-5 text-blue-600" />
                     )}
                   </div>
                   <div className="min-w-0">
