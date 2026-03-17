@@ -12,7 +12,7 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, MapPin } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { BillingSheet } from "@shared/schema";
@@ -24,6 +24,8 @@ export default function BillingSheets() {
   const [editingDraft, setEditingDraft] = useState<BillingSheet | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [activeExpanded, setActiveExpanded] = useState(true);
+  const [completedExpanded, setCompletedExpanded] = useState(true);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -76,6 +78,16 @@ export default function BillingSheets() {
   ) || [];
   const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
 
+  // Active: draft (user's own) + submitted; Completed: approved + billed
+  const activeStatuses = ['draft', 'submitted'];
+  const completedStatuses = ['approved', 'billed'];
+  
+  const activeSheets = billingSheets?.filter(sheet => {
+    if (sheet.status === 'draft') return sheet.technicianId === currentUser?.id;
+    return sheet.status === 'submitted';
+  }) || [];
+  const completedSheets = billingSheets?.filter(sheet => completedStatuses.includes(sheet.status)) || [];
+
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
@@ -107,20 +119,17 @@ export default function BillingSheets() {
     });
   };
 
-  // Filter billing sheets based on search query
-  const filteredDrafts = draftSheets.filter(sheet => 
+  const matchesSearch = (sheet: BillingSheet) =>
     sheet.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     sheet.technicianName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase());
 
-  const filteredSubmitted = submittedSheets.filter(sheet => 
-    sheet.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.technicianName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter billing sheets based on search query
+  const filteredDrafts = draftSheets.filter(matchesSearch);
+  const filteredSubmitted = submittedSheets.filter(matchesSearch);
+  const filteredActive = activeSheets.filter(matchesSearch);
+  const filteredCompleted = completedSheets.filter(matchesSearch);
 
 
 
@@ -345,7 +354,7 @@ export default function BillingSheets() {
             </Card>
           ))}
         </div>
-      ) : (filteredDrafts.length === 0 && filteredSubmitted.length === 0) ? (
+      ) : (filteredActive.length === 0 && filteredCompleted.length === 0) ? (
         <Card>
           <CardContent className="text-center py-12">
             <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -390,322 +399,268 @@ export default function BillingSheets() {
             </div>
           )}
 
-          {/* Draft Billing Sheets Section */}
-          {filteredDrafts.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-2 mb-4">
-                <FileText className="w-5 h-5 text-orange-600" />
-                <h2 className="text-lg font-semibold text-gray-900">Draft Billing Sheets</h2>
-                <Badge variant="secondary" className="bg-orange-100 text-orange-800">
-                  {filteredDrafts.length}
-                </Badge>
-                {canEditDelete && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      const allDraftIds = filteredDrafts.map(s => s.id);
-                      const allSelected = allDraftIds.every(id => selectedIds.has(id));
-                      setSelectedIds(prev => {
-                        const next = new Set(prev);
-                        if (allSelected) {
-                          allDraftIds.forEach(id => next.delete(id));
-                        } else {
-                          allDraftIds.forEach(id => next.add(id));
-                        }
-                        return next;
-                      });
-                    }}
-                    className="text-xs text-gray-500 ml-auto"
-                  >
-                    {filteredDrafts.every(s => selectedIds.has(s.id)) ? 'Deselect All Drafts' : 'Select All Drafts'}
-                  </Button>
+          {/* Active Section (draft + submitted) */}
+          <div>
+            <button
+              onClick={() => setActiveExpanded(!activeExpanded)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                {activeExpanded ? <ChevronDown className="w-5 h-5 text-blue-700" /> : <ChevronRight className="w-5 h-5 text-blue-700" />}
+                <span className="text-base font-semibold text-blue-900">Active</span>
+                <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{filteredActive.length}</Badge>
+              </div>
+            </button>
+
+            {activeExpanded && (
+              <div className="mt-3 space-y-4">
+                {filteredActive.length === 0 ? (
+                  <p className="text-center text-gray-500 py-6">No active billing sheets</p>
+                ) : (
+                  filteredActive.map((sheet) => (
+                    <Card key={sheet.id} className={`hover:shadow-md transition-shadow ${sheet.status === 'draft' ? 'border-orange-200 bg-orange-50/50' : ''}`}>
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 mb-3">
+                              {canEditDelete && (
+                                <Checkbox
+                                  checked={selectedIds.has(sheet.id)}
+                                  onCheckedChange={() => toggleSelect(sheet.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex-shrink-0"
+                                />
+                              )}
+                              <FileText className={`w-5 h-5 flex-shrink-0 ${sheet.status === 'draft' ? 'text-orange-600' : 'text-blue-600'}`} />
+                              <div className="min-w-0 flex-1">
+                                <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
+                                <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                              </div>
+                              {getStatusBadge(sheet.status)}
+                            </div>
+
+                            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
+                              currentUser?.role === 'field_tech' ? 'lg:grid-cols-2' : 'lg:grid-cols-4'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
+                                  <p className="text-gray-500 text-xs">Work Date</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-gray-900 truncate">{sheet.technicianName}</p>
+                                  <p className="text-gray-500 text-xs">Technician</p>
+                                </div>
+                              </div>
+                              {currentUser?.role !== 'field_tech' && (
+                                <>
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
+                                      <p className="text-gray-500 text-xs">Total Time</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
+                                      <p className="text-gray-500 text-xs">Total Amount</p>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            <div className="mt-3 space-y-1">
+                              <p className="text-xs sm:text-sm text-gray-600">
+                                <strong>Work:</strong> <span className="break-words">{sheet.workDescription}</span>
+                              </p>
+                              {sheet.propertyAddress && (
+                                <p className="text-xs sm:text-sm text-gray-600">
+                                  <strong>Location:</strong> <span className="break-words">{sheet.propertyAddress}</span>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
+                            <div className="flex flex-col sm:items-end gap-2">
+                              {/* Continue Draft button for field techs */}
+                              {currentUser?.role === 'field_tech' && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                                <Button size="sm" onClick={() => setEditingDraft(sheet)} className="bg-orange-600 hover:bg-orange-700 text-white px-3">
+                                  <FileText className="w-3 h-3 mr-1" />Continue Draft
+                                </Button>
+                              )}
+                              {/* Submit for approval button for field techs */}
+                              {currentUser?.role === 'field_tech' && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                                <Button size="sm" onClick={() => submitForApproval.mutate(sheet.id)} disabled={submitForApproval.isPending} className="bg-blue-600 hover:bg-blue-700 text-white px-3">
+                                  <Send className="w-3 h-3 mr-1" />Submit for Approval
+                                </Button>
+                              )}
+                              {/* View button for submitted sheets */}
+                              {sheet.status !== 'draft' && (
+                                <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
+                                  <Eye className="w-3 h-3 mr-1" />View
+                                </Button>
+                              )}
+                              {/* Approval buttons for managers on submitted sheets */}
+                              {currentUser?.role !== 'field_tech' && sheet.status === 'submitted' && (
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-green-600 hover:bg-green-700 text-white px-3">
+                                    <Check className="w-3 h-3 mr-1" />Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => rejectBillingSheet.mutate(sheet.id)} disabled={rejectBillingSheet.isPending} className="border-red-300 text-red-600 hover:bg-red-50 px-3">
+                                    <X className="w-3 h-3 mr-1" />Reject
+                                  </Button>
+                                </div>
+                              )}
+                              {/* Edit and Delete buttons for admins */}
+                              {canEditDelete && (
+                                <div className="flex gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 px-3">
+                                    <Edit className="w-3 h-3 mr-1" />Edit
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 px-3">
+                                    <Trash2 className="w-3 h-3 mr-1" />Delete
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {sheet.status === 'draft' ? `Last saved: ${formatDate(sheet.updatedAt)}` : `Created: ${formatDate(sheet.createdAt)}`}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
                 )}
               </div>
-              <div className="space-y-4">
-                {filteredDrafts.map((sheet) => (
-                  <Card key={sheet.id} className="border-orange-200 bg-orange-50/50">
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-3">
-                            {canEditDelete && (
-                              <Checkbox
-                                checked={selectedIds.has(sheet.id)}
-                                onCheckedChange={() => toggleSelect(sheet.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex-shrink-0"
-                              />
-                            )}
-                            <FileText className="w-5 h-5 text-orange-600 flex-shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
-                              <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
-                            </div>
-                            <Badge className="bg-orange-100 text-orange-800">Draft</Badge>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
-                                <p className="text-gray-500 text-xs">Work Date</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-gray-900 truncate">{sheet.technicianName}</p>
-                                <p className="text-gray-500 text-xs">Technician</p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+            )}
+          </div>
 
-                        <div className="flex flex-col sm:items-end gap-2 flex-shrink-0">
-                          {/* Edit draft button for field techs */}
-                          {currentUser?.role === 'field_tech' && sheet.technicianId === currentUser.id && (
-                            <Button
-                              size="sm"
-                              onClick={() => setEditingDraft(sheet)}
-                              className="bg-orange-600 hover:bg-orange-700 text-white px-3"
-                            >
-                              <FileText className="w-3 h-3 mr-1" />
-                              Continue Draft
-                            </Button>
-                          )}
-                          
-                          {/* Delete button for company admin and billing manager on draft sheets */}
-                          {canEditDelete && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                if (confirm(`Are you sure you want to delete draft billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) {
-                                  deleteBillingSheet.mutate(sheet.id);
-                                }
-                              }}
-                              className="border-red-300 text-red-600 hover:bg-red-50 px-3"
-                            >
-                              <Trash2 className="w-3 h-3 mr-1" />
-                              Delete Draft
-                            </Button>
-                          )}
-                          
-                          <div className="text-xs text-gray-500">
-                            Last saved: {formatDate(sheet.updatedAt)}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+          {/* Completed Section (approved + billed) */}
+          <div>
+            <button
+              onClick={() => setCompletedExpanded(!completedExpanded)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
+                <span className="text-base font-semibold text-gray-700">Completed</span>
+                <Badge variant="secondary">{filteredCompleted.length}</Badge>
               </div>
-            </div>
-          )}
+            </button>
 
-          {/* Submitted Billing Sheets Section */}
-          {filteredSubmitted.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Check className="w-5 h-5 text-green-600" />
-                <h2 className="text-lg font-semibold text-gray-900">Submitted Billing Sheets</h2>
-                <Badge variant="secondary" className="bg-green-100 text-green-800">
-                  {filteredSubmitted.length}
-                </Badge>
-                {canEditDelete && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      const allSubmittedIds = filteredSubmitted.map(s => s.id);
-                      const allSelected = allSubmittedIds.every(id => selectedIds.has(id));
-                      setSelectedIds(prev => {
-                        const next = new Set(prev);
-                        if (allSelected) {
-                          allSubmittedIds.forEach(id => next.delete(id));
-                        } else {
-                          allSubmittedIds.forEach(id => next.add(id));
-                        }
-                        return next;
-                      });
-                    }}
-                    className="text-xs text-gray-500 ml-auto"
-                  >
-                    {filteredSubmitted.every(s => selectedIds.has(s.id)) ? 'Deselect All Submitted' : 'Select All Submitted'}
-                  </Button>
+            {completedExpanded && (
+              <div className="mt-3 space-y-4">
+                {filteredCompleted.length === 0 ? (
+                  <p className="text-center text-gray-500 py-6">No completed billing sheets</p>
+                ) : (
+                  filteredCompleted.map((sheet) => (
+                    <Card key={sheet.id} className="hover:shadow-md transition-shadow">
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 mb-3">
+                              {canEditDelete && (
+                                <Checkbox
+                                  checked={selectedIds.has(sheet.id)}
+                                  onCheckedChange={() => toggleSelect(sheet.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex-shrink-0"
+                                />
+                              )}
+                              <FileText className="w-5 h-5 text-green-600 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
+                                <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                              </div>
+                              {getStatusBadge(sheet.status)}
+                            </div>
+
+                            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
+                              currentUser?.role === 'field_tech' ? 'lg:grid-cols-2' : 'lg:grid-cols-4'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
+                                  <p className="text-gray-500 text-xs">Work Date</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-gray-900 truncate">{sheet.technicianName}</p>
+                                  <p className="text-gray-500 text-xs">Technician</p>
+                                </div>
+                              </div>
+                              {currentUser?.role !== 'field_tech' && (
+                                <>
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
+                                      <p className="text-gray-500 text-xs">Total Time</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
+                                      <p className="text-gray-500 text-xs">Total Amount</p>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            <div className="mt-3 space-y-1">
+                              <p className="text-xs sm:text-sm text-gray-600">
+                                <strong>Work:</strong> <span className="break-words">{sheet.workDescription}</span>
+                              </p>
+                              {sheet.propertyAddress && (
+                                <p className="text-xs sm:text-sm text-gray-600">
+                                  <strong>Location:</strong> <span className="break-words">{sheet.propertyAddress}</span>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
+                            <div className="flex flex-col sm:items-end gap-2">
+                              <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
+                                <Eye className="w-3 h-3 mr-1" />View
+                              </Button>
+                              {canEditDelete && (
+                                <div className="flex gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 px-3">
+                                    <Edit className="w-3 h-3 mr-1" />Edit
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 px-3">
+                                    <Trash2 className="w-3 h-3 mr-1" />Delete
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Created: {formatDate(sheet.createdAt)}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
                 )}
               </div>
-              <div className="space-y-4">
-                {filteredSubmitted.map((sheet) => (
-                  <Card key={sheet.id} className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-3">
-                      {canEditDelete && (
-                        <Checkbox
-                          checked={selectedIds.has(sheet.id)}
-                          onCheckedChange={() => toggleSelect(sheet.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex-shrink-0"
-                        />
-                      )}
-                      <FileText className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
-                        <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
-                      </div>
-                    </div>
-                    
-                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
-                      currentUser?.role === 'field_tech' ? 'lg:grid-cols-2' : 'lg:grid-cols-4'
-                    }`}>
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
-                          <p className="text-gray-500 text-xs">Work Date</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-gray-900 truncate">{sheet.technicianName}</p>
-                          <p className="text-gray-500 text-xs">Technician</p>
-                        </div>
-                      </div>
-                      
-                      {/* Hide pricing info from field techs */}
-                      {currentUser?.role !== 'field_tech' && (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
-                              <p className="text-gray-500 text-xs">Total Time</p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
-                              <p className="text-gray-500 text-xs">Total Amount</p>
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    
-                    <div className="mt-3 space-y-1">
-                      <p className="text-xs sm:text-sm text-gray-600">
-                        <strong>Work:</strong> <span className="break-words">{sheet.workDescription}</span>
-                      </p>
-                      {sheet.propertyAddress && (
-                        <p className="text-xs sm:text-sm text-gray-600">
-                          <strong>Location:</strong> <span className="break-words">{sheet.propertyAddress}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
-                    <div className="flex flex-col sm:items-end gap-2">
-                      {getStatusBadge(sheet.status)}
-                      
-                      {/* Submit for approval button for field techs on draft billing sheets */}
-                      {currentUser?.role === 'field_tech' && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
-                        <Button
-                          size="sm"
-                          onClick={() => submitForApproval.mutate(sheet.id)}
-                          disabled={submitForApproval.isPending}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-3"
-                        >
-                          <Send className="w-3 h-3 mr-1" />
-                          Submit for Approval
-                        </Button>
-                      )}
-                      
-                      {/* View button for submitted billing sheets */}
-                      {sheet.status !== 'draft' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setViewingSheet(sheet)}
-                          className="px-3"
-                        >
-                          <Eye className="w-3 h-3 mr-1" />
-                          View
-                        </Button>
-                      )}
-                      
-                      {/* Approval buttons for managers on submitted billing sheets */}
-                      {currentUser?.role !== 'field_tech' && sheet.status === 'submitted' && (
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => approveBillingSheet.mutate(sheet.id)}
-                            disabled={approveBillingSheet.isPending}
-                            className="bg-green-600 hover:bg-green-700 text-white px-3"
-                          >
-                            <Check className="w-3 h-3 mr-1" />
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => rejectBillingSheet.mutate(sheet.id)}
-                            disabled={rejectBillingSheet.isPending}
-                            className="border-red-300 text-red-600 hover:bg-red-50 px-3"
-                          >
-                            <X className="w-3 h-3 mr-1" />
-                            Reject
-                          </Button>
-                        </div>
-                      )}
-                      
-                      {/* Edit and Delete buttons for company admin and billing manager */}
-                      {canEditDelete && (
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setEditingDraft(sheet)}
-                            className="border-blue-300 text-blue-600 hover:bg-blue-50 px-3"
-                          >
-                            <Edit className="w-3 h-3 mr-1" />
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) {
-                                deleteBillingSheet.mutate(sheet.id);
-                              }
-                            }}
-                            className="border-red-300 text-red-600 hover:bg-red-50 px-3"
-                          >
-                            <Trash2 className="w-3 h-3 mr-1" />
-                            Delete
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      Created: {formatDate(sheet.createdAt)}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-                ))}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
 

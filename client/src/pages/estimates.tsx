@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
-import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw, Wrench } from "lucide-react";
+import { Plus, FileText, Mail, Download, Eye, Edit2, RefreshCw, Wrench, ChevronDown, ChevronRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -22,6 +22,8 @@ export default function Estimates() {
   const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [creatingWorkOrder, setCreatingWorkOrder] = useState<number | null>(null);
+  const [activeExpanded, setActiveExpanded] = useState(true);
+  const [completedExpanded, setCompletedExpanded] = useState(true);
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -126,6 +128,12 @@ export default function Estimates() {
     });
   };
 
+  const activeStatuses = ['pending', 'approved'];
+  const completedStatuses = ['rejected', 'converted_to_work_order'];
+
+  const activeEstimates = estimates?.filter(e => activeStatuses.includes(e.status)) || [];
+  const completedEstimates = estimates?.filter(e => completedStatuses.includes(e.status)) || [];
+
   // Show full page skeleton while loading (after all hooks)
   if (isLoading) {
     return <EstimateListSkeleton />;
@@ -169,322 +177,302 @@ export default function Estimates() {
         </TabsList>
 
         <TabsContent value="estimates">
+          <div className="space-y-4">
+            {/* Active Section */}
+            <div>
+              <button
+                onClick={() => setActiveExpanded(!activeExpanded)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  {activeExpanded ? <ChevronDown className="w-5 h-5 text-blue-700" /> : <ChevronRight className="w-5 h-5 text-blue-700" />}
+                  <span className="text-base font-semibold text-blue-900">Active</span>
+                  <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{activeEstimates.length}</Badge>
+                </div>
+              </button>
 
-        {/* Estimates List - Responsive Design */}
-        {/* Desktop Table View */}
-        <div className="hidden lg:block">
-          <Card className="bg-white shadow-sm border border-gray-200">
-            <CardHeader className="px-6 py-4 border-b border-gray-200">
-              <CardTitle className="text-lg font-semibold text-gray-900">All Estimates</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Estimate
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Customer
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Project
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Amount
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Date
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {isLoading ? (
-                      Array.from({ length: 5 }).map((_, i) => (
-                        <tr key={i}>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <Skeleton className="h-8 w-8 rounded-lg mr-3" />
-                              <Skeleton className="h-4 w-24" />
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <Skeleton className="h-4 w-32" />
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <Skeleton className="h-4 w-40" />
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <Skeleton className="h-4 w-16" />
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <Skeleton className="h-5 w-16 rounded-full" />
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <Skeleton className="h-4 w-20" />
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right">
-                            <Skeleton className="h-8 w-24" />
-                          </td>
-                        </tr>
-                      ))
+              {activeExpanded && (
+                <>
+                  {/* Desktop Table View */}
+                  <div className="hidden lg:block mt-3">
+                    <Card className="bg-white shadow-sm border border-gray-200">
+                      <CardContent className="p-0">
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estimate</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {activeEstimates.length === 0 ? (
+                                <tr>
+                                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">No active estimates</td>
+                                </tr>
+                              ) : (
+                                activeEstimates.map((estimate) => (
+                                  <tr key={estimate.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="flex items-center">
+                                        <div className="bg-blue-50 p-2 rounded-lg mr-3">
+                                          <FileText className="w-4 h-4 text-blue-600" />
+                                        </div>
+                                        <div className="text-sm font-medium text-gray-900">{estimate.estimateNumber}</div>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm text-gray-900">{estimate.customerName}</div>
+                                      <div className="text-sm text-gray-500">{estimate.customerEmail}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm text-gray-900">{estimate.projectName}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm font-medium text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(estimate.status)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(estimate.createdAt)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                      <div className="flex items-center space-x-2 justify-end">
+                                        <Button variant="outline" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setSelectedEstimateId(estimate.id); setShowDetailModal(true); }}>
+                                          <Eye className="w-4 h-4 mr-1" />View Details
+                                        </Button>
+                                        {estimate.status === 'approved' && (
+                                          <Button variant="outline" size="sm" className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400" onClick={() => handleCreateWorkOrder(estimate.id)} disabled={creatingWorkOrder === estimate.id} title="Create Work Order">
+                                            {creatingWorkOrder === estimate.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wrench className="w-4 h-4" />}
+                                          </Button>
+                                        )}
+                                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                          <Edit2 className="w-4 h-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="sm" className="text-green-600 hover:text-green-800" onClick={() => handleCheckStatus(estimate.id)} title="Check Status">
+                                          <RefreshCw className="w-4 h-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900"><Mail className="w-4 h-4" /></Button>
+                                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900"><Download className="w-4 h-4" /></Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Mobile Card View */}
+                  <div className="lg:hidden mt-3 space-y-4">
+                    {activeEstimates.length === 0 ? (
+                      <p className="text-center text-gray-500 py-6">No active estimates</p>
                     ) : (
-                      estimates?.map((estimate) => (
-                        <tr key={estimate.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div className="bg-blue-50 p-2 rounded-lg mr-3">
-                                <FileText className="w-4 h-4 text-blue-600" />
+                      activeEstimates.map((estimate) => (
+                        <Card key={estimate.id} className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center">
+                                <div className="bg-blue-50 p-2 rounded-lg mr-3"><FileText className="w-5 h-5 text-blue-600" /></div>
+                                <div className="text-sm font-semibold text-gray-900">{estimate.estimateNumber}</div>
                               </div>
+                              {getStatusBadge(estimate.status)}
+                            </div>
+                            <div className="space-y-2">
                               <div>
-                                <div className="text-sm font-medium text-gray-900">{estimate.estimateNumber}</div>
+                                <div className="text-sm font-medium text-gray-900">{estimate.customerName}</div>
+                                <div className="text-xs text-gray-500">{estimate.customerEmail}</div>
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">{estimate.customerName}</div>
-                            <div className="text-sm text-gray-500">{estimate.customerEmail}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">{estimate.projectName}</div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm font-medium text-gray-900">
-                              {formatCurrency(parseFloat(estimate.totalAmount))}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {getStatusBadge(estimate.status)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {formatDate(estimate.createdAt)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div className="flex items-center space-x-2 justify-end">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="text-blue-600 hover:text-blue-800"
-                                onClick={() => {
-                                  setSelectedEstimateId(estimate.id);
-                                  setShowDetailModal(true);
-                                }}
-                              >
-                                <Eye className="w-4 h-4 mr-1" />
-                                View Details
-                              </Button>
-                              {estimate.status !== 'converted_to_work_order' && (
-                                <>
+                              <div className="text-sm text-gray-700">{estimate.projectName}</div>
+                              <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                                <div className="text-lg font-bold text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</div>
+                                <div className="text-xs text-gray-500">{formatDate(estimate.createdAt)}</div>
+                              </div>
+                              <div className="pt-3 border-t border-gray-100 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSelectedEstimateId(estimate.id); setShowDetailModal(true); }}>
+                                    <Eye className="w-4 h-4 mr-2" />View Details
+                                  </Button>
                                   {estimate.status === 'approved' && (
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400"
-                                      onClick={() => handleCreateWorkOrder(estimate.id)}
-                                      disabled={creatingWorkOrder === estimate.id}
-                                      title="Create Work Order"
-                                    >
-                                      {creatingWorkOrder === estimate.id ? (
-                                        <RefreshCw className="w-4 h-4 animate-spin" />
-                                      ) : (
-                                        <Wrench className="w-4 h-4" />
-                                      )}
+                                    <Button variant="outline" size="sm" className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400 flex-1" onClick={() => handleCreateWorkOrder(estimate.id)} disabled={creatingWorkOrder === estimate.id}>
+                                      {creatingWorkOrder === estimate.id ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <Wrench className="w-4 h-4 mr-2" />}
+                                      <span className="truncate">Create Work Order</span>
                                     </Button>
                                   )}
-                                  <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    className="text-blue-600 hover:text-blue-800"
-                                    onClick={() => {
-                                      setEditEstimateId(estimate.id);
-                                      setShowEstimateModal(true);
-                                    }}
-                                  >
-                                    <Edit2 className="w-4 h-4" />
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                    <Edit2 className="w-4 h-4 mr-1" />Edit
                                   </Button>
-                                  <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    className="text-green-600 hover:text-green-800"
-                                    onClick={() => handleCheckStatus(estimate.id)}
-                                    title="Check Status"
-                                  >
-                                    <RefreshCw className="w-4 h-4" />
+                                  <Button variant="outline" size="sm" className="text-green-600 hover:text-green-800 flex-1" onClick={() => handleCheckStatus(estimate.id)}>
+                                    <RefreshCw className="w-4 h-4 mr-1" />Status
                                   </Button>
-                                  <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                                    <Mail className="w-4 h-4" />
-                                  </Button>
-                                  <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
-                                    <Download className="w-4 h-4" />
-                                  </Button>
-                                </>
-                              )}
-                              {estimate.status === 'converted_to_work_order' && (
-                                <span className="text-sm text-gray-500 italic">Cannot edit - Converted</span>
-                              )}
+                                  <Button variant="outline" size="sm" className="flex-1"><Mail className="w-4 h-4 mr-1" />Email</Button>
+                                  <Button variant="outline" size="sm" className="flex-1"><Download className="w-4 h-4 mr-1" />PDF</Button>
+                                </div>
+                              </div>
                             </div>
-                          </td>
-                        </tr>
+                          </CardContent>
+                        </Card>
                       ))
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Mobile Card View */}
-        <div className="lg:hidden space-y-4">
-          {isLoading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <Card key={i} className="bg-white shadow-sm border border-gray-200">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center">
-                      <Skeleton className="h-10 w-10 rounded-lg mr-3" />
-                      <div>
-                        <Skeleton className="h-4 w-24 mb-1" />
-                        <Skeleton className="h-3 w-16" />
-                      </div>
-                    </div>
-                    <Skeleton className="h-6 w-16 rounded-full" />
                   </div>
-                  <div className="space-y-2">
-                    <Skeleton className="h-3 w-32" />
-                    <Skeleton className="h-3 w-40" />
-                    <div className="flex justify-between items-center pt-2">
-                      <Skeleton className="h-4 w-20" />
-                      <Skeleton className="h-3 w-16" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
-            estimates?.map((estimate) => (
-              <Card key={estimate.id} className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  {/* Header */}
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center">
-                      <div className="bg-blue-50 p-2 rounded-lg mr-3">
-                        <FileText className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">{estimate.estimateNumber}</div>
-                      </div>
-                    </div>
-                    {getStatusBadge(estimate.status)}
-                  </div>
+                </>
+              )}
+            </div>
 
-                  {/* Content */}
-                  <div className="space-y-2">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">{estimate.customerName}</div>
-                      <div className="text-xs text-gray-500">{estimate.customerEmail}</div>
-                    </div>
-                    <div className="text-sm text-gray-700">{estimate.projectName}</div>
-                    
-                    {/* Bottom Row */}
-                    <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-                      <div className="text-lg font-bold text-gray-900">
-                        {formatCurrency(parseFloat(estimate.totalAmount))}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatDate(estimate.createdAt)}
-                      </div>
-                    </div>
+            {/* Completed Section */}
+            <div>
+              <button
+                onClick={() => setCompletedExpanded(!completedExpanded)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
+                  <span className="text-base font-semibold text-gray-700">Completed</span>
+                  <Badge variant="secondary">{completedEstimates.length}</Badge>
+                </div>
+              </button>
 
-                    {/* Actions */}
-                    <div className="pt-3 border-t border-gray-100 space-y-2">
-                      {/* Primary Actions Row */}
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1"
-                          onClick={() => {
-                            setSelectedEstimateId(estimate.id);
-                            setShowDetailModal(true);
-                          }}
-                        >
-                          <Eye className="w-4 h-4 mr-2" />
-                          View Details
-                        </Button>
-                        {estimate.status === 'approved' && (
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            className="text-green-600 hover:text-green-800 border-green-300 hover:border-green-400 flex-1"
-                            onClick={() => handleCreateWorkOrder(estimate.id)}
-                            disabled={creatingWorkOrder === estimate.id}
-                            title="Create Work Order"
-                          >
-                            {creatingWorkOrder === estimate.id ? (
-                              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                            ) : (
-                              <Wrench className="w-4 h-4 mr-2" />
-                            )}
-                            <span className="truncate">Create Work Order</span>
-                          </Button>
-                        )}
-                      </div>
-                      
-                      {/* Secondary Actions Row */}
-                      {estimate.status !== 'converted_to_work_order' && (
-                        <div className="flex items-center justify-center gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => {
-                              setEditEstimateId(estimate.id);
-                              setShowEstimateModal(true);
-                            }}
-                          >
-                            <Edit2 className="w-4 h-4 mr-1" />
-                            Edit
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            className="text-green-600 hover:text-green-800 flex-1"
-                            onClick={() => handleCheckStatus(estimate.id)}
-                            title="Check Status"
-                          >
-                            <RefreshCw className="w-4 h-4 mr-1" />
-                            Status
-                          </Button>
-                          <Button variant="outline" size="sm" className="flex-1">
-                            <Mail className="w-4 h-4 mr-1" />
-                            Email
-                          </Button>
-                          <Button variant="outline" size="sm" className="flex-1">
-                            <Download className="w-4 h-4 mr-1" />
-                            PDF
-                          </Button>
+              {completedExpanded && (
+                <>
+                  {/* Desktop Table View */}
+                  <div className="hidden lg:block mt-3">
+                    <Card className="bg-white shadow-sm border border-gray-200">
+                      <CardContent className="p-0">
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estimate</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {completedEstimates.length === 0 ? (
+                                <tr>
+                                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">No completed estimates</td>
+                                </tr>
+                              ) : (
+                                completedEstimates.map((estimate) => (
+                                  <tr key={estimate.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="flex items-center">
+                                        <div className="bg-gray-100 p-2 rounded-lg mr-3">
+                                          <FileText className="w-4 h-4 text-gray-500" />
+                                        </div>
+                                        <div className="text-sm font-medium text-gray-900">{estimate.estimateNumber}</div>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm text-gray-900">{estimate.customerName}</div>
+                                      <div className="text-sm text-gray-500">{estimate.customerEmail}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm text-gray-900">{estimate.projectName}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="text-sm font-medium text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(estimate.status)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(estimate.createdAt)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                      <div className="flex items-center space-x-2 justify-end">
+                                        <Button variant="outline" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setSelectedEstimateId(estimate.id); setShowDetailModal(true); }}>
+                                          <Eye className="w-4 h-4 mr-1" />View Details
+                                        </Button>
+                                        {estimate.status !== 'converted_to_work_order' ? (
+                                          <>
+                                            <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                              <Edit2 className="w-4 h-4" />
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="text-green-600 hover:text-green-800" onClick={() => handleCheckStatus(estimate.id)} title="Check Status">
+                                              <RefreshCw className="w-4 h-4" />
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900"><Mail className="w-4 h-4" /></Button>
+                                            <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900"><Download className="w-4 h-4" /></Button>
+                                          </>
+                                        ) : (
+                                          <span className="text-sm text-gray-500 italic">Cannot edit - Converted</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
                         </div>
-                      )}
-                    </div>
-                    {estimate.status === 'converted_to_work_order' && (
-                      <div className="pt-3 border-t border-gray-100">
-                        <span className="text-sm text-gray-500 italic">Converted to Work Order</span>
-                      </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Mobile Card View */}
+                  <div className="lg:hidden mt-3 space-y-4">
+                    {completedEstimates.length === 0 ? (
+                      <p className="text-center text-gray-500 py-6">No completed estimates</p>
+                    ) : (
+                      completedEstimates.map((estimate) => (
+                        <Card key={estimate.id} className="bg-gray-50 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center">
+                                <div className="bg-gray-100 p-2 rounded-lg mr-3"><FileText className="w-5 h-5 text-gray-500" /></div>
+                                <div className="text-sm font-semibold text-gray-900">{estimate.estimateNumber}</div>
+                              </div>
+                              {getStatusBadge(estimate.status)}
+                            </div>
+                            <div className="space-y-2">
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">{estimate.customerName}</div>
+                                <div className="text-xs text-gray-500">{estimate.customerEmail}</div>
+                              </div>
+                              <div className="text-sm text-gray-700">{estimate.projectName}</div>
+                              <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                                <div className="text-lg font-bold text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</div>
+                                <div className="text-xs text-gray-500">{formatDate(estimate.createdAt)}</div>
+                              </div>
+                              <div className="pt-3 border-t border-gray-100 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSelectedEstimateId(estimate.id); setShowDetailModal(true); }}>
+                                    <Eye className="w-4 h-4 mr-2" />View Details
+                                  </Button>
+                                </div>
+                                {estimate.status !== 'converted_to_work_order' ? (
+                                  <div className="flex items-center justify-center gap-2">
+                                    <Button variant="outline" size="sm" className="flex-1" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                      <Edit2 className="w-4 h-4 mr-1" />Edit
+                                    </Button>
+                                    <Button variant="outline" size="sm" className="text-green-600 hover:text-green-800 flex-1" onClick={() => handleCheckStatus(estimate.id)}>
+                                      <RefreshCw className="w-4 h-4 mr-1" />Status
+                                    </Button>
+                                    <Button variant="outline" size="sm" className="flex-1"><Mail className="w-4 h-4 mr-1" />Email</Button>
+                                    <Button variant="outline" size="sm" className="flex-1"><Download className="w-4 h-4 mr-1" />PDF</Button>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-500 italic">Converted to Work Order</p>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))
                     )}
                   </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
+                </>
+              )}
+            </div>
+          </div>
         </TabsContent>
 
         {!isIrrigationManager && !isFieldTech && (

@@ -38,7 +38,8 @@ import {
   Edit,
   Trash2,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  ChevronDown
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
 
@@ -54,6 +55,8 @@ export default function WorkOrders() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [activeExpanded, setActiveExpanded] = useState(true);
+  const [completedExpanded, setCompletedExpanded] = useState(true);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -734,19 +737,16 @@ export default function WorkOrders() {
               ))}
           </div>
         ) : (
-          // List view (default)
-          <div className="space-y-4">
-            {filteredWorkOrders
-              ?.sort((a, b) => {
-                // For field techs: Put completed work orders at the bottom
-                if (currentUser?.role === 'field_tech') {
-                  if (a.status === 'completed' && b.status !== 'completed') return 1;
-                  if (a.status !== 'completed' && b.status === 'completed') return -1;
-                }
-                // Otherwise sort by creation date (oldest to newest)
-                return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
-              })
-              ?.map((workOrder) => (
+          // List view (default) - with collapsible Active/Completed sections
+          (() => {
+            const activeStatuses = ['pending', 'assigned', 'in_progress'];
+            const completedStatuses = ['completed', 'cancelled'];
+            const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status))
+              .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+            const completedWorkOrders = filteredWorkOrders.filter(wo => completedStatuses.includes(wo.status))
+              .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+
+            const renderWorkOrderCard = (workOrder: WorkOrder) => (
               <Card key={workOrder.id} className={`border-0 shadow-sm hover:shadow-md transition-all duration-200 ${
                 workOrder.status === 'completed' && currentUser?.role === 'field_tech' 
                   ? 'bg-green-50 border-l-4 border-l-green-500' 
@@ -985,8 +985,58 @@ export default function WorkOrders() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+            );
+
+            return (
+              <div className="space-y-4">
+                {/* Active Section */}
+                <div>
+                  <button
+                    onClick={() => setActiveExpanded(!activeExpanded)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {activeExpanded ? <ChevronDown className="w-5 h-5 text-blue-700" /> : <ChevronRight className="w-5 h-5 text-blue-700" />}
+                      <span className="text-base font-semibold text-blue-900">Active</span>
+                      <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{activeWorkOrders.length}</Badge>
+                    </div>
+                  </button>
+                  {activeExpanded && (
+                    <div className="mt-3 space-y-4">
+                      {activeWorkOrders.length === 0 ? (
+                        <p className="text-center text-gray-500 py-6">No active work orders</p>
+                      ) : (
+                        activeWorkOrders.map(renderWorkOrderCard)
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Completed Section */}
+                <div>
+                  <button
+                    onClick={() => setCompletedExpanded(!completedExpanded)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
+                      <span className="text-base font-semibold text-gray-700">Completed</span>
+                      <Badge variant="secondary">{completedWorkOrders.length}</Badge>
+                    </div>
+                  </button>
+                  {completedExpanded && (
+                    <div className="mt-3 space-y-4">
+                      {completedWorkOrders.length === 0 ? (
+                        <p className="text-center text-gray-500 py-6">No completed work orders</p>
+                      ) : (
+                        completedWorkOrders.map(renderWorkOrderCard)
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()
         )}
 
         {/* Bulk Delete Confirmation Dialog */}
