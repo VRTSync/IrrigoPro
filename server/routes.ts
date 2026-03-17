@@ -3998,13 +3998,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         if (integration && integration.refreshToken) {
           const newTokenData = await refreshQuickBooksToken(integration.refreshToken);
           
+          // Guard against NaN when expires_in is missing or zero
+          const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0
+            ? newTokenData.expires_in
+            : 3600;
+          if (!newTokenData.expires_in || newTokenData.expires_in <= 0) {
+            console.warn('QuickBooks token refresh: expires_in missing or zero, defaulting to 3600 seconds');
+          }
+
           // Update the stored integration with new tokens
           await storage.saveQuickBooksIntegration({
             companyId: integration.companyId,
             accessToken: newTokenData.access_token,
             refreshToken: newTokenData.refresh_token || integration.refreshToken, // Keep old refresh token if new one not provided
             realmId: integration.realmId,
-            expiresAt: new Date(Date.now() + (newTokenData.expires_in * 1000))
+            expiresAt: new Date(Date.now() + (expiresInSeconds * 1000))
           });
           
           // Retry the original request with the new token
@@ -4044,15 +4052,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Function to exchange authorization code for access tokens
   async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
-    // Use exactly what's registered in QuickBooks app
-    const host = req.get('host');
-    let redirectUri;
-    
-    if (host?.includes('irrigopro.com')) {
-      redirectUri = 'https://irrigopro.com/api/quickbooks/callback';
-    } else {
-      // Use the development callback for all non-production environments
-      redirectUri = 'https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback';
+    const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI;
+    if (!redirectUri) {
+      throw new Error('QUICKBOOKS_REDIRECT_URI environment variable is not set');
     }
     
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -4064,7 +4066,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       redirect_uri: redirectUri
     });
 
-    const response = await makeQuickBooksRequest(tokenEndpoint, {
+    // Use a plain fetch (not the auto-refresh wrapper) to avoid cascading refresh errors
+    // during the initial handshake when there is no stored token yet.
+    const response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${authHeader}`,
@@ -4072,7 +4076,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         'Accept': 'application/json'
       },
       body: body.toString()
-    }, 'Token Exchange');
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -4122,17 +4126,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      const state = Math.random().toString(36).substring(2, 15);
-      // Use exactly what's registered in QuickBooks app
-      const host = req.get('host');
-      let redirectUri;
-      
-      if (host?.includes('irrigopro.com')) {
-        redirectUri = 'https://irrigopro.com/api/quickbooks/callback';
-      } else {
-        // Use development callback
-        redirectUri = 'https://ae7894b1-12cd-48fe-acc6-f6506c6cf73b-00-3b44ujv51cwut.janeway.replit.dev/api/quickbooks/callback';
+      const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI;
+      if (!redirectUri) {
+        console.warn('WARNING: QUICKBOOKS_REDIRECT_URI environment variable is not set');
+        return res.status(400).json({
+          message: "QuickBooks redirect URI is not configured. Please set the QUICKBOOKS_REDIRECT_URI environment variable."
+        });
       }
+
+      const state = require('crypto').randomBytes(16).toString('hex');
+      // Store state in session for CSRF verification in the callback
+      (req.session as any).quickbooksOAuthState = state;
       
       // QuickBooks OAuth URL
       const authUrl = `https://appcenter.intuit.com/app/connect/oauth2?` +
@@ -4165,6 +4169,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           </html>
         `);
       }
+
+      // Verify CSRF state parameter
+      const expectedState = (req.session as any).quickbooksOAuthState;
+      if (!state || !expectedState || state !== expectedState) {
+        console.error('QuickBooks OAuth state mismatch. Possible CSRF attack.', { received: state, expected: expectedState });
+        return res.status(400).send(`
+          <html>
+            <head><title>Connection Failed</title></head>
+            <body>
+              <h2>QuickBooks Connection Failed</h2>
+              <p>Security verification failed. Please try connecting again.</p>
+              <button onclick="window.location.href='/billing'">Return to IrrigoPro</button>
+            </body>
+          </html>
+        `);
+      }
+      // Clear the state from session after verification
+      delete (req.session as any).quickbooksOAuthState;
 
       // Exchange the authorization code for access tokens
       console.log("QuickBooks OAuth callback received:", { code, state, realmId });
@@ -4301,10 +4323,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/quickbooks/disconnect", requireQuickBooksAccess, async (req, res) => {
     try {
       const user = req.user as any;
-      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      if (!user) {
+        return res.status(401).json({ success: false, message: "Authentication required." });
+      }
+      const userCompanyId = user.companyId ? user.companyId.toString() : null;
+      if (!userCompanyId) {
+        return res.status(400).json({ success: false, message: "Company context is required to disconnect QuickBooks." });
+      }
       
-      // Remove QuickBooks integration for this company
-      await storage.disconnectQuickBooks();
+      // Remove QuickBooks integration for this company only
+      await storage.disconnectQuickBooks(userCompanyId);
       
       res.json({ 
         success: true, 
@@ -4684,8 +4712,32 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Create invoice in QuickBooks using actual API
-      const apiBase = 'https://sandbox-quickbooks.api.intuit.com';
-      
+      const apiBase = process.env.NODE_ENV === 'production'
+        ? 'https://quickbooks.api.intuit.com'
+        : 'https://sandbox-quickbooks.api.intuit.com';
+
+      // Look up the real QB customer ID from the estimate's linked customer
+      let qbCustomerId: string | null = null;
+      if (estimate.customerId) {
+        const customer = await storage.getCustomer(estimate.customerId);
+        if (!customer || !customer.quickbooksId) {
+          return res.status(400).json({
+            success: false,
+            message: "Sync this customer to QuickBooks first before creating an invoice."
+          });
+        }
+        qbCustomerId = customer.quickbooksId;
+      }
+
+      if (!qbCustomerId) {
+        return res.status(400).json({
+          success: false,
+          message: "This estimate has no linked customer. Please assign a customer and sync them to QuickBooks first."
+        });
+      }
+
+      const defaultItemId = process.env.QUICKBOOKS_DEFAULT_ITEM_ID || "1";
+
       // Prepare invoice data for QuickBooks
       const invoiceData = {
         Line: [{
@@ -4693,13 +4745,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           DetailType: "SalesItemLineDetail",
           SalesItemLineDetail: {
             ItemRef: {
-              value: "1", // Default service item
+              value: defaultItemId,
               name: "Services"
             }
           }
         }],
         CustomerRef: {
-          value: "1" // This would be the actual customer ID from QuickBooks
+          value: qbCustomerId
         }
       };
 
@@ -4715,9 +4767,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       if (invoiceResponse.ok) {
         const invoiceResult = await invoiceResponse.json();
+        const qbInvoiceId = invoiceResult?.Invoice?.Id;
+        if (!qbInvoiceId) {
+          console.error('QuickBooks invoice created but no ID returned in response', invoiceResult);
+        }
         res.json({ 
           success: true,
-          quickbooksId: invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || `QB-${id}`,
+          quickbooksId: qbInvoiceId,
           message: "Estimate synced to QuickBooks successfully" 
         });
       } else {
@@ -5272,9 +5328,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/integrations/quickbooks/customers/disconnect", async (req, res) => {
+  app.post("/api/integrations/quickbooks/customers/disconnect", requireAuthentication, async (req, res) => {
     try {
-      await storage.disconnectQuickBooks();
+      const user = req.user as any;
+      if (!user) {
+        return res.status(401).json({ message: "Authentication required." });
+      }
+      const userCompanyId = user.companyId ? user.companyId.toString() : null;
+      if (!userCompanyId) {
+        return res.status(400).json({ message: "Company context is required to disconnect QuickBooks." });
+      }
+      await storage.disconnectQuickBooks(userCompanyId);
       res.json({ message: "Disconnected from QuickBooks successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to disconnect from QuickBooks" });

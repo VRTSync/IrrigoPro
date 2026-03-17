@@ -116,6 +116,11 @@ app.use((req, res, next) => {
   console.log("Starting server...");
   console.log("Node environment:", process.env.NODE_ENV);
   console.log("Database URL available:", !!process.env.DATABASE_URL);
+
+  // Warn if QuickBooks redirect URI is not configured
+  if (!process.env.QUICKBOOKS_REDIRECT_URI) {
+    console.warn('WARNING: QUICKBOOKS_REDIRECT_URI is not set. QuickBooks OAuth will not work until this is configured.');
+  }
   
   let server;
   try {

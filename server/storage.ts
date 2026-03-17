@@ -1562,8 +1562,8 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async disconnectQuickBooks(): Promise<void> {
-    await db.delete(quickbooksIntegration);
+  async disconnectQuickBooks(companyId: string): Promise<void> {
+    await db.delete(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId));
   }
 
   async connectGoogleSheetsCustomers(sheetUrl: string): Promise<void> {
