@@ -65,7 +65,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
     onSuccess: (data) => {
       toast({
         title: "Customer Sync Complete",
-        description: `${data.syncedCount || data.totalCustomers || 0} customers imported from QuickBooks`,
+        description: data.message || `${data.customersAdded || 0} added, ${data.customersAlreadySynced || 0} already synced`,
         variant: "default"
       });
       // Refresh customer list

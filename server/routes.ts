@@ -4441,14 +4441,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const user = req.user as any;
       const userCompanyId = user?.companyId ? user.companyId.toString() : null;
       
-      const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
-      console.log("QuickBooks status:", qbStatus);
-      
-      if (!qbStatus.isConnected) {
-        console.log("QuickBooks not connected - aborting sync");
-        return res.status(401).json({ message: "QuickBooks not connected" });
-      }
-
       // Get actual QuickBooks integration data
       const integration = await storage.getQuickBooksIntegration(userCompanyId);
       console.log("QuickBooks integration data available:", !!integration);
@@ -4501,7 +4493,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       const quickBooksCustomers = qbCustomers.map((customer: any) => ({
         qb_id: customer.Id,
-        name: customer.CompanyName || customer.Name || customer.DisplayName || `Customer ${customer.Id}`,
+        name: (customer.DisplayName || '').trim() || (customer.CompanyName || '').trim() || (customer.Name || '').trim(),
         email: customer.PrimaryEmailAddr?.Address || '',
         phone: customer.PrimaryPhone?.FreeFormNumber || '',
         address: customer.BillAddr ? 
@@ -4512,10 +4504,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log(`After mapping: ${quickBooksCustomers.length} customers to process`);
       console.log('Sample customer data:', quickBooksCustomers[0]);
       
-      // Filter out customers without names, but allow missing emails
-      const validCustomers = quickBooksCustomers.filter(customer => customer.name && customer.name !== `Customer ${customer.qb_id}`);
+      // Filter out customers with no usable name at all
+      const validCustomers = quickBooksCustomers.filter(customer => customer.name && customer.name.trim() !== '');
 
-      let syncedCount = 0;
+      let customersAdded = 0;
+      let customersAlreadySynced = 0;
       const results = [];
 
       console.log(`Processing ${validCustomers.length} valid customers`);
@@ -4526,17 +4519,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
           
           if (!existingCustomer) {
-            // Validate required fields before creating (name is required, email is optional)
-            if (!qbCustomer.name) {
-              console.log(`Skipping customer ${qbCustomer.qb_id}: missing required name`);
-              results.push({ 
-                action: 'error', 
-                customer: qbCustomer, 
-                error: 'Missing required name' 
-              });
-              continue;
-            }
-
             // Get user's actual company ID to avoid foreign key errors
             const user = req.user as any;
             const userCompanyId = user?.companyId || 1; // Use user's company ID or default to 1
@@ -4551,9 +4533,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               companyId: userCompanyId
             });
             
-            syncedCount++;
+            customersAdded++;
             results.push({ action: 'created', customer: newCustomer });
           } else {
+            customersAlreadySynced++;
             results.push({ action: 'exists', customer: existingCustomer });
           }
         } catch (error) {
@@ -4564,10 +4547,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       res.json({
         success: true,
-        syncedCount,
+        customersAdded,
+        customersAlreadySynced,
         totalCustomers: quickBooksCustomers.length,
         results,
-        message: `Successfully synced ${syncedCount} customers from QuickBooks`
+        message: `${customersAdded} added, ${customersAlreadySynced} already synced`
       });
 
     } catch (error) {
