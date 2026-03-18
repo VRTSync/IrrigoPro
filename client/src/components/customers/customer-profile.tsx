@@ -42,7 +42,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
   const [showSiteMaps, setShowSiteMaps] = useState(false);
 
   const [activeView, setActiveView] = useState<'estimates' | 'work-orders' | 'billing-sheets'>('estimates');
-  const isAdmin = userRole === "company_admin" || userRole === "super_admin";
+  const isAdmin = userRole === "company_admin" || userRole === "super_admin" || userRole === "billing_manager";
 
   // Fetch customer-related data
   const { data: estimates = [] } = useQuery<Estimate[]>({

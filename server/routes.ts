@@ -161,6 +161,35 @@ const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
   }
 };
 
+// Middleware to allow company admins AND billing managers to edit customer records
+const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
+  try {
+    let userId = req.headers['x-user-id'];
+    let userRole = req.headers['x-user-role'];
+
+    if (!userId && req.session?.userId) {
+      userId = req.session.userId;
+      const user = await storage.getUser(parseInt(userId));
+      if (user) {
+        userRole = user.role;
+        req.userCompanyId = user.companyId;
+      }
+    }
+
+    if (!userId || !userRole) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    if (userRole !== 'company_admin' && userRole !== 'super_admin' && userRole !== 'billing_manager') {
+      return res.status(403).json({ message: "Access denied. Customer editing is restricted to administrators and billing managers." });
+    }
+
+    next();
+  } catch (error) {
+    return res.status(500).json({ message: "Authentication error" });
+  }
+};
+
 // Middleware to check if user can edit/delete work orders and billing sheets
 const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
   const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
@@ -2573,7 +2602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
+  app.put("/api/customers/:id", requireCustomerEditAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customerData = insertCustomerSchema.partial().parse(req.body);
@@ -2590,7 +2619,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
+  app.patch("/api/customers/:id", requireCustomerEditAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customerData = insertCustomerSchema.partial().parse(req.body);

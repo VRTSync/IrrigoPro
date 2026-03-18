@@ -337,7 +337,7 @@ export default function Customers() {
                                 >
                                   <Eye className="w-4 h-4" />
                                 </Button>
-                                {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                                {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
                                   <>
                                     <CustomerForm
                                       customer={customer}
@@ -347,7 +347,7 @@ export default function Customers() {
                                         </Button>
                                       }
                                     />
-                                    <AlertDialog>
+                                    {(userRole === 'company_admin' || userRole === 'super_admin') && (<AlertDialog>
                                       <AlertDialogTrigger asChild>
                                         <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
                                           <Trash2 className="w-4 h-4" />
@@ -375,6 +375,7 @@ export default function Customers() {
                                         </AlertDialogFooter>
                                       </AlertDialogContent>
                                     </AlertDialog>
+                                    )}
                                   </>
                                 )}
                               </>

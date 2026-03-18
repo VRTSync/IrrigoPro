@@ -14,7 +14,7 @@ Business Rules: No markup on parts (bill at cost), no tax calculations on any ch
 Admin Access Restriction: Company admin users should not have direct access to estimates and work orders pages - only view through modal previews in operations page. Removed navigation paths to /estimates and /work-orders for admin role.
 Navigation Improvements: Company admin navigation streamlined to 5 items with improved wording and Admin dropdown containing Team and Company management options for better alignment and organization. Irrigation manager navigation enhanced to include comprehensive business management: Estimates (full estimate system access), Work Orders, Billing Sheets, Customers (with site map viewing), Dashboard, and Parts (with catalog/list dropdown). Mobile navigation optimized for irrigation managers with smart prioritization: ensures access to all key business areas including the complete estimate management system.
 Site Map Access Control: Site map viewing (read-only) is available to company administrators, irrigation managers, and field technicians. Complete CRUD operations (create, update, delete) are restricted to company administrators only. All other roles including super admins and billing managers have no access to site maps. Backend API routes are protected with appropriate access control middleware: requireSiteMapViewAccess for viewing operations and requireCompanyAdminAccess for modification operations.
-Customer Management Permissions: Complete role-based access control implemented for customer management. Irrigation managers and field technicians have strict view-only access - they cannot create, edit, or delete customers, cannot access integrations, and cannot edit property notes. Only company admin and super admin users have full customer management privileges including creation, editing, deletion, integrations access, and property notes editing. Backend API routes are protected with requireAdminAccess middleware and frontend UI properly restricts access based on user roles. This ensures complete data integrity and prevents any unauthorized customer information modifications.
+Customer Management Permissions: Role-based access control for customer management. Billing managers can view all customers and edit existing customer details (name, address, contact info, etc.) but cannot create new customers, delete customers, or access the integrations tab. Irrigation managers and field technicians have strict view-only access. Only company admin and super admin users have full privileges including creation, deletion, integrations access, and property notes editing. Backend uses requireCustomerEditAccess middleware (allows company_admin, super_admin, billing_manager) on PUT/PATCH customer routes and requireCompanyAdminAccess (company_admin/super_admin only) on POST/DELETE routes. Frontend UI shows Edit button for billing_manager in the customer list and customer profile, but not Delete, Add Customer, or Integrations tab.
 Parts Management Independence: Parts catalog operates independently from QuickBooks integration. Internal parts CRUD system provides complete inventory control without external dependencies. QuickBooks integration removed from parts catalog to ensure reliable operation and reduce complexity.
 Development Testing Features: Switch User functionality is currently available for development testing but must be completely removed before production deployment. This includes removing the switch-user routes from all user role configurations and removing the Switch User button from the profile dropdown in the navigation component.
 Production Security: All debug console.log statements removed from customer creation flow. Authentication uses session-based user lookup instead of localStorage for production compatibility. Form validation properly handles missing user data with graceful fallbacks.
@@ -32,14 +32,14 @@ Phone-Based User Login: New company team members use their phone number as their
 
 ## System Architecture
 
-### Frontend Architecture
+### Frontend
 - **Framework**: React with TypeScript, Vite.
-- **UI/UX**: shadcn/ui components with Radix UI, Tailwind CSS. Responsive design, mobile-first, dual-layout (desktop table views + mobile card layouts), and role-based mobile navigation.
+- **UI/UX**: shadcn/ui components with Radix UI, Tailwind CSS. Responsive design, mobile-first, dual-layout, and role-based mobile navigation.
 - **State Management**: TanStack React Query.
 - **Routing**: Wouter.
 - **Forms**: React Hook Form with Zod validation.
 
-### Backend Architecture
+### Backend
 - **Runtime**: Node.js with Express.js.
 - **Language**: TypeScript with ES modules.
 - **Database**: PostgreSQL with Drizzle ORM.
@@ -52,16 +52,16 @@ Phone-Based User Login: New company team members use their phone number as their
 - **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions.
 - **Site Maps & Controller Management System**: KML import for interactive irrigation maps using Leaflet.
 - **Customer Email Approval System**: Token-based estimate approval with Postmark email integration.
-- **Notification System**: Database-driven notifications for work order assignments, completions, and estimate approvals.
-- **iOS PWA Push Notifications**: PWA implementation with service worker and push notifications.
-- **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based picker.
-- **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes).
+- **Notification System**: Database-driven notifications for work order assignments, completions, and estimate approvals, including iOS PWA Push Notifications.
+- **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based picker featuring live GPS and "Use My Location" functionality.
+- **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes), phone-based user login.
 - **User Management**: Company administrators manage users within their company.
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
+- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions.
 
 ## External Dependencies
 
-### Frontend Dependencies
+### Frontend
 - **UI Components**: Radix UI (via shadcn/ui)
 - **Form Handling**: React Hook Form, Zod
 - **Date Handling**: date-fns
@@ -70,7 +70,7 @@ Phone-Based User Login: New company team members use their phone number as their
 - **Mapping**: Leaflet, OpenStreetMap, Esri satellite tiles
 - **PWA & Notifications**: Service Worker API, Notification API, Badge API
 
-### Backend Dependencies
+### Backend
 - **Database**: Neon Database (PostgreSQL)
 - **ORM**: Drizzle ORM
 - **Session Management**: connect-pg-simple
