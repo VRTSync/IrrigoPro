@@ -70,6 +70,7 @@ export const customers = pgTable("customers", {
   notes: text("notes"),
   propertyNotes: text("property_notes"), // Property-specific notes for technicians
   quickbooksId: text("quickbooks_id"), // QuickBooks customer ID for integration
+  hiddenFromBilling: boolean("hidden_from_billing").default(false),
 });
 
 // Site maps and controller management

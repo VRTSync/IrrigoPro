@@ -1687,8 +1687,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/billing-preview", async (req, res) => {
     try {
       console.log("Fetching comprehensive customer billing data...");
-      const customers = await storage.getCustomers();
-      console.log(`Found ${customers.length} customers`);
+      const allCustomers = await storage.getCustomers();
+      const customers = allCustomers.filter(c => !c.hiddenFromBilling);
+      console.log(`Found ${customers.length} customers (${allCustomers.length - customers.length} hidden from billing)`);
       
       // Get filter parameters from query
       const dateFilter = req.query.dateFilter as string || "last_30_days";

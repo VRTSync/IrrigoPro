@@ -323,6 +323,9 @@ export default function CustomerBilling() {
   // Filter customers based on current filter settings
   const filterCustomers = (customers: Customer[]) => {
     return customers.filter(customer => {
+      // Exclude hidden customers from billing list
+      if (customer.hiddenFromBilling) return false;
+      
       const preview = getCustomerPreview(customer);
       
       // Search term filter

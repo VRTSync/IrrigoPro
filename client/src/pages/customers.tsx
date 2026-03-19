@@ -9,7 +9,7 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, Building2 } from "lucide-react";
+import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, Building2, EyeOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@shared/schema";
@@ -83,6 +83,30 @@ export default function Customers() {
   const handleDeleteCustomer = (customerId: number) => {
     deleteCustomerMutation.mutate(customerId);
   };
+
+  // Toggle hidden from billing mutation
+  const toggleHiddenMutation = useMutation({
+    mutationFn: async ({ customerId, hidden }: { customerId: number; hidden: boolean }) => {
+      return await apiRequest(`/api/customers/${customerId}`, "PATCH", { hiddenFromBilling: hidden });
+    },
+    onSuccess: (_, { hidden }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+      toast({
+        title: hidden ? "Hidden from Billing" : "Visible in Billing",
+        description: hidden
+          ? "This customer will no longer appear in the billing list."
+          : "This customer will now appear in the billing list.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update billing visibility. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Check for auto-selection from site maps page
   useEffect(() => {
@@ -206,7 +230,7 @@ export default function Customers() {
               {filteredCustomers?.map((customer) => (
                 <Card 
                   key={customer.id} 
-                  className="glass-card p-4 active:scale-[0.98] transition-all duration-200"
+                  className={`glass-card p-4 active:scale-[0.98] transition-all duration-200 ${customer.hiddenFromBilling ? 'opacity-60' : ''}`}
                   onClick={() => userRole === 'field_tech' 
                     ? setLocation(`/customers/${customer.id}/profile`)
                     : setSelectedCustomer(customer)
@@ -215,7 +239,7 @@ export default function Customers() {
                 >
                   <div className="flex items-center gap-4">
                     {/* Avatar */}
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${customer.hiddenFromBilling ? 'bg-gradient-to-br from-slate-300 to-slate-400' : 'bg-gradient-to-br from-sky-400 to-sky-600'}`}>
                       <span className="text-white font-semibold text-lg">
                         {customer.name.charAt(0).toUpperCase()}
                       </span>
@@ -223,7 +247,15 @@ export default function Customers() {
                     
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <div className="text-base font-semibold text-slate-900 truncate">{customer.name}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-base font-semibold text-slate-900 truncate">{customer.name}</div>
+                        {customer.hiddenFromBilling && (
+                          <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded flex-shrink-0">
+                            <EyeOff className="w-3 h-3" />
+                            Hidden
+                          </span>
+                        )}
+                      </div>
                       {userRole !== 'field_tech' && customer.email && (
                         <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
                           <Mail className="w-3.5 h-3.5" />
@@ -237,6 +269,22 @@ export default function Customers() {
                         </div>
                       )}
                     </div>
+                    
+                    {/* Actions for admin on mobile */}
+                    {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`flex-shrink-0 ${customer.hiddenFromBilling ? 'text-slate-400 hover:text-slate-600' : 'text-slate-400 hover:text-orange-600'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleHiddenMutation.mutate({ customerId: customer.id, hidden: !customer.hiddenFromBilling });
+                        }}
+                        title={customer.hiddenFromBilling ? "Show in billing" : "Hide from billing"}
+                      >
+                        {customer.hiddenFromBilling ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                      </Button>
+                    )}
                     
                     {/* Chevron */}
                     <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
@@ -281,14 +329,22 @@ export default function Customers() {
                     </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredCustomers?.map((customer) => (
-                      <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
+                      <tr key={customer.id} className={`hover:bg-gray-50 cursor-pointer ${customer.hiddenFromBilling ? 'opacity-60' : ''}`} onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="bg-blue-50 p-2 rounded-lg mr-3">
-                              <Users className="w-4 h-4 text-blue-600" />
+                            <div className={`p-2 rounded-lg mr-3 ${customer.hiddenFromBilling ? 'bg-slate-100' : 'bg-blue-50'}`}>
+                              <Users className={`w-4 h-4 ${customer.hiddenFromBilling ? 'text-slate-400' : 'text-blue-600'}`} />
                             </div>
                             <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-900">{customer.name}</div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium text-gray-900">{customer.name}</div>
+                                {customer.hiddenFromBilling && (
+                                  <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                                    <EyeOff className="w-3 h-3" />
+                                    Hidden from billing
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                           </div>
@@ -339,6 +395,18 @@ export default function Customers() {
                                 </Button>
                                 {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
                                   <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className={customer.hiddenFromBilling ? "text-slate-400 hover:text-slate-700" : "text-gray-400 hover:text-orange-600"}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleHiddenMutation.mutate({ customerId: customer.id, hidden: !customer.hiddenFromBilling });
+                                      }}
+                                      title={customer.hiddenFromBilling ? "Show in billing" : "Hide from billing"}
+                                    >
+                                      {customer.hiddenFromBilling ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                                    </Button>
                                     <CustomerForm
                                       customer={customer}
                                       trigger={
