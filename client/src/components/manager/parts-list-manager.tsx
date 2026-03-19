@@ -16,6 +16,8 @@ interface PartWithoutPrice {
   description: string;
   sku: string;
   category: string;
+  size?: string | null;
+  material?: string | null;
 }
 
 export function PartsListManager({ onBack }: PartsListManagerProps) {
@@ -111,10 +113,25 @@ export function PartsListManager({ onBack }: PartsListManagerProps) {
                   {part.description || 'No description available'}
                 </p>
                 
-                <div>
+                <div className="mb-2">
                   <p className="text-xs text-gray-500">SKU</p>
                   <p className="text-sm font-medium text-gray-900">{part.sku}</p>
                 </div>
+                
+                {(part.size || part.material) && (
+                  <div className="flex gap-2 flex-wrap">
+                    {part.size && (
+                      <Badge variant="outline" className="text-xs text-gray-600">
+                        {part.size}
+                      </Badge>
+                    )}
+                    {part.material && (
+                      <Badge variant="outline" className="text-xs text-gray-600">
+                        {part.material}
+                      </Badge>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))

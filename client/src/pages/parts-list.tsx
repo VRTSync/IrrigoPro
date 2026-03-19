@@ -14,16 +14,24 @@ import {
   Filter,
   Tag,
   Grid3X3,
-  List
+  List,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from "lucide-react";
 import type { Part } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
+type SortColumn = "name" | "sku" | "category" | "size" | "material";
+type SortDirection = "asc" | "desc";
+
 export default function PartsList() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -45,6 +53,32 @@ export default function PartsList() {
     
     return matchesSearch && matchesCategory;
   });
+
+  // Sort parts based on sortColumn and sortDirection
+  const sortedParts = filteredParts ? [...filteredParts].sort((a, b) => {
+    if (!sortColumn) return 0;
+    const aVal = (a[sortColumn] ?? "").toLowerCase();
+    const bVal = (b[sortColumn] ?? "").toLowerCase();
+    if (aVal < bVal) return sortDirection === "asc" ? -1 : 1;
+    if (aVal > bVal) return sortDirection === "asc" ? 1 : -1;
+    return 0;
+  }) : filteredParts;
+
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  };
+
+  const SortIcon = ({ column }: { column: SortColumn }) => {
+    if (sortColumn !== column) return <ArrowUpDown className="w-3 h-3 ml-1 inline opacity-40" />;
+    return sortDirection === "asc"
+      ? <ArrowUp className="w-3 h-3 ml-1 inline text-blue-600" />
+      : <ArrowDown className="w-3 h-3 ml-1 inline text-blue-600" />;
+  };
 
   const deletePart = useMutation({
     mutationFn: async (id: number) => {
@@ -216,7 +250,7 @@ export default function PartsList() {
             </Card>
           ))}
         </div>
-      ) : filteredParts?.length === 0 ? (
+      ) : sortedParts?.length === 0 ? (
         <Card>
           <CardContent className="p-12 text-center">
             <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -269,7 +303,7 @@ export default function PartsList() {
                       {part.description}
                     </p>
                   )}
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <Badge variant="outline" className="text-xs">
                       <Tag className="w-3 h-3 mr-1" />
                       {part.sku}
@@ -277,6 +311,16 @@ export default function PartsList() {
                     {part.category && (
                       <Badge className={`text-xs ${getCategoryColor(part.category)}`}>
                         {part.category}
+                      </Badge>
+                    )}
+                    {part.size && (
+                      <Badge variant="outline" className="text-xs text-gray-600">
+                        {part.size}
+                      </Badge>
+                    )}
+                    {part.material && (
+                      <Badge variant="outline" className="text-xs text-gray-600">
+                        {part.material}
                       </Badge>
                     )}
                   </div>
@@ -301,14 +345,35 @@ export default function PartsList() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Part Details
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("name")}
+                  >
+                    Part Details <SortIcon column="name" />
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    SKU
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("sku")}
+                  >
+                    SKU <SortIcon column="sku" />
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Category
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("category")}
+                  >
+                    Category <SortIcon column="category" />
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("size")}
+                  >
+                    Size <SortIcon column="size" />
+                  </th>
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("material")}
+                  >
+                    Material <SortIcon column="material" />
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
@@ -319,7 +384,7 @@ export default function PartsList() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredParts?.map((part) => (
+                {sortedParts?.map((part) => (
                   <tr key={part.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <div className="flex items-start">
@@ -345,11 +410,19 @@ export default function PartsList() {
                       </Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {part.category && (
+                      {part.category ? (
                         <Badge className={`text-xs ${getCategoryColor(part.category)}`}>
                           {part.category}
                         </Badge>
+                      ) : (
+                        <span className="text-gray-400 text-sm">—</span>
                       )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {part.size || <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {part.material || <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
