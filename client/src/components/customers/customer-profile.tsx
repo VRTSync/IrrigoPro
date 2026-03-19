@@ -25,6 +25,7 @@ import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shar
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
+import { BillingNotes } from "./billing-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
 import { CustomerForm } from "@/components/customer-form";
 
@@ -225,6 +226,13 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
         <div className="mb-8">
           <PropertyNotes customer={customer} userRole={userRole} />
         </div>
+
+        {/* Billing Notes Section - visible only to billing_manager, company_admin, super_admin */}
+        {(userRole === "billing_manager" || userRole === "company_admin" || userRole === "super_admin") && (
+          <div className="mb-8">
+            <BillingNotes customer={customer} userRole={userRole} />
+          </div>
+        )}
 
         {/* Customer Data Viewer with Selector */}
         <div className="mb-8">

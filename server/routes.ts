@@ -66,6 +66,31 @@ function applyPricingVisibility(req: Request, data: any): any {
   }
   return data;
 }
+
+// Roles allowed to read billing notes
+const BILLING_NOTES_READ_ROLES = new Set(['billing_manager', 'company_admin', 'super_admin']);
+
+// Strip billingNotes from customer data for roles that should not see it
+function stripBillingNotes(data: any): any {
+  if (Array.isArray(data)) {
+    return data.map(stripBillingNotes);
+  }
+  if (data && typeof data === 'object' && 'billingNotes' in data) {
+    const { billingNotes, ...rest } = data;
+    return rest;
+  }
+  return data;
+}
+
+function applyBillingNotesVisibility(req: Request, data: any): any {
+  // Use only authenticated role (set by requireAuthentication middleware).
+  // Raw headers are untrusted and intentionally not used here.
+  const userRole = req.authenticatedUserRole;
+  if (!userRole || !BILLING_NOTES_READ_ROLES.has(userRole)) {
+    return stripBillingNotes(data);
+  }
+  return data;
+}
 import type { UploadedFile } from "express-fileupload";
 import { 
   insertUserSchema,
@@ -1673,10 +1698,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Customer routes
-  app.get("/api/customers", async (req, res) => {
+  app.get("/api/customers", requireAuthentication, async (req, res) => {
     try {
       const customers = await storage.getCustomers();
-      res.json(customers);
+      res.json(applyBillingNotesVisibility(req, customers));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch customers" });
     }
@@ -1805,7 +1830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get individual customer by ID
-  app.get("/api/customers/:id(\\d+)", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)", requireAuthentication, async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       
@@ -1820,7 +1845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Customer not found" });
       }
       
-      res.json(customer);
+      res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
       console.error("Error fetching customer:", error);
       res.status(500).json({ message: "Failed to fetch customer" });
@@ -1828,7 +1853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get customer billing data - all work orders, billing sheets, and estimates for a customer
-  app.get("/api/customers/:id(\\d+)/billing", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)/billing", requireAuthentication, async (req, res) => {
     try {
       const customerId = parseInt(req.params.id);
       
@@ -1916,7 +1941,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         unbilledBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
 
       const billingData = {
-        customer,
+        customer: applyBillingNotesVisibility(req, customer),
         workOrders,
         billingSheets,
         estimates,
@@ -2576,22 +2601,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
-  app.get("/api/customers/:id(\\d+)", async (req, res) => {
+  app.get("/api/customers/:id(\\d+)", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const customer = await storage.getCustomer(id);
       if (!customer) {
         return res.status(404).json({ message: "Customer not found" });
       }
-      res.json(customer);
+      res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch customer" });
     }
   });
 
-  app.post("/api/customers", requireCompanyAdminAccess, async (req, res) => {
+  app.post("/api/customers", requireCompanyAdminAccess, requireAuthentication, async (req, res) => {
     try {
-      const customerData = insertCustomerSchema.parse(req.body);
+      let customerData = insertCustomerSchema.parse(req.body);
+      // Only billing_manager may set billingNotes at creation time
+      if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
+        const { billingNotes, ...rest } = customerData;
+        customerData = rest as typeof customerData;
+      }
       const customer = await storage.createCustomer(customerData);
       res.status(201).json(customer);
     } catch (error) {
@@ -2603,15 +2633,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/customers/:id", requireCustomerEditAccess, async (req, res) => {
+  app.put("/api/customers/:id", requireCustomerEditAccess, requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const customerData = insertCustomerSchema.partial().parse(req.body);
+      let customerData = insertCustomerSchema.partial().parse(req.body);
+      // Only billing_manager may write billingNotes (use authenticated role, not raw header)
+      if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
+        const { billingNotes, ...rest } = customerData;
+        customerData = rest;
+      }
       const customer = await storage.updateCustomer(id, customerData);
       if (!customer) {
         return res.status(404).json({ message: "Customer not found" });
       }
-      res.json(customer);
+      res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
@@ -2620,15 +2655,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/customers/:id", requireCustomerEditAccess, async (req, res) => {
+  app.patch("/api/customers/:id", requireCustomerEditAccess, requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const customerData = insertCustomerSchema.partial().parse(req.body);
+      let customerData = insertCustomerSchema.partial().parse(req.body);
+      // Only billing_manager may write billingNotes (use authenticated role, not raw header)
+      if ('billingNotes' in customerData && req.authenticatedUserRole !== 'billing_manager') {
+        const { billingNotes, ...rest } = customerData;
+        customerData = rest;
+      }
       const customer = await storage.updateCustomer(id, customerData);
       if (!customer) {
         return res.status(404).json({ message: "Customer not found" });
       }
-      res.json(customer);
+      res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
