@@ -193,9 +193,9 @@ export default function Login() {
       if (user.role === "field_tech") {
         window.location.href = "/";
       } else if (user.role === "irrigation_manager") {
-        window.location.href = "/work-orders";
+        window.location.href = "/";
       } else if (user.role === "billing_manager") {
-        window.location.href = "/customers";
+        window.location.href = "/";
       } else {
         window.location.href = "/";
       }
