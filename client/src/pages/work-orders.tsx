@@ -53,7 +53,13 @@ export default function WorkOrders() {
   const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [groupByCustomer, setGroupByCustomer] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    const savedUser = safeGet("user");
+    if (savedUser) {
+      try { return JSON.parse(savedUser); } catch { return null; }
+    }
+    return null;
+  });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [activeExpanded, setActiveExpanded] = useState(true);
@@ -69,32 +75,26 @@ export default function WorkOrders() {
     });
   };
 
-  // Get current user from localStorage and refresh user data
+  // Refresh current user from API in the background to keep data fresh
   useEffect(() => {
     const refreshUserData = async () => {
       const savedUser = safeGet("user");
-      if (savedUser) {
-        try {
-          const currentUserData = JSON.parse(savedUser);
-          
-          // Force refresh user data from API to get updated user info
-          const response = await fetch(`/api/users`);
-          if (response.ok) {
-            const users = await response.json();
-            const updatedUser = users.find((u: any) => u.username === currentUserData.username);
-            if (updatedUser) {
-              // Always update stored user (safe for Safari private browsing)
-              safeSet("user", JSON.stringify(updatedUser));
-              setCurrentUser(updatedUser);
-            } else {
-              setCurrentUser(currentUserData);
-            }
-          } else {
-            setCurrentUser(currentUserData);
+      if (!savedUser) return;
+      let currentUserData: any = null;
+      try { currentUserData = JSON.parse(savedUser); } catch { return; }
+
+      try {
+        const response = await fetch(`/api/users`);
+        if (response.ok) {
+          const users = await response.json();
+          const updatedUser = users.find((u: any) => u.username === currentUserData.username);
+          if (updatedUser) {
+            safeSet("user", JSON.stringify(updatedUser));
+            setCurrentUser(updatedUser);
           }
-        } catch (error) {
-          console.error("Error refreshing user data:", error);
         }
+      } catch (error) {
+        console.error("Error refreshing user data:", error);
       }
     };
     
@@ -102,7 +102,6 @@ export default function WorkOrders() {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('create') === 'true') {
       setShowWorkOrderForm(true);
-      // Clean up URL
       window.history.replaceState({}, '', window.location.pathname);
     }
     
@@ -298,9 +297,9 @@ export default function WorkOrders() {
   // Check if user can edit/delete work orders
   const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager' || currentUser?.role === 'irrigation_manager';
 
-  // Handle loading state for currentUser
+  // Handle loading state for currentUser (fallback — should rarely trigger since state is initialized synchronously)
   if (!currentUser) {
-    return <div>Loading user data...</div>;
+    return <WorkOrderListSkeleton />;
   }
 
   // Show loading skeleton while loading (after all hooks)

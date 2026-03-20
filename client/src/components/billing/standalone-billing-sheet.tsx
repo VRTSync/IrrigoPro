@@ -111,19 +111,14 @@ export function StandaloneBillingSheet({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
-  // Get user from localStorage (production-compatible)
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  
-  useEffect(() => {
+  // Get user from localStorage (production-compatible) — initialized synchronously to avoid blank form states
+  const [currentUser, setCurrentUser] = useState<any>(() => {
     const savedUser = safeGet("user");
     if (savedUser) {
-      try {
-        setCurrentUser(JSON.parse(savedUser));
-      } catch (error) {
-        console.error("Error parsing user data:", error);
-      }
+      try { return JSON.parse(savedUser); } catch { return null; }
     }
-  }, []);
+    return null;
+  });
   
   const isFieldTech = currentUser?.role === 'field_tech';
 
