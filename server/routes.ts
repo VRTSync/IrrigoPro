@@ -4204,7 +4204,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      const state = require('crypto').randomBytes(16).toString('hex');
+      const state = crypto.randomBytes(16).toString('hex');
       // Store state in session for CSRF verification in the callback
       (req.session as any).quickbooksOAuthState = state;
       
