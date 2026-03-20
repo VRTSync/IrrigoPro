@@ -169,6 +169,8 @@ function Router() {
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
+                <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
+                <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
