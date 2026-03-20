@@ -201,6 +201,9 @@ function Router() {
                 <Route path="/" component={CustomerBilling} />
                 <Route path="/billing" component={CustomerBilling} />
                 <Route path="/customers" component={Customers} />
+                <Route path="/customers/:id/profile" component={CustomerProfile} />
+                <Route path="/work-orders" component={WorkOrders} />
+                <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />

@@ -142,9 +142,10 @@ export default function Navigation() {
         ];
       case "billing_manager":
         return [
-          { path: "/customers", label: "Customers", icon: Users },
-          { path: "/parts", label: "Parts", icon: Package },
+          { path: "/work-orders", label: "Work Orders", icon: Wrench },
+          { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { path: "/customers", label: "Customers", icon: Users },
           { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
         ];
       default:
