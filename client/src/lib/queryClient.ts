@@ -16,7 +16,12 @@ export async function apiRequest(
   // Use safe storage (works in Safari private browsing too)
   const getCurrentUser = () => {
     const savedUser = safeGet("user");
-    return savedUser ? JSON.parse(savedUser) : null;
+    if (!savedUser) return null;
+    try {
+      return JSON.parse(savedUser);
+    } catch {
+      return null;
+    }
   };
   
   const user = getCurrentUser();
@@ -50,7 +55,12 @@ export const getQueryFn: <T>(options: {
     // Use safe storage (works in Safari private browsing too)
     const getCurrentUser = () => {
       const savedUser = safeGet("user");
-      return savedUser ? JSON.parse(savedUser) : null;
+      if (!savedUser) return null;
+      try {
+        return JSON.parse(savedUser);
+      } catch {
+        return null;
+      }
     };
     
     const user = getCurrentUser();

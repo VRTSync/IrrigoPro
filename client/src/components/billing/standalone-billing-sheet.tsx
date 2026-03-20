@@ -146,19 +146,16 @@ export function StandaloneBillingSheet({
   // Fetch customers for the CustomerSelector
   const { data: customers } = useQuery<Customer[]>({
     queryKey: ["/api/customers"],
-    queryFn: () => fetch("/api/customers").then(res => res.json()),
   });
 
   // Fetch parts for adding to billing sheet
   const { data: parts } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
-    queryFn: () => fetch("/api/parts").then(res => res.json()),
   });
 
   // Get popular parts (most frequently used)
   const { data: popularParts } = useQuery<Part[]>({
     queryKey: ["/api/parts/popular"],
-    queryFn: () => fetch("/api/parts/popular").then(res => res.json()),
   });
 
   // Filter parts by search query

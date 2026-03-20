@@ -17,7 +17,12 @@ export default function FieldTechDashboard() {
   // Get current user from localStorage
   const getCurrentUser = () => {
     const savedUser = safeGet("user");
-    return savedUser ? JSON.parse(savedUser) : null;
+    if (!savedUser) return null;
+    try {
+      return JSON.parse(savedUser);
+    } catch {
+      return null;
+    }
   };
 
   const currentUser = getCurrentUser();
