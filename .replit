@@ -48,3 +48,8 @@ externalPort = 3000
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.production]
+QUICKBOOKS_REDIRECT_URI = "https://irrigopro.com/api/quickbooks/callback"

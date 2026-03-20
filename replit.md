@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, offering zone-based estimates, customer integrations, and a modern user interface.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, offering zone-based estimates, customer integrations, and a modern user interface, ultimately enhancing efficiency and customer satisfaction in the irrigation industry.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -76,4 +76,4 @@ Phone-Based User Login: New company team members use their phone number as their
 - **Session Management**: connect-pg-simple
 - **Email Service**: Postmark API
 - **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
-- **PDF Generation**: Puppeteer (uses system chromium or bundled Chrome fallback).
+- **PDF Generation**: Puppeteer.
