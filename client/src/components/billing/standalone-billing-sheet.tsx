@@ -83,11 +83,6 @@ interface StandaloneBillingSheetProps {
   };
 }
 
-// Helper function to get current user (deprecated - use useQuery instead)
-const getCurrentUser = () => {
-  const savedUser = safeGet("user");
-  return savedUser ? JSON.parse(savedUser) : null;
-};
 
 export function StandaloneBillingSheet({ 
   open, 
@@ -218,10 +213,7 @@ export function StandaloneBillingSheet({
         photos: uploadedPhotos.map(photo => photo.url),
       };
       
-      return apiRequest(`/api/billing-sheets/${draftData.id}`, {
-        method: "PATCH",
-        body: payload,
-      });
+      return apiRequest(`/api/billing-sheets/${draftData.id}`, "PATCH", payload);
     },
     onSuccess: () => {
       toast({
