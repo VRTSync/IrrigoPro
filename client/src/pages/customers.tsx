@@ -9,7 +9,7 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, Building2, EyeOff } from "lucide-react";
+import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, ChevronDown, ChevronUp, Building2, EyeOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@shared/schema";
@@ -36,6 +36,8 @@ export default function Customers() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showSiteMaps, setShowSiteMaps] = useState<Customer | null>(null);
   const [userRole, setUserRole] = useState<string>("company_admin");
+  const [activeExpanded, setActiveExpanded] = useState(true);
+  const [hiddenExpanded, setHiddenExpanded] = useState(false);
   const [, setLocation] = useLocation();
   
   const queryClient = useQueryClient();
@@ -139,6 +141,12 @@ export default function Customers() {
     );
   });
 
+  const sortByName = (a: Customer, b: Customer) =>
+    (a.irrigoName || a.name).localeCompare(b.irrigoName || b.name);
+
+  const activeCustomers = (filteredCustomers?.filter(c => !c.hiddenFromBilling) || []).sort(sortByName);
+  const hiddenCustomers = (filteredCustomers?.filter(c => c.hiddenFromBilling) || []).sort(sortByName);
+
   // Show full page skeleton while loading (after all hooks)
   if (isLoading) {
     return <CustomerListSkeleton />;
@@ -230,248 +238,393 @@ export default function Customers() {
             </div>
 
             {/* Customers List - Mobile Card View */}
-            <div className="lg:hidden space-y-3">
-              {filteredCustomers?.map((customer) => (
-                <Card 
-                  key={customer.id} 
-                  className={`glass-card p-4 active:scale-[0.98] transition-all duration-200 ${customer.hiddenFromBilling ? 'opacity-60' : ''}`}
-                  onClick={() => userRole === 'field_tech' 
-                    ? setLocation(`/customers/${customer.id}/profile`)
-                    : setSelectedCustomer(customer)
-                  }
-                  data-testid={`card-customer-${customer.id}`}
-                >
-                  <div className="flex items-center gap-4">
-                    {/* Avatar */}
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${customer.hiddenFromBilling ? 'bg-gradient-to-br from-slate-300 to-slate-400' : 'bg-gradient-to-br from-sky-400 to-sky-600'}`}>
-                      <span className="text-white font-semibold text-lg">
-                        {(customer.irrigoName || customer.name).charAt(0).toUpperCase()}
-                      </span>
+            <div className="lg:hidden space-y-4">
+
+              {/* Active Customers Section */}
+              {activeCustomers.length > 0 && (
+                <div className="space-y-3">
+                  <button
+                    onClick={() => setActiveExpanded(!activeExpanded)}
+                    className="w-full flex items-center justify-between px-1 py-1 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-700 text-sm">Active Customers</span>
+                      <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-medium">{activeCustomers.length}</span>
                     </div>
-                    
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="text-base font-semibold text-slate-900 truncate">
-                          {customer.irrigoName || customer.name}
-                        </div>
-                        {customer.hiddenFromBilling && (
-                          <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded flex-shrink-0">
-                            <EyeOff className="w-3 h-3" />
-                            Hidden
+                    {activeExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                  </button>
+                  {activeExpanded && activeCustomers.map((customer) => (
+                    <Card 
+                      key={customer.id} 
+                      className="glass-card p-4 active:scale-[0.98] transition-all duration-200"
+                      onClick={() => userRole === 'field_tech' 
+                        ? setLocation(`/customers/${customer.id}/profile`)
+                        : setSelectedCustomer(customer)
+                      }
+                      data-testid={`card-customer-${customer.id}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm bg-gradient-to-br from-sky-400 to-sky-600">
+                          <span className="text-white font-semibold text-lg">
+                            {(customer.irrigoName || customer.name).charAt(0).toUpperCase()}
                           </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-base font-semibold text-slate-900 truncate">
+                            {customer.irrigoName || customer.name}
+                          </div>
+                          {customer.irrigoName && customer.irrigoName !== customer.name && (
+                            <div className="text-xs text-slate-400 truncate">{customer.name}</div>
+                          )}
+                          {userRole !== 'field_tech' && customer.email && (
+                            <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
+                              <Mail className="w-3.5 h-3.5" />
+                              <span className="truncate">{customer.email}</span>
+                            </div>
+                          )}
+                          {customer.phone && (
+                            <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
+                              <Phone className="w-3.5 h-3.5" />
+                              <span>{customer.phone}</span>
+                            </div>
+                          )}
+                        </div>
+                        {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="flex-shrink-0 text-slate-400 hover:text-orange-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleHiddenMutation.mutate({ customerId: customer.id, hidden: true });
+                            }}
+                            title="Hide from billing"
+                          >
+                            <EyeOff className="w-4 h-4" />
+                          </Button>
                         )}
+                        <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
                       </div>
-                      {customer.irrigoName && customer.irrigoName !== customer.name && (
-                        <div className="text-xs text-slate-400 truncate">{customer.name}</div>
-                      )}
-                      {userRole !== 'field_tech' && customer.email && (
-                        <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
-                          <Mail className="w-3.5 h-3.5" />
-                          <span className="truncate">{customer.email}</span>
+                      {customer.address && (
+                        <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-sm text-slate-500">
+                          <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">{customer.address}</span>
                         </div>
                       )}
-                      {customer.phone && (
-                        <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
-                          <Phone className="w-3.5 h-3.5" />
-                          <span>{customer.phone}</span>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              {/* Hidden from Billing Section */}
+              {hiddenCustomers.length > 0 && (
+                <div className="space-y-3">
+                  <button
+                    onClick={() => setHiddenExpanded(!hiddenExpanded)}
+                    className="w-full flex items-center justify-between px-1 py-1 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-500 text-sm">Hidden from Billing</span>
+                      <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">{hiddenCustomers.length}</span>
+                    </div>
+                    {hiddenExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                  </button>
+                  {hiddenExpanded && hiddenCustomers.map((customer) => (
+                    <Card 
+                      key={customer.id} 
+                      className="glass-card p-4 active:scale-[0.98] transition-all duration-200 opacity-60"
+                      onClick={() => userRole === 'field_tech' 
+                        ? setLocation(`/customers/${customer.id}/profile`)
+                        : setSelectedCustomer(customer)
+                      }
+                      data-testid={`card-customer-${customer.id}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm bg-gradient-to-br from-slate-300 to-slate-400">
+                          <span className="text-white font-semibold text-lg">
+                            {(customer.irrigoName || customer.name).charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-base font-semibold text-slate-900 truncate">
+                            {customer.irrigoName || customer.name}
+                          </div>
+                          {customer.irrigoName && customer.irrigoName !== customer.name && (
+                            <div className="text-xs text-slate-400 truncate">{customer.name}</div>
+                          )}
+                          {userRole !== 'field_tech' && customer.email && (
+                            <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
+                              <Mail className="w-3.5 h-3.5" />
+                              <span className="truncate">{customer.email}</span>
+                            </div>
+                          )}
+                          {customer.phone && (
+                            <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
+                              <Phone className="w-3.5 h-3.5" />
+                              <span>{customer.phone}</span>
+                            </div>
+                          )}
+                        </div>
+                        {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="flex-shrink-0 text-slate-400 hover:text-slate-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleHiddenMutation.mutate({ customerId: customer.id, hidden: false });
+                            }}
+                            title="Show in billing"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                      </div>
+                      {customer.address && (
+                        <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-sm text-slate-500">
+                          <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">{customer.address}</span>
                         </div>
                       )}
-                    </div>
-                    
-                    {/* Actions for admin on mobile */}
-                    {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={`flex-shrink-0 ${customer.hiddenFromBilling ? 'text-slate-400 hover:text-slate-600' : 'text-slate-400 hover:text-orange-600'}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleHiddenMutation.mutate({ customerId: customer.id, hidden: !customer.hiddenFromBilling });
-                        }}
-                        title={customer.hiddenFromBilling ? "Show in billing" : "Hide from billing"}
-                      >
-                        {customer.hiddenFromBilling ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                      </Button>
-                    )}
-                    
-                    {/* Chevron */}
-                    <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
-                  </div>
-                  
-                  {customer.address && (
-                    <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-sm text-slate-500">
-                      <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="truncate">{customer.address}</span>
-                    </div>
-                  )}
-                </Card>
-              ))}
+                    </Card>
+                  ))}
+                </div>
+              )}
+
             </div>
 
           {/* Desktop Table View */}
-          <div className="hidden lg:block">
-            <Card className="bg-white shadow-sm border border-gray-200">
-              <CardHeader className="px-6 py-4 border-b border-gray-200">
-                <CardTitle className="text-lg font-semibold text-gray-900">All Customers</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Customer
-                        </th>
-                        {userRole !== 'field_tech' && (
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Contact
-                          </th>
-                        )}
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Address
-                        </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredCustomers?.map((customer) => (
-                      <tr key={customer.id} className={`hover:bg-gray-50 cursor-pointer ${customer.hiddenFromBilling ? 'opacity-60' : ''}`} onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className={`p-2 rounded-lg mr-3 ${customer.hiddenFromBilling ? 'bg-slate-100' : 'bg-blue-50'}`}>
-                              <Users className={`w-4 h-4 ${customer.hiddenFromBilling ? 'text-slate-400' : 'text-blue-600'}`} />
-                            </div>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <div className="text-sm font-medium text-gray-900">
-                                  {customer.irrigoName || customer.name}
-                                </div>
-                                {customer.hiddenFromBilling && (
-                                  <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                                    <EyeOff className="w-3 h-3" />
-                                    Hidden from billing
-                                  </span>
-                                )}
-                              </div>
-                              {customer.irrigoName && customer.irrigoName !== customer.name && (
-                                <div className="text-xs text-gray-400 mt-0.5">{customer.name}</div>
-                              )}
-                            </div>
+          <div className="hidden lg:block space-y-4">
 
-                          </div>
-                        </td>
-                        {userRole !== 'field_tech' && (
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="space-y-1">
-                              <div className="flex items-center text-sm text-gray-900">
-                                <Mail className="w-4 h-4 mr-2 text-gray-400" />
-                                {customer.email}
-                              </div>
-                              {customer.phone && (
-                                <div className="flex items-center text-sm text-gray-500">
-                                  <Phone className="w-4 h-4 mr-2 text-gray-400" />
-                                  {customer.phone}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{customer.address}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <div className="flex items-center space-x-2 justify-end">
-                            {userRole === 'field_tech' ? (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="text-blue-600 hover:text-blue-900"
-                                onClick={() => setLocation(`/customers/${customer.id}/profile`)}
-                              >
-                                <Eye className="w-4 h-4 mr-1" />
-                                View Profile
-                              </Button>
-                            ) : (
-                              <>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="text-blue-600 hover:text-blue-900"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedCustomer(customer);
-                                  }}
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                                {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className={customer.hiddenFromBilling ? "text-slate-400 hover:text-slate-700" : "text-gray-400 hover:text-orange-600"}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        toggleHiddenMutation.mutate({ customerId: customer.id, hidden: !customer.hiddenFromBilling });
-                                      }}
-                                      title={customer.hiddenFromBilling ? "Show in billing" : "Hide from billing"}
-                                    >
-                                      {customer.hiddenFromBilling ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                                    </Button>
-                                    <CustomerForm
-                                      customer={customer}
-                                      trigger={
-                                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}>
-                                          <Edit className="w-4 h-4" />
-                                        </Button>
-                                      }
-                                    />
-                                    {(userRole === 'company_admin' || userRole === 'super_admin') && (<AlertDialog>
-                                      <AlertDialogTrigger asChild>
-                                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}>
-                                          <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                      </AlertDialogTrigger>
-                                      <AlertDialogContent>
-                                        <AlertDialogHeader>
-                                          <AlertDialogTitle>Delete Customer</AlertDialogTitle>
-                                          <AlertDialogDescription>
-                                            Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.
-                                          </AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                          <AlertDialogAction
-                                            className="bg-red-600 hover:bg-red-700"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDeleteCustomer(customer.id);
-                                            }}
-                                            disabled={deleteCustomerMutation.isPending}
-                                          >
-                                            {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
-                                          </AlertDialogAction>
-                                        </AlertDialogFooter>
-                                      </AlertDialogContent>
-                                    </AlertDialog>
-                                    )}
-                                  </>
-                                )}
-                              </>
+            {/* Active Customers */}
+            {activeCustomers.length > 0 && (
+              <Card className="bg-white shadow-sm border border-gray-200">
+                <CardHeader
+                  className="px-6 py-4 border-b border-gray-200 cursor-pointer select-none"
+                  onClick={() => setActiveExpanded(!activeExpanded)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <CardTitle className="text-lg font-semibold text-gray-900">Active Customers</CardTitle>
+                      <span className="text-xs bg-sky-100 text-sky-700 px-2.5 py-0.5 rounded-full font-medium">{activeCustomers.length}</span>
+                    </div>
+                    {activeExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                  </div>
+                </CardHeader>
+                {activeExpanded && (
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                            {userRole !== 'field_tech' && (
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  }
-                  </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {activeCustomers.map((customer) => (
+                            <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div className="p-2 rounded-lg mr-3 bg-blue-50">
+                                    <Users className="w-4 h-4 text-blue-600" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-gray-900">{customer.irrigoName || customer.name}</div>
+                                    {customer.irrigoName && customer.irrigoName !== customer.name && (
+                                      <div className="text-xs text-gray-400 mt-0.5">{customer.name}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              {userRole !== 'field_tech' && (
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center text-sm text-gray-900">
+                                      <Mail className="w-4 h-4 mr-2 text-gray-400" />{customer.email}
+                                    </div>
+                                    {customer.phone && (
+                                      <div className="flex items-center text-sm text-gray-500">
+                                        <Phone className="w-4 h-4 mr-2 text-gray-400" />{customer.phone}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">{customer.address}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex items-center space-x-2 justify-end">
+                                  {userRole === 'field_tech' ? (
+                                    <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={() => setLocation(`/customers/${customer.id}/profile`)}>
+                                      <Eye className="w-4 h-4 mr-1" />View Profile
+                                    </Button>
+                                  ) : (
+                                    <>
+                                      <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={(e) => { e.stopPropagation(); setSelectedCustomer(customer); }}>
+                                        <Eye className="w-4 h-4" />
+                                      </Button>
+                                      {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
+                                        <>
+                                          <Button variant="ghost" size="sm" className="text-gray-400 hover:text-orange-600" onClick={(e) => { e.stopPropagation(); toggleHiddenMutation.mutate({ customerId: customer.id, hidden: true }); }} title="Hide from billing">
+                                            <EyeOff className="w-4 h-4" />
+                                          </Button>
+                                          <CustomerForm customer={customer} trigger={<Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}><Edit className="w-4 h-4" /></Button>} />
+                                          {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                                            <AlertDialog>
+                                              <AlertDialogTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}><Trash2 className="w-4 h-4" /></Button>
+                                              </AlertDialogTrigger>
+                                              <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                  <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+                                                  <AlertDialogDescription>Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.</AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                  <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={(e) => { e.stopPropagation(); handleDeleteCustomer(customer.id); }} disabled={deleteCustomerMutation.isPending}>
+                                                    {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
+                                                  </AlertDialogAction>
+                                                </AlertDialogFooter>
+                                              </AlertDialogContent>
+                                            </AlertDialog>
+                                          )}
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+            )}
+
+            {/* Hidden from Billing */}
+            {hiddenCustomers.length > 0 && (
+              <Card className="bg-white shadow-sm border border-gray-200 opacity-80">
+                <CardHeader
+                  className="px-6 py-4 border-b border-gray-200 cursor-pointer select-none"
+                  onClick={() => setHiddenExpanded(!hiddenExpanded)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <CardTitle className="text-lg font-semibold text-gray-500">Hidden from Billing</CardTitle>
+                      <span className="text-xs bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full font-medium">{hiddenCustomers.length}</span>
+                    </div>
+                    {hiddenExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                  </div>
+                </CardHeader>
+                {hiddenExpanded && (
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                            {userRole !== 'field_tech' && (
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                            )}
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {hiddenCustomers.map((customer) => (
+                            <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer opacity-70" onClick={() => userRole !== 'field_tech' && setSelectedCustomer(customer)}>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div className="p-2 rounded-lg mr-3 bg-slate-100">
+                                    <Users className="w-4 h-4 text-slate-400" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-gray-900">{customer.irrigoName || customer.name}</div>
+                                    {customer.irrigoName && customer.irrigoName !== customer.name && (
+                                      <div className="text-xs text-gray-400 mt-0.5">{customer.name}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              {userRole !== 'field_tech' && (
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center text-sm text-gray-900">
+                                      <Mail className="w-4 h-4 mr-2 text-gray-400" />{customer.email}
+                                    </div>
+                                    {customer.phone && (
+                                      <div className="flex items-center text-sm text-gray-500">
+                                        <Phone className="w-4 h-4 mr-2 text-gray-400" />{customer.phone}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">{customer.address}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex items-center space-x-2 justify-end">
+                                  {userRole === 'field_tech' ? (
+                                    <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={() => setLocation(`/customers/${customer.id}/profile`)}>
+                                      <Eye className="w-4 h-4 mr-1" />View Profile
+                                    </Button>
+                                  ) : (
+                                    <>
+                                      <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={(e) => { e.stopPropagation(); setSelectedCustomer(customer); }}>
+                                        <Eye className="w-4 h-4" />
+                                      </Button>
+                                      {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
+                                        <>
+                                          <Button variant="ghost" size="sm" className="text-slate-400 hover:text-slate-700" onClick={(e) => { e.stopPropagation(); toggleHiddenMutation.mutate({ customerId: customer.id, hidden: false }); }} title="Show in billing">
+                                            <Eye className="w-4 h-4" />
+                                          </Button>
+                                          <CustomerForm customer={customer} trigger={<Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}><Edit className="w-4 h-4" /></Button>} />
+                                          {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                                            <AlertDialog>
+                                              <AlertDialogTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}><Trash2 className="w-4 h-4" /></Button>
+                                              </AlertDialogTrigger>
+                                              <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                  <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+                                                  <AlertDialogDescription>Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.</AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                  <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={(e) => { e.stopPropagation(); handleDeleteCustomer(customer.id); }} disabled={deleteCustomerMutation.isPending}>
+                                                    {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
+                                                  </AlertDialogAction>
+                                                </AlertDialogFooter>
+                                              </AlertDialogContent>
+                                            </AlertDialog>
+                                          )}
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+            )}
+
           </div>
 
             {/* Empty State */}

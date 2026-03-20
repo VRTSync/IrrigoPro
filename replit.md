@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, ultimately enhancing efficiency and customer satisfaction in the irrigation industry. Key capabilities include zone-based estimates, customer integrations, and a modern user interface.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry. Key capabilities include zone-based estimates, customer integrations, and a modern user interface.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -48,15 +48,15 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 ### Core Features
 - **Complete Business Workflow**: Estimates, customer approval, work order generation, field work, invoicing, and standalone billing sheets.
 - **Monthly Invoice Consolidation**: Consolidates customer work into single monthly, tax-free QuickBooks invoices.
-- **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions.
+- **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions, including granular control over pricing visibility for field technicians.
 - **Site Maps & Controller Management System**: KML import for interactive irrigation maps using Leaflet.
 - **Customer Email Approval System**: Token-based estimate approval with Postmark email integration.
 - **Notification System**: Database-driven notifications for work order assignments, completions, and estimate approvals, including iOS PWA Push Notifications.
 - **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based picker featuring live GPS and "Use My Location" functionality.
-- **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes), phone-based user login.
+- **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes), phone-based user login, session-based authentication.
 - **User Management**: Company administrators manage users within their company.
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
-- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions.
+- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins.
 
 ## External Dependencies
 
