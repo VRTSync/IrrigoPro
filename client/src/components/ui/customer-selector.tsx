@@ -57,11 +57,15 @@ export function CustomerSelector({
     queryKey: ["/api/customers"],
   });
 
-  const filteredCustomers = customers?.filter(customer =>
-    customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.address?.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const filteredCustomers = customers?.filter(customer => {
+    const q = searchQuery.toLowerCase();
+    return (
+      customer.name.toLowerCase().includes(q) ||
+      (customer.irrigoName || "").toLowerCase().includes(q) ||
+      customer.email.toLowerCase().includes(q) ||
+      customer.address?.toLowerCase().includes(q)
+    );
+  }) || [];
 
   const form = useForm<NewCustomerFormData>({
     resolver: zodResolver(newCustomerSchema),
@@ -242,7 +246,12 @@ export function CustomerSelector({
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="min-w-0 flex-1">
-                          <h3 className="font-semibold text-gray-900 truncate text-base">{customer.name}</h3>
+                          <h3 className="font-semibold text-gray-900 truncate text-base">
+                            {customer.irrigoName || customer.name}
+                          </h3>
+                          {customer.irrigoName && customer.irrigoName !== customer.name && (
+                            <p className="text-xs text-gray-400 truncate">{customer.name}</p>
+                          )}
                           <div className="text-sm text-gray-600 space-y-1 mt-2">
                             <div className="flex items-center">
                               <Mail className="w-4 h-4 mr-2 flex-shrink-0 text-gray-400" />

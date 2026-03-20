@@ -151,7 +151,14 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                   </div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2 sm:mb-3 truncate">{customer.name}</h1>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 truncate">
+                    {customer.irrigoName || customer.name}
+                  </h1>
+                  {customer.irrigoName && customer.irrigoName !== customer.name && (
+                    <p className="text-sm text-gray-500 mb-2 truncate">
+                      Official: {customer.name}
+                    </p>
+                  )}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 sm:gap-3 text-gray-700">
                       <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">

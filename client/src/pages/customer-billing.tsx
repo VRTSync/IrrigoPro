@@ -329,9 +329,12 @@ export default function CustomerBilling() {
       const preview = getCustomerPreview(customer);
       
       // Search term filter
-      if (searchTerm && !customer.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-          !customer.email.toLowerCase().includes(searchTerm.toLowerCase())) {
-        return false;
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const matchesSearch = customer.name.toLowerCase().includes(q) ||
+          (customer.irrigoName || "").toLowerCase().includes(q) ||
+          customer.email.toLowerCase().includes(q);
+        if (!matchesSearch) return false;
       }
       
       // Amount filter
@@ -643,7 +646,7 @@ export default function CustomerBilling() {
                         onClick={() => setSelectedCustomerId(customer.id)}
                       >
                         <div className="flex items-center justify-between mb-2">
-                          <div className="font-medium text-base text-gray-900">{customer.name}</div>
+                          <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
                           {preview.billingPace >= 1.3 ? (
                             <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
                           ) : preview.billingPace <= 0.7 ? (
@@ -1140,7 +1143,7 @@ export default function CustomerBilling() {
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium text-gray-900 truncate">{customer.name}</div>
+                      <div className="font-medium text-gray-900 truncate">{customer.irrigoName || customer.name}</div>
                       {preview.unbilledAmount > 0 ? (
                         <Badge className="bg-orange-100 text-orange-800 text-xs">
                           NEEDS BILLING
@@ -1208,7 +1211,7 @@ export default function CustomerBilling() {
                 <CardHeader className="pb-2 p-3 md:p-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div>
-                      <CardTitle className="text-base md:text-lg">{customerBillingData.customer.name}</CardTitle>
+                      <CardTitle className="text-base md:text-lg">{customerBillingData.customer.irrigoName || customerBillingData.customer.name}</CardTitle>
                       <div className="space-y-1 text-xs text-gray-600 mt-1">
                         <div className="flex items-center gap-2">
                           <Mail className="w-3 h-3" />

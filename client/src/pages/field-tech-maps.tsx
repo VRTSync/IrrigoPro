@@ -49,6 +49,7 @@ export default function FieldTechMaps() {
 
   // Filter customers based on search term
   const filteredCustomers = customersWithMaps?.filter(customer =>
+    (customer.irrigoName || customer.name).toLowerCase().includes(searchTerm.toLowerCase()) ||
     customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     customer.address?.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
@@ -112,7 +113,7 @@ export default function FieldTechMaps() {
                   <div className="space-y-1">
                     <CardTitle className="text-lg flex items-center gap-2">
                       <Users className="w-5 h-5 text-blue-600" />
-                      {customer.name}
+                      {customer.irrigoName || customer.name}
                     </CardTitle>
                     {customer.address && (
                       <p className="text-sm text-gray-600 flex items-center gap-1">

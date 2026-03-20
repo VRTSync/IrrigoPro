@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, offering zone-based estimates, customer integrations, and a modern user interface, ultimately enhancing efficiency and customer satisfaction in the irrigation industry.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, ultimately enhancing efficiency and customer satisfaction in the irrigation industry with key capabilities such as zone-based estimates, customer integrations, and a modern user interface.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -27,6 +27,7 @@ Work Order Editing: Full work order editing available for irrigation managers an
 Work Order Assignment: The assignment dropdown on work orders includes both irrigation managers and field technicians, grouped by role (Managers / Field Techs). The `/api/users/field-techs` endpoint returns both `field_tech` and `irrigation_manager` active users. Reassignment in work order details also shows grouped managers and field techs.
 Location Picker Enhancements: The LocationPicker component features a live GPS tracking dot (pulsing blue circle) that continuously shows the user's real-time position on the map. A "Use My Location" button snaps the work location pin to the user's GPS coordinates with reverse geocoding. The map automatically re-centers when the customer/community selection changes using `map.flyTo()` for smooth transitions.
 Phone-Based User Login: New company team members use their phone number as their login username. The phone field is required when creating new users, and the username is automatically set to the phone number. Email is optional. Existing users with text-slug usernames are completely unaffected.
+IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` field (stored in the database as `irrigo_name`) that is the name shown to all IrrigoPro users throughout the app — intended to be a property name or nickname the field team recognizes. It defaults to the official customer name on creation and auto-fills from the customer name when adding new customers. Displayed as the primary name everywhere (customer list, profile, billing, site maps, customer selector). Official name shown as a faint subtitle only when it differs. In the customer form, the field is highlighted with a green bordered box, green badge labeled "Irrigo Facing", and a Tag icon so it is unmistakable. Search across all views matches both irrigoName and official name.
 
 ## System Architecture
 

@@ -50,6 +50,7 @@ export default function SiteMaps() {
   // Filter site maps based on search term
   const filteredSiteMaps = siteMaps?.filter(map =>
     map.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (map.customer.irrigoName || map.customer.name).toLowerCase().includes(searchTerm.toLowerCase()) ||
     map.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     map.customer.address?.toLowerCase().includes(searchTerm.toLowerCase())
   ) || [];
@@ -120,7 +121,7 @@ export default function SiteMaps() {
                     <CardTitle className="text-lg">{siteMap.name}</CardTitle>
                     <div className="flex items-center text-sm text-gray-600">
                       <Building className="h-4 w-4 mr-1" />
-                      {siteMap.customer.name}
+                      {siteMap.customer.irrigoName || siteMap.customer.name}
                     </div>
                   </div>
                   <Badge variant="secondary" className="ml-2">

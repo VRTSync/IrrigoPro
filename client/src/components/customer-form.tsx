@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CalendarIcon, DollarSign, Percent, FileText } from "lucide-react";
+import { CalendarIcon, DollarSign, Percent, FileText, Tag } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@shared/schema";
@@ -18,6 +19,7 @@ import type { Customer, User } from "@shared/schema";
 
 const customerFormSchema = insertCustomerSchema.extend({
   companyId: z.number().min(1, "Company ID is required"),
+  irrigoName: z.string().optional(),
   totalControllers: z.coerce.number().min(1, "Must have at least 1 controller").max(10, "Maximum 10 controllers").default(1),
   contractType: z.enum(["standard", "premium", "commercial", "residential"]).default("standard"),
   laborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("45.00"),
@@ -64,6 +66,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
     resolver: zodResolver(customerFormSchema),
     defaultValues: customer ? {
       name: customer.name,
+      irrigoName: customer.irrigoName || customer.name,
       email: customer.email,
       phone: customer.phone || "",
       address: customer.address || "",
@@ -80,6 +83,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       notes: customer.notes || "",
     } : {
       name: "",
+      irrigoName: "",
       email: "",
       phone: "",
       address: "",
@@ -103,6 +107,15 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       form.setValue('companyId', companyId);
     }
   }, [companyId, customer, form]);
+
+  // For new customers: auto-fill irrigoName from name as the user types (only while irrigoName is still blank)
+  const watchedName = form.watch("name");
+  const watchedIrrigoName = form.watch("irrigoName");
+  useEffect(() => {
+    if (!customer && (!watchedIrrigoName || watchedIrrigoName === "")) {
+      form.setValue("irrigoName", watchedName);
+    }
+  }, [watchedName, customer, form]);
 
   const mutation = useMutation({
     mutationFn: async (data: CustomerFormData) => {
@@ -183,15 +196,44 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                 <CardTitle className="text-lg">Basic Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* IrrigoPro Display Name — prominently styled */}
+                <div className="rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
+                  <FormField
+                    control={form.control}
+                    name="irrigoName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="flex items-center gap-2 text-emerald-800 font-semibold text-base">
+                          <Tag className="w-4 h-4 text-emerald-600" />
+                          IrrigoPro Display Name
+                          <Badge className="bg-emerald-600 text-white text-xs px-2 py-0.5 ml-1">Irrigo Facing</Badge>
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="Enter the name your team will see (e.g. property name)"
+                            className="border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500 bg-white text-base font-medium"
+                            {...field}
+                            value={field.value || ""}
+                          />
+                        </FormControl>
+                        <p className="text-xs text-emerald-700 mt-1">
+                          This is what all IrrigoPro users see — use the property name or nickname your team knows this customer by.
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="name"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Customer Name</FormLabel>
+                        <FormLabel>Official Customer Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter customer name" {...field} />
+                          <Input placeholder="Enter official/QuickBooks customer name" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

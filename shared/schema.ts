@@ -67,6 +67,7 @@ export const customers = pgTable("customers", {
   contractStartDate: timestamp("contract_start_date"),
   contractEndDate: timestamp("contract_end_date"),
   paymentTerms: text("payment_terms").default("net_30"), // net_30, net_15, due_on_receipt
+  irrigoName: text("irrigo_name"), // IrrigoPro-facing display name (e.g. property name) — shown to all Irrigo users
   notes: text("notes"),
   propertyNotes: text("property_notes"), // Property-specific notes for technicians
   billingNotes: text("billing_notes"), // Private notes for billing manager use only

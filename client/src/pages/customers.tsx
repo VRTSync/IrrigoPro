@@ -129,11 +129,15 @@ export default function Customers() {
     }
   }, [customers]);
 
-  const filteredCustomers = customers?.filter(customer =>
-    customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.phone?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCustomers = customers?.filter(customer => {
+    const q = searchQuery.toLowerCase();
+    return (
+      customer.name.toLowerCase().includes(q) ||
+      (customer.irrigoName || "").toLowerCase().includes(q) ||
+      customer.email.toLowerCase().includes(q) ||
+      customer.phone?.toLowerCase().includes(q)
+    );
+  });
 
   // Show full page skeleton while loading (after all hooks)
   if (isLoading) {
@@ -241,14 +245,16 @@ export default function Customers() {
                     {/* Avatar */}
                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${customer.hiddenFromBilling ? 'bg-gradient-to-br from-slate-300 to-slate-400' : 'bg-gradient-to-br from-sky-400 to-sky-600'}`}>
                       <span className="text-white font-semibold text-lg">
-                        {customer.name.charAt(0).toUpperCase()}
+                        {(customer.irrigoName || customer.name).charAt(0).toUpperCase()}
                       </span>
                     </div>
                     
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <div className="text-base font-semibold text-slate-900 truncate">{customer.name}</div>
+                        <div className="text-base font-semibold text-slate-900 truncate">
+                          {customer.irrigoName || customer.name}
+                        </div>
                         {customer.hiddenFromBilling && (
                           <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded flex-shrink-0">
                             <EyeOff className="w-3 h-3" />
@@ -256,6 +262,9 @@ export default function Customers() {
                           </span>
                         )}
                       </div>
+                      {customer.irrigoName && customer.irrigoName !== customer.name && (
+                        <div className="text-xs text-slate-400 truncate">{customer.name}</div>
+                      )}
                       {userRole !== 'field_tech' && customer.email && (
                         <div className="flex items-center gap-1.5 text-sm text-slate-500 mt-0.5">
                           <Mail className="w-3.5 h-3.5" />
@@ -337,7 +346,9 @@ export default function Customers() {
                             </div>
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
-                                <div className="text-sm font-medium text-gray-900">{customer.name}</div>
+                                <div className="text-sm font-medium text-gray-900">
+                                  {customer.irrigoName || customer.name}
+                                </div>
                                 {customer.hiddenFromBilling && (
                                   <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
                                     <EyeOff className="w-3 h-3" />
@@ -345,6 +356,9 @@ export default function Customers() {
                                   </span>
                                 )}
                               </div>
+                              {customer.irrigoName && customer.irrigoName !== customer.name && (
+                                <div className="text-xs text-gray-400 mt-0.5">{customer.name}</div>
+                              )}
                             </div>
 
                           </div>
