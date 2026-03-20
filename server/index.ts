@@ -106,6 +106,28 @@ app.use((req, res, next) => {
   next();
 });
 
+// Prevent database connection resets and other transient errors from crashing the server
+process.on('unhandledRejection', (reason: any, promise) => {
+  const msg = reason?.message || String(reason);
+  // Log but don't crash — Neon DB may terminate idle connections; these are recoverable
+  console.error('Unhandled promise rejection (non-fatal):', msg);
+  logger.error('Unhandled promise rejection', reason instanceof Error ? reason : new Error(msg), 'Server');
+});
+
+process.on('uncaughtException', (error: Error) => {
+  const msg = error?.message || String(error);
+  // DB connection resets are recoverable — log and continue
+  if (msg.includes('terminating connection') || msg.includes('Connection terminated') || msg.includes('ECONNRESET')) {
+    console.error('Recoverable connection error (continuing):', msg);
+    logger.error('Recoverable connection error', error, 'Server');
+    return;
+  }
+  // For truly unrecoverable errors, log and exit
+  console.error('Uncaught exception (fatal):', msg);
+  logger.error('Uncaught exception (fatal)', error, 'Server');
+  process.exit(1);
+});
+
 (async () => {
   logger.info("Starting IrrigoPro server", "Server Startup", {
     environment: process.env.NODE_ENV,
