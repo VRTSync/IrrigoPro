@@ -10,6 +10,8 @@ import QuickBooksPage from "@/pages/quickbooks";
 import PartsCatalog from "@/pages/parts-catalog";
 import Customers from "@/pages/customers";
 import SiteMapsPage from "@/pages/site-maps";
+import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
+import CustomerProfile from "@/pages/customer-profile";
 import CustomerBilling from "@/pages/customer-billing";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
@@ -113,6 +115,8 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/quickbooks" component={QuickBooksPage} />
           <Route path="/parts" component={PartsCatalog} />
           <Route path="/customers" component={Customers} />
+          <Route path="/customers/:id/profile" component={CustomerProfile} />
+          <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
           <Route path="/site-maps" component={SiteMapsPage} />
           <Route path="/customer-billing" component={CustomerBilling} />
           <Route path="/field-tech" component={FieldTech} />

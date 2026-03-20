@@ -182,18 +182,20 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                         <span className="font-medium text-sm sm:text-base break-words">{customer.address}</span>
                       </div>
                     )}
-                    {/* Site Maps Button */}
-                    <div className="mt-3">
-                      <Button 
-                        onClick={() => setShowSiteMaps(true)}
-                        variant="outline"
-                        size="sm"
-                        className="flex items-center gap-2 bg-white hover:bg-blue-50 border-blue-200 text-blue-700 hover:text-blue-800"
-                      >
-                        <Map className="w-4 h-4" />
-                        <span className="text-sm">View Site Maps</span>
-                      </Button>
-                    </div>
+                    {/* Site Maps Button - only for roles with site map access */}
+                    {(userRole === 'company_admin' || userRole === 'irrigation_manager' || userRole === 'field_tech') && (
+                      <div className="mt-3">
+                        <Button 
+                          onClick={() => setShowSiteMaps(true)}
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2 bg-white hover:bg-blue-50 border-blue-200 text-blue-700 hover:text-blue-800"
+                        >
+                          <Map className="w-4 h-4" />
+                          <span className="text-sm">View Site Maps</span>
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
