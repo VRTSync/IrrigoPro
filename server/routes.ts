@@ -494,6 +494,16 @@ const requireQuickBooksAccess = (req: any, res: any, next: any) => {
   next();
 };
 
+// In-memory OAuth state store (replaces session-based storage — app uses localStorage auth, not server sessions)
+// Maps state token -> expiry timestamp (10 min TTL)
+const oauthStateStore = new Map<string, number>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, expiry] of oauthStateStore.entries()) {
+    if (now > expiry) oauthStateStore.delete(state);
+  }
+}, 60_000);
+
 import { db } from "./db";
 import { 
   customers, estimates, workOrders, estimateItems, estimateZones, parts, billingSheets, billingSheetItems, 
@@ -4205,8 +4215,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const state = crypto.randomBytes(16).toString('hex');
-      // Store state in session for CSRF verification in the callback
-      (req.session as any).quickbooksOAuthState = state;
+      // Store state in memory store for CSRF verification in the callback (10 min TTL)
+      oauthStateStore.set(state, Date.now() + 10 * 60 * 1000);
       
       // QuickBooks OAuth URL
       const authUrl = `https://appcenter.intuit.com/app/connect/oauth2?` +
@@ -4240,10 +4250,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `);
       }
 
-      // Verify CSRF state parameter
-      const expectedState = (req.session as any).quickbooksOAuthState;
-      if (!state || !expectedState || state !== expectedState) {
-        console.error('QuickBooks OAuth state mismatch. Possible CSRF attack.', { received: state, expected: expectedState });
+      // Verify CSRF state parameter against in-memory store
+      const stateExpiry = state ? oauthStateStore.get(state as string) : undefined;
+      if (!state || !stateExpiry || Date.now() > stateExpiry) {
+        console.error('QuickBooks OAuth state mismatch or expired. Possible CSRF attack.', { received: state });
         return res.status(400).send(`
           <html>
             <head><title>Connection Failed</title></head>
@@ -4255,8 +4265,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           </html>
         `);
       }
-      // Clear the state from session after verification
-      delete (req.session as any).quickbooksOAuthState;
+      // Clear the state from store after verification
+      oauthStateStore.delete(state as string);
 
       // Exchange the authorization code for access tokens
       console.log("QuickBooks OAuth callback received:", { code, state, realmId });
@@ -6695,11 +6705,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // The realmId (company ID) will be provided by QuickBooks
       const realmId = req.query.realmId;
       
-      if (realmId) {
-        // Store the QuickBooks company context in session if needed
-        req.session.quickbooksRealmId = realmId;
-      }
-      
       // Redirect to customer billing page where QuickBooks integration is located
       res.redirect('/customer-billing?source=quickbooks_launch');
     } catch (error) {
@@ -6720,12 +6725,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // 3. Log the disconnection event
       
       const realmId = req.body.realmId;
-      
-      if (realmId && req.session) {
-        // Clear QuickBooks session data
-        delete req.session.quickbooksRealmId;
-        delete req.session.quickbooksTokens;
-      }
       
       // For now, just acknowledge the disconnection
       // In a full implementation, you'd clean up stored tokens and company associations
