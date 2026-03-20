@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -34,7 +35,7 @@ export default function CompanyProfile() {
   const [requiresSetup, setRequiresSetup] = useState(false);
 
   // Get current user info from localStorage for now (working solution)
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const user = JSON.parse(safeGet("user") || "{}");
   const companyId = user?.companyId;
 
   // Fetch company profile with proper authentication

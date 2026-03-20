@@ -1,3 +1,4 @@
+import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,7 +55,7 @@ export default function FieldPortal() {
 
   // Check authentication and redirect if not field tech
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       const userData = JSON.parse(savedUser);
       if (userData.role === "field_tech") {
@@ -130,7 +131,7 @@ export default function FieldPortal() {
   });
 
   const handleLogout = () => {
-    localStorage.removeItem("user");
+    safeRemove("user");
     window.location.href = "/login";
   };
 

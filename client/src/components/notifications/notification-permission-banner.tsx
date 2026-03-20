@@ -3,6 +3,7 @@ import { Bell, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { notificationService } from '@/lib/notifications';
+import { safeSet } from '@/utils/safeStorage';
 
 export function NotificationPermissionBanner() {
   const [show, setShow] = useState(false);
@@ -32,12 +33,12 @@ export function NotificationPermissionBanner() {
   const handleEnable = async () => {
     const newPermission = await notificationService.requestPermission();
     setPermission(newPermission);
-    localStorage.setItem('notification-permission-asked', 'true');
+    safeSet('notification-permission-asked', 'true');
     setShow(false);
   };
 
   const handleDismiss = () => {
-    localStorage.setItem('notification-permission-asked', 'true');
+    safeSet('notification-permission-asked', 'true');
     setShow(false);
   };
 

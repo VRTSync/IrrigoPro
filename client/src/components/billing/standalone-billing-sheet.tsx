@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -84,7 +85,7 @@ interface StandaloneBillingSheetProps {
 
 // Helper function to get current user (deprecated - use useQuery instead)
 const getCurrentUser = () => {
-  const savedUser = localStorage.getItem("user");
+  const savedUser = safeGet("user");
   return savedUser ? JSON.parse(savedUser) : null;
 };
 
@@ -114,7 +115,7 @@ export function StandaloneBillingSheet({
   const [currentUser, setCurrentUser] = useState<any>(null);
   
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         setCurrentUser(JSON.parse(savedUser));

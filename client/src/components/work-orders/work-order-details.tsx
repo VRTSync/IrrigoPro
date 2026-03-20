@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -73,7 +74,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
   // Get current user from localStorage
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       setCurrentUser(JSON.parse(savedUser));
     }

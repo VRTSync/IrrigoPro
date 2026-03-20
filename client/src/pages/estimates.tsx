@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { EstimateListSkeleton } from "@/components/ui/loading-skeleton";
 
@@ -30,7 +31,7 @@ export default function Estimates() {
 
   // Get current user role
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
 

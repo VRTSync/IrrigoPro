@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,7 +45,7 @@ interface SiteMapProject {
 export function SiteMapsPage() {
   // Get current user role for permissions
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
   

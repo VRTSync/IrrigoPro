@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -19,7 +20,7 @@ export default function FieldTechMaps() {
 
   // Get current user
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
   const currentUser = getCurrentUser();

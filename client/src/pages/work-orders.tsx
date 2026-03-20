@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safeGet, safeSet } from "@/utils/safeStorage";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { WorkOrderListSkeleton } from "@/components/ui/loading-skeleton";
 
@@ -71,7 +72,7 @@ export default function WorkOrders() {
   // Get current user from localStorage and refresh user data
   useEffect(() => {
     const refreshUserData = async () => {
-      const savedUser = localStorage.getItem("user");
+      const savedUser = safeGet("user");
       if (savedUser) {
         try {
           const currentUserData = JSON.parse(savedUser);
@@ -82,8 +83,8 @@ export default function WorkOrders() {
             const users = await response.json();
             const updatedUser = users.find((u: any) => u.username === currentUserData.username);
             if (updatedUser) {
-              // Always update localStorage with fresh data
-              localStorage.setItem("user", JSON.stringify(updatedUser));
+              // Always update stored user (safe for Safari private browsing)
+              safeSet("user", JSON.stringify(updatedUser));
               setCurrentUser(updatedUser);
             } else {
               setCurrentUser(currentUserData);

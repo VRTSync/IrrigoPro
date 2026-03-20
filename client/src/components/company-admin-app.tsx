@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safeSet } from "@/utils/safeStorage";
 import { Switch, Route } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import Navigation from "@/components/layout/navigation";
@@ -75,7 +76,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
 
   const handleOnboardingComplete = () => {
     setNeedsOnboarding(false);
-    localStorage.setItem("onboarding_completed", "true");
+    safeSet("onboarding_completed", "true");
   };
 
   // Show loading while checking setup

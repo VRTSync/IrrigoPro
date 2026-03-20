@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -103,7 +104,7 @@ export function CompletedWorkDetailModal({
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
   // Determine pricing visibility
-  const savedUser = localStorage.getItem("user");
+  const savedUser = safeGet("user");
   const userRole = savedUser ? JSON.parse(savedUser)?.role : "";
   const canSeePricing = showPricing !== undefined ? showPricing : userRole !== "field_tech";
 

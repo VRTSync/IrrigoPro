@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { safeGet, safeSet } from "@/utils/safeStorage";
 import { User, Mail, Calendar, Building2, Shield } from "lucide-react";
 
 interface UserProfile {
@@ -33,7 +34,7 @@ export default function UserProfilePage() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       const userData = JSON.parse(savedUser);
       setUser(userData);
@@ -50,8 +51,8 @@ export default function UserProfilePage() {
       return await apiRequest(`/api/users/${user.id}`, "PATCH", data);
     },
     onSuccess: (updatedUser) => {
-      // Update localStorage
-      localStorage.setItem("user", JSON.stringify(updatedUser));
+      // Update stored user (safe for Safari private browsing)
+      safeSet("user", JSON.stringify(updatedUser));
       setUser(updatedUser);
       toast({
         title: "Profile Updated",

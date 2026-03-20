@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -54,7 +55,7 @@ export function InvoicePdfPreviewModal({
 
   // Build PDF URL with auth headers as query params for better compatibility
   const getPdfUrl = () => {
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const user = JSON.parse(safeGet("user") || "{}");
     const params = new URLSearchParams({
       'user-id': user.id?.toString() || '',
       'user-role': user.role || '',
@@ -99,7 +100,7 @@ export function InvoicePdfPreviewModal({
 
   const handleViewPdf = () => {
     // Open PDF in new tab
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const user = JSON.parse(safeGet("user") || "{}");
     const params = new URLSearchParams({
       'x-user-id': user.id?.toString() || '',
       'x-user-role': user.role || '',
@@ -113,7 +114,7 @@ export function InvoicePdfPreviewModal({
     if (!pdf) return;
     
     // Trigger download using a temporary link
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const user = JSON.parse(safeGet("user") || "{}");
     const params = new URLSearchParams({
       'x-user-id': user.id?.toString() || '',
       'x-user-role': user.role || '',

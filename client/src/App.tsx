@@ -1,6 +1,7 @@
 import { Switch, Route } from "wouter";
 import { useState, useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
+import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -67,7 +68,7 @@ function Router() {
     
     // Check for saved user in localStorage and validate session
     const refreshUserSession = async () => {
-      const savedUser = localStorage.getItem("user");
+      const savedUser = safeGet("user");
       if (savedUser) {
         try {
           const userData = JSON.parse(savedUser);
@@ -75,7 +76,7 @@ function Router() {
           setUser(userData);
         } catch (error) {
           console.error("Error parsing user data:", error);
-          localStorage.removeItem("user");
+          safeRemove("user");
         }
       } else {
         console.log("No saved user found");

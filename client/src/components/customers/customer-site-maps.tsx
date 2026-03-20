@@ -1,3 +1,4 @@
+import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,13 +97,13 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   useEffect(() => {
     if (!siteMaps || siteMaps.length === 0) return;
     
-    const selectedSiteMapId = localStorage.getItem('selectedSiteMapId');
+    const selectedSiteMapId = safeGet('selectedSiteMapId');
     let siteMapToSelect: SiteMap | null = null;
     
     if (selectedSiteMapId) {
       // Find specific site map from Maps page
       siteMapToSelect = siteMaps.find(sm => sm.id.toString() === selectedSiteMapId) || null;
-      localStorage.removeItem('selectedSiteMapId');
+      safeRemove('selectedSiteMapId');
     } else if (siteMaps.length === 1) {
       // Auto-select if there's only one site map
       siteMapToSelect = siteMaps[0];
@@ -170,7 +171,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   }
 
   // Debug authentication status
-  const savedUser = localStorage.getItem("user");
+  const savedUser = safeGet("user");
   const userData = savedUser ? JSON.parse(savedUser) : null;
   console.log('Site maps authentication check:', {
     hasLocalStorageUser: !!savedUser,

@@ -1,3 +1,4 @@
+import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,7 @@ export default function Navigation() {
   };
 
   // Get current user role from localStorage
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const user = JSON.parse(safeGet("user") || "{}");
   const userRole = user.role;
   const companyId = user.companyId;
 
@@ -272,7 +273,7 @@ export default function Navigation() {
                   </Link>
                   <DropdownMenuItem
                     onClick={() => {
-                      localStorage.removeItem("user");
+                      safeRemove("user");
                       window.location.href = "/login";
                     }}
                     className="text-red-600"
@@ -349,7 +350,7 @@ export default function Navigation() {
                   </Link>
                   <DropdownMenuItem
                     onClick={() => {
-                      localStorage.removeItem("user");
+                      safeRemove("user");
                       window.location.href = "/login";
                     }}
                     className="text-red-600"

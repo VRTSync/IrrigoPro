@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ export default function CustomerProfile() {
   const [userRole, setUserRole] = useState<string>("");
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         const userData = JSON.parse(savedUser);

@@ -192,7 +192,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
         description: description || "",
         projectAddress: projectAddress || "",
         locationNotes: locationNotes || "",
-        scheduledDate: scheduledDate ? new Date(scheduledDate).toISOString() : null,
+        scheduledDate: scheduledDate ? new Date(scheduledDate + 'T00:00:00').toISOString() : null,
         priority,
         totalHours: totalHours || null,
         laborRate: laborRate || null,

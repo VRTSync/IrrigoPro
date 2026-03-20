@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { UserSelector } from "@/components/user-selector";
 import { useState, useEffect } from "react";
 
@@ -16,7 +17,7 @@ export default function SwitchUser() {
 
   useEffect(() => {
     // Get current user from localStorage
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         setCurrentUser(JSON.parse(savedUser));

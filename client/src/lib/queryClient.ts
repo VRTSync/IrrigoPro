@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { safeGet } from "@/utils/safeStorage";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -12,9 +13,9 @@ export async function apiRequest(
   method: string = "GET",
   data?: unknown | undefined,
 ): Promise<any> {
-  // Use localStorage for headers but rely on session for actual auth
+  // Use safe storage (works in Safari private browsing too)
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
   
@@ -46,9 +47,9 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Use localStorage for headers but rely on session for actual auth
+    // Use safe storage (works in Safari private browsing too)
     const getCurrentUser = () => {
-      const savedUser = localStorage.getItem("user");
+      const savedUser = safeGet("user");
       return savedUser ? JSON.parse(savedUser) : null;
     };
     

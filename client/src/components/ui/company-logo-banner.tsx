@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useQuery } from "@tanstack/react-query";
 import React, { useState, useEffect } from "react";
 
@@ -10,7 +11,7 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
   const [user, setUser] = useState<{ id: number, companyId: number, role: string } | null>(null);
   
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         const userData = JSON.parse(savedUser);

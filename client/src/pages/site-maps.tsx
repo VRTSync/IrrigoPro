@@ -1,3 +1,4 @@
+import { safeGet, safeSet } from "@/utils/safeStorage";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -19,7 +20,7 @@ export default function SiteMaps() {
 
   // Get current user
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
   const currentUser = getCurrentUser();
@@ -155,9 +156,9 @@ export default function SiteMaps() {
                       onClick={() => {
                         // Store the customer and map to auto-select when navigating to customers page
                         if (siteMap.customerId) {
-                          localStorage.setItem('selectedCustomerId', siteMap.customerId.toString());
-                          localStorage.setItem('selectedSiteMapId', siteMap.id.toString());
-                          localStorage.setItem('showSiteMaps', 'true');
+                          safeSet('selectedCustomerId', siteMap.customerId.toString());
+                          safeSet('selectedSiteMapId', siteMap.id.toString());
+                          safeSet('showSiteMaps', 'true');
                         }
                       }}
                     >
@@ -173,8 +174,8 @@ export default function SiteMaps() {
                       onClick={() => {
                         // Store the customer to auto-select when navigating to customers page
                         if (siteMap.customerId) {
-                          localStorage.setItem('selectedCustomerId', siteMap.customerId.toString());
-                          localStorage.setItem('showSiteMaps', 'false');
+                          safeSet('selectedCustomerId', siteMap.customerId.toString());
+                          safeSet('showSiteMaps', 'false');
                         }
                       }}
                     >

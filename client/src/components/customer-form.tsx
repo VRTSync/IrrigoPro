@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -49,7 +50,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         setCurrentUser(JSON.parse(savedUser));

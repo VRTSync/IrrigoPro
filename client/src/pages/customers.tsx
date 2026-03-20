@@ -1,3 +1,4 @@
+import { safeGet, safeRemove } from "@/utils/safeStorage";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,7 @@ export default function Customers() {
 
   // Get user role from localStorage
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         const userData = JSON.parse(savedUser);
@@ -112,8 +113,8 @@ export default function Customers() {
 
   // Check for auto-selection from site maps page
   useEffect(() => {
-    const selectedCustomerId = localStorage.getItem('selectedCustomerId');
-    const shouldShowSiteMaps = localStorage.getItem('showSiteMaps') === 'true';
+    const selectedCustomerId = safeGet('selectedCustomerId');
+    const shouldShowSiteMaps = safeGet('showSiteMaps') === 'true';
     
     if (selectedCustomerId && customers) {
       const customer = customers.find(c => c.id.toString() === selectedCustomerId);
@@ -124,9 +125,9 @@ export default function Customers() {
           setSelectedCustomer(customer);
         }
         // Clear the stored values after using them
-        localStorage.removeItem('selectedCustomerId');
-        localStorage.removeItem('showSiteMaps');
-        localStorage.removeItem('selectedSiteMapId');
+        safeRemove('selectedCustomerId');
+        safeRemove('showSiteMaps');
+        safeRemove('selectedSiteMapId');
       }
     }
   }, [customers]);

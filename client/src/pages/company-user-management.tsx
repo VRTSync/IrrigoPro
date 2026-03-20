@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,7 +76,7 @@ export default function CompanyUserManagement() {
 
   // Get current user from localStorage
   useEffect(() => {
-    const user = localStorage.getItem("user");
+    const user = safeGet("user");
     if (user) {
       setCurrentUser(JSON.parse(user));
     }

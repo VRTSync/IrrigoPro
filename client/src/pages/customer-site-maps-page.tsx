@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -10,7 +11,7 @@ export default function CustomerSiteMapsPage() {
   const [, setLocation] = useLocation();
   
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
   const currentUser = getCurrentUser();

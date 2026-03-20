@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { User, Lock, LogIn, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { safeSet } from "@/utils/safeStorage";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 
@@ -179,8 +180,8 @@ export default function Login() {
       const user = await apiRequest("/api/auth/login", "POST", credentials);
       console.log("Login successful, user:", user);
       
-      // Store user in localStorage
-      localStorage.setItem("user", JSON.stringify(user));
+      // Store user in storage (safe for Safari private browsing)
+      safeSet("user", JSON.stringify(user));
       
       // Show success toast
       toast({

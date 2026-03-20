@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safeSet } from "@/utils/safeStorage";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -100,9 +101,9 @@ export default function OnboardingFlow({ companyId, currentUser, onComplete }: O
       return apiRequest(`/api/users/${currentUser.id}`, "PATCH", data);
     },
     onSuccess: () => {
-      // Update localStorage with new user info
+      // Update stored user (safe for Safari private browsing)
       const updatedUser = { ...currentUser, ...adminForm.getValues() };
-      localStorage.setItem("user", JSON.stringify(updatedUser));
+      safeSet("user", JSON.stringify(updatedUser));
       
       setCurrentStep(4);
       toast({
@@ -122,8 +123,8 @@ export default function OnboardingFlow({ companyId, currentUser, onComplete }: O
   const completeOnboarding = async () => {
     setIsCompleting(true);
     
-    // Mark onboarding as complete in localStorage
-    localStorage.setItem("onboarding_completed", "true");
+    // Mark onboarding as complete (safe for Safari private browsing)
+    safeSet("onboarding_completed", "true");
     
     // Refresh queries
     await queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });

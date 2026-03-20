@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Shield, FileText, UserCheck } from "lucide-react";
@@ -22,7 +23,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<User | null>(null);
   
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       setUser(JSON.parse(savedUser));
     }

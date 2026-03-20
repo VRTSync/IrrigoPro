@@ -95,7 +95,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
         customerId: Number(data.customerId),
         estimateId: data.estimateId ? Number(data.estimateId) : null,
         assignedTechnicianId: data.assignedTechnicianId ? Number(data.assignedTechnicianId) : null,
-        scheduledDate: data.scheduledDate ? new Date(data.scheduledDate).toISOString() : null,
+        scheduledDate: data.scheduledDate ? new Date(data.scheduledDate + 'T00:00:00').toISOString() : null,
       };
       
       return await apiRequest("/api/work-orders", "POST", submitData);

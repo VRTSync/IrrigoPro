@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -70,7 +71,7 @@ export default function Operations() {
   
   // Get current user to check role
   const getCurrentUser = () => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     return savedUser ? JSON.parse(savedUser) : null;
   };
   

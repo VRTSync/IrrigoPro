@@ -1,3 +1,4 @@
+import { safeGet } from "@/utils/safeStorage";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { PartsListSkeleton } from "@/components/ui/loading-skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -664,7 +665,7 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
 
   const onSubmit = async (data: z.infer<typeof AssemblyFormSchema>) => {
     const getCurrentUser = () => {
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const user = JSON.parse(safeGet("user") || "{}");
       return user;
     };
 
@@ -927,7 +928,7 @@ export default function PartsCatalog() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
+    const savedUser = safeGet("user");
     if (savedUser) {
       try {
         setCurrentUser(JSON.parse(savedUser));

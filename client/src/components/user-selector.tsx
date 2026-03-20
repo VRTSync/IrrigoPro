@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safeSet } from "@/utils/safeStorage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -74,8 +75,8 @@ export function UserSelector({ onUserSelect, currentUser }: UserSelectorProps) {
   };
 
   const handleUserSelect = (user: UserProfile) => {
-    // Store selected user in localStorage
-    localStorage.setItem("user", JSON.stringify(user));
+    // Store selected user (safe for Safari private browsing)
+    safeSet("user", JSON.stringify(user));
     onUserSelect(user);
     
     // Reload the page to apply the new user context
