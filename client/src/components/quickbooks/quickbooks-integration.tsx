@@ -58,9 +58,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   // Customer sync mutation
   const syncCustomersMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest("/api/quickbooks/sync-customers", {
-        method: "POST"
-      });
+      return await apiRequest("/api/quickbooks/sync-customers", "POST");
     },
     onSuccess: (data) => {
       toast({

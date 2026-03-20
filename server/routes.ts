@@ -495,12 +495,12 @@ const requireQuickBooksAccess = (req: any, res: any, next: any) => {
 };
 
 // In-memory OAuth state store (replaces session-based storage — app uses localStorage auth, not server sessions)
-// Maps state token -> expiry timestamp (10 min TTL)
-const oauthStateStore = new Map<string, number>();
+// Maps state token -> { expiry timestamp, companyId } (10 min TTL)
+const oauthStateStore = new Map<string, { expiry: number; companyId: string | null }>();
 setInterval(() => {
   const now = Date.now();
-  for (const [state, expiry] of oauthStateStore.entries()) {
-    if (now > expiry) oauthStateStore.delete(state);
+  for (const [state, entry] of oauthStateStore.entries()) {
+    if (now > entry.expiry) oauthStateStore.delete(state);
   }
 }, 60_000);
 
@@ -2293,8 +2293,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
 
       // Pre-flight: verify QuickBooks connection before doing anything
-      const user = req.user as any;
-      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      // req.authenticatedUserCompanyId is set by requireAuthentication middleware from the x-user-company-id header
+      const userCompanyId = req.authenticatedUserCompanyId ? req.authenticatedUserCompanyId.toString() : null;
       const integration = await storage.getQuickBooksIntegration(userCompanyId);
       if (!integration || !integration.accessToken) {
         return res.status(400).json({
@@ -4215,8 +4215,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const state = crypto.randomBytes(16).toString('hex');
-      // Store state in memory store for CSRF verification in the callback (10 min TTL)
-      oauthStateStore.set(state, Date.now() + 10 * 60 * 1000);
+      // Store state + company ID in memory store for CSRF verification in the callback (10 min TTL)
+      const authCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      oauthStateStore.set(state, { expiry: Date.now() + 10 * 60 * 1000, companyId: authCompanyId });
       
       // QuickBooks OAuth URL
       const authUrl = `https://appcenter.intuit.com/app/connect/oauth2?` +
@@ -4251,8 +4252,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Verify CSRF state parameter against in-memory store
-      const stateExpiry = state ? oauthStateStore.get(state as string) : undefined;
-      if (!state || !stateExpiry || Date.now() > stateExpiry) {
+      const stateEntry = state ? oauthStateStore.get(state as string) : undefined;
+      if (!state || !stateEntry || Date.now() > stateEntry.expiry) {
         console.error('QuickBooks OAuth state mismatch or expired. Possible CSRF attack.', { received: state });
         return res.status(400).send(`
           <html>
@@ -4265,6 +4266,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           </html>
         `);
       }
+      // Retrieve company ID that was stored when the OAuth flow was initiated
+      const oauthCompanyId = stateEntry.companyId;
       // Clear the state from store after verification
       oauthStateStore.delete(state as string);
 
@@ -4284,15 +4287,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           lastSync: new Date()
         };
 
-        // Save to database instead of session - use the user's actual company ID, not the QuickBooks realm ID
-        console.log("Saving QuickBooks integration with realmId:", realmId);
-        
-        // Get user's company ID from the current session
-        const user = req.user as any;
-        const userCompanyId = user?.companyId ? user.companyId.toString() : realmId as string;
+        // Save to database — use the company ID that was stored when OAuth flow began
+        console.log("Saving QuickBooks integration with realmId:", realmId, "companyId:", oauthCompanyId);
         
         await storage.saveQuickBooksIntegration({
-          companyId: userCompanyId, // Use the user's IrrigoPro company ID, not QB realm ID
+          companyId: oauthCompanyId || realmId as string, // Prefer IrrigoPro company ID; fall back to QB realm ID
           accessToken: qbData.accessToken,
           refreshToken: qbData.refreshToken,
           realmId: realmId as string, // Keep QB realm ID for API calls
@@ -4402,11 +4401,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Clear QuickBooks connection (for reconnecting)
   app.post("/api/quickbooks/disconnect", requireQuickBooksAccess, async (req, res) => {
     try {
-      const user = req.user as any;
-      if (!user) {
-        return res.status(401).json({ success: false, message: "Authentication required." });
-      }
-      const userCompanyId = user.companyId ? user.companyId.toString() : null;
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       if (!userCompanyId) {
         return res.status(400).json({ success: false, message: "Company context is required to disconnect QuickBooks." });
       }
@@ -4430,9 +4425,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Add alias for status endpoint
   app.get("/api/quickbooks/status", requireQuickBooksAccess, async (req, res) => {
     try {
-      // Get user's company ID from session
-      const user = req.user as any;
-      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       
       // Get from database for this user's company
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
@@ -4453,9 +4447,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.get("/api/quickbooks/customers", requireQuickBooksAccess, async (req, res) => {
     try {
-      // Get user's company ID
-      const user = req.user as any;
-      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
       
@@ -4521,9 +4514,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
       
-      // Get user's company ID from session
-      const user = req.user as any;
-      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       
       // Get from database for this user's company
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
@@ -4545,9 +4537,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/quickbooks/sync-customers", requireQuickBooksAccess, async (req, res) => {
     try {
       
-      // Get user's company ID
-      const user = req.user as any;
-      const userCompanyId = user?.companyId ? user.companyId.toString() : null;
+      // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       
       // Get actual QuickBooks integration data
       const integration = await storage.getQuickBooksIntegration(userCompanyId);
@@ -4627,9 +4618,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           const existingCustomer = await storage.getCustomerByQuickBooksId(qbCustomer.qb_id);
           
           if (!existingCustomer) {
-            // Get user's actual company ID to avoid foreign key errors
-            const user = req.user as any;
-            const userCompanyId = user?.companyId || 1; // Use user's company ID or default to 1
+            // Use company ID from header (set earlier in this route)
+            const companyId = parseInt(userCompanyId || '1') || 1;
             
             // Create new customer from QuickBooks data with QuickBooks ID mapping
             const newCustomer = await storage.createCustomer({
@@ -4638,7 +4628,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               phone: qbCustomer.phone || '',
               address: qbCustomer.address || '',
               quickbooksId: qbCustomer.qb_id,
-              companyId: userCompanyId
+              companyId: companyId
             });
             
             customersAdded++;
@@ -5410,11 +5400,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/integrations/quickbooks/customers/disconnect", requireAuthentication, async (req, res) => {
     try {
-      const user = req.user as any;
-      if (!user) {
-        return res.status(401).json({ message: "Authentication required." });
-      }
-      const userCompanyId = user.companyId ? user.companyId.toString() : null;
+      // req.authenticatedUserCompanyId is set by requireAuthentication from x-user-company-id header
+      const userCompanyId = req.authenticatedUserCompanyId ? req.authenticatedUserCompanyId.toString() : null;
       if (!userCompanyId) {
         return res.status(400).json({ message: "Company context is required to disconnect QuickBooks." });
       }

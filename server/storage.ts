@@ -1396,27 +1396,33 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getQuickBooksIntegration(companyId?: string): Promise<any | null> {
+  async getQuickBooksIntegration(companyId?: string | null): Promise<any | null> {
     try {
-      let query = db.select().from(quickbooksIntegration);
-      
       if (companyId) {
-        query = query.where(eq(quickbooksIntegration.companyId, companyId));
+        // Try to find by company ID first
+        const byCompany = await db.select().from(quickbooksIntegration)
+          .where(eq(quickbooksIntegration.companyId, companyId))
+          .limit(1);
+        if (byCompany.length > 0) return byCompany[0];
+        // Fall back to first integration (handles legacy data where companyId was stored as QB realm ID)
       }
-      
-      const integration = await query.limit(1);
-      return integration.length > 0 ? integration[0] : null;
+      const fallback = await db.select().from(quickbooksIntegration).limit(1);
+      return fallback.length > 0 ? fallback[0] : null;
     } catch (error) {
       console.error('Error getting QuickBooks integration:', error);
       return null;
     }
   }
 
-  async getQuickBooksCustomerStatus(companyId?: string): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
+  async getQuickBooksCustomerStatus(companyId?: string | null): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
     // Check if QuickBooks integration exists for this company
-    let integration;
+    let integration: any[];
     if (companyId) {
       integration = await db.select().from(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId)).limit(1);
+      // Fall back to first integration (handles legacy data where companyId was stored as QB realm ID)
+      if (integration.length === 0) {
+        integration = await db.select().from(quickbooksIntegration).limit(1);
+      }
     } else {
       integration = await db.select().from(quickbooksIntegration).limit(1);
     }
