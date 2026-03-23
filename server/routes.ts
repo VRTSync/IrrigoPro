@@ -285,6 +285,53 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
   });
 };
 
+// More granular middleware for billing sheet updates that allows field techs to submit for approval
+const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+  const userId = req.authenticatedUserId || req.headers['x-user-id'];
+  const updateData = req.body;
+
+  // Managers have full access
+  if (userRole === 'company_admin' || userRole === 'billing_manager' || userRole === 'irrigation_manager') {
+    return next();
+  }
+
+  // Field techs can only submit their own billing sheet for approval
+  if (userRole === 'field_tech') {
+    const keys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
+    // Payload must be exactly { status: 'submitted' }
+    if (keys.length !== 1 || updateData.status !== 'submitted') {
+      return res.status(403).json({
+        message: "Access denied. Field technicians can only submit billing sheets for approval."
+      });
+    }
+
+    if (!userId) {
+      return res.status(401).json({ message: "Authentication required - user ID not found." });
+    }
+
+    try {
+      const billingSheetId = parseInt(req.params.id);
+      const billingSheet = await storage.getBillingSheetById(billingSheetId);
+      const userIdNum = parseInt(userId as string);
+
+      if (billingSheet && billingSheet.technicianId === userIdNum) {
+        return next();
+      }
+    } catch (error) {
+      console.error('Error checking billing sheet ownership:', error);
+    }
+
+    return res.status(403).json({
+      message: "Access denied. Field technicians can only submit their own billing sheets for approval."
+    });
+  }
+
+  return res.status(403).json({
+    message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit billing sheets."
+  });
+};
+
 // Authentication middleware for notifications - ensures users can only access their own notifications
 const requireNotificationAccess = async (req: any, res: any, next: any) => {
   try {
@@ -5697,7 +5744,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.patch("/api/billing-sheets/:id", requireWorkOrderBillingAccess, async (req, res) => {
+  app.patch("/api/billing-sheets/:id", requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { items, ...billingSheetData } = req.body;
