@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
 import type { BillingSheet, BillingSheetItem } from "@shared/schema";
 
@@ -93,10 +94,23 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   const [totalHours, setTotalHours] = useState(billingSheet.totalHours?.toString() || "0");
   const [laborRate, setLaborRate] = useState(billingSheet.laborRate?.toString() || "0");
   const [notes, setNotes] = useState(billingSheet.notes || "");
+  const [branchName, setBranchName] = useState((billingSheet as any).branchName || "");
   const [parts, setParts] = useState<EditPartRow[]>([]);
   const [partsLoaded, setPartsLoaded] = useState(false);
   const [showPartsEditor, setShowPartsEditor] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({}); 
+  
+  // Fetch the customer to get its branches
+  const { data: customer } = useQuery({
+    queryKey: ["/api/customers", billingSheet.customerId],
+    queryFn: async () => {
+      const res = await fetch(`/api/customers/${billingSheet.customerId}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: open && !!billingSheet.customerId,
+  });
+  const customerBranches: string[] = (customer as any)?.branches || [];
 
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -124,6 +138,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
     setTotalHours(billingSheet.totalHours?.toString() || "0");
     setLaborRate(billingSheet.laborRate?.toString() || "0");
     setNotes(billingSheet.notes || "");
+    setBranchName((billingSheet as any).branchName || "");
     setErrors({});
   }, [open, billingSheet]);
 
@@ -168,6 +183,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
         totalAmount: grandTotal.toFixed(2),
         propertyAddress: propertyAddress || "",
         notes: notes || "",
+        branchName: branchName || null,
         items: parts
           .filter((p) => p.partName.trim())
           .map((p) => ({
@@ -294,6 +310,21 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                     />
                     {errors.workDate && <p className="text-xs text-red-500 mt-1">{errors.workDate}</p>}
                   </FieldRow>
+                  {customerBranches.length > 0 && (
+                    <FieldRow label="Branch *">
+                      <Select value={branchName} onValueChange={setBranchName}>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select branch..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {customerBranches.map((branch) => (
+                            <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.branchName && <p className="text-xs text-red-500 mt-1">{errors.branchName}</p>}
+                    </FieldRow>
+                  )}
                 </div>
               </SectionCard>
             </div>

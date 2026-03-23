@@ -24,6 +24,7 @@ const workOrderFormSchema = insertWorkOrderSchema.extend({
   workLocationLat: z.number().optional(),
   workLocationLng: z.number().optional(),
   workLocationAddress: z.string().optional(),
+  branchName: z.string().optional(),
 });
 
 type WorkOrderFormData = z.infer<typeof workOrderFormSchema>;
@@ -79,6 +80,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
     form.setValue("customerName", customer.name);
     form.setValue("customerEmail", customer.email);
     form.setValue("customerPhone", customer.phone || "");
+    form.setValue("branchName", "");
     
     // Reset location picker when customer changes
     setShowLocationPicker(false);
@@ -127,6 +129,12 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
       return;
     }
 
+    const customerBranches = (selectedCustomer as any)?.branches;
+    if (customerBranches && customerBranches.length > 0 && !data.branchName) {
+      form.setError("branchName", { message: "Branch is required for this customer" });
+      return;
+    }
+
     const finalData = {
       ...data,
       projectName: data.projectName || "Work Order",
@@ -172,6 +180,42 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
             </Card>
 
 
+
+            {/* Branch selector — only shown if customer has branches configured */}
+            {selectedCustomer && (selectedCustomer as any).branches && (selectedCustomer as any).branches.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <User className="w-5 h-5 text-blue-600" />
+                    Branch Location
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <FormField
+                    control={form.control}
+                    name="branchName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Branch *</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value || ""}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select branch location..." />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {((selectedCustomer as any).branches as string[]).map((branch: string) => (
+                              <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             {/* Step 2: Work Location (Optional) */}
             <Card>

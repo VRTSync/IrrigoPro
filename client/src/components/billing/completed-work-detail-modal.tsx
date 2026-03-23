@@ -146,6 +146,7 @@ export function CompletedWorkDetailModal({
   const workSummary = isWorkOrder ? wo?.workSummary : null;
   const customerNotes = isWorkOrder ? wo?.customerNotes : null;
   const locationNotes = isWorkOrder ? wo?.locationNotes : null;
+  const branchName = isWorkOrder ? (wo as any)?.branchName : (bs as any)?.branchName;
 
   const openLightbox = (url: string, index: number) => {
     setLightboxPhoto(url);
@@ -230,6 +231,7 @@ export function CompletedWorkDetailModal({
               <SectionCard title="Job Info" icon={<Calendar className="w-4 h-4" />}>
                 <div className="space-y-3">
                   <InfoRow label="Technician" value={techName ?? "—"} />
+                  {branchName && <InfoRow label="Branch" value={branchName} />}
                   <InfoRow
                     label={isWorkOrder ? "Scheduled Date" : "Work Date"}
                     value={fmt(workDate)}

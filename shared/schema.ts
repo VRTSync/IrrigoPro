@@ -73,6 +73,7 @@ export const customers = pgTable("customers", {
   billingNotes: text("billing_notes"), // Private notes for billing manager use only
   quickbooksId: text("quickbooks_id"), // QuickBooks customer ID for integration
   hiddenFromBilling: boolean("hidden_from_billing").default(false),
+  branches: text("branches").array(), // Optional list of branch names for customers with multiple locations
 });
 
 // Site maps and controller management
@@ -201,6 +202,7 @@ export const billingSheets = pgTable("billing_sheets", {
   billedAt: timestamp("billed_at"),
   photos: text("photos").array().default([]),
   notes: text("notes"),
+  branchName: text("branch_name"), // Selected branch for multi-location customers
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -426,6 +428,7 @@ export const workOrders = pgTable("work_orders", {
   billedAt: timestamp("billed_at"),
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
+  branchName: text("branch_name"), // Selected branch for multi-location customers
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

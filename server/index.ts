@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 import { db } from "./db";
+import { pool } from "./db";
 import { customers } from "@shared/schema";
 import { ne } from "drizzle-orm";
 
@@ -143,6 +144,30 @@ async function runStartupMigrations() {
     }
   } catch (err) {
     logger.error('Startup migration error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Add branches column to customers table if not already present
+  try {
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS branches text[]`);
+    logger.info('Startup migration: ensured customers.branches column exists', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: branches column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Add branch_name column to billing_sheets table if not already present
+  try {
+    await pool.query(`ALTER TABLE billing_sheets ADD COLUMN IF NOT EXISTS branch_name text`);
+    logger.info('Startup migration: ensured billing_sheets.branch_name column exists', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: billing_sheets.branch_name column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Add branch_name column to work_orders table if not already present
+  try {
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS branch_name text`);
+    logger.info('Startup migration: ensured work_orders.branch_name column exists', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: work_orders.branch_name column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 }
 

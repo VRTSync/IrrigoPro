@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CalendarIcon, DollarSign, Percent, FileText, Tag } from "lucide-react";
+import { CalendarIcon, DollarSign, Percent, FileText, Tag, Plus, X, Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -31,6 +31,7 @@ const customerFormSchema = insertCustomerSchema.extend({
   contractStartDate: z.string().optional(),
   contractEndDate: z.string().optional(),
   notes: z.string().optional(),
+  branches: z.array(z.string()).optional(),
 });
 
 type CustomerFormData = z.infer<typeof customerFormSchema>;
@@ -71,6 +72,7 @@ function customerToFormValues(customer: Customer): CustomerFormData {
     contractStartDate: customer.contractStartDate ? new Date(customer.contractStartDate).toISOString().split('T')[0] : "",
     contractEndDate: customer.contractEndDate ? new Date(customer.contractEndDate).toISOString().split('T')[0] : "",
     notes: customer.notes || "",
+    branches: (customer as any).branches || [],
   };
 }
 
@@ -105,6 +107,8 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
 
   const companyId = currentUser?.companyId;
 
+  const [newBranchInput, setNewBranchInput] = useState("");
+
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: customer ? customerToFormValues(customer) : {
@@ -124,6 +128,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       contractStartDate: "",
       contractEndDate: "",
       notes: "",
+      branches: [],
     },
   });
 
@@ -525,6 +530,84 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                     )}
                   />
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Branch Management */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center">
+                  <Building2 className="w-5 h-5 mr-2" />
+                  Branch Locations
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <FormField
+                  control={form.control}
+                  name="branches"
+                  render={({ field }) => {
+                    const branches = field.value || [];
+                    const addBranch = () => {
+                      const trimmed = newBranchInput.trim();
+                      if (!trimmed || branches.includes(trimmed)) return;
+                      field.onChange([...branches, trimmed]);
+                      setNewBranchInput("");
+                    };
+                    const removeBranch = (index: number) => {
+                      field.onChange(branches.filter((_, i) => i !== index));
+                    };
+                    return (
+                      <FormItem>
+                        <p className="text-sm text-gray-500 mb-3">
+                          Add branch names for customers with multiple locations (e.g. a bank with multiple branches). When branches are defined, a required "Branch" dropdown will appear on billing sheets and work orders for this customer.
+                        </p>
+                        <div className="space-y-2">
+                          {branches.map((branch, index) => (
+                            <div key={index} className="flex items-center gap-2">
+                              <span className="flex-1 text-sm bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 text-blue-900">
+                                {branch}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeBranch(index)}
+                                className="text-red-500 hover:text-red-700 h-8 w-8 p-0"
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          ))}
+                          <div className="flex gap-2 mt-2">
+                            <Input
+                              placeholder="Enter branch name..."
+                              value={newBranchInput}
+                              onChange={(e) => setNewBranchInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  addBranch();
+                                }
+                              }}
+                              className="flex-1"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={addBranch}
+                              disabled={!newBranchInput.trim()}
+                              className="gap-1"
+                            >
+                              <Plus className="w-4 h-4" />
+                              Add
+                            </Button>
+                          </div>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
+                />
               </CardContent>
             </Card>
 

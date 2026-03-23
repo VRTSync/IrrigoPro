@@ -6060,7 +6060,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         taxAmount: billingSheetData.taxAmount || '0',
         totalAmount: billingSheetData.totalAmount || '0',
         photos: billingSheetData.photos || [],
-        notes: billingSheetData.notes || ''
+        notes: billingSheetData.notes || '',
+        branchName: billingSheetData.branchName || null
       };
       
       // Generate billing number

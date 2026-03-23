@@ -1573,6 +1573,12 @@ export default function CustomerBilling() {
                                       <Calendar className="w-3 h-3" />
                                       {formatDate(bs.workDate)}
                                     </div>
+                                    {(bs as any).branchName && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium text-gray-700">Branch:</span>
+                                        {(bs as any).branchName}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1651,6 +1657,12 @@ export default function CustomerBilling() {
                                     <div className="flex items-center gap-1">
                                       <User className="w-3 h-3" />
                                       {wo.assignedTo}
+                                    </div>
+                                  )}
+                                  {(wo as any).branchName && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-medium text-gray-700">Branch:</span>
+                                      {(wo as any).branchName}
                                     </div>
                                   )}
                                 </div>

@@ -66,6 +66,7 @@ const billingSheetSchema = z.object({
   laborRate: z.coerce.number().min(0, "Labor rate must be positive"),
   notes: z.string().optional(),
   items: z.array(billingItemSchema).optional().default([]),
+  branchName: z.string().optional(),
 });
 
 type BillingSheetData = z.infer<typeof billingSheetSchema>;
@@ -383,7 +384,13 @@ export function StandaloneBillingSheet({
   };
 
   const onSubmit = (data: BillingSheetData) => {
-    
+    // Validate branch is selected if the customer has branches
+    const customerBranches = (selectedCustomer as any)?.branches;
+    if (customerBranches && customerBranches.length > 0 && !data.branchName) {
+      form.setError("branchName", { message: "Branch is required for this customer" });
+      return;
+    }
+
     if (showReview) {
       if (isSubmittingRef.current) return;
       isSubmittingRef.current = true;
@@ -504,6 +511,12 @@ export function StandaloneBillingSheet({
                         <p className="text-sm font-medium text-gray-600">Customer</p>
                         <p className="text-gray-900">{form.watch('customerName')}</p>
                       </div>
+                      {form.watch('branchName') && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Branch</p>
+                          <p className="text-gray-900">{form.watch('branchName')}</p>
+                        </div>
+                      )}
                       <div>
                         <p className="text-sm font-medium text-gray-600">Property Address</p>
                         <p className="text-gray-900">{form.watch('propertyAddress') || 'No address specified'}</p>
@@ -682,6 +695,7 @@ export function StandaloneBillingSheet({
                                     form.setValue("customerName", customer.name);
                                     setSelectedCustomer(customer);
                                     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
+                                    form.setValue("branchName", "");
                                   }}
                                   placeholder="Select customer"
                                   hideLabel={true}
@@ -692,6 +706,33 @@ export function StandaloneBillingSheet({
                             </FormItem>
                           )}
                         />
+
+                        {/* Branch selector — only shown if customer has branches configured */}
+                        {selectedCustomer && (selectedCustomer as any).branches && (selectedCustomer as any).branches.length > 0 && (
+                          <FormField
+                            control={form.control}
+                            name="branchName"
+                            rules={{ required: "Branch is required" }}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Branch *</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value || ""}>
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select branch location..." />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    {((selectedCustomer as any).branches as string[]).map((branch: string) => (
+                                      <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
                         
                         <div className="sm:col-span-2">
                           <FormField

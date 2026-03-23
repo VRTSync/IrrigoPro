@@ -109,10 +109,23 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const [assignedTechnicianName, setAssignedTechnicianName] = useState(
     workOrder.assignedTechnicianName || ""
   );
+  const [branchName, setBranchName] = useState((workOrder as any).branchName || "");
   const [parts, setParts] = useState<EditPartRow[]>([]);
   const [partsLoaded, setPartsLoaded] = useState(false);
   const [showPartsEditor, setShowPartsEditor] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Fetch the customer to get its branches
+  const { data: customer } = useQuery({
+    queryKey: ["/api/customers", workOrder.customerId],
+    queryFn: async () => {
+      const res = await fetch(`/api/customers/${workOrder.customerId}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: open && !!workOrder.customerId,
+  });
+  const customerBranches: string[] = (customer as any)?.branches || [];
 
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -150,6 +163,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     setNotes(workOrder.notes || "");
     setAssignedTechnicianId(workOrder.assignedTechnicianId || null);
     setAssignedTechnicianName(workOrder.assignedTechnicianName || "");
+    setBranchName((workOrder as any).branchName || "");
     setErrors({});
   }, [open, workOrder]);
 
@@ -198,6 +212,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
         laborRate: laborRate || null,
         specialInstructions: specialInstructions || "",
         notes: notes || "",
+        branchName: branchName || null,
         assignedTechnicianId: assignedTechnicianId ? Number(assignedTechnicianId) : null,
         assignedTechnicianName: assignedTechnicianId ? assignedTechnicianName : "",
         items: parts
@@ -370,6 +385,21 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                       </SelectContent>
                     </Select>
                   </FieldRow>
+                  {customerBranches.length > 0 && (
+                    <FieldRow label="Branch *">
+                      <Select value={branchName} onValueChange={setBranchName}>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select branch..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {customerBranches.map((branch) => (
+                            <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.branchName && <p className="text-xs text-red-500 mt-1">{errors.branchName}</p>}
+                    </FieldRow>
+                  )}
                   <FieldRow label="Scheduled Date">
                     <Input
                       type="date"
