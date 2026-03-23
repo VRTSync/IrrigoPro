@@ -53,7 +53,8 @@ export function CustomerSelector({
   const queryClient = useQueryClient();
 
   const { data: customers, isLoading } = useQuery<Customer[]>({
-    queryKey: ["/api/customers"],
+    queryKey: ["/api/customers", { billingVisible: true }],
+    queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });
 
   const filteredCustomers = customers?.filter(customer => {

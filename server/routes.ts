@@ -1757,7 +1757,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Customer routes
   app.get("/api/customers", requireAuthentication, async (req, res) => {
     try {
-      const customers = await storage.getCustomers();
+      const billingVisible = req.query.billingVisible === "true";
+      let customers = await storage.getCustomers();
+      if (billingVisible) {
+        customers = customers.filter(c => !c.hiddenFromBilling);
+      }
       res.json(applyBillingNotesVisibility(req, customers));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch customers" });

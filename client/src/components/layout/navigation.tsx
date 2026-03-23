@@ -112,6 +112,7 @@ export default function Navigation() {
               { path: "/company-profile", label: "Company", icon: Settings },
               { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
               { path: "/labor-rates", label: "Labor Rates", icon: DollarSign },
+              { path: "/admin/customers", label: "All Customers", icon: Users },
             ]
           },
         ];

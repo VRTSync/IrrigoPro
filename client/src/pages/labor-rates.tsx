@@ -20,7 +20,8 @@ export default function LaborRates() {
   const [editState, setEditState] = useState<EditState>({ laborRate: "", emergencyLaborRate: "" });
 
   const { data: customers = [], isLoading } = useQuery<Customer[]>({
-    queryKey: ["/api/customers"],
+    queryKey: ["/api/customers", { billingVisible: true }],
+    queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });
 
   const sorted = [...customers].sort((a, b) =>

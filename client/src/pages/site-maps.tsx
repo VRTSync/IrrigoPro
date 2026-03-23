@@ -25,11 +25,19 @@ export default function SiteMaps() {
   };
   const currentUser = getCurrentUser();
 
+  // Fetch billing-visible customers for filtering
+  const { data: billingCustomers } = useQuery<Customer[]>({
+    queryKey: ['/api/customers', { billingVisible: true }],
+    queryFn: () => apiRequest('/api/customers?billingVisible=true'),
+    enabled: !!currentUser?.id,
+  });
+
   // Fetch all site maps
   const { data: siteMaps, isLoading } = useQuery({
-    queryKey: ['/api/site-maps'],
+    queryKey: ['/api/site-maps', (billingCustomers || []).map(c => c.id)],
     queryFn: async () => {
       const maps = await apiRequest('/api/site-maps') as SiteMap[];
+      const visibleIds = new Set((billingCustomers || []).map(c => c.id));
       
       // Fetch customer details for each map
       const mapsWithCustomers = await Promise.all(
@@ -43,9 +51,10 @@ export default function SiteMaps() {
         })
       );
       
-      return mapsWithCustomers;
+      // Only show site maps for billing-visible customers
+      return mapsWithCustomers.filter(map => visibleIds.has(map.customerId));
     },
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.id && billingCustomers !== undefined,
   });
 
   // Filter site maps based on search term

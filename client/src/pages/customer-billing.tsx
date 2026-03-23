@@ -141,9 +141,10 @@ export default function CustomerBilling() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Get all customers
+  // Get billing-visible customers only
   const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
-    queryKey: ["/api/customers"],
+    queryKey: ["/api/customers", { billingVisible: true }],
+    queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });
 
   // Get comprehensive customer billing data including work orders, estimates, and billing sheets

@@ -18,6 +18,7 @@ import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import PartsSettings from "@/pages/parts-settings";
 import LaborRates from "@/pages/labor-rates";
+import AdminCustomers from "@/pages/admin-customers";
 
 import UserProfile from "@/pages/user-profile";
 import LicenseAgreement from "@/pages/license-agreement";
@@ -119,6 +120,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/parts" component={PartsCatalog} />
           <Route path="/parts-settings" component={PartsSettings} />
           <Route path="/labor-rates" component={LaborRates} />
+          <Route path="/admin/customers" component={AdminCustomers} />
           <Route path="/customers" component={Customers} />
           <Route path="/customers/:id/profile" component={CustomerProfile} />
           <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
