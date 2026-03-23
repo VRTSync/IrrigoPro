@@ -5680,6 +5680,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log('Received billing sheet data:', req.body);
       const billingSheetData = req.body;
       
+      // Determine the correct status based on creator's role
+      // irrigation_manager => 'approved' (skip manual approval step)
+      // field_tech => 'submitted' (goes to irrigation manager for review)
+      // others (company_admin, billing_manager, etc.) => use client-provided status or 'draft'
+      const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      let resolvedStatus: string;
+      if (creatorRole === 'irrigation_manager') {
+        resolvedStatus = 'approved';
+      } else if (creatorRole === 'field_tech') {
+        resolvedStatus = 'submitted';
+      } else {
+        resolvedStatus = billingSheetData.status || 'draft';
+      }
+
       // Clean the data - remove any fields that might interfere with timestamps
       const cleanData = {
         customerId: billingSheetData.customerId,
@@ -5690,7 +5704,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         technicianName: billingSheetData.technicianName,
         technicianId: billingSheetData.technicianId || null,
         workDescription: billingSheetData.workDescription,
-        status: billingSheetData.status || 'completed',
+        status: resolvedStatus,
         totalHours: billingSheetData.totalHours || '0',
         laborRate: billingSheetData.laborRate || '45.00',
         laborSubtotal: billingSheetData.laborSubtotal || '0',

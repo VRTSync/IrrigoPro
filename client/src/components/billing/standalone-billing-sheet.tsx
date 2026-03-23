@@ -116,6 +116,7 @@ export function StandaloneBillingSheet({
   });
   
   const isFieldTech = currentUser?.role === 'field_tech';
+  const isIrrigationManager = currentUser?.role === 'irrigation_manager';
 
   // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0];
@@ -169,7 +170,7 @@ export function StandaloneBillingSheet({
     mutationFn: async (data: any) => {
       const payload = {
         ...data,
-        status: isFieldTech ? 'submitted' : 'draft',
+        status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft',
         technicianId: isFieldTech ? currentUser?.id : null,
         companyId: currentUser?.companyId,
         photos: uploadedPhotos.map(photo => photo.url),
@@ -399,7 +400,7 @@ export function StandaloneBillingSheet({
         markupPercent,
         taxPercent,
         technicianId: currentUser?.id, // Add technician ID for proper filtering
-        status: isFieldTech ? 'submitted' : 'draft', // Field techs submit, others save as draft
+        status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft', // Field techs submit, irrigation managers auto-approve, others save as draft
       };
 
       // Determine if this is an update or create operation
