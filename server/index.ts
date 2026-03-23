@@ -3,10 +3,9 @@ import fileUpload from "express-fileupload";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
-import { db } from "./db";
-import { pool } from "./db";
-import { customers } from "@shared/schema";
-import { ne } from "drizzle-orm";
+import { db, pool } from "./db";
+import { customers, parts, billingSheets, billingSheetItems } from "@shared/schema";
+import { ne, eq } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
 interface RateLimitOptions {
@@ -168,6 +167,150 @@ async function runStartupMigrations() {
     logger.info('Startup migration: ensured work_orders.branch_name column exists', 'Server Startup');
   } catch (err) {
     logger.error('Startup migration: work_orders.branch_name column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  const MIGRATION_KEY = 'billing-sheets-sync-rates-v1';
+
+  try {
+    // Ensure a persistent app_settings table exists for tracking one-time migrations
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    // Check if this migration has already completed
+    const existingRow = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [MIGRATION_KEY]
+    );
+    if (existingRow.rows.length > 0 && existingRow.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${MIGRATION_KEY}': already completed, skipping`, 'Server Startup');
+      return;
+    }
+
+    const allCustomers = await db.select().from(customers);
+    const customerRateMap = new Map<number, string>();
+    for (const c of allCustomers) {
+      customerRateMap.set(c.id, c.laborRate ?? '45.00');
+    }
+
+    const allParts = await db.select().from(parts);
+    const partPriceMap = new Map<number, string>();
+    for (const p of allParts) {
+      partPriceMap.set(p.id, p.price);
+    }
+
+    const allSheets = await db.select().from(billingSheets);
+    const allItems = await db.select().from(billingSheetItems);
+
+    const itemsBySheet = new Map<number, typeof allItems>();
+    for (const item of allItems) {
+      if (item.billingSheetId === null || item.billingSheetId === undefined) continue;
+      const list = itemsBySheet.get(item.billingSheetId) ?? [];
+      list.push(item);
+      itemsBySheet.set(item.billingSheetId, list);
+    }
+
+    let sheetsUpdated = 0;
+    let itemsUpdated = 0;
+
+    for (const sheet of allSheets) {
+      if (sheet.customerId === null || sheet.customerId === undefined) continue;
+
+      const currentLaborRate = customerRateMap.get(sheet.customerId);
+      if (currentLaborRate === undefined) continue;
+
+      const sheetItems = itemsBySheet.get(sheet.id) ?? [];
+      let partsSubtotal = 0;
+      let itemsChangedOnSheet = 0;
+
+      for (const item of sheetItems) {
+        if (item.partId === null || item.partId === undefined) {
+          partsSubtotal += parseFloat(item.totalPrice ?? '0');
+          continue;
+        }
+
+        const currentPrice = partPriceMap.get(item.partId);
+        if (currentPrice === undefined) {
+          partsSubtotal += parseFloat(item.totalPrice ?? '0');
+          continue;
+        }
+
+        const qty = parseFloat(item.quantity ?? '0');
+        const newTotalPrice = qty * parseFloat(currentPrice);
+        const newTotalPriceStr = newTotalPrice.toFixed(2);
+
+        const priceChanged =
+          parseFloat(item.unitPrice ?? '0').toFixed(2) !== parseFloat(currentPrice).toFixed(2) ||
+          parseFloat(item.totalPrice ?? '0').toFixed(2) !== newTotalPriceStr;
+
+        if (priceChanged) {
+          await db
+            .update(billingSheetItems)
+            .set({
+              unitPrice: currentPrice,
+              totalPrice: newTotalPriceStr,
+            })
+            .where(eq(billingSheetItems.id, item.id));
+
+          itemsChangedOnSheet++;
+          itemsUpdated++;
+        }
+
+        partsSubtotal += newTotalPrice;
+      }
+
+      const totalHours = parseFloat(sheet.totalHours ?? '0');
+      const newLaborRate = parseFloat(currentLaborRate);
+      const newLaborSubtotal = totalHours * newLaborRate;
+      const markupAmount = parseFloat(sheet.markupAmount ?? '0');
+      const taxAmount = parseFloat(sheet.taxAmount ?? '0');
+      const newTotalAmount = newLaborSubtotal + partsSubtotal + markupAmount + taxAmount;
+
+      const sheetChanged =
+        parseFloat(sheet.laborRate ?? '0').toFixed(2) !== newLaborRate.toFixed(2) ||
+        parseFloat(sheet.laborSubtotal ?? '0').toFixed(2) !== newLaborSubtotal.toFixed(2) ||
+        parseFloat(sheet.partsSubtotal ?? '0').toFixed(2) !== partsSubtotal.toFixed(2) ||
+        parseFloat(sheet.totalAmount ?? '0').toFixed(2) !== newTotalAmount.toFixed(2) ||
+        itemsChangedOnSheet > 0;
+
+      if (sheetChanged) {
+        await db
+          .update(billingSheets)
+          .set({
+            laborRate: currentLaborRate,
+            laborSubtotal: newLaborSubtotal.toFixed(2),
+            partsSubtotal: partsSubtotal.toFixed(2),
+            totalAmount: newTotalAmount.toFixed(2),
+          })
+          .where(eq(billingSheets.id, sheet.id));
+
+        sheetsUpdated++;
+      }
+    }
+
+    // Persist the migration completion flag atomically
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ($1, 'completed', NOW())
+       ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+      [MIGRATION_KEY]
+    );
+
+    logger.info(
+      `Startup migration '${MIGRATION_KEY}': updated ${sheetsUpdated} billing sheet(s) and ${itemsUpdated} item(s) to current rates`,
+      'Server Startup'
+    );
+    console.log(`[Migration] ${MIGRATION_KEY}: ${sheetsUpdated} sheets updated, ${itemsUpdated} items updated`);
+  } catch (err) {
+    logger.error(
+      `Startup migration '${MIGRATION_KEY}' error (non-fatal)`,
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
   }
 }
 
