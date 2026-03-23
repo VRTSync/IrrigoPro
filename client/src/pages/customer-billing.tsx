@@ -29,7 +29,8 @@ import {
   ChevronUp,
   Filter,
   X,
-  Edit
+  Edit,
+  Trash2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -119,6 +120,9 @@ export default function CustomerBilling() {
     invoiceNumber: string;
     customerEmail: string;
   } | null>(null);
+
+  // Delete confirmation state
+  const [itemToDelete, setItemToDelete] = useState<{ type: "work_order" | "billing_sheet"; id: number; label: string } | null>(null);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -221,6 +225,45 @@ export default function CustomerBilling() {
 
   const hasAnySelection = () => {
     return selectedWorkOrderIds.size > 0 || selectedBillingSheetIds.size > 0;
+  };
+
+  // Delete work order mutation
+  const deleteWorkOrderMutation = useMutation({
+    mutationFn: (id: number) => apiRequest(`/api/work-orders/${id}`, "DELETE"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      setItemToDelete(null);
+      toast({ title: "Work order deleted", description: "The work order has been removed." });
+    },
+    onError: () => {
+      toast({ title: "Delete failed", description: "Could not delete the work order.", variant: "destructive" });
+    }
+  });
+
+  // Delete billing sheet mutation
+  const deleteBillingSheetMutation = useMutation({
+    mutationFn: (id: number) => apiRequest(`/api/billing-sheets/${id}`, "DELETE"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      setItemToDelete(null);
+      toast({ title: "Billing sheet deleted", description: "The billing sheet has been removed." });
+    },
+    onError: () => {
+      toast({ title: "Delete failed", description: "Could not delete the billing sheet.", variant: "destructive" });
+    }
+  });
+
+  const confirmDelete = () => {
+    if (!itemToDelete) return;
+    if (itemToDelete.type === "work_order") {
+      deleteWorkOrderMutation.mutate(itemToDelete.id);
+    } else {
+      deleteBillingSheetMutation.mutate(itemToDelete.id);
+    }
   };
 
   // Preview Invoice Mutation
@@ -1377,6 +1420,15 @@ export default function CustomerBilling() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
+                                    onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
+                                    className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                  >
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Delete
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
                                     onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
                                     className="h-6 px-2 text-xs hover:bg-orange-50"
                                   >
@@ -1421,6 +1473,15 @@ export default function CustomerBilling() {
                                   >
                                     <Edit className="w-3 h-3 mr-1" />
                                     Edit
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
+                                    className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                  >
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Delete
                                   </Button>
                                   <Button
                                     variant="ghost"
@@ -1496,6 +1557,15 @@ export default function CustomerBilling() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
+                                  className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                >
+                                  <Trash2 className="w-3 h-3 mr-1" />
+                                  Delete
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
                                   className="h-6 px-2 text-xs"
                                 >
@@ -1556,6 +1626,15 @@ export default function CustomerBilling() {
                                 >
                                   <Edit className="w-3 h-3 mr-1" />
                                   Edit
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
+                                  className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                >
+                                  <Trash2 className="w-3 h-3 mr-1" />
+                                  Delete
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1727,6 +1806,28 @@ export default function CustomerBilling() {
           onEdit={() => { setShowBillingSheetDetail(false); setShowEditBillingSheet(true); }}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!itemToDelete} onOpenChange={(open) => { if (!open) setItemToDelete(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete {itemToDelete?.type === "work_order" ? "Work Order" : "Billing Sheet"}?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            Are you sure you want to delete <strong>{itemToDelete?.label}</strong>? This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setItemToDelete(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleteWorkOrderMutation.isPending || deleteBillingSheetMutation.isPending}
+            >
+              {(deleteWorkOrderMutation.isPending || deleteBillingSheetMutation.isPending) ? "Deleting…" : "Delete"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Work Order Modal */}
       {selectedWorkOrder && showEditWorkOrder && (
