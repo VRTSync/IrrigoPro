@@ -133,19 +133,16 @@ process.on('uncaughtException', (error: Error) => {
 
 async function runStartupMigrations() {
   try {
-    const toUpdate = await db
-      .select({ id: customers.id })
-      .from(customers)
-      .where(or(ne(customers.markupPercent, '0.00'), ne(customers.taxPercent, '0.00')));
-    if (toUpdate.length > 0) {
-      await db
-        .update(customers)
-        .set({ markupPercent: '0.00', taxPercent: '0.00' })
-        .where(or(ne(customers.markupPercent, '0.00'), ne(customers.taxPercent, '0.00')));
-      console.log(`Startup migration: reset ${toUpdate.length} customer(s) to 0.00% markup and 0.00% tax`);
+    const updated = await db
+      .update(customers)
+      .set({ markupPercent: '0.00', taxPercent: '0.00' })
+      .where(or(ne(customers.markupPercent, '0.00'), ne(customers.taxPercent, '0.00')))
+      .returning({ id: customers.id });
+    if (updated.length > 0) {
+      logger.info(`Startup migration: reset ${updated.length} customer(s) to 0.00% markup and 0.00% tax`, 'Server Startup');
     }
   } catch (err) {
-    console.error('Startup migration error (non-fatal):', err);
+    logger.error('Startup migration error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 }
 
