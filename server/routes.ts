@@ -5683,10 +5683,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Determine the correct status based on creator's role
       // irrigation_manager => 'approved' (skip manual approval step)
       // field_tech => 'submitted' (goes to irrigation manager for review)
-      // others (company_admin, billing_manager, etc.) => use client-provided status or 'draft'
+      // Server is source of truth for status based on creator role
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
       let resolvedStatus: string;
-      if (creatorRole === 'irrigation_manager') {
+      if (creatorRole === 'irrigation_manager' || creatorRole === 'billing_manager') {
         resolvedStatus = 'approved';
       } else if (creatorRole === 'field_tech') {
         resolvedStatus = 'submitted';

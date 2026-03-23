@@ -116,7 +116,7 @@ export function StandaloneBillingSheet({
   });
   
   const isFieldTech = currentUser?.role === 'field_tech';
-  const isIrrigationManager = currentUser?.role === 'irrigation_manager';
+  const isIrrigationManager = currentUser?.role === 'irrigation_manager' || currentUser?.role === 'billing_manager';
 
   // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0];
