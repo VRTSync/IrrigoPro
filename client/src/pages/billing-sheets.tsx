@@ -492,14 +492,14 @@ export default function BillingSheets() {
 
                           <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
                             <div className="flex flex-col sm:items-end gap-2">
-                              {/* Continue Draft button for field techs */}
-                              {currentUser?.role === 'field_tech' && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                              {/* Continue Draft button for field techs and irrigation managers */}
+                              {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
                                 <Button size="sm" onClick={() => setEditingDraft(sheet)} className="bg-orange-600 hover:bg-orange-700 text-white px-3">
                                   <FileText className="w-3 h-3 mr-1" />Continue Draft
                                 </Button>
                               )}
-                              {/* Submit for approval button for field techs */}
-                              {currentUser?.role === 'field_tech' && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                              {/* Submit for approval button for field techs and irrigation managers */}
+                              {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
                                 <Button size="sm" onClick={() => submitForApproval.mutate(sheet.id)} disabled={submitForApproval.isPending} className="bg-blue-600 hover:bg-blue-700 text-white px-3">
                                   <Send className="w-3 h-3 mr-1" />Submit for Approval
                                 </Button>
