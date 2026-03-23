@@ -4,8 +4,8 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 import { db, pool } from "./db";
-import { customers, parts, billingSheets, billingSheetItems } from "@shared/schema";
-import { ne, eq } from "drizzle-orm";
+import { customers, parts, billingSheets, billingSheetItems, users } from "@shared/schema";
+import { ne, eq, inArray, or, and } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
 interface RateLimitOptions {
@@ -311,6 +311,34 @@ async function runStartupMigrations() {
       err instanceof Error ? err : new Error(String(err)),
       'Server Startup'
     );
+  }
+
+  try {
+    const irrigationManagers = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.role, 'irrigation_manager'));
+    if (irrigationManagers.length > 0) {
+      const managerIds = irrigationManagers.map((u) => u.id);
+      const updated = await db
+        .update(billingSheets)
+        .set({ status: 'approved' })
+        .where(
+          and(
+            inArray(billingSheets.technicianId, managerIds),
+            or(
+              eq(billingSheets.status, 'draft'),
+              eq(billingSheets.status, 'submitted')
+            )
+          )
+        )
+        .returning({ id: billingSheets.id });
+      if (updated.length > 0) {
+        logger.info(`Startup migration: approved ${updated.length} billing sheet(s) created by irrigation managers`, 'Server Startup');
+      }
+    }
+  } catch (err) {
+    logger.error('Startup migration error (irrigation manager billing sheets, non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 }
 
