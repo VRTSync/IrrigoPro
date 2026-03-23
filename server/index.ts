@@ -3,6 +3,9 @@ import fileUpload from "express-fileupload";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
+import { db } from "./db";
+import { customers } from "@shared/schema";
+import { ne, or } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
 interface RateLimitOptions {
@@ -128,6 +131,24 @@ process.on('uncaughtException', (error: Error) => {
   process.exit(1);
 });
 
+async function runStartupMigrations() {
+  try {
+    const toUpdate = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(or(ne(customers.markupPercent, '0.00'), ne(customers.taxPercent, '0.00')));
+    if (toUpdate.length > 0) {
+      await db
+        .update(customers)
+        .set({ markupPercent: '0.00', taxPercent: '0.00' })
+        .where(or(ne(customers.markupPercent, '0.00'), ne(customers.taxPercent, '0.00')));
+      console.log(`Startup migration: reset ${toUpdate.length} customer(s) to 0.00% markup and 0.00% tax`);
+    }
+  } catch (err) {
+    console.error('Startup migration error (non-fatal):', err);
+  }
+}
+
 (async () => {
   logger.info("Starting IrrigoPro server", "Server Startup", {
     environment: process.env.NODE_ENV,
@@ -143,6 +164,8 @@ process.on('uncaughtException', (error: Error) => {
   if (!process.env.QUICKBOOKS_REDIRECT_URI) {
     console.warn('WARNING: QUICKBOOKS_REDIRECT_URI is not set. QuickBooks OAuth will not work until this is configured.');
   }
+
+  await runStartupMigrations();
   
   let server;
   try {
