@@ -1,5 +1,5 @@
 import { safeGet } from "@/utils/safeStorage";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -35,6 +35,45 @@ const customerFormSchema = insertCustomerSchema.extend({
 
 type CustomerFormData = z.infer<typeof customerFormSchema>;
 
+const CONTRACT_TYPES = ["standard", "premium", "commercial", "residential"] as const;
+type ContractType = typeof CONTRACT_TYPES[number];
+function toContractType(value: string | null | undefined): ContractType {
+  if (value && (CONTRACT_TYPES as readonly string[]).includes(value)) {
+    return value as ContractType;
+  }
+  return "standard";
+}
+
+const PAYMENT_TERMS = ["net_30", "net_15", "due_on_receipt"] as const;
+type PaymentTerms = typeof PAYMENT_TERMS[number];
+function toPaymentTerms(value: string | null | undefined): PaymentTerms {
+  if (value && (PAYMENT_TERMS as readonly string[]).includes(value)) {
+    return value as PaymentTerms;
+  }
+  return "net_30";
+}
+
+function customerToFormValues(customer: Customer): CustomerFormData {
+  return {
+    name: customer.name,
+    irrigoName: customer.irrigoName || customer.name,
+    email: customer.email,
+    phone: customer.phone || "",
+    address: customer.address || "",
+    companyId: customer.companyId,
+    totalControllers: customer.totalControllers || 1,
+    contractType: toContractType(customer.contractType),
+    laborRate: customer.laborRate || "45.00",
+    markupPercent: customer.markupPercent || "20.00",
+    taxPercent: customer.taxPercent || "8.25",
+    discountPercent: customer.discountPercent || "0.00",
+    paymentTerms: toPaymentTerms(customer.paymentTerms),
+    contractStartDate: customer.contractStartDate ? new Date(customer.contractStartDate).toISOString().split('T')[0] : "",
+    contractEndDate: customer.contractEndDate ? new Date(customer.contractEndDate).toISOString().split('T')[0] : "",
+    notes: customer.notes || "",
+  };
+}
+
 interface CustomerFormProps {
   customer?: Customer;
   trigger: React.ReactNode;
@@ -44,6 +83,9 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Tracks form values saved in the most recent successful mutation so the
+  // open-trigger reset does not overwrite them before the query refetches.
+  const justSavedValues = useRef<CustomerFormData | null>(null);
 
   // Get user from localStorage (production-compatible)
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -65,24 +107,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
 
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
-    defaultValues: customer ? {
-      name: customer.name,
-      irrigoName: customer.irrigoName || customer.name,
-      email: customer.email,
-      phone: customer.phone || "",
-      address: customer.address || "",
-      companyId: customer.companyId,
-      totalControllers: customer.totalControllers || 1,
-      contractType: customer.contractType as any || "standard",
-      laborRate: customer.laborRate || "45.00",
-      markupPercent: customer.markupPercent || "20.00",
-      taxPercent: customer.taxPercent || "8.25",
-      discountPercent: customer.discountPercent || "0.00",
-      paymentTerms: customer.paymentTerms as any || "net_30",
-      contractStartDate: customer.contractStartDate ? new Date(customer.contractStartDate).toISOString().split('T')[0] : "",
-      contractEndDate: customer.contractEndDate ? new Date(customer.contractEndDate).toISOString().split('T')[0] : "",
-      notes: customer.notes || "",
-    } : {
+    defaultValues: customer ? customerToFormValues(customer) : {
       name: "",
       irrigoName: "",
       email: "",
@@ -101,6 +126,20 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       notes: "",
     },
   });
+
+  // Re-initialize form with latest customer data whenever the dialog opens.
+  // If we just saved, use the saved values (the query refetch may not have
+  // completed yet), then clear the ref so subsequent opens use fresh server data.
+  useEffect(() => {
+    if (open && customer) {
+      if (justSavedValues.current) {
+        form.reset(justSavedValues.current);
+        justSavedValues.current = null;
+      } else {
+        form.reset(customerToFormValues(customer));
+      }
+    }
+  }, [open, customer, form]);
 
   // Update companyId when user data loads
   useEffect(() => {
@@ -129,10 +168,11 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
         contractEndDate: data.contractEndDate ? new Date(data.contractEndDate).toISOString() : null,
       });
     },
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      justSavedValues.current = variables;
+      form.reset(variables);
       setOpen(false);
-      form.reset();
       toast({
         title: customer ? "Customer Updated" : "Customer Created",
         description: customer ? "Customer information has been updated successfully." : "New customer has been added to your database.",
