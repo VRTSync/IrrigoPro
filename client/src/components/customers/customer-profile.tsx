@@ -236,6 +236,45 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
           <PropertyNotes customer={customer} userRole={userRole} />
         </div>
 
+        {/* Billing Rates Section - visible only to billing_manager, company_admin, super_admin */}
+        {(userRole === "billing_manager" || userRole === "company_admin" || userRole === "super_admin") && (
+          <div className="mb-8">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <DollarSign className="w-5 h-5 text-green-600" />
+                  Billing Rates
+                  <span className="text-xs font-normal text-gray-400 ml-1">(billing team only)</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-gray-50 rounded-lg p-3 border">
+                    <div className="text-xs text-gray-500 font-medium mb-1">Labor Rate</div>
+                    <div className="text-lg font-bold text-gray-900">
+                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(customer.laborRate || 45))}/hr
+                    </div>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-3 border border-orange-200">
+                    <div className="text-xs text-orange-600 font-medium mb-1">Emergency Labor Rate</div>
+                    <div className="text-lg font-bold text-orange-700">
+                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(customer.emergencyLaborRate || 125))}/hr
+                    </div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 border">
+                    <div className="text-xs text-gray-500 font-medium mb-1">Markup</div>
+                    <div className="text-lg font-bold text-gray-900">{customer.markupPercent || '20.00'}%</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 border">
+                    <div className="text-xs text-gray-500 font-medium mb-1">Tax</div>
+                    <div className="text-lg font-bold text-gray-900">{customer.taxPercent || '8.25'}%</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* Billing Notes Section - visible only to billing_manager, company_admin, super_admin */}
         {(userRole === "billing_manager" || userRole === "company_admin" || userRole === "super_admin") && (
           <div className="mb-8">
