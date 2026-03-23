@@ -122,7 +122,6 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     };
     
     form.setValue("laborRate", safeParseFloat(customer.laborRate, "45"));
-    form.setValue("markupPercent", safeParseFloat(customer.markupPercent, "20"));
     form.setValue("taxPercent", safeParseFloat(customer.taxPercent, "8.25"));
     
     // Clear validation errors for auto-populated fields

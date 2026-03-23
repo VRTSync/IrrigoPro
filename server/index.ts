@@ -5,7 +5,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 import { db } from "./db";
 import { customers } from "@shared/schema";
-import { ne, or } from "drizzle-orm";
+import { ne } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
 interface RateLimitOptions {
@@ -135,11 +135,11 @@ async function runStartupMigrations() {
   try {
     const updated = await db
       .update(customers)
-      .set({ markupPercent: '0.00', taxPercent: '0.00' })
-      .where(or(ne(customers.markupPercent, '0.00'), ne(customers.taxPercent, '0.00')))
+      .set({ taxPercent: '0.00' })
+      .where(ne(customers.taxPercent, '0.00'))
       .returning({ id: customers.id });
     if (updated.length > 0) {
-      logger.info(`Startup migration: reset ${updated.length} customer(s) to 0.00% markup and 0.00% tax`, 'Server Startup');
+      logger.info(`Startup migration: reset ${updated.length} customer(s) to 0.00% tax`, 'Server Startup');
     }
   } catch (err) {
     logger.error('Startup migration error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');

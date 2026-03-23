@@ -2826,9 +2826,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 case 'laborrate':
                   customerData.laborRate = values[index];
                   break;
-                case 'markuppercent':
-                  customerData.markupPercent = values[index];
-                  break;
                 case 'taxpercent':
                   customerData.taxPercent = values[index];
                   break;

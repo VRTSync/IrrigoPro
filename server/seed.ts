@@ -54,7 +54,6 @@ export async function seedDatabase() {
         address: "123 Oak Street, Springfield, IL 62701",
         contractType: "residential",
         laborRate: "42.00",
-        markupPercent: "18.00",
         taxPercent: "8.25",
         discountPercent: "0.00",
         paymentTerms: "net_30",
@@ -67,7 +66,6 @@ export async function seedDatabase() {
         address: "456 Business Ave, Springfield, IL 62702",
         contractType: "commercial",
         laborRate: "55.00",
-        markupPercent: "25.00",
         taxPercent: "8.25",
         discountPercent: "5.00",
         paymentTerms: "net_15",
@@ -80,7 +78,6 @@ export async function seedDatabase() {
         address: "789 Garden Way, Springfield, IL 62703",
         contractType: "premium",
         laborRate: "50.00",
-        markupPercent: "22.00",
         taxPercent: "8.25",
         discountPercent: "10.00",
         paymentTerms: "net_30",
@@ -93,7 +90,6 @@ export async function seedDatabase() {
         address: "321 Maple Drive, Springfield, IL 62704",
         contractType: "standard",
         laborRate: "45.00",
-        markupPercent: "20.00",
         taxPercent: "8.25",
         discountPercent: "0.00",
         paymentTerms: "net_30",
@@ -415,7 +411,7 @@ export async function seedBillingMonth() {
     const bsTotalHours = "4.00";
     const bsLaborSubtotal = (4.0 * parseFloat(bsLaborRate)).toFixed(2);
     const bsPartsSubtotal = "99.75";
-    const bsMarkupAmount = (parseFloat(bsPartsSubtotal) * parseFloat(customer.markupPercent || "20.00") / 100).toFixed(2);
+    const bsMarkupAmount = "0.00";
     const bsTaxAmount = ((parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal) + parseFloat(bsMarkupAmount)) * parseFloat(customer.taxPercent || "8.25") / 100).toFixed(2);
     const bsTotalAmount = (parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal) + parseFloat(bsMarkupAmount) + parseFloat(bsTaxAmount)).toFixed(2);
 

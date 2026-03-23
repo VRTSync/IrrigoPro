@@ -61,7 +61,6 @@ export const customers = pgTable("customers", {
   contractType: text("contract_type").default("standard"), // standard, premium, commercial, residential
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("45.00"),
   emergencyLaborRate: decimal("emergency_labor_rate", { precision: 10, scale: 2 }).default("125.00"),
-  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).default("0.00"),
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0.00"),
   discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }).default("0.00"),
   // Contract details

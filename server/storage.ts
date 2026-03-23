@@ -1904,8 +1904,8 @@ export class DatabaseStorage implements IStorage {
       partsSubtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
       laborSubtotal = Number(sheetData.totalHours || 0) * Number(sheetData.laborRate || 0);
       
-      // Calculate markup (typically on parts)
-      const markupPercent = 20; // Default 20% markup
+      // Markup is handled at the parts library level, not per-customer
+      const markupPercent = 0;
       markupAmount = partsSubtotal * (markupPercent / 100);
       
       // Calculate tax on subtotals + markup
@@ -2137,7 +2137,7 @@ export class DatabaseStorage implements IStorage {
     });
     
     // Calculate markup and tax
-    const markupPercent = parseFloat(customer.markupPercent || "20");
+    const markupPercent = 0;
     const taxPercent = parseFloat(customer.taxPercent || "8.25");
     const markupAmount = partsSubtotal * (markupPercent / 100);
     const taxAmount = (partsSubtotal + laborSubtotal + markupAmount) * (taxPercent / 100);

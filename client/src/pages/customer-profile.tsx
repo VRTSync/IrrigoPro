@@ -235,15 +235,6 @@ export default function CustomerProfile() {
                   <span className="text-sm font-normal text-gray-500">/hr</span>
                 </p>
               </div>
-              {customer.markupPercent && (
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Markup</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {parseFloat(customer.markupPercent).toFixed(0)}
-                    <span className="text-sm font-normal text-gray-500">%</span>
-                  </p>
-                </div>
-              )}
               {customer.discountPercent && parseFloat(customer.discountPercent) > 0 && (
                 <div className="bg-gray-50 rounded-lg p-3">
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Discount</p>

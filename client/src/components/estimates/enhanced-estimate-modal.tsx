@@ -192,7 +192,6 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
     form.setValue("customerPhone", customer.phone || "");
     // Use customer's contract rates - labor rate is pulled from customer profile
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
-    form.setValue("markupPercent", parseFloat(customer.markupPercent || "20"));
     form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
     
     // Clear validation errors after autofill

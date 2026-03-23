@@ -284,7 +284,7 @@ export function StandaloneBillingSheet({
 
   const partsSubtotal = Array.isArray(items) ? items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0) : 0;
   const laborSubtotal = totalHours * laborRate;
-  const markupPercent = selectedCustomer?.markupPercent ? parseFloat(selectedCustomer.markupPercent) : 20;
+  const markupPercent = 0;
   const taxPercent = selectedCustomer?.taxPercent ? parseFloat(selectedCustomer.taxPercent) : 8.25;
   
   const markupAmount = (partsSubtotal * markupPercent) / 100;

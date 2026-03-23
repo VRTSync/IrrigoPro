@@ -248,7 +248,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div className="bg-gray-50 rounded-lg p-3 border">
                     <div className="text-xs text-gray-500 font-medium mb-1">Labor Rate</div>
                     <div className="text-lg font-bold text-gray-900">
@@ -260,10 +260,6 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                     <div className="text-lg font-bold text-orange-700">
                       {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(customer.emergencyLaborRate || 125))}/hr
                     </div>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-3 border">
-                    <div className="text-xs text-gray-500 font-medium mb-1">Markup</div>
-                    <div className="text-lg font-bold text-gray-900">{customer.markupPercent || '20.00'}%</div>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-3 border">
                     <div className="text-xs text-gray-500 font-medium mb-1">Tax</div>
