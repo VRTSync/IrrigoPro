@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState, useEffect } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 
 export default function Navigation() {
@@ -111,6 +111,7 @@ export default function Navigation() {
               { path: "/users", label: "Team", icon: Users },
               { path: "/company-profile", label: "Company", icon: Settings },
               { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
+              { path: "/labor-rates", label: "Labor Rates", icon: DollarSign },
             ]
           },
         ];

@@ -2734,6 +2734,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/customers/:id/labor-rates", requireAuthentication, async (req, res) => {
+    try {
+      if (req.authenticatedUserRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied. Labor rate changes are restricted to company administrators." });
+      }
+      const id = parseInt(req.params.id);
+      const laborRateSchema = z.object({
+        laborRate: z.union([z.string(), z.number()]).optional(),
+        emergencyLaborRate: z.union([z.string(), z.number()]).optional(),
+      });
+      const parsed = laborRateSchema.parse(req.body);
+      const updateData: { laborRate?: string; emergencyLaborRate?: string } = {};
+      if (parsed.laborRate !== undefined) updateData.laborRate = String(parsed.laborRate);
+      if (parsed.emergencyLaborRate !== undefined) updateData.emergencyLaborRate = String(parsed.emergencyLaborRate);
+      const customer = await storage.updateCustomer(id, updateData);
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+      res.json(customer);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid labor rate data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update labor rates" });
+    }
+  });
+
   app.delete("/api/customers/:id", requireCompanyAdminAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
