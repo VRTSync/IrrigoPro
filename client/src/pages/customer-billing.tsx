@@ -112,6 +112,7 @@ export default function CustomerBilling() {
   const [amountFilter, setAmountFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
+  const [otherCustomersCollapsed, setOtherCustomersCollapsed] = useState(true);
   
   // PDF modal state
   const [showPdfModal, setShowPdfModal] = useState(false);
@@ -475,6 +476,20 @@ export default function CustomerBilling() {
 
   const filteredCustomers = filterCustomers(customers);
 
+  const openBillingCustomers = filteredCustomers
+    .filter(c => {
+      const preview = getCustomerPreview(c);
+      return preview.unbilledAmount > 0;
+    })
+    .sort((a, b) => getCustomerPreview(b).unbilledAmount - getCustomerPreview(a).unbilledAmount);
+
+  const otherCustomers = filteredCustomers
+    .filter(c => {
+      const preview = getCustomerPreview(c);
+      return preview.unbilledAmount <= 0;
+    })
+    .sort((a, b) => (a.irrigoName || a.name).localeCompare(b.irrigoName || b.name));
+
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   const formatCurrency = (amount: string | number) => {
@@ -678,43 +693,94 @@ export default function CustomerBilling() {
                   <div className="text-gray-500">No customers found</div>
                 </div>
               ) : (
-                <div className="space-y-2 p-4">
-                  {filteredCustomers.map((customer) => {
-                    const preview = getCustomerPreview(customer);
-                    return (
-                      <Card
-                        key={customer.id}
-                        className="p-4 cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
-                        onClick={() => setSelectedCustomerId(customer.id)}
+                <div className="p-4 space-y-4">
+                  {openBillingCustomers.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-orange-700 uppercase tracking-wide mb-2 px-1">
+                        Open Billing ({openBillingCustomers.length})
+                      </div>
+                      <div className="space-y-2">
+                        {openBillingCustomers.map((customer) => {
+                          const preview = getCustomerPreview(customer);
+                          return (
+                            <Card
+                              key={customer.id}
+                              className="p-4 cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
+                              onClick={() => setSelectedCustomerId(customer.id)}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
+                                {preview.billingPace >= 1.3 ? (
+                                  <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
+                                ) : preview.billingPace <= 0.7 ? (
+                                  <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
+                                ) : (
+                                  <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-600 mb-2">{customer.email}</div>
+                              {customer.phone && (
+                                <div className="text-sm text-gray-600 mb-2">{customer.phone}</div>
+                              )}
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm text-orange-700 font-medium">Unbilled Work:</span>
+                                <Badge className="bg-orange-100 text-orange-800">
+                                  {formatCurrency(preview.unbilledAmount)}
+                                </Badge>
+                              </div>
+                              {customer.address && (
+                                <div className="text-xs text-gray-500 mt-2 truncate">{customer.address}</div>
+                              )}
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {otherCustomers.length > 0 && (
+                    <div>
+                      <button
+                        className="w-full flex items-center justify-between text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 px-1 hover:text-gray-700 transition-colors"
+                        onClick={() => setOtherCustomersCollapsed(v => !v)}
                       >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
-                          {preview.billingPace >= 1.3 ? (
-                            <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
-                          ) : preview.billingPace <= 0.7 ? (
-                            <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
-                          ) : (
-                            <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
-                          )}
+                        <span>All Other Customers ({otherCustomers.length})</span>
+                        {otherCustomersCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                      </button>
+                      {!otherCustomersCollapsed && (
+                        <div className="space-y-2">
+                          {otherCustomers.map((customer) => {
+                            const preview = getCustomerPreview(customer);
+                            return (
+                              <Card
+                                key={customer.id}
+                                className="p-4 cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
+                                onClick={() => setSelectedCustomerId(customer.id)}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
+                                  {preview.billingPace >= 1.3 ? (
+                                    <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
+                                  ) : preview.billingPace <= 0.7 ? (
+                                    <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
+                                  ) : (
+                                    <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
+                                  )}
+                                </div>
+                                <div className="text-sm text-gray-600 mb-2">{customer.email}</div>
+                                {customer.phone && (
+                                  <div className="text-sm text-gray-600 mb-2">{customer.phone}</div>
+                                )}
+                                {customer.address && (
+                                  <div className="text-xs text-gray-500 mt-2 truncate">{customer.address}</div>
+                                )}
+                              </Card>
+                            );
+                          })}
                         </div>
-                        <div className="text-sm text-gray-600 mb-2">{customer.email}</div>
-                        {customer.phone && (
-                          <div className="text-sm text-gray-600 mb-2">{customer.phone}</div>
-                        )}
-                        {preview.unbilledAmount > 0 && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-orange-700 font-medium">Unbilled Work:</span>
-                            <Badge className="bg-orange-100 text-orange-800">
-                              {formatCurrency(preview.unbilledAmount)}
-                            </Badge>
-                          </div>
-                        )}
-                        {customer.address && (
-                          <div className="text-xs text-gray-500 mt-2 truncate">{customer.address}</div>
-                        )}
-                      </Card>
-                    );
-                  })}
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1169,68 +1235,116 @@ export default function CustomerBilling() {
           {(loadingCustomers || loadingPreviews) ? (
             <div className="p-4 text-center text-gray-500">Loading customer billing data...</div>
           ) : (
-            <div className="divide-y divide-gray-200">
-              {filteredCustomers.map((customer) => {
-                const preview = getCustomerPreview(customer);
-                const daysSinceInvoice = preview.lastInvoiceDate 
-                  ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate!).getTime()) / (1000 * 60 * 60 * 24))
-                  : null;
-                
-                return (
-                  <div
-                    key={customer.id}
-                    onClick={() => setSelectedCustomerId(customer.id)}
-                    className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
-                      selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium text-gray-900 truncate">{customer.irrigoName || customer.name}</div>
-                      {preview.unbilledAmount > 0 ? (
-                        <Badge className="bg-orange-100 text-orange-800 text-xs">
-                          NEEDS BILLING
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-green-100 text-green-800 text-xs">
-                          UP TO DATE
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
-                    
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500">This month:</span>
-                        <span className="text-xs font-medium">
-                          {formatCurrency(preview.currentMonthBilling)}
-                        </span>
-                      </div>
-
-                      {preview.unbilledAmount > 0 && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-orange-700 font-medium">Unbilled:</span>
-                          <Badge className="bg-orange-100 text-orange-800 text-xs">
-                            {formatCurrency(preview.unbilledAmount)}
-                          </Badge>
-                        </div>
-                      )}
-
-                      {preview.lastInvoiceDate && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-500">Last invoiced:</span>
-                          <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
-                            {formatDateWithOptions(preview.lastInvoiceDate, { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            })}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+            <div>
+              {openBillingCustomers.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-orange-50 border-b border-orange-100">
+                    <span className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
+                      Open Billing ({openBillingCustomers.length})
+                    </span>
                   </div>
-                );
-              })}
+                  <div className="divide-y divide-gray-200">
+                    {openBillingCustomers.map((customer) => {
+                      const preview = getCustomerPreview(customer);
+                      const daysSinceInvoice = preview.lastInvoiceDate
+                        ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate!).getTime()) / (1000 * 60 * 60 * 24))
+                        : null;
+                      return (
+                        <div
+                          key={customer.id}
+                          onClick={() => setSelectedCustomerId(customer.id)}
+                          className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                            selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="font-medium text-gray-900 truncate">{customer.irrigoName || customer.name}</div>
+                            <Badge className="bg-orange-100 text-orange-800 text-xs">NEEDS BILLING</Badge>
+                          </div>
+                          <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">This month:</span>
+                              <span className="text-xs font-medium">{formatCurrency(preview.currentMonthBilling)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-orange-700 font-medium">Unbilled:</span>
+                              <Badge className="bg-orange-100 text-orange-800 text-xs">
+                                {formatCurrency(preview.unbilledAmount)}
+                              </Badge>
+                            </div>
+                            {preview.lastInvoiceDate && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-500">Last invoiced:</span>
+                                <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
+                                  {formatDateWithOptions(preview.lastInvoiceDate, { month: 'short', day: 'numeric' })}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {otherCustomers.length > 0 && (
+                <div>
+                  <button
+                    className="w-full px-4 py-2 flex items-center justify-between bg-gray-50 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                    onClick={() => setOtherCustomersCollapsed(v => !v)}
+                  >
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      All Other Customers ({otherCustomers.length})
+                    </span>
+                    {otherCustomersCollapsed ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronUp className="h-4 w-4 text-gray-400" />}
+                  </button>
+                  {!otherCustomersCollapsed && (
+                    <div className="divide-y divide-gray-200">
+                      {otherCustomers.map((customer) => {
+                        const preview = getCustomerPreview(customer);
+                        const daysSinceInvoice = preview.lastInvoiceDate
+                          ? Math.floor((Date.now() - new Date(preview.lastInvoiceDate!).getTime()) / (1000 * 60 * 60 * 24))
+                          : null;
+                        return (
+                          <div
+                            key={customer.id}
+                            onClick={() => setSelectedCustomerId(customer.id)}
+                            className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                              selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="font-medium text-gray-900 truncate">{customer.irrigoName || customer.name}</div>
+                              <Badge className="bg-green-100 text-green-800 text-xs">UP TO DATE</Badge>
+                            </div>
+                            <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-500">This month:</span>
+                                <span className="text-xs font-medium">{formatCurrency(preview.currentMonthBilling)}</span>
+                              </div>
+                              {preview.lastInvoiceDate && (
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-500">Last invoiced:</span>
+                                  <span className={`text-xs ${daysSinceInvoice && daysSinceInvoice > 30 ? 'text-red-600' : 'text-green-600'}`}>
+                                    {formatDateWithOptions(preview.lastInvoiceDate, { month: 'short', day: 'numeric' })}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {filteredCustomers.length === 0 && (
+                <div className="p-4 text-center text-gray-500">No customers found</div>
+              )}
             </div>
           )}
         </div>
