@@ -6079,6 +6079,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       let deleted = 0;
       for (const id of validIds) {
+        await storage.deleteWorkOrderItems(id);
         const success = await storage.deleteWorkOrder(id);
         if (success) deleted++;
       }
@@ -6096,6 +6097,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid work order ID" });
       }
+      await storage.deleteWorkOrderItems(id);
       const success = await storage.deleteWorkOrder(id);
       if (!success) {
         return res.status(404).json({ message: "Work order not found" });
