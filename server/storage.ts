@@ -26,6 +26,11 @@ import {
   irrigationZones,
   partUsage,
   apiKeys,
+  partCategories,
+  partBrands,
+  partSizes,
+  partMaterials,
+  partFittingTypes,
   type Company,
   type User,
   type Customer, 
@@ -52,6 +57,11 @@ import {
   type IrrigationZone,
   type PartUsage,
   type ApiKey,
+  type PartCategory,
+  type PartBrand,
+  type PartSize,
+  type PartMaterial,
+  type PartFittingType,
   type InsertCompany,
   type InsertUser,
   type InsertCustomer, 
@@ -78,6 +88,11 @@ import {
   type InsertIrrigationZone,
   type InsertPartUsage,
   type InsertApiKey,
+  type InsertPartCategory,
+  type InsertPartBrand,
+  type InsertPartSize,
+  type InsertPartMaterial,
+  type InsertPartFittingType,
   type EstimateWithItems,
   type EstimateWithZones,
   type PropertyZoneWithZones,
@@ -164,6 +179,32 @@ export interface IStorage {
   disconnectGoogleSheetsCustomers(): Promise<void>;
   getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }>;
   disconnectQuickBooksCustomers(): Promise<void>;
+
+  // Parts Reference Lists (per-company: categories, brands, sizes, materials, fitting types)
+  getPartCategories(companyId: number): Promise<PartCategory[]>;
+  createPartCategory(category: InsertPartCategory): Promise<PartCategory>;
+  updatePartCategory(id: number, companyId: number, data: Partial<InsertPartCategory>): Promise<PartCategory | undefined>;
+  deletePartCategory(id: number, companyId: number): Promise<boolean>;
+
+  getPartBrands(companyId: number): Promise<PartBrand[]>;
+  createPartBrand(brand: InsertPartBrand): Promise<PartBrand>;
+  updatePartBrand(id: number, companyId: number, data: Partial<InsertPartBrand>): Promise<PartBrand | undefined>;
+  deletePartBrand(id: number, companyId: number): Promise<boolean>;
+
+  getPartSizes(companyId: number): Promise<PartSize[]>;
+  createPartSize(size: InsertPartSize): Promise<PartSize>;
+  updatePartSize(id: number, companyId: number, data: Partial<InsertPartSize>): Promise<PartSize | undefined>;
+  deletePartSize(id: number, companyId: number): Promise<boolean>;
+
+  getPartMaterials(companyId: number): Promise<PartMaterial[]>;
+  createPartMaterial(material: InsertPartMaterial): Promise<PartMaterial>;
+  updatePartMaterial(id: number, companyId: number, data: Partial<InsertPartMaterial>): Promise<PartMaterial | undefined>;
+  deletePartMaterial(id: number, companyId: number): Promise<boolean>;
+
+  getPartFittingTypes(companyId: number): Promise<PartFittingType[]>;
+  createPartFittingType(fittingType: InsertPartFittingType): Promise<PartFittingType>;
+  updatePartFittingType(id: number, companyId: number, data: Partial<InsertPartFittingType>): Promise<PartFittingType | undefined>;
+  deletePartFittingType(id: number, companyId: number): Promise<boolean>;
 
   // Parts
   getParts(): Promise<Part[]>;
@@ -2473,6 +2514,152 @@ export class DatabaseStorage implements IStorage {
     .limit(limit);
 
     return results;
+  }
+
+  // Default seed values for parts reference lists
+  private readonly DEFAULT_CATEGORIES = [
+    "Backflow", "Bushing", "Controller", "Decoder", "Filter", "Fitting",
+    "Head", "Irrigation Box", "Labor", "Misc", "Module", "Nipple",
+    "Nozzle", "Pipe", "Rental", "Service", "Valve", "Wire"
+  ];
+  private readonly DEFAULT_BRANDS = [
+    "Hunter", "Rainbird", "Febco", "LEIT", "EBON", "Wilkins", "Mcdonald", "Leemco", "Ranier"
+  ];
+  private readonly DEFAULT_SIZES = [
+    "0.125\"", "0.25\"", "0.375\"", "0.5\"", "0.75\"", "1\"", "1.25\"", "1.5\"",
+    "2\"", "2.5\"", "3\"", "4\"", "6\"", "8\"", "10\"", "12\""
+  ];
+  private readonly DEFAULT_MATERIALS = [
+    "PVC", "Copper", "Brass", "NETAFIM", "POLY", "BACKFLOW", "Insert"
+  ];
+  private readonly DEFAULT_FITTING_TYPES = [
+    "90° Coupler", "45° Coupler", "Tee", "Union", "Cap", "Coupler", "Male Adapter",
+    "Female Adapter", "Plug", "Slip-Fix", "Cross", "Manifold", "Ball Valve"
+  ];
+
+  async getPartCategories(companyId: number): Promise<PartCategory[]> {
+    const existing = await db.select().from(partCategories).where(eq(partCategories.companyId, companyId));
+    if (existing.length === 0) {
+      const toInsert = this.DEFAULT_CATEGORIES.map(name => ({ companyId, name, markupPercent: "0.00" }));
+      const seeded = await db.insert(partCategories).values(toInsert).returning();
+      return seeded;
+    }
+    return existing;
+  }
+
+  async createPartCategory(category: InsertPartCategory): Promise<PartCategory> {
+    const [result] = await db.insert(partCategories).values(category).returning();
+    return result;
+  }
+
+  async updatePartCategory(id: number, companyId: number, data: Partial<InsertPartCategory>): Promise<PartCategory | undefined> {
+    const [result] = await db.update(partCategories).set(data).where(and(eq(partCategories.id, id), eq(partCategories.companyId, companyId))).returning();
+    return result;
+  }
+
+  async deletePartCategory(id: number, companyId: number): Promise<boolean> {
+    const result = await db.delete(partCategories).where(and(eq(partCategories.id, id), eq(partCategories.companyId, companyId))).returning();
+    return result.length > 0;
+  }
+
+  async getPartBrands(companyId: number): Promise<PartBrand[]> {
+    const existing = await db.select().from(partBrands).where(eq(partBrands.companyId, companyId));
+    if (existing.length === 0) {
+      const toInsert = this.DEFAULT_BRANDS.map(name => ({ companyId, name }));
+      const seeded = await db.insert(partBrands).values(toInsert).returning();
+      return seeded;
+    }
+    return existing;
+  }
+
+  async createPartBrand(brand: InsertPartBrand): Promise<PartBrand> {
+    const [result] = await db.insert(partBrands).values(brand).returning();
+    return result;
+  }
+
+  async updatePartBrand(id: number, companyId: number, data: Partial<InsertPartBrand>): Promise<PartBrand | undefined> {
+    const [result] = await db.update(partBrands).set(data).where(and(eq(partBrands.id, id), eq(partBrands.companyId, companyId))).returning();
+    return result;
+  }
+
+  async deletePartBrand(id: number, companyId: number): Promise<boolean> {
+    const result = await db.delete(partBrands).where(and(eq(partBrands.id, id), eq(partBrands.companyId, companyId))).returning();
+    return result.length > 0;
+  }
+
+  async getPartSizes(companyId: number): Promise<PartSize[]> {
+    const existing = await db.select().from(partSizes).where(eq(partSizes.companyId, companyId));
+    if (existing.length === 0) {
+      const toInsert = this.DEFAULT_SIZES.map(name => ({ companyId, name }));
+      const seeded = await db.insert(partSizes).values(toInsert).returning();
+      return seeded;
+    }
+    return existing;
+  }
+
+  async createPartSize(size: InsertPartSize): Promise<PartSize> {
+    const [result] = await db.insert(partSizes).values(size).returning();
+    return result;
+  }
+
+  async updatePartSize(id: number, companyId: number, data: Partial<InsertPartSize>): Promise<PartSize | undefined> {
+    const [result] = await db.update(partSizes).set(data).where(and(eq(partSizes.id, id), eq(partSizes.companyId, companyId))).returning();
+    return result;
+  }
+
+  async deletePartSize(id: number, companyId: number): Promise<boolean> {
+    const result = await db.delete(partSizes).where(and(eq(partSizes.id, id), eq(partSizes.companyId, companyId))).returning();
+    return result.length > 0;
+  }
+
+  async getPartMaterials(companyId: number): Promise<PartMaterial[]> {
+    const existing = await db.select().from(partMaterials).where(eq(partMaterials.companyId, companyId));
+    if (existing.length === 0) {
+      const toInsert = this.DEFAULT_MATERIALS.map(name => ({ companyId, name }));
+      const seeded = await db.insert(partMaterials).values(toInsert).returning();
+      return seeded;
+    }
+    return existing;
+  }
+
+  async createPartMaterial(material: InsertPartMaterial): Promise<PartMaterial> {
+    const [result] = await db.insert(partMaterials).values(material).returning();
+    return result;
+  }
+
+  async updatePartMaterial(id: number, companyId: number, data: Partial<InsertPartMaterial>): Promise<PartMaterial | undefined> {
+    const [result] = await db.update(partMaterials).set(data).where(and(eq(partMaterials.id, id), eq(partMaterials.companyId, companyId))).returning();
+    return result;
+  }
+
+  async deletePartMaterial(id: number, companyId: number): Promise<boolean> {
+    const result = await db.delete(partMaterials).where(and(eq(partMaterials.id, id), eq(partMaterials.companyId, companyId))).returning();
+    return result.length > 0;
+  }
+
+  async getPartFittingTypes(companyId: number): Promise<PartFittingType[]> {
+    const existing = await db.select().from(partFittingTypes).where(eq(partFittingTypes.companyId, companyId));
+    if (existing.length === 0) {
+      const toInsert = this.DEFAULT_FITTING_TYPES.map(name => ({ companyId, name }));
+      const seeded = await db.insert(partFittingTypes).values(toInsert).returning();
+      return seeded;
+    }
+    return existing;
+  }
+
+  async createPartFittingType(fittingType: InsertPartFittingType): Promise<PartFittingType> {
+    const [result] = await db.insert(partFittingTypes).values(fittingType).returning();
+    return result;
+  }
+
+  async updatePartFittingType(id: number, companyId: number, data: Partial<InsertPartFittingType>): Promise<PartFittingType | undefined> {
+    const [result] = await db.update(partFittingTypes).set(data).where(and(eq(partFittingTypes.id, id), eq(partFittingTypes.companyId, companyId))).returning();
+    return result;
+  }
+
+  async deletePartFittingType(id: number, companyId: number): Promise<boolean> {
+    const result = await db.delete(partFittingTypes).where(and(eq(partFittingTypes.id, id), eq(partFittingTypes.companyId, companyId))).returning();
+    return result.length > 0;
   }
 }
 

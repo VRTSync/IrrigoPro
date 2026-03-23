@@ -37,6 +37,7 @@ import PrivacyPolicy from "@/pages/privacy-policy";
 import SwitchUser from "@/pages/switch-user";
 import CustomerProfile from "@/pages/customer-profile";
 import EstimateApproval from "@/pages/estimate-approval";
+import PartsSettings from "@/pages/parts-settings";
 
 import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
@@ -167,6 +168,7 @@ function Router() {
                 <Route path="/estimates" component={Estimates} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/parts-list" component={PartsList} />
+                <Route path="/parts-settings" component={PartsSettings} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
@@ -205,6 +207,7 @@ function Router() {
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/parts" component={PartsCatalog} />
+                <Route path="/parts-settings" component={PartsSettings} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/switch-user" component={SwitchUser} />

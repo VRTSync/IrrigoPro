@@ -526,6 +526,38 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Parts reference list tables - per-company, database-backed
+export const partCategories = pgTable("part_categories", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(),
+  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).default("0.00"),
+});
+
+export const partBrands = pgTable("part_brands", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(),
+});
+
+export const partSizes = pgTable("part_sizes", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(),
+});
+
+export const partMaterials = pgTable("part_materials", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(),
+});
+
+export const partFittingTypes = pgTable("part_fitting_types", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  name: text("name").notNull(),
+});
+
 // External API Keys for CRM integrations
 export const apiKeys = pgTable("api_keys", {
   id: serial("id").primaryKey(),
@@ -608,6 +640,25 @@ export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems
 export const insertPartUsageSchema = createInsertSchema(partUsage).omit({ id: true, updatedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertApiKeySchema = createInsertSchema(apiKeys).omit({ id: true, createdAt: true });
+
+// Parts reference list insert schemas
+export const insertPartCategorySchema = createInsertSchema(partCategories).omit({ id: true });
+export const insertPartBrandSchema = createInsertSchema(partBrands).omit({ id: true });
+export const insertPartSizeSchema = createInsertSchema(partSizes).omit({ id: true });
+export const insertPartMaterialSchema = createInsertSchema(partMaterials).omit({ id: true });
+export const insertPartFittingTypeSchema = createInsertSchema(partFittingTypes).omit({ id: true });
+
+export type PartCategory = typeof partCategories.$inferSelect;
+export type PartBrand = typeof partBrands.$inferSelect;
+export type PartSize = typeof partSizes.$inferSelect;
+export type PartMaterial = typeof partMaterials.$inferSelect;
+export type PartFittingType = typeof partFittingTypes.$inferSelect;
+
+export type InsertPartCategory = z.infer<typeof insertPartCategorySchema>;
+export type InsertPartBrand = z.infer<typeof insertPartBrandSchema>;
+export type InsertPartSize = z.infer<typeof insertPartSizeSchema>;
+export type InsertPartMaterial = z.infer<typeof insertPartMaterialSchema>;
+export type InsertPartFittingType = z.infer<typeof insertPartFittingTypeSchema>;
 
 export type Company = typeof companies.$inferSelect;
 export type ApiKey = typeof apiKeys.$inferSelect;

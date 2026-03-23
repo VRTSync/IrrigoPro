@@ -3394,6 +3394,325 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================================================
+  // PARTS SETTINGS - Reference Lists (categories, brands, sizes, materials, fitting types)
+  // GET is open to all authenticated users; mutations restricted to admin/manager roles
+  // ============================================================================
+
+  const requirePartsSettingsAccess = (req: any, res: any, next: any) => {
+    const userRole = req.authenticatedUserRole;
+    if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
+      return res.status(403).json({ message: "Access denied. Only company administrators, billing managers, and irrigation managers can manage parts settings." });
+    }
+    next();
+  };
+
+  // Part Categories
+  app.get("/api/part-settings/categories", requireAuthentication, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const categories = await storage.getPartCategories(companyId);
+      res.json(categories);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch part categories" });
+    }
+  });
+
+  app.post("/api/part-settings/categories", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    let markupPercent = "0.00";
+    if (req.body.markupPercent !== undefined) {
+      const parsed = parseFloat(req.body.markupPercent);
+      if (isNaN(parsed) || parsed < 0) return res.status(400).json({ message: "markupPercent must be a non-negative number" });
+      markupPercent = parsed.toFixed(2);
+    }
+    try {
+      const category = await storage.createPartCategory({ companyId, name, markupPercent });
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create part category" });
+    }
+  });
+
+  app.patch("/api/part-settings/categories/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    const update: { name?: string; markupPercent?: string } = {};
+    if (typeof req.body.name === "string") {
+      update.name = req.body.name.trim();
+      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+    }
+    if (req.body.markupPercent !== undefined) {
+      const parsed = parseFloat(req.body.markupPercent);
+      if (isNaN(parsed) || parsed < 0) return res.status(400).json({ message: "markupPercent must be a non-negative number" });
+      update.markupPercent = parsed.toFixed(2);
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    try {
+      const category = await storage.updatePartCategory(id, companyId, update);
+      if (!category) return res.status(404).json({ message: "Category not found" });
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update part category" });
+    }
+  });
+
+  app.delete("/api/part-settings/categories/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const deleted = await storage.deletePartCategory(id, companyId);
+      if (!deleted) return res.status(404).json({ message: "Category not found" });
+      res.json({ message: "Category deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete part category" });
+    }
+  });
+
+  // Part Brands
+  app.get("/api/part-settings/brands", requireAuthentication, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const brands = await storage.getPartBrands(companyId);
+      res.json(brands);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch part brands" });
+    }
+  });
+
+  app.post("/api/part-settings/brands", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    try {
+      const brand = await storage.createPartBrand({ companyId, name });
+      res.json(brand);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create part brand" });
+    }
+  });
+
+  app.patch("/api/part-settings/brands/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    const update: { name?: string } = {};
+    if (typeof req.body.name === "string") {
+      update.name = req.body.name.trim();
+      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    try {
+      const brand = await storage.updatePartBrand(id, companyId, update);
+      if (!brand) return res.status(404).json({ message: "Brand not found" });
+      res.json(brand);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update part brand" });
+    }
+  });
+
+  app.delete("/api/part-settings/brands/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const deleted = await storage.deletePartBrand(id, companyId);
+      if (!deleted) return res.status(404).json({ message: "Brand not found" });
+      res.json({ message: "Brand deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete part brand" });
+    }
+  });
+
+  // Part Sizes
+  app.get("/api/part-settings/sizes", requireAuthentication, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const sizes = await storage.getPartSizes(companyId);
+      res.json(sizes);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch part sizes" });
+    }
+  });
+
+  app.post("/api/part-settings/sizes", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    try {
+      const size = await storage.createPartSize({ companyId, name });
+      res.json(size);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create part size" });
+    }
+  });
+
+  app.patch("/api/part-settings/sizes/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    const update: { name?: string } = {};
+    if (typeof req.body.name === "string") {
+      update.name = req.body.name.trim();
+      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    try {
+      const size = await storage.updatePartSize(id, companyId, update);
+      if (!size) return res.status(404).json({ message: "Size not found" });
+      res.json(size);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update part size" });
+    }
+  });
+
+  app.delete("/api/part-settings/sizes/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const deleted = await storage.deletePartSize(id, companyId);
+      if (!deleted) return res.status(404).json({ message: "Size not found" });
+      res.json({ message: "Size deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete part size" });
+    }
+  });
+
+  // Part Materials
+  app.get("/api/part-settings/materials", requireAuthentication, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const materials = await storage.getPartMaterials(companyId);
+      res.json(materials);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch part materials" });
+    }
+  });
+
+  app.post("/api/part-settings/materials", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    try {
+      const material = await storage.createPartMaterial({ companyId, name });
+      res.json(material);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create part material" });
+    }
+  });
+
+  app.patch("/api/part-settings/materials/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    const update: { name?: string } = {};
+    if (typeof req.body.name === "string") {
+      update.name = req.body.name.trim();
+      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    try {
+      const material = await storage.updatePartMaterial(id, companyId, update);
+      if (!material) return res.status(404).json({ message: "Material not found" });
+      res.json(material);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update part material" });
+    }
+  });
+
+  app.delete("/api/part-settings/materials/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const deleted = await storage.deletePartMaterial(id, companyId);
+      if (!deleted) return res.status(404).json({ message: "Material not found" });
+      res.json({ message: "Material deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete part material" });
+    }
+  });
+
+  // Part Fitting Types
+  app.get("/api/part-settings/fitting-types", requireAuthentication, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const fittingTypes = await storage.getPartFittingTypes(companyId);
+      res.json(fittingTypes);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch part fitting types" });
+    }
+  });
+
+  app.post("/api/part-settings/fitting-types", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    try {
+      const fittingType = await storage.createPartFittingType({ companyId, name });
+      res.json(fittingType);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create part fitting type" });
+    }
+  });
+
+  app.patch("/api/part-settings/fitting-types/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    const update: { name?: string } = {};
+    if (typeof req.body.name === "string") {
+      update.name = req.body.name.trim();
+      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    try {
+      const fittingType = await storage.updatePartFittingType(id, companyId, update);
+      if (!fittingType) return res.status(404).json({ message: "Fitting type not found" });
+      res.json(fittingType);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update part fitting type" });
+    }
+  });
+
+  app.delete("/api/part-settings/fitting-types/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
+    const companyId = req.authenticatedUserCompanyId;
+    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const deleted = await storage.deletePartFittingType(id, companyId);
+      if (!deleted) return res.status(404).json({ message: "Fitting type not found" });
+      res.json({ message: "Fitting type deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete part fitting type" });
+    }
+  });
+
   app.get("/api/parts", async (req, res) => {
     try {
       const parts = await storage.getParts();

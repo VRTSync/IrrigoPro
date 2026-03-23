@@ -91,7 +91,16 @@ export default function Navigation() {
               { path: "/site-maps", label: "Maps", icon: MapIcon },
             ]
           },
-          { path: "/parts", label: "Parts", icon: Package },
+          { 
+            path: "/parts", 
+            label: "Parts", 
+            icon: Package, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/parts", label: "Parts Catalog", icon: Package },
+              { path: "/parts-settings", label: "Parts Settings", icon: Settings },
+            ]
+          },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { 
             path: "/admin", 
@@ -129,6 +138,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/parts", label: "Parts Catalog", icon: Package },
               { path: "/parts-list", label: "Parts List", icon: Package },
+              { path: "/parts-settings", label: "Parts Settings", icon: Settings },
             ]
           },
         ];
@@ -147,6 +157,16 @@ export default function Navigation() {
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
+          { 
+            path: "/parts", 
+            label: "Parts", 
+            icon: Package, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/parts", label: "Parts Catalog", icon: Package },
+              { path: "/parts-settings", label: "Parts Settings", icon: Settings },
+            ]
+          },
         ];
       default:
         return [];
@@ -439,6 +459,20 @@ export default function Navigation() {
                     if (customersLink) {
                       expandedItems.push(customersLink);
                     }
+                  }
+                } else if (userRole === 'billing_manager') {
+                  // For billing managers, prioritize: Work Orders, Billing, Customers, QuickBooks
+                  // Parts Settings is accessible via desktop nav and Parts Catalog is available via direct /parts link
+                  const priority = ['Work Orders', 'Billing', 'Customers', 'QuickBooks'];
+                  priority.forEach(label => {
+                    const found = otherItems.find(item => item.label === label && !item.isDropdown);
+                    if (found) expandedItems.push(found);
+                  });
+                  // Add Parts Catalog as the last mobile slot
+                  const partsItem = otherItems.find(item => item.label === 'Parts' && item.isDropdown);
+                  if (partsItem?.dropdownItems) {
+                    const partsLink = partsItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Parts Catalog');
+                    if (partsLink && expandedItems.length < 4) expandedItems.push(partsLink);
                   }
                 } else {
                   // For other roles, use the standard expansion

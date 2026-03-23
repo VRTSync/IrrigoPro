@@ -16,6 +16,7 @@ import CustomerProfile from "@/pages/customer-profile";
 import CustomerBilling from "@/pages/customer-billing";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
+import PartsSettings from "@/pages/parts-settings";
 
 import UserProfile from "@/pages/user-profile";
 import LicenseAgreement from "@/pages/license-agreement";
@@ -115,6 +116,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/quickbooks" component={QuickBooksPage} />
           <Route path="/parts" component={PartsCatalog} />
+          <Route path="/parts-settings" component={PartsSettings} />
           <Route path="/customers" component={Customers} />
           <Route path="/customers/:id/profile" component={CustomerProfile} />
           <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />

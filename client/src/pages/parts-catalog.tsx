@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
@@ -21,35 +22,96 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import type { Part, Assembly, AssemblyWithParts, InsertAssembly, InsertAssemblyPart } from "@shared/schema";
+import type { Part, Assembly, AssemblyWithParts, InsertAssembly, InsertAssemblyPart, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@shared/schema";
 import { insertPartSchema, insertAssemblySchema } from "@shared/schema";
 
 import { BulkImport } from "@/components/parts/bulk-import";
 
-// Irrigation parts categories based on your CSV
-const PART_CATEGORIES = [
-  "Backflow", "Bushing", "Controller", "Decoder", "Filter", "Fitting", 
-  "Head", "Irrigation Box", "Labor", "Misc", "Module", "Nipple", 
-  "Nozzle", "Pipe", "Rental", "Service", "Valve", "Wire"
-];
+// Quick-add popover for adding a new entry to a reference list inline
+interface QuickAddPopoverProps {
+  label: string;
+  apiPath: string;
+  queryKey: string;
+  withMarkup?: boolean;
+  onAdded: (name: string) => void;
+}
 
-const MATERIALS = [
-  "PVC", "Copper", "Brass", "NETAFIM", "POLY", "BACKFLOW", "Insert"
-];
+function QuickAddPopover({ label, apiPath, queryKey, withMarkup = false, onAdded }: QuickAddPopoverProps) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [markup, setMarkup] = useState("0.00");
 
-const BRANDS = [
-  "Hunter", "Rainbird", "Febco", "LEIT", "EBON", "Wilkins", "Mcdonald", "Leemco", "Ranier"
-];
+  type QuickAddPayload = { name: string; markupPercent?: string };
 
-const FITTING_TYPES = [
-  "90° Coupler", "45° Coupler", "Tee", "Union", "Cap", "Coupler", "Male Adapter", 
-  "Female Adapter", "Plug", "Slip-Fix", "Cross", "Manifold", "Ball Valve"
-];
+  const createMutation = useMutation({
+    mutationFn: (data: QuickAddPayload) => apiRequest(apiPath, "POST", data),
+    onSuccess: (result: { name: string }) => {
+      queryClient.invalidateQueries({ queryKey: [queryKey] });
+      onAdded(result.name);
+      setName("");
+      setMarkup("0.00");
+      setOpen(false);
+      toast({ title: `${label} added` });
+    },
+    onError: () => toast({ title: `Failed to add ${label}`, variant: "destructive" }),
+  });
 
-const COMMON_SIZES = [
-  "0.125\"", "0.25\"", "0.375\"", "0.5\"", "0.75\"", "1\"", "1.25\"", "1.5\"", 
-  "2\"", "2.5\"", "3\"", "4\"", "6\"", "8\"", "10\"", "12\""
-];
+  const handleAdd = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const data: QuickAddPayload = { name: trimmed };
+    if (withMarkup) data.markupPercent = markup || "0.00";
+    createMutation.mutate(data);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="text-xs text-blue-600 hover:text-blue-800 hover:underline ml-1 flex-shrink-0"
+          tabIndex={-1}
+        >
+          + Add new
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3" align="start">
+        <p className="text-sm font-medium mb-2">Add new {label}</p>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={`${label} name`}
+          className="h-8 text-sm mb-2"
+          autoFocus
+          onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setOpen(false); }}
+        />
+        {withMarkup && (
+          <div className="mb-2">
+            <label className="text-xs text-gray-500 mb-1 block">Markup % (optional)</label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={markup}
+              onChange={(e) => setMarkup(e.target.value)}
+              placeholder="0.00"
+              className="h-8 text-sm"
+            />
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" className="flex-1 h-7 text-xs" onClick={handleAdd} disabled={createMutation.isPending || !name.trim()}>
+            Add
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 const PartFormSchema = insertPartSchema;
 
@@ -61,6 +123,13 @@ interface PartFormDialogProps {
 
 function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   const { toast } = useToast();
+
+  // Dynamic reference list queries
+  const { data: partCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: partBrands = [] } = useQuery<PartBrand[]>({ queryKey: ["/api/part-settings/brands"] });
+  const { data: partSizes = [] } = useQuery<PartSize[]>({ queryKey: ["/api/part-settings/sizes"] });
+  const { data: partMaterials = [] } = useQuery<PartMaterial[]>({ queryKey: ["/api/part-settings/materials"] });
+  const { data: partFittingTypes = [] } = useQuery<PartFittingType[]>({ queryKey: ["/api/part-settings/fitting-types"] });
   
   const form = useForm<z.infer<typeof PartFormSchema>>({
     resolver: zodResolver(PartFormSchema),
@@ -247,17 +316,26 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 name="category"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Category *</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <div className="flex items-center gap-1">
+                      <FormLabel>Category *</FormLabel>
+                      <QuickAddPopover
+                        label="Category"
+                        apiPath="/api/part-settings/categories"
+                        queryKey="/api/part-settings/categories"
+                        withMarkup
+                        onAdded={(name) => field.onChange(name)}
+                      />
+                    </div>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {PART_CATEGORIES.map((category) => (
-                          <SelectItem key={category} value={category}>
-                            {category}
+                        {partCategories.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.name}>
+                            {cat.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -272,8 +350,16 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 name="material"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Material</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
+                    <div className="flex items-center gap-1">
+                      <FormLabel>Material</FormLabel>
+                      <QuickAddPopover
+                        label="Material"
+                        apiPath="/api/part-settings/materials"
+                        queryKey="/api/part-settings/materials"
+                        onAdded={(name) => field.onChange(name)}
+                      />
+                    </div>
+                    <Select onValueChange={field.onChange} value={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select material" />
@@ -281,9 +367,9 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
-                        {MATERIALS.map((material) => (
-                          <SelectItem key={material} value={material}>
-                            {material}
+                        {partMaterials.map((mat) => (
+                          <SelectItem key={mat.id} value={mat.name}>
+                            {mat.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -298,8 +384,16 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 name="size"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Size</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
+                    <div className="flex items-center gap-1">
+                      <FormLabel>Size</FormLabel>
+                      <QuickAddPopover
+                        label="Size"
+                        apiPath="/api/part-settings/sizes"
+                        queryKey="/api/part-settings/sizes"
+                        onAdded={(name) => field.onChange(name)}
+                      />
+                    </div>
+                    <Select onValueChange={field.onChange} value={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select size" />
@@ -307,9 +401,9 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
-                        {COMMON_SIZES.map((size) => (
-                          <SelectItem key={size} value={size}>
-                            {size}
+                        {partSizes.map((sz) => (
+                          <SelectItem key={sz.id} value={sz.name}>
+                            {sz.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -324,8 +418,16 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 name="brand"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Brand</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
+                    <div className="flex items-center gap-1">
+                      <FormLabel>Brand</FormLabel>
+                      <QuickAddPopover
+                        label="Brand"
+                        apiPath="/api/part-settings/brands"
+                        queryKey="/api/part-settings/brands"
+                        onAdded={(name) => field.onChange(name)}
+                      />
+                    </div>
+                    <Select onValueChange={field.onChange} value={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select brand" />
@@ -333,9 +435,9 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
-                        {BRANDS.map((brand) => (
-                          <SelectItem key={brand} value={brand}>
-                            {brand}
+                        {partBrands.map((br) => (
+                          <SelectItem key={br.id} value={br.name}>
+                            {br.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -350,8 +452,16 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                 name="fittingType"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Fitting Type</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || "none"}>
+                    <div className="flex items-center gap-1">
+                      <FormLabel>Fitting Type</FormLabel>
+                      <QuickAddPopover
+                        label="Fitting Type"
+                        apiPath="/api/part-settings/fitting-types"
+                        queryKey="/api/part-settings/fitting-types"
+                        onAdded={(name) => field.onChange(name)}
+                      />
+                    </div>
+                    <Select onValueChange={field.onChange} value={field.value || "none"}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select fitting type" />
@@ -359,9 +469,9 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
-                        {FITTING_TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {type}
+                        {partFittingTypes.map((ft) => (
+                          <SelectItem key={ft.id} value={ft.name}>
+                            {ft.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -478,6 +588,8 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
   const { data: parts } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
   });
+
+  const { data: assemblyCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
 
   // Filter parts for selection (exclude already selected parts)
   const filteredPartsForSelection = useMemo(() => {
@@ -735,9 +847,9 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {PART_CATEGORIES.map((category) => (
-                          <SelectItem key={category} value={category}>
-                            {category}
+                        {assemblyCategories.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.name}>
+                            {cat.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -821,9 +933,9 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
-                      {PART_CATEGORIES.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category}
+                      {assemblyCategories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.name}>
+                          {cat.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -948,6 +1060,10 @@ export default function PartsCatalog() {
   const { data: assemblies, isLoading: isLoadingAssemblies } = useQuery<AssemblyWithParts[]>({
     queryKey: ["/api/assemblies"],
   });
+
+  // Dynamic reference lists for filter dropdowns
+  const { data: filterCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: filterMaterials = [] } = useQuery<PartMaterial[]>({ queryKey: ["/api/part-settings/materials"] });
 
 
 
@@ -1104,9 +1220,9 @@ export default function PartsCatalog() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {PART_CATEGORIES.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category}
+                {filterCategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.name}>
+                    {cat.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1118,9 +1234,9 @@ export default function PartsCatalog() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Materials</SelectItem>
-                {MATERIALS.map((material) => (
-                  <SelectItem key={material} value={material}>
-                    {material}
+                {filterMaterials.map((mat) => (
+                  <SelectItem key={mat.id} value={mat.name}>
+                    {mat.name}
                   </SelectItem>
                 ))}
               </SelectContent>
