@@ -6125,12 +6125,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "No valid IDs provided" });
       }
       let deleted = 0;
+      const skipped: number[] = [];
       for (const id of validIds) {
+        const invoiced = await storage.hasInvoiceItems(id);
+        if (invoiced) {
+          skipped.push(id);
+          continue;
+        }
         await storage.deleteWorkOrderItems(id);
         const success = await storage.deleteWorkOrder(id);
         if (success) deleted++;
       }
-      res.json({ deleted });
+      if (skipped.length > 0 && deleted === 0) {
+        return res.status(409).json({ message: "These work orders are linked to invoices and cannot be deleted. Remove them from their invoices first." });
+      }
+      const skipMessage = skipped.length > 0
+        ? `${skipped.length} work order(s) could not be deleted because they are linked to invoices. Remove them from their invoices first.`
+        : undefined;
+      res.json({ deleted, skipped, skipMessage });
     } catch (error) {
       res.status(500).json({ message: "Failed to bulk delete work orders" });
     }
@@ -6143,6 +6155,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Validate work order ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid work order ID" });
+      }
+      const invoiced = await storage.hasInvoiceItems(id);
+      if (invoiced) {
+        return res.status(409).json({ message: "This work order is linked to an invoice and cannot be deleted. Remove it from the invoice first." });
       }
       await storage.deleteWorkOrderItems(id);
       const success = await storage.deleteWorkOrder(id);

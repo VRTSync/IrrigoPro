@@ -33,7 +33,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@shared/schema";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { InvoiceList } from "@/components/billing/invoice-list";
@@ -227,7 +227,6 @@ export default function CustomerBilling() {
     return selectedWorkOrderIds.size > 0 || selectedBillingSheetIds.size > 0;
   };
 
-  // Delete work order mutation
   const deleteWorkOrderMutation = useMutation({
     mutationFn: (id: number) => apiRequest(`/api/work-orders/${id}`, "DELETE"),
     onSuccess: () => {
@@ -237,8 +236,8 @@ export default function CustomerBilling() {
       setItemToDelete(null);
       toast({ title: "Work order deleted", description: "The work order has been removed." });
     },
-    onError: () => {
-      toast({ title: "Delete failed", description: "Could not delete the work order.", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Delete failed", description: parseApiError(error, "Could not delete the work order."), variant: "destructive" });
     }
   });
 

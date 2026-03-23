@@ -242,6 +242,7 @@ export interface IStorage {
   createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
+  hasInvoiceItems(workOrderId: number): Promise<boolean>;
   assignWorkOrder(workOrderId: number, technicianId: number, technicianName: string): Promise<boolean>;
   
   // Work Order Items
@@ -1770,6 +1771,11 @@ export class DatabaseStorage implements IStorage {
   async deleteWorkOrder(id: number): Promise<boolean> {
     const result = await db.delete(workOrders).where(eq(workOrders.id, id));
     return (result.rowCount || 0) > 0;
+  }
+
+  async hasInvoiceItems(workOrderId: number): Promise<boolean> {
+    const rows = await db.select({ id: invoiceItems.id }).from(invoiceItems).where(eq(invoiceItems.workOrderId, workOrderId)).limit(1);
+    return rows.length > 0;
   }
 
   async assignWorkOrder(workOrderId: number, technicianId: number, technicianName: string): Promise<boolean> {

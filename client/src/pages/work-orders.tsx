@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { WorkOrderListSkeleton } from "@/components/ui/loading-skeleton";
 
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -249,7 +249,6 @@ export default function WorkOrders() {
     },
   });
 
-  // Delete work order mutation
   const deleteWorkOrder = useMutation({
     mutationFn: async (workOrderId: number) => {
       return apiRequest(`/api/work-orders/${workOrderId}`, "DELETE");
@@ -264,7 +263,7 @@ export default function WorkOrders() {
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to delete work order",
+        description: parseApiError(error, "Failed to delete work order"),
         variant: "destructive",
       });
     },
@@ -276,10 +275,20 @@ export default function WorkOrders() {
       return apiRequest("/api/work-orders/bulk", "DELETE", { ids });
     },
     onSuccess: (data: any) => {
-      toast({
-        title: "Work Orders Deleted",
-        description: `${data?.deleted ?? 0} work order(s) deleted successfully`,
-      });
+      const deleted: number = data?.deleted ?? 0;
+      const skipMessage: string | undefined = data?.skipMessage;
+      if (skipMessage) {
+        toast({
+          title: `${deleted} Work Order(s) Deleted`,
+          description: skipMessage,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Work Orders Deleted",
+          description: `${deleted} work order(s) deleted successfully`,
+        });
+      }
       setSelectedIds(new Set());
       setShowBulkDeleteDialog(false);
       queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
@@ -287,7 +296,7 @@ export default function WorkOrders() {
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to delete work orders",
+        description: parseApiError(error, "Failed to delete work orders"),
         variant: "destructive",
       });
       setShowBulkDeleteDialog(false);

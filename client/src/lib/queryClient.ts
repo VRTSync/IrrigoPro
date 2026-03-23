@@ -87,6 +87,21 @@ export const getQueryFn: <T>(options: {
     return await res.json();
   };
 
+export function parseApiError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const jsonStart = message.indexOf("{");
+  if (jsonStart !== -1) {
+    try {
+      const parsed: unknown = JSON.parse(message.slice(jsonStart));
+      if (parsed !== null && typeof parsed === "object" && "message" in parsed && typeof (parsed as Record<string, unknown>).message === "string") {
+        return (parsed as Record<string, unknown>).message as string;
+      }
+    } catch {
+    }
+  }
+  return fallback;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
