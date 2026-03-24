@@ -61,7 +61,7 @@ export function EditPartsModal({
           partName: part.name,
           quantity: String(qty || 1),
           unitPrice: String(parseFloat(part.price) || 0),
-          laborHours: String(part.laborHours || 0),
+          laborHours: String((part as Part & { laborHours?: string }).laborHours || 0),
           zoneId: null,
           notes: "",
         },

@@ -621,9 +621,9 @@ export default function CompanyUserManagement() {
                         {user.email}
                         <span className="flex items-center">
                           {user.emailVerified ? (
-                            <CheckCircle className="w-3 h-3 text-green-600" title="Email verified" />
+                            <CheckCircle className="w-3 h-3 text-green-600" aria-label="Email verified" />
                           ) : (
-                            <Mail className="w-3 h-3 text-orange-500" title="Email not verified" />
+                            <Mail className="w-3 h-3 text-orange-500" aria-label="Email not verified" />
                           )}
                         </span>
                       </div>
@@ -739,9 +739,9 @@ export default function CompanyUserManagement() {
                                 {user.email}
                                 <span className="flex items-center">
                                   {user.emailVerified ? (
-                                    <CheckCircle className="w-3 h-3 text-green-600" title="Email verified" />
+                                    <CheckCircle className="w-3 h-3 text-green-600" aria-label="Email verified" />
                                   ) : (
-                                    <Mail className="w-3 h-3 text-orange-500" title="Email not verified" />
+                                    <Mail className="w-3 h-3 text-orange-500" aria-label="Email not verified" />
                                   )}
                                 </span>
                               </div>

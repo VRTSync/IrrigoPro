@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
 
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 
 interface DashboardStats {

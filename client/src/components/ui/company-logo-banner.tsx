@@ -23,7 +23,7 @@ export function CompanyLogoBanner({ className = "" }: CompanyLogoBannerProps) {
   }, []);
 
   // Fetch company profile using the authenticated user's company ID from session
-  const { data: company, error } = useQuery({
+  const { data: company, error } = useQuery<{ logo?: string; name?: string }>({
     queryKey: [`/api/company/${user?.companyId}/profile`],
     enabled: !!user?.companyId && !isNaN(user?.companyId), // Only fetch when we have a valid numeric company ID
     retry: false,

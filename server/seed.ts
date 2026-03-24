@@ -1,44 +1,40 @@
 import { db } from "./db";
 import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users, workOrders, workOrderItems, billingSheets, billingSheetItems } from "@shared/schema";
 
+type UserInsert = typeof users.$inferInsert;
+type CustomerInsert = typeof customers.$inferInsert;
+type PartInsert = typeof parts.$inferInsert;
+type EstimateZoneInsert = typeof estimateZones.$inferInsert;
+
 export async function seedDatabase() {
   console.log("Starting database seeding...");
 
   try {
     // Seed users first
-    const sampleUsers = [
+    const sampleUsers: UserInsert[] = [
       {
-        id: '1',
         username: 'admin',
         password: 'admin123',
         name: 'Admin User',
         email: 'admin@company.com',
-        role: 'admin' as const,
+        role: 'admin',
         isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
       },
       {
-        id: '2',
         username: 'manager',
         password: 'manager123',
         name: 'Manager User',
         email: 'manager@company.com',
-        role: 'irrigation_manager' as const,
+        role: 'irrigation_manager',
         isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
       },
       {
-        id: '3',
         username: 'tech',
         password: 'tech123',
         name: 'John Tech',
         email: 'tech@company.com',
-        role: 'field_tech' as const,
+        role: 'field_tech',
         isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
       }
     ];
 
@@ -46,8 +42,9 @@ export async function seedDatabase() {
     console.log(`Inserted ${insertedUsers.length} users`);
 
     // Seed customers with contract-based billing rates
-    const sampleCustomers = [
+    const sampleCustomers: CustomerInsert[] = [
       { 
+        companyId: insertedUsers[0].companyId ?? 1,
         name: "Johnson Family", 
         email: "johnson@example.com", 
         phone: "(555) 123-4567", 
@@ -60,6 +57,7 @@ export async function seedDatabase() {
         notes: "Preferred residential customer with seasonal maintenance contract"
       },
       { 
+        companyId: insertedUsers[0].companyId ?? 1,
         name: "Office Complex Management", 
         email: "manager@officecomplex.com", 
         phone: "(555) 234-5678", 
@@ -72,6 +70,7 @@ export async function seedDatabase() {
         notes: "Commercial contract with bulk pricing discount"
       },
       { 
+        companyId: insertedUsers[0].companyId ?? 1,
         name: "Garden Center LLC", 
         email: "info@gardencenter.com", 
         phone: "(555) 345-6789", 
@@ -84,6 +83,7 @@ export async function seedDatabase() {
         notes: "Premium service contract with priority scheduling"
       },
       { 
+        companyId: insertedUsers[0].companyId ?? 1,
         name: "Smith Residence", 
         email: "smith@example.com", 
         phone: "(555) 456-7890", 
@@ -101,15 +101,16 @@ export async function seedDatabase() {
     console.log(`Inserted ${insertedCustomers.length} customers`);
 
     // Seed parts
-    const sampleParts = [
-      { name: "Rain Bird 5004 Sprinkler", description: "Pop-up spray head with adjustable pattern", price: "18.50", laborHours: "0.50", sku: "RB-5004", category: "Sprinklers" },
-      { name: "Hunter PGP-ADJ Rotor", description: "Adjustable arc rotary sprinkler", price: "42.75", laborHours: "0.75", sku: "HU-PGP-ADJ", category: "Rotors" },
-      { name: "1\" PVC Pipe (10ft)", description: "Schedule 40 PVC pipe for irrigation", price: "12.25", laborHours: "0.25", sku: "PVC-1-10", category: "Pipes" },
-      { name: "Rain Bird ESP-ME Controller", description: "WiFi-enabled irrigation controller", price: "189.00", laborHours: "2.00", sku: "RB-ESP-ME", category: "Controllers" },
-      { name: "Hunter Pro-Spray Body", description: "Professional grade spray head body", price: "8.75", laborHours: "0.30", sku: "HU-PS-BODY", category: "Sprinklers" },
-      { name: "Toro Super 800 Nozzle", description: "High-efficiency spray nozzle", price: "3.25", laborHours: "0.10", sku: "TO-S800", category: "Nozzles" },
-      { name: "Irritrol 2400 Valve", description: "24V AC irrigation valve", price: "32.50", laborHours: "0.60", sku: "IR-2400", category: "Valves" },
-      { name: "1/2\" Poly Tubing (100ft)", description: "Flexible polyethylene tubing", price: "24.99", laborHours: "0.75", sku: "POLY-05-100", category: "Tubing" },
+    const companyId = insertedUsers[0].companyId ?? 1;
+    const sampleParts: PartInsert[] = [
+      { companyId, name: "Rain Bird 5004 Sprinkler", description: "Pop-up spray head with adjustable pattern", price: "18.50", sku: "RB-5004", category: "Sprinklers" },
+      { companyId, name: "Hunter PGP-ADJ Rotor", description: "Adjustable arc rotary sprinkler", price: "42.75", sku: "HU-PGP-ADJ", category: "Rotors" },
+      { companyId, name: "1\" PVC Pipe (10ft)", description: "Schedule 40 PVC pipe for irrigation", price: "12.25", sku: "PVC-1-10", category: "Pipes" },
+      { companyId, name: "Rain Bird ESP-ME Controller", description: "WiFi-enabled irrigation controller", price: "189.00", sku: "RB-ESP-ME", category: "Controllers" },
+      { companyId, name: "Hunter Pro-Spray Body", description: "Professional grade spray head body", price: "8.75", sku: "HU-PS-BODY", category: "Sprinklers" },
+      { companyId, name: "Toro Super 800 Nozzle", description: "High-efficiency spray nozzle", price: "3.25", sku: "TO-S800", category: "Nozzles" },
+      { companyId, name: "Irritrol 2400 Valve", description: "24V AC irrigation valve", price: "32.50", sku: "IR-2400", category: "Valves" },
+      { companyId, name: "1/2\" Poly Tubing (100ft)", description: "Flexible polyethylene tubing", price: "24.99", sku: "POLY-05-100", category: "Tubing" },
     ];
 
     const insertedParts = await db.insert(parts).values(sampleParts).returning();
@@ -189,10 +190,10 @@ export async function seedDatabase() {
     console.log(`Inserted ${insertedEstimates.length} estimates`);
 
     // Seed estimate zones
-    const sampleEstimateZones = [
-      { estimateId: insertedEstimates[0].id, zoneName: "Front Yard", workDescription: "Install sprinkler system for front lawn and flower beds", clockInTime: "8:00 AM", sortOrder: 1 },
-      { estimateId: insertedEstimates[0].id, zoneName: "Back Yard", workDescription: "Install rotor system for large back lawn area", clockInTime: "10:00 AM", sortOrder: 2 },
-      { estimateId: insertedEstimates[1].id, zoneName: "Parking Area", workDescription: "Install commercial sprinkler system for landscaping", clockInTime: "7:00 AM", sortOrder: 1 },
+    const sampleEstimateZones: EstimateZoneInsert[] = [
+      { estimateId: insertedEstimates[0].id, controllerId: "A", zoneNumber: "1", zoneName: "Front Yard", workDescription: "Install sprinkler system for front lawn and flower beds", clockInTime: "8:00 AM", sortOrder: 1 },
+      { estimateId: insertedEstimates[0].id, controllerId: "A", zoneNumber: "2", zoneName: "Back Yard", workDescription: "Install rotor system for large back lawn area", clockInTime: "10:00 AM", sortOrder: 2 },
+      { estimateId: insertedEstimates[1].id, controllerId: "B", zoneNumber: "1", zoneName: "Parking Area", workDescription: "Install commercial sprinkler system for landscaping", clockInTime: "7:00 AM", sortOrder: 1 },
     ];
 
     const insertedEstimateZones = await db.insert(estimateZones).values(sampleEstimateZones).returning();

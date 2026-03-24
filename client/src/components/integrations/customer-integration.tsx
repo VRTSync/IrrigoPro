@@ -45,10 +45,7 @@ export function CustomerIntegration() {
   // Google Sheets mutations
   const connectGoogleSheets = useMutation({
     mutationFn: async (url: string) => {
-      return apiRequest('/api/integrations/google-sheets/customers/connect', {
-        method: 'POST',
-        body: { sheetUrl: url }
-      });
+      return apiRequest('/api/integrations/google-sheets/customers/connect', 'POST', { sheetUrl: url });
     },
     onSuccess: () => {
       toast({
@@ -69,9 +66,7 @@ export function CustomerIntegration() {
 
   const syncGoogleSheets = useMutation({
     mutationFn: async () => {
-      return apiRequest('/api/integrations/google-sheets/customers/sync', {
-        method: 'POST'
-      });
+      return apiRequest('/api/integrations/google-sheets/customers/sync', 'POST');
     },
     onSuccess: (data: any) => {
       toast({
@@ -92,9 +87,7 @@ export function CustomerIntegration() {
 
   const disconnectGoogleSheets = useMutation({
     mutationFn: async () => {
-      return apiRequest('/api/integrations/google-sheets/customers/disconnect', {
-        method: 'POST'
-      });
+      return apiRequest('/api/integrations/google-sheets/customers/disconnect', 'POST');
     },
     onSuccess: () => {
       toast({
@@ -168,9 +161,7 @@ export function CustomerIntegration() {
 
   const disconnectQuickBooks = useMutation({
     mutationFn: async () => {
-      return apiRequest('/api/quickbooks/disconnect', {
-        method: 'POST'
-      });
+      return apiRequest('/api/quickbooks/disconnect', 'POST');
     },
     onSuccess: () => {
       toast({

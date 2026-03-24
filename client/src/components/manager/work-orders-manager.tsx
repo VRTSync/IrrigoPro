@@ -141,7 +141,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                       </Badge>
                     </div>
                     <p className="text-gray-600 mb-1">Customer: {workOrder.customerName}</p>
-                    <p className="text-gray-600 mb-1">Property: {workOrder.propertyAddress}</p>
+                    <p className="text-gray-600 mb-1">Property: {workOrder.projectAddress}</p>
                     <p className="text-sm text-gray-500">
                       Created: {new Date(workOrder.createdAt).toLocaleDateString()}
                     </p>

@@ -611,6 +611,7 @@ This is an automated email from IrrigoPro
             Name: `Invoice_${invoiceNumber}_Detail.pdf`,
             Content: pdfBase64,
             ContentType: 'application/pdf',
+            ContentID: '',
           },
         ],
         Tag: 'invoice-detail-pdf',

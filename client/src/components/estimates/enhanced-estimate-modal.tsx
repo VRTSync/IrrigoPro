@@ -38,7 +38,7 @@ const estimateFormSchema = z.object({
 type EstimateFormValues = z.infer<typeof estimateFormSchema>;
 
 interface EstimateItem {
-  part: Part;
+  part: Part & { laborHours?: string };
   quantity: number;
   totalPrice: number;
   totalLaborHours: number;
@@ -169,7 +169,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
             laborHours: item.laborHours,
             sku: "",
             category: ""
-          } as Part,
+          } as Part & { laborHours?: string },
           quantity: item.quantity,
           totalPrice: parseFloat(item.totalPrice),
           totalLaborHours: parseFloat(item.laborHours) // Labor hours per part, not multiplied by quantity
@@ -238,7 +238,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
     setZones(zones.filter(zone => zone.id !== zoneId));
   };
 
-  const addPart = (part: Part, quantity: number = 1) => {
+  const addPart = (part: Part & { laborHours?: string }, quantity: number = 1) => {
     if (!selectedZoneId) {
       toast({
         title: "Error",
@@ -258,7 +258,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       const updatedItems = [...zone.items];
       updatedItems[existingIndex].quantity += quantity;
       updatedItems[existingIndex].totalPrice = updatedItems[existingIndex].quantity * parseFloat(part.price);
-      updatedItems[existingIndex].totalLaborHours = parseFloat(part.laborHours); // Labor hours per part, not multiplied by quantity
+      updatedItems[existingIndex].totalLaborHours = parseFloat(part.laborHours || '0');
       
       updateZone(selectedZoneId, { items: updatedItems });
     } else {
@@ -267,7 +267,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         part,
         quantity,
         totalPrice: quantity * parseFloat(part.price),
-        totalLaborHours: parseFloat(part.laborHours), // Labor hours per part, not multiplied by quantity
+        totalLaborHours: parseFloat(part.laborHours || '0'),
       };
       
       updateZone(selectedZoneId, { items: [...zone.items, newItem] });
@@ -294,7 +294,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
           ...item,
           quantity: newQuantity,
           totalPrice: newQuantity * parseFloat(item.part.price),
-          totalLaborHours: parseFloat(item.part.laborHours), // Labor hours per part, not multiplied by quantity
+          totalLaborHours: parseFloat(item.part.laborHours || '0'),
         };
       }
       return item;

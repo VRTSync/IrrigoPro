@@ -22,6 +22,7 @@ interface UserProfile {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  emailVerified?: boolean;
 }
 
 export default function UserProfilePage() {

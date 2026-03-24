@@ -130,7 +130,7 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
                       <p className="font-medium text-gray-900">{part.name}</p>
                       <p className="text-sm text-gray-600">{part.description}</p>
                       <p className="text-xs text-gray-500">
-                        Labor: {part.laborHours} hours • SKU: {part.sku}
+                        SKU: {part.sku}
                       </p>
                     </div>
                   </div>

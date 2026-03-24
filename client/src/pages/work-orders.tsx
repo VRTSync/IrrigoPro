@@ -1060,7 +1060,7 @@ export default function WorkOrders() {
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
-                onClick={() => bulkDeleteWorkOrders.mutate([...selectedIds])}
+                onClick={() => bulkDeleteWorkOrders.mutate(Array.from(selectedIds))}
                 className="bg-red-600 hover:bg-red-700"
                 disabled={bulkDeleteWorkOrders.isPending}
               >

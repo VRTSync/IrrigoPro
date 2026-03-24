@@ -105,6 +105,16 @@ import { db } from "./db";
 import { sql, eq, like, desc, and, gte, lte, or } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
+type DrizzlePartInsert = typeof parts.$inferInsert;
+type DrizzleWorkOrderInsert = typeof workOrders.$inferInsert;
+type DrizzleInvoiceInsert = typeof invoices.$inferInsert;
+type DrizzleCustomerInsert = typeof customers.$inferInsert;
+type DrizzleBillingSheetInsert = typeof billingSheets.$inferInsert;
+
+function toDrizzleInsert<TDrizzle>(zodParsed: object): TDrizzle {
+  return zodParsed as TDrizzle;
+}
+
 export interface IStorage {
   // Companies
   getCompanies(): Promise<Company[]>;
@@ -308,7 +318,7 @@ export interface IStorage {
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
   getInvoiceById(id: number): Promise<InvoiceWithItems | undefined>;
-  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice>;
   updateInvoice(id: number, invoice: Partial<InsertInvoice>): Promise<Invoice | undefined>;
   deleteInvoice(id: number): Promise<boolean>;
   deleteInvoiceItemsByInvoiceId(invoiceId: number): Promise<boolean>;
@@ -327,8 +337,8 @@ export interface IStorage {
   getSiteMapZones(siteMapId: number): Promise<IrrigationZone[]>;
   createSiteMap(siteMap: InsertSiteMap): Promise<SiteMap>;
   deleteSiteMap(siteMapId: number): Promise<boolean>;
-  saveControllers(siteMapId: number, controllers: InsertController[]): Promise<Controller[]>;
-  saveZones(siteMapId: number, zones: InsertIrrigationZone[]): Promise<IrrigationZone[]>;
+  saveControllers(siteMapId: number, controllers: InsertController[], companyId?: number): Promise<Controller[]>;
+  saveZones(siteMapId: number, zones: InsertIrrigationZone[], companyId?: number): Promise<IrrigationZone[]>;
 
   // Company Profile Management
   getCompanyProfile(companyId: number): Promise<Company | undefined>;
@@ -451,22 +461,20 @@ export class DatabaseStorage implements IStorage {
 
   // Users - with optional pagination (backward compatible)
   async getUsers(companyId?: number, options?: { limit?: number; offset?: number }): Promise<User[]> {
-    let query = db.select().from(users);
-    
-    if (companyId !== undefined) {
-      // For super_admin (companyId = null), show all users
-      // For company users, show only users from their company
-      if (companyId !== null) {
-        query = query.where(eq(users.companyId, companyId));
-      }
+    const conditions = [];
+    if (companyId !== undefined && companyId !== null) {
+      conditions.push(eq(users.companyId, companyId));
     }
-    
-    // Add pagination if requested (maintains backward compatibility)
+
+    let query = conditions.length > 0
+      ? db.select().from(users).where(and(...conditions))
+      : db.select().from(users);
+
     if (options?.limit) {
-      query = query.limit(options.limit);
+      query = query.limit(options.limit) as typeof query;
     }
     if (options?.offset) {
-      query = query.offset(options.offset);
+      query = query.offset(options.offset) as typeof query;
     }
     
     return await query;
@@ -740,13 +748,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPart(part: InsertPart): Promise<Part> {
-    const [newPart] = await db.insert(parts).values(part).returning();
+    const [newPart] = await db.insert(parts).values(toDrizzleInsert<DrizzlePartInsert>(part)).returning();
     return newPart;
   }
 
   async updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined> {
     try {
-      const [updatedPart] = await db.update(parts).set(part).where(eq(parts.id, id)).returning();
+      const [updatedPart] = await db.update(parts).set(toDrizzleInsert<Partial<DrizzlePartInsert>>(part)).where(eq(parts.id, id)).returning();
       return updatedPart || undefined;
     } catch (error) {
       console.error(`Database error in updatePart for ID ${id}:`, error);
@@ -875,8 +883,10 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      (assembly as any).totalPrice = totalPrice.toFixed(2);
-      (assembly as any).totalLaborHours = totalLaborHours.toFixed(2);
+      Object.assign(assembly, {
+        totalPrice: totalPrice.toFixed(2),
+        totalLaborHours: totalLaborHours.toFixed(2)
+      });
 
       // Remove existing parts
       await db.delete(assemblyParts).where(eq(assemblyParts.assemblyId, id));
@@ -1458,7 +1468,7 @@ export class DatabaseStorage implements IStorage {
 
   async getQuickBooksCustomerStatus(companyId?: string | null): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
     // Check if QuickBooks integration exists for this company
-    let integration: any[];
+    let integration: (typeof quickbooksIntegration.$inferSelect)[];
     if (companyId) {
       integration = await db.select().from(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId)).limit(1);
       // Fall back to first integration (handles legacy data where companyId was stored as QB realm ID)
@@ -1547,16 +1557,16 @@ export class DatabaseStorage implements IStorage {
         // Add new customer
         await db.insert(customers).values({
           name: qbCustomer.name,
-          email: qbCustomer.email,
+          email: qbCustomer.email || '',
           phone: qbCustomer.phone,
           address: qbCustomer.address,
-          companyId: 1, // Default company
+          companyId: 1,
           laborRate: "45.00",
           markupPercent: "20.00",
           taxPercent: "8.25",
           paymentTerms: "net_30",
           notes: `Synced from QuickBooks (ID: ${qbCustomer.id})`
-        });
+        } as InsertCustomer);
         customersAdded++;
       } else {
         // Update existing customer with QuickBooks data
@@ -1750,7 +1760,7 @@ export class DatabaseStorage implements IStorage {
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
     // Create the work order with full pricing snapshot from estimate
-    const workOrderData: InsertWorkOrder = {
+    const workOrderData: InsertWorkOrder & { workOrderNumber: string } = {
       workOrderNumber,
       estimateId: estimateId,
       customerId: estimate.customerId!,
@@ -1773,7 +1783,7 @@ export class DatabaseStorage implements IStorage {
       totalItems: estimate.zones?.reduce((sum, zone) => sum + zone.items.length, 0) || 0,
     };
 
-    const [newWorkOrder] = await db.insert(workOrders).values(workOrderData).returning();
+    const [newWorkOrder] = await db.insert(workOrders).values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData)).returning();
 
     // Copy estimate items to work order items
     if (estimate.zones) {
@@ -1938,9 +1948,9 @@ export class DatabaseStorage implements IStorage {
     };
     
     // Remove any timestamp fields that Drizzle manages automatically
-    const { createdAt, updatedAt, ...insertData } = finalSheetDataWithNumber;
+    const { createdAt, updatedAt, ...insertData } = finalSheetDataWithNumber as Record<string, unknown>;
     
-    const [newSheet] = await db.insert(billingSheets).values([insertData]).returning();
+    const [newSheet] = await db.insert(billingSheets).values([toDrizzleInsert<DrizzleBillingSheetInsert>(insertData)]).returning();
     
     // If items are provided, insert them
     if (items && Array.isArray(items)) {
@@ -2061,7 +2071,7 @@ export class DatabaseStorage implements IStorage {
       );
     
     // Group by customer
-    const customerWork = new Map<number, { workOrders: any[], billingSheets: any[] }>();
+    const customerWork = new Map<number, { workOrders: WorkOrder[], billingSheets: BillingSheet[] }>();
     
     // Group work orders by customer
     completedWorkOrders.forEach(wo => {
@@ -2095,7 +2105,7 @@ export class DatabaseStorage implements IStorage {
 
   async createMonthlyInvoice(
     customerId: number, 
-    work: { workOrders: any[], billingSheets: any[] },
+    work: { workOrders: WorkOrder[], billingSheets: BillingSheet[] },
     month: number,
     year: number,
     periodStart: Date,
@@ -2175,8 +2185,8 @@ export class DatabaseStorage implements IStorage {
           sourceType: "work_order",
           sourceId: wo.id,
           workOrderId: wo.id,
-          workDate: wo.completedAt || wo.startedAt,
-          description: wo.projectName || wo.description,
+          workDate: wo.completedAt || wo.startedAt || new Date(),
+          description: wo.projectName || wo.description || '',
           partId: item.partId,
           partName: item.partName,
           quantity: item.actualQuantityUsed?.toString() || item.quantity.toString(),
@@ -2249,8 +2259,8 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
   }
 
-  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
-    const [newInvoice] = await db.insert(invoices).values(invoice).returning();
+  async createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice> {
+    const [newInvoice] = await db.insert(invoices).values(toDrizzleInsert<DrizzleInvoiceInsert>(invoice)).returning();
     return newInvoice;
   }
 
@@ -2496,7 +2506,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getPopularParts(companyId: number, limit: number = 10): Promise<(Part & { usageCount: number })[]> {
+  async getPopularParts(companyId: number, limit: number = 10): Promise<{ id: number; companyId: number; name: string; description: string | null; sku: string; category: string; price: string; usageCount: number }[]> {
     const results = await db.select({
       id: parts.id,
       companyId: parts.companyId,

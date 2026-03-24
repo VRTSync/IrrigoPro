@@ -40,7 +40,7 @@ const estimateFormSchema = z.object({
 type EstimateFormValues = z.infer<typeof estimateFormSchema>;
 
 interface EstimateItem {
-  part: Part;
+  part: Part & { laborHours?: string };
   quantity: number;
   totalPrice: number;
   totalLaborHours: number;
@@ -193,7 +193,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     setZones(zones.filter(zone => zone.id !== zoneId));
   };
 
-  const addPart = (part: Part, quantity: number = 1) => {
+  const addPart = (part: Part & { laborHours?: string }, quantity: number = 1) => {
     if (!selectedZoneId) {
       toast({
         title: "Error",
@@ -212,14 +212,14 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       const updatedItems = [...zone.items];
       updatedItems[existingIndex].quantity += quantity;
       updatedItems[existingIndex].totalPrice = parseFloat(part.price) * updatedItems[existingIndex].quantity;
-      updatedItems[existingIndex].totalLaborHours = parseFloat(part.laborHours) * updatedItems[existingIndex].quantity;
+      updatedItems[existingIndex].totalLaborHours = parseFloat(part.laborHours || '0') * updatedItems[existingIndex].quantity;
       updateZone(selectedZoneId, { items: updatedItems });
     } else {
       const newItem: EstimateItem = {
         part,
         quantity,
         totalPrice: parseFloat(part.price) * quantity,
-        totalLaborHours: parseFloat(part.laborHours) * quantity,
+        totalLaborHours: parseFloat(part.laborHours || '0') * quantity,
       };
       updateZone(selectedZoneId, { items: [...zone.items, newItem] });
     }
@@ -235,7 +235,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
           ...item,
           quantity: Math.max(0, quantity),
           totalPrice: parseFloat(item.part.price) * Math.max(0, quantity),
-          totalLaborHours: parseFloat(item.part.laborHours) * Math.max(0, quantity),
+          totalLaborHours: parseFloat(item.part.laborHours || '0') * Math.max(0, quantity),
         };
       }
       return item;

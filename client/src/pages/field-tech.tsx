@@ -54,7 +54,7 @@ export default function FieldTech() {
   const { toast } = useToast();
 
   // Fetch property zones
-  const { data: propertyZones = [], isLoading: loadingZones } = useQuery({
+  const { data: propertyZones = [], isLoading: loadingZones } = useQuery<PropertyZone[]>({
     queryKey: ["/api/property-zones"],
     enabled: true,
   });

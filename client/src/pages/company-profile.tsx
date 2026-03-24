@@ -361,8 +361,7 @@ export default function CompanyProfile() {
                   {isEditing && (
                     <div className="border rounded-lg p-4">
                       <ObjectUploader
-                        maxNumberOfFiles={1}
-                        maxFileSize={2097152}
+                        maxSizeMB={2}
                         onGetUploadParameters={async () => {
                           try {
                             console.log('Getting upload parameters for company logo...');

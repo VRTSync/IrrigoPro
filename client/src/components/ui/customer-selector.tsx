@@ -352,7 +352,7 @@ export function CustomerSelector({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Contract Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} defaultValue={field.value ?? undefined}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select contract type" />
@@ -421,7 +421,7 @@ export function CustomerSelector({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Payment Terms</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} defaultValue={field.value ?? undefined}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select payment terms" />

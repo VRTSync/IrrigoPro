@@ -131,7 +131,8 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   const { data: partMaterials = [] } = useQuery<PartMaterial[]>({ queryKey: ["/api/part-settings/materials"] });
   const { data: partFittingTypes = [] } = useQuery<PartFittingType[]>({ queryKey: ["/api/part-settings/fitting-types"] });
   
-  const form = useForm<z.infer<typeof PartFormSchema>>({
+  type PartFormInput = z.input<typeof PartFormSchema>;
+  const form = useForm<PartFormInput>({
     resolver: zodResolver(PartFormSchema),
     defaultValues: {
       companyId: 1,
@@ -189,7 +190,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   }, [part, form]);
 
   const createPartMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof PartFormSchema>) => {
+    mutationFn: async (data: PartFormInput) => {
       return await apiRequest("/api/parts", "POST", data);
     },
     onSuccess: () => {
@@ -211,7 +212,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   });
 
   const updatePartMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof PartFormSchema>) => {
+    mutationFn: async (data: PartFormInput) => {
       console.log("updatePartMutation.mutationFn called with:", { 
         partId: part?.id, 
         url: `/api/parts/${part?.id}`,
@@ -241,7 +242,7 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
     },
   });
 
-  const onSubmit = (data: z.infer<typeof PartFormSchema>) => {
+  const onSubmit = (data: PartFormInput) => {
     console.log("Parts form onSubmit called", { 
       hasPartForEdit: !!part, 
       partId: part?.id,
@@ -563,9 +564,6 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
 const AssemblyFormSchema = insertAssemblySchema.omit({ 
   companyId: true, 
   createdBy: true,
-  id: true,
-  createdAt: true,
-  updatedAt: true 
 }).extend({
   parts: z.array(z.object({
     partId: z.number(),
@@ -840,7 +838,7 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Category</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value ?? undefined}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select category" />
@@ -867,7 +865,7 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
                 <FormItem>
                   <FormLabel>Description</FormLabel>
                   <FormControl>
-                    <Textarea {...field} placeholder="Describe what this assembly is used for..." rows={2} />
+                    <Textarea {...field} value={field.value ?? ''} placeholder="Describe what this assembly is used for..." rows={2} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

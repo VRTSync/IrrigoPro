@@ -82,7 +82,7 @@ export default function PartsList() {
 
   const deletePart = useMutation({
     mutationFn: async (id: number) => {
-      return apiRequest(`/api/parts/${id}`, { method: 'DELETE' });
+      return apiRequest(`/api/parts/${id}`, 'DELETE');
     },
     onSuccess: () => {
       toast({

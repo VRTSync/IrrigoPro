@@ -1,4 +1,5 @@
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express } from "express";
+import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import bcrypt from 'bcrypt';
@@ -6,19 +7,8 @@ import crypto from 'crypto';
 import { EmailService } from "./email-service";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
-import { db } from "./db";
-import { invoicePdfs } from "@shared/schema";
-import { eq } from "drizzle-orm";
 
-// Extend Express Request type to include session
-declare module 'express' {
-  interface Request {
-    session: any;
-    authenticatedUserId?: number;
-    authenticatedUserRole?: string;
-    authenticatedUserCompanyId?: number | null;
-  }
-}
+/// <reference path="./types/express.d.ts" />
 
 // ============================================================================
 // FIELD TECH PRICING VISIBILITY - Critical Security Feature
@@ -109,7 +99,9 @@ import {
   insertSiteMapSchema,
   insertCompanySchema,
   insertAssemblySchema,
-  insertAssemblyPartSchema
+  insertAssemblyPartSchema,
+  type InsertEstimateZone,
+  type InsertEstimateItem
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -406,7 +398,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     // Production session-based authentication
     if (req.session && req.session.userId) {
       try {
-        const user = await storage.getUser(parseInt(req.session.userId));
+        const user = await storage.getUser(parseInt(String(req.session.userId)));
         if (user) {
           userId = req.session.userId;
           userRole = user.role;
@@ -490,7 +482,7 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
     // Prioritize session authentication (production-safe)
     if (req.session?.userId) {
       userId = req.session.userId.toString();
-      const user = await storage.getUser(parseInt(userId));
+      const user = await storage.getUser(parseInt(userId!));
       if (user) {
         userRole = user.role;
         console.log('Session authentication successful:', { userId, userRole });
@@ -546,7 +538,7 @@ const requireQuickBooksAccess = (req: any, res: any, next: any) => {
 const oauthStateStore = new Map<string, { expiry: number; companyId: string | null }>();
 setInterval(() => {
   const now = Date.now();
-  for (const [state, entry] of oauthStateStore.entries()) {
+  for (const [state, entry] of Array.from(oauthStateStore.entries())) {
     if (now > entry.expiry) oauthStateStore.delete(state);
   }
 }, 60_000);
@@ -555,7 +547,7 @@ import { db } from "./db";
 import { 
   customers, estimates, workOrders, estimateItems, estimateZones, parts, billingSheets, billingSheetItems, 
   users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
-  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones
+  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs
 } from "@shared/schema";
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
 
@@ -658,7 +650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Allow company admins and irrigation managers to view their own company profile
       const allowedRoles = ['company_admin', 'irrigation_manager'];
-      if (!allowedRoles.includes(userRole) || userCompanyId !== companyId) {
+      if (!allowedRoles.includes(userRole as string) || userCompanyId !== companyId) {
         return res.status(403).json({ message: "Access denied. You can only view your own company profile." });
       }
 
@@ -860,7 +852,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Production session-based fallback
       if (!userRole && req.session && req.session.userId) {
         try {
-          const user = await storage.getUser(parseInt(req.session.userId));
+          const user = await storage.getUser(parseInt(String(req.session.userId)));
           if (user) {
             userRole = user.role;
             userCompanyId = user.companyId;
@@ -1451,7 +1443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         newPassword: "admin123"
       });
     } catch (error) {
-      res.status(500).json({ message: "Password reset failed", error: error.message });
+      res.status(500).json({ message: "Password reset failed", error: error instanceof Error ? error.message : String(error) });
     }
   });
 
@@ -1547,7 +1539,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         password: hashedPassword,
         passwordResetToken: null,
         passwordResetExpires: null,
-        updatedAt: new Date()
       });
       
       res.json({ message: "Password reset successfully" });
@@ -1579,7 +1570,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.updateUser(user.id, {
         emailVerificationToken,
         emailVerificationExpires,
-        updatedAt: new Date()
       });
       
       // Send verification email
@@ -1623,7 +1613,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.updateUser(user.id, {
         emailVerificationToken,
         emailVerificationExpires,
-        updatedAt: new Date()
       });
       
       // Send verification email
@@ -1652,7 +1641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Get user from database
-      const user = await storage.getUser(parseInt(req.session.userId));
+      const user = await storage.getUser(parseInt(String(req.session.userId)));
       if (!user) {
         return res.status(404).json({ 
           message: "User not found" 
@@ -1699,7 +1688,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         emailVerified: true,
         emailVerificationToken: null,
         emailVerificationExpires: null,
-        updatedAt: new Date()
       });
       
       res.send(`
@@ -1866,7 +1854,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             pendingWorkOrders: workOrders.filter(wo => wo.status === 'pending' || wo.status === 'assigned' || wo.status === 'in_progress').length
           };
         } catch (error) {
-          console.error(`Error processing customer ${customer.id}: ${error.message}`);
+          console.error(`Error processing customer ${customer.id}: ${error instanceof Error ? error.message : String(error)}`);
           return {
             id: customer.id,
             name: customer.name,
@@ -2228,8 +2216,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Filter to only include selected items
-      let selectedWorkOrders = [];
-      let selectedBillingSheets = [];
+      let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
+      let selectedBillingSheets: (typeof allBillingSheets)[number][] = [];
 
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
@@ -2376,8 +2364,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const billingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Filter to only include selected items
-      let selectedWorkOrders = [];
-      let selectedBillingSheets = [];
+      let selectedWorkOrders: (typeof allWorkOrders)[number][] = [];
+      let selectedBillingSheets: (typeof allBillingSheets)[number][] = [];
 
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
@@ -2442,8 +2430,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         status: 'generated',
-        createdAt: currentDate,
-        updatedAt: currentDate
       });
 
       if (!invoice) {
@@ -2463,16 +2449,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           workOrderId: workOrder.id,
           description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
           workDate: workOrder.completedAt || workOrder.createdAt,
-          technicianName: workOrder.completedByUserName || workOrder.assignedTechnicianName || 'Unknown',
           laborHours: (parseFloat(workOrder.totalHours || '0')).toString(),
           laborRate: '45.00',
-          laborAmount: woLaborAmount.toString(),
           laborTotal: woLaborAmount.toString(),
-          partsAmount: woPartsAmount.toString(),
-          markupAmount: 0,
-          taxAmount: 0,
-          totalAmount: woTotalAmount.toString(),
-          quantity: 1,
+          quantity: '1',
           unitPrice: woTotalAmount.toString(),
           totalPrice: woTotalAmount.toString()
         });
@@ -2487,16 +2467,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           billingSheetId: billingSheet.id,
           description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
           workDate: billingSheet.workDate,
-          technicianName: billingSheet.technicianName,
           laborHours: (parseFloat(billingSheet.totalHours || '0')).toString(),
           laborRate: (parseFloat(billingSheet.laborRate || '45')).toString(),
-          laborAmount: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
           laborTotal: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
-          partsAmount: (parseFloat(billingSheet.partsSubtotal || '0')).toString(),
-          markupAmount: 0,
-          taxAmount: 0,
-          totalAmount: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
-          quantity: 1,
+          quantity: '1',
           unitPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
           totalPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString()
         });
@@ -2811,7 +2785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/customers/import-csv", requireCompanyAdminAccess, async (req, res) => {
     try {
-      const file = (req as any).files?.file;
+      const file = req.files?.file;
       if (!file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
@@ -2958,7 +2932,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
-      if (!allowedRoles.includes(userRole)) {
+      if (!allowedRoles.includes(userRole as string)) {
         return res.status(403).json({ message: "Access denied. You don't have permission to create parts." });
       }
 
@@ -2994,7 +2968,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check role-based access for parts editing
       const userRole = req.authenticatedUserRole;
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
-      if (!allowedRoles.includes(userRole)) {
+      if (!allowedRoles.includes(userRole as string)) {
         console.error(`PUT /api/parts/:id - Access denied. Role ${userRole} cannot edit parts`);
         return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
       }
@@ -3046,7 +3020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check role-based access for parts editing
       const userRole = req.authenticatedUserRole;
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
-      if (!allowedRoles.includes(userRole)) {
+      if (!allowedRoles.includes(userRole as string)) {
         console.error(`PATCH /api/parts/:id - Access denied. Role ${userRole} cannot edit parts`);
         return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
       }
@@ -3770,7 +3744,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
-      if (!allowedRoles.includes(userRole)) {
+      if (!allowedRoles.includes(userRole as string)) {
         return res.status(403).json({ message: "Access denied. You don't have permission to delete parts." });
       }
 
@@ -3990,6 +3964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             price: price.toString(),
             sku: sku.trim(),
             category: category.trim(),
+            companyId: req.authenticatedUserCompanyId || 1,
           };
 
           await storage.createPart(partData);
@@ -4068,8 +4043,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...zone,
         items: zone.items.map(item => {
           // Handle nested part data structure from frontend
-          const partData = (item as any).part;
-          const quantity = (item as any).quantity || 1;
+          const partData = item.part;
+          const quantity = item.quantity || 1;
           const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
           const laborHours = parseFloat(String(item.laborHours || 0));
           return {
@@ -4101,12 +4076,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
 
       const laborSubtotal = totalLaborHours * laborRate;
-      const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
+      const markupAmount = partsSubtotal * (markupPercent / 100);
       const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
       const taxAmount = subtotalWithMarkup * (taxPercent / 100);
       const totalAmount = subtotalWithMarkup + taxAmount;
 
-      // Convert and normalize data with calculated totals
       const estimate = {
         ...parsed.estimate,
         estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
@@ -4120,7 +4094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         taxPercent: String(parsed.estimate.taxPercent)
       };
       
-      const newEstimate = await storage.createEstimate(estimate, zones);
+      const newEstimate = await storage.createEstimate(estimate, zones as (InsertEstimateZone & { items: InsertEstimateItem[] })[]);
       res.status(201).json(newEstimate);
     } catch (error) {
       console.error("Estimate creation error:", error);
@@ -4132,7 +4106,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           details: error.errors.map(err => ({
             path: err.path.join('.'),
             message: err.message,
-            received: err.received
+            received: 'received' in err ? (err as z.ZodIssue & { received?: unknown }).received : undefined
           }))
         });
       }
@@ -4153,8 +4127,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...zone,
         items: zone.items.map(item => {
           // Handle nested part data structure from frontend
-          const partData = (item as any).part;
-          const quantity = (item as any).quantity || 1;
+          const partData = item.part;
+          const quantity = item.quantity || 1;
           const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
           const laborHours = parseFloat(String(item.laborHours || 0));
           return {
@@ -4186,12 +4160,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
 
       const laborSubtotal = totalLaborHours * laborRate;
-      const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
+      const markupAmount = partsSubtotal * (markupPercent / 100);
       const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
       const taxAmount = subtotalWithMarkup * (taxPercent / 100);
       const totalAmount = subtotalWithMarkup + taxAmount;
 
-      // Convert and normalize data with calculated totals
       const estimate = {
         ...parsed.estimate,
         estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
@@ -4205,7 +4178,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         taxPercent: String(parsed.estimate.taxPercent)
       };
       
-      const updatedEstimate = await storage.updateEstimateWithZones(estimateId, estimate, zones);
+      const updatedEstimate = await storage.updateEstimateWithZones(estimateId, estimate, zones as (InsertEstimateZone & { items: InsertEstimateItem[] })[]);
       res.json(updatedEstimate);
     } catch (error) {
       console.error("Estimate update error:", error);
@@ -4217,7 +4190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           details: error.errors.map(err => ({
             path: err.path.join('.'),
             message: err.message,
-            received: err.received
+            received: 'received' in err ? (err as z.ZodIssue & { received?: unknown }).received : undefined
           }))
         });
       }
@@ -4453,7 +4426,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   }
 
   // Helper function to make QuickBooks API requests with intuit_tid capture and automatic token refresh
-  async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = ''): Promise<Response> {
+  async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = ''): Promise<globalThis.Response> {
     let response = await fetch(url, options);
     
     // Always capture intuit_tid from response headers
@@ -4492,7 +4465,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           // Retry the original request with the new token
           const updatedOptions = { ...options };
           if (updatedOptions.headers) {
-            (updatedOptions.headers as any)['Authorization'] = `Bearer ${newTokenData.access_token}`;
+            (updatedOptions.headers as Record<string, string>)['Authorization'] = `Bearer ${newTokenData.access_token}`;
           }
           
           console.log('Retrying request with refreshed token...');
@@ -4984,20 +4957,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       console.log(`Found ${qbCustomers.length} active customers in QuickBooks`);
       
-      const quickBooksCustomers = qbCustomers.map((customer: any) => ({
-        qb_id: customer.Id,
-        name: (customer.DisplayName || '').trim() || (customer.CompanyName || '').trim() || (customer.Name || '').trim(),
-        email: customer.PrimaryEmailAddr?.Address || '',
-        phone: customer.PrimaryPhone?.FreeFormNumber || '',
+      const quickBooksCustomers = (qbCustomers as Record<string, unknown>[]).map((customer: Record<string, unknown>) => ({
+        qb_id: customer.Id as string,
+        name: (String(customer.DisplayName || '').trim() || String(customer.CompanyName || '').trim() || String(customer.Name || '').trim()),
+        email: ((customer.PrimaryEmailAddr as Record<string, string> | undefined)?.Address || ''),
+        phone: ((customer.PrimaryPhone as Record<string, string> | undefined)?.FreeFormNumber || ''),
         address: customer.BillAddr ? 
-          `${customer.BillAddr.Line1 || ''} ${customer.BillAddr.City || ''} ${customer.BillAddr.CountrySubDivisionCode || ''} ${customer.BillAddr.PostalCode || ''}`.trim() 
+          `${(customer.BillAddr as Record<string, string>).Line1 || ''} ${(customer.BillAddr as Record<string, string>).City || ''} ${(customer.BillAddr as Record<string, string>).CountrySubDivisionCode || ''} ${(customer.BillAddr as Record<string, string>).PostalCode || ''}`.trim() 
           : ''
       }));
       
       console.log(`After mapping: ${quickBooksCustomers.length} customers to process`);
       console.log('Sample customer data:', quickBooksCustomers[0]);
       
-      // Filter out customers with no usable name at all
       const validCustomers = quickBooksCustomers.filter(customer => customer.name && customer.name.trim() !== '');
 
       let customersAdded = 0;
@@ -5033,7 +5005,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           }
         } catch (error) {
           console.error(`Error syncing customer ${qbCustomer.name}:`, error);
-          results.push({ action: 'error', customer: qbCustomer, error: error.message });
+          results.push({ action: 'error', customer: qbCustomer, error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -5115,7 +5087,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             description: item.Description || '',
             price: (item.UnitPrice || 0).toString(),
             companyId: req.authenticatedUserCompanyId || 1,
-            quickbooksId: item.Id
+            quickbooksId: item.Id,
+            category: 'General'
           };
 
           // Check if part already exists by QuickBooks ID
@@ -5327,7 +5300,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrder = await storage.createWorkOrderFromEstimate(id);
         
         // Auto-assign to the company's irrigation manager
-        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId);
+        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId!);
         if (irrigationManager && workOrder) {
           await storage.assignWorkOrder(workOrder.id, irrigationManager.id, irrigationManager.name);
           
@@ -5337,7 +5310,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             type: 'work_order_assigned',
             title: 'New Work Order Assigned',
             message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} has been auto-assigned to you from approved estimate.`,
-            data: { workOrderId: workOrder.id, estimateId: id },
             isRead: false,
           });
         }
@@ -5429,7 +5401,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvalToken,
         estimateDate: new Date(estimate.estimateDate).toLocaleDateString(),
         createdBy: estimate.createdBy,
-        companyId: estimate.companyId,
+        companyId: estimate.companyId!,
         zones: zones?.map(zone => ({
           zoneName: zone.zoneName,
           workDescription: zone.workDescription,
@@ -5502,7 +5474,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrder = await storage.createWorkOrderFromEstimate(estimate.id);
         
         // Auto-assign to the company's irrigation manager
-        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId);
+        const irrigationManager = await storage.getIrrigationManagerForCompany(estimate.companyId!);
         if (irrigationManager && workOrder) {
           await storage.assignWorkOrder(workOrder.id, irrigationManager.id, irrigationManager.name);
           
@@ -5512,7 +5484,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             type: 'work_order_assigned',
             title: 'New Work Order Assigned',
             message: `Work order ${workOrder.workOrderNumber} for ${estimate.customerName} has been auto-assigned to you from approved estimate.`,
-            data: { workOrderId: workOrder.id, estimateId: estimate.id },
             isRead: false,
           });
         }
@@ -5788,7 +5759,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const result = await storage.syncQuickBooksCustomers();
       res.json(result);
     } catch (error) {
-      res.status(500).json({ message: error.message || "Failed to sync customers from QuickBooks" });
+      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to sync customers from QuickBooks" });
     }
   });
 
@@ -5821,7 +5792,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       } = req.body;
 
       const completedByUserId = req.authenticatedUserId;
-      const completedByUser = await storage.getUser(completedByUserId);
+      const completedByUser = completedByUserId ? await storage.getUser(completedByUserId) : undefined;
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
 
       // Calculate totals
@@ -5853,9 +5824,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         completedByUserName: completedByUserName as string,
         workSummary,
         customerNotes,
-        totalHours: laborHours,
+        totalHours: laborHours.toString(),
         photos: mergedPhotos,
-        totalPartsCost: partsCost,
+        totalPartsCost: partsCost.toString(),
         totalAmount: totalAmount.toFixed(2)
       });
 
@@ -5907,7 +5878,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const id = parseInt(req.params.id);
       
       const completedByUserId = req.authenticatedUserId;
-      const completedByUser = await storage.getUser(completedByUserId);
+      const completedByUser = completedByUserId ? await storage.getUser(completedByUserId) : undefined;
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
       
       const workOrder = await storage.updateWorkOrder(id, { 
@@ -6075,7 +6046,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       const billingSheet = await storage.createBillingSheet({
         ...cleanData,
-        billingNumber
       });
 
       // Notify irrigation managers and admins that a billing sheet was submitted
@@ -6284,8 +6254,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       // Send email to customer with PDF attachment
-      const emailService = new EmailService();
-      const emailResult = await emailService.sendInvoiceDetailPdf(
+      const emailResult = await EmailService.sendInvoiceDetailPdf(
         invoice.customerEmail,
         invoice.customerName,
         invoice.invoiceNumber,
@@ -6636,7 +6605,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Invalid work order ID" });
       }
       const billingData = req.body;
-      await storage.createBillingSheet(workOrderId, billingData);
+      await storage.createBillingSheet({ ...billingData, workOrderId });
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to save billing sheet" });
@@ -6711,7 +6680,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Notification routes
   app.get("/api/notifications/:userId", requireNotificationAccess, async (req, res) => {
     try {
-      const userId = req.authenticatedUserId; // Use the validated user ID from middleware
+      const userId = req.authenticatedUserId!;
       
       const notifications = await storage.getNotifications(userId);
       res.json(notifications);
@@ -6728,7 +6697,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.get("/api/notifications/:userId/count", requireNotificationAccess, async (req, res) => {
     try {
-      const userId = req.authenticatedUserId; // Use the validated user ID from middleware
+      const userId = req.authenticatedUserId!;
       
       const count = await storage.getUnreadNotificationCount(userId);
       res.json({ count });
@@ -6804,8 +6773,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Multi-Factor Authentication API endpoints
   app.post("/api/mfa/setup", async (req, res) => {
     try {
-      const userId = (req as any).user?.id;
-      const userEmail = (req as any).user?.email;
+      const userId = req.user?.id;
+      const userEmail = req.user?.email;
       
       if (!userId || !userEmail) {
         return res.status(401).json({ message: "Authentication required" });
@@ -6829,7 +6798,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/mfa/verify-setup", async (req, res) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.id;
       const { secret, code, backupCodes } = req.body;
       
       if (!userId) {
@@ -6866,7 +6835,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/mfa/verify", async (req, res) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.id;
       const { code } = req.body;
       
       if (!userId) {
@@ -6913,7 +6882,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/mfa/disable", async (req, res) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.id;
       const { password } = req.body;
       
       if (!userId) {
@@ -6955,7 +6924,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/mfa/backup-codes/regenerate", async (req, res) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.id;
       
       if (!userId) {
         return res.status(401).json({ message: "Authentication required" });
@@ -6987,7 +6956,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.get("/api/mfa/status", async (req, res) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = req.user?.id;
       
       if (!userId) {
         return res.status(401).json({ message: "Authentication required" });
@@ -7186,7 +7155,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/company/:companyId/api-keys", requireCompanyAdminAccess, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userId = parseInt(req.headers['x-user-id'] as string) || req.session?.userId;
+      const userId = parseInt(req.headers['x-user-id'] as string) || Number(req.session?.userId) || 0;
       const { name, expiresAt } = req.body;
 
       if (!name || name.trim().length === 0) {
@@ -7200,7 +7169,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const apiKey = await storage.createApiKey({
         companyId,
         name: name.trim(),
-        apiKey: rawKey, // Store the raw key (could be hashed for extra security)
+        apiKey: rawKey,
         keyPrefix,
         createdBy: userId,
         expiresAt: expiresAt ? new Date(expiresAt) : null,
@@ -7342,12 +7311,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const newCustomer = await storage.createCustomer({
           companyId,
           name: customer.name,
-          email: customer.email || null,
-          phone: customer.phone || null,
-          address: customer.address || null,
-          city: customer.city || null,
-          state: customer.state || null,
-          zipCode: customer.zip || null,
+          email: customer.email || '',
+          phone: customer.phone || undefined,
+          address: customer.address || undefined,
           notes: `Created via API integration on ${new Date().toISOString()}`
         });
         customerId = newCustomer.id;
@@ -7361,7 +7327,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       // Create the work order with all required fields
       const newWorkOrder = await storage.createWorkOrder({
-        companyId,
         customerId,
         customerName: customerData?.name || customer.name,
         customerEmail: customerData?.email || customer.email || '',

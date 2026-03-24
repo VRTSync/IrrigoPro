@@ -52,7 +52,7 @@ export default function SiteMaps() {
       );
       
       // Only show site maps for billing-visible customers
-      return mapsWithCustomers.filter(map => visibleIds.has(map.customerId));
+      return mapsWithCustomers.filter(map => map.customerId != null && visibleIds.has(map.customerId));
     },
     enabled: !!currentUser?.id && billingCustomers !== undefined,
   });

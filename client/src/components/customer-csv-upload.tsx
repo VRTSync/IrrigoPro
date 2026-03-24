@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Upload, FileText, CheckCircle, AlertCircle, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { safeGet } from "@/utils/safeStorage";
 
 interface CsvUploadResult {
   success: boolean;
@@ -29,10 +29,31 @@ export function CustomerCsvUpload() {
       const formData = new FormData();
       formData.append('file', csvFile);
       
-      return apiRequest('/api/customers/import-csv', {
+      let user = null;
+      try {
+        const savedUser = safeGet("user");
+        if (savedUser) user = JSON.parse(savedUser);
+      } catch {
+        user = null;
+      }
+      const headers: Record<string, string> = {};
+      if (user?.role) {
+        headers["x-user-role"] = user.role;
+        headers["x-user-id"] = user.id?.toString() || "";
+        headers["x-user-name"] = user.name || "";
+        headers["x-user-company-id"] = user.companyId?.toString() || "";
+      }
+      const res = await fetch('/api/customers/import-csv', {
         method: 'POST',
+        headers,
         body: formData,
+        credentials: "include",
       });
+      if (!res.ok) {
+        const text = (await res.text()) || res.statusText;
+        throw new Error(`${res.status}: ${text}`);
+      }
+      return await res.json();
     },
     onSuccess: (result: CsvUploadResult) => {
       setUploadResult(result);

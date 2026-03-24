@@ -678,7 +678,7 @@ export default function BillingSheets() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => bulkDeleteBillingSheets.mutate([...selectedIds])}
+              onClick={() => bulkDeleteBillingSheets.mutate(Array.from(selectedIds))}
               className="bg-red-600 hover:bg-red-700"
               disabled={bulkDeleteBillingSheets.isPending}
             >

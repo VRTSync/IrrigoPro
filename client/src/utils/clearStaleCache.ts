@@ -5,7 +5,7 @@ export const clearStaleCache = () => {
     queryClient.removeQueries({ 
       predicate: (query) => {
         const key = Array.isArray(query.queryKey) ? query.queryKey[0] as string : '';
-        return key && key.includes('/api/company/') && key.includes('/profile');
+        return !!(key && key.includes('/api/company/') && key.includes('/profile'));
       }
     });
   }).catch(() => {});

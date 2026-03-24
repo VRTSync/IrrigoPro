@@ -152,10 +152,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
 
   const saveBillingSheet = useMutation({
     mutationFn: async (data: BillingSheetData) => {
-      return apiRequest(`/api/work-orders/${workOrder.id}/billing-sheet`, {
-        method: 'POST',
-        body: data,
-      });
+      return apiRequest(`/api/work-orders/${workOrder.id}/billing-sheet`, 'POST', data);
     },
     onSuccess: () => {
       toast({

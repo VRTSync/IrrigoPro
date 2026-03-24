@@ -94,7 +94,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
           <Card>
             <CardContent className="text-center py-8">
               <p className="text-gray-500 mb-4">No estimates found</p>
-              <Button onClick={() => setShowCreateForm(true)}>
+              <Button onClick={() => setShowEstimateModal(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Create First Estimate
               </Button>
@@ -113,7 +113,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                       </Badge>
                     </div>
                     <p className="text-gray-600 mb-1">Customer: {estimate.customerName}</p>
-                    <p className="text-gray-600 mb-1">Property: {estimate.propertyAddress}</p>
+                    <p className="text-gray-600 mb-1">Property: {estimate.projectAddress}</p>
                     <p className="text-sm text-gray-500">
                       Created: {new Date(estimate.createdAt).toLocaleDateString()}
                     </p>
