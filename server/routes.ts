@@ -1818,14 +1818,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
-          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed');
+          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed' || bs.status === 'approved');
           
           // Calculate unbilled amounts for this customer
           const unbilledWorkOrders = completedWorkOrders.filter(wo => 
             !wo.invoiceId && wo.status === 'completed'
           );
           const unbilledBillingSheets = completedBillingSheets.filter(bs => 
-            !bs.invoiceId && bs.status === 'completed'
+            !bs.invoiceId && (bs.status === 'completed' || bs.status === 'approved')
           );
           
           const unbilledAmount = 
@@ -1981,7 +1981,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wo.status === 'completed' && !wo.invoiceId
       );
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'completed' && !bs.invoiceId
+        (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
       );
 
       // Calculate total unbilled amount
@@ -2241,7 +2241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           wo.status === 'completed' && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          bs.status === 'completed' && !bs.invoiceId
+          (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
         );
       }
 
@@ -2389,7 +2389,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           wo.status === 'completed' && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          bs.status === 'completed' && !bs.invoiceId
+          (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
         );
       }
 
