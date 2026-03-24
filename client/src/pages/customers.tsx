@@ -7,7 +7,7 @@ import { CustomerListSkeleton } from "@/components/ui/loading-skeleton";
 import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, ChevronDown, ChevronUp, Building2 } from "lucide-react";
+import { Plus, Users, Search, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, ChevronDown, ChevronUp, Building2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import type { Customer } from "@shared/schema";
@@ -340,29 +340,24 @@ export default function Customers() {
                                         <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={(e) => { e.stopPropagation(); setSelectedCustomer(customer); }}>
                                           <Eye className="w-4 h-4" />
                                         </Button>
-                                        {(userRole === 'company_admin' || userRole === 'super_admin' || userRole === 'billing_manager') && (
-                                          <>
-                                            <CustomerForm customer={customer} trigger={<Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900" onClick={(e) => e.stopPropagation()}><Edit className="w-4 h-4" /></Button>} />
-                                            {(userRole === 'company_admin' || userRole === 'super_admin') && (
-                                              <AlertDialog>
-                                                <AlertDialogTrigger asChild>
-                                                  <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}><Trash2 className="w-4 h-4" /></Button>
-                                                </AlertDialogTrigger>
-                                                <AlertDialogContent>
-                                                  <AlertDialogHeader>
-                                                    <AlertDialogTitle>Delete Customer</AlertDialogTitle>
-                                                    <AlertDialogDescription>Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.</AlertDialogDescription>
-                                                  </AlertDialogHeader>
-                                                  <AlertDialogFooter>
-                                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                    <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={(e) => { e.stopPropagation(); handleDeleteCustomer(customer.id); }} disabled={deleteCustomerMutation.isPending}>
-                                                      {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
-                                                    </AlertDialogAction>
-                                                  </AlertDialogFooter>
-                                                </AlertDialogContent>
-                                              </AlertDialog>
-                                            )}
-                                          </>
+                                        {(userRole === 'company_admin' || userRole === 'super_admin') && (
+                                          <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                              <Button variant="ghost" size="sm" className="text-gray-600 hover:text-red-600" onClick={(e) => e.stopPropagation()}><Trash2 className="w-4 h-4" /></Button>
+                                            </AlertDialogTrigger>
+                                            <AlertDialogContent>
+                                              <AlertDialogHeader>
+                                                <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+                                                <AlertDialogDescription>Are you sure you want to delete "{customer.name}"? This action cannot be undone and will remove all associated data including estimates, work orders, and billing records.</AlertDialogDescription>
+                                              </AlertDialogHeader>
+                                              <AlertDialogFooter>
+                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={(e) => { e.stopPropagation(); handleDeleteCustomer(customer.id); }} disabled={deleteCustomerMutation.isPending}>
+                                                  {deleteCustomerMutation.isPending ? "Deleting..." : "Delete Customer"}
+                                                </AlertDialogAction>
+                                              </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                          </AlertDialog>
                                         )}
                                       </>
                                     )}

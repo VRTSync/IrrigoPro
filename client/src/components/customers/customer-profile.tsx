@@ -18,8 +18,7 @@ import {
   DollarSign,
   Clock,
   Package,
-  Map,
-  Pencil
+  Map
 } from "lucide-react";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
@@ -27,7 +26,6 @@ import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
 import { BillingNotes } from "./billing-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
-import { CustomerForm } from "@/components/customer-form";
 
 interface CustomerProfileProps {
   customer: Customer;
@@ -126,17 +124,6 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
               <ArrowLeft className="w-4 h-4" />
               Back to Customers
             </Button>
-            {isAdmin && (
-              <CustomerForm
-                customer={customer}
-                trigger={
-                  <Button variant="outline" className="flex items-center gap-2">
-                    <Pencil className="w-4 h-4" />
-                    Edit Customer
-                  </Button>
-                }
-              />
-            )}
           </div>
           
           <div className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border shadow-lg p-4 sm:p-6 lg:p-8">

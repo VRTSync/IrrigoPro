@@ -6,11 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign, Edit } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign } from "lucide-react";
 import { Customer } from "@shared/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
-import { CustomerForm } from "@/components/customer-form";
 
 export default function CustomerProfile() {
   const { id } = useParams();
@@ -101,17 +100,6 @@ export default function CustomerProfile() {
               <MapPin className="w-4 h-4 mr-2" />
               View Site Map
             </Button>
-            {isAdmin && (
-              <CustomerForm
-                customer={customer}
-                trigger={
-                  <Button variant="outline" className="w-full">
-                    <Edit className="w-4 h-4 mr-2" />
-                    Edit Customer
-                  </Button>
-                }
-              />
-            )}
           </div>
         </div>
       </div>
@@ -139,17 +127,6 @@ export default function CustomerProfile() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isAdmin && (
-            <CustomerForm
-              customer={customer}
-              trigger={
-                <Button variant="outline">
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit Customer
-                </Button>
-              }
-            />
-          )}
           <Button
             onClick={() => setLocation(`/customers/${id}/site-maps`)}
             className="bg-blue-600 hover:bg-blue-700"
