@@ -395,25 +395,28 @@ export function StandaloneBillingSheet({
       if (isSubmittingRef.current) return;
       isSubmittingRef.current = true;
 
-      const submissionData = {
-        ...data,
-        // Ensure laborRate is set for field techs (use default if hidden)
-        laborRate: isFieldTech ? 45 : data.laborRate,
-        laborSubtotal: totals.laborSubtotal,
-        partsSubtotal: totals.partsSubtotal,
-        markupAmount: totals.markupAmount,
-        taxAmount: totals.taxAmount,
-        totalAmount: totals.totalAmount,
-        markupPercent,
-        taxPercent,
-        technicianId: currentUser?.id, // Add technician ID for proper filtering
-        status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft', // Field techs submit, irrigation managers auto-approve, others save as draft
-      };
-
       // Determine if this is an update or create operation
       const isUpdating = !!draftData?.id;
       const url = isUpdating ? `/api/billing-sheets/${draftData.id}` : "/api/billing-sheets";
       const method = isUpdating ? "PATCH" : "POST";
+
+      // Field techs submitting a draft must send only { status: 'submitted' }
+      // (the server enforces this restriction for security).
+      // All other cases (new sheet POST or manager PATCH) send the full payload.
+      const submissionData = (isUpdating && isFieldTech)
+        ? { status: 'submitted' as const }
+        : {
+            ...data,
+            // Ensure laborRate is set for field techs (use default if hidden)
+            laborRate: isFieldTech ? 45 : data.laborRate,
+            laborSubtotal: totals.laborSubtotal,
+            partsSubtotal: totals.partsSubtotal,
+            markupAmount: totals.markupAmount,
+            taxAmount: totals.taxAmount,
+            totalAmount: totals.totalAmount,
+            technicianId: currentUser?.id,
+            status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft',
+          };
 
       setIsSubmitting(true);
       fetch(url, {

@@ -290,8 +290,8 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
 
   // Field techs can only submit their own billing sheet for approval
   if (userRole === 'field_tech') {
-    const keys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
     // Payload must be exactly { status: 'submitted' }
+    const keys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
     if (keys.length !== 1 || updateData.status !== 'submitted') {
       return res.status(403).json({
         message: "Access denied. Field technicians can only submit billing sheets for approval."
@@ -6032,7 +6032,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalAmount: billingSheetData.totalAmount || '0',
         photos: billingSheetData.photos || [],
         notes: billingSheetData.notes || '',
-        branchName: billingSheetData.branchName || null
+        branchName: billingSheetData.branchName || null,
+        items: Array.isArray(billingSheetData.items) ? billingSheetData.items : undefined,
       };
       
       // Generate billing number
@@ -6079,7 +6080,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.patch("/api/billing-sheets/:id", requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { items, ...billingSheetData } = req.body;
+      const { items, markupPercent, taxPercent, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
       
       console.log('Updating billing sheet:', id, 'with data:', billingSheetData);
       
@@ -6611,17 +6612,43 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Work order not found" });
       }
 
-      const { techName, workPerformed, ...rest } = req.body;
+      const { techName, workPerformed, additionalNotes, totalPartsCost, arrivalPhoto, finishedPhoto, actualStartTime, actualEndTime, materialItems, laborItems, additionalCharges, technicianNotes, laborRate: formLaborRate, ...rest } = req.body;
+
+      const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      let resolvedStatus: string;
+      if (creatorRole === 'irrigation_manager' || creatorRole === 'billing_manager') {
+        resolvedStatus = 'approved';
+      } else if (creatorRole === 'field_tech') {
+        resolvedStatus = 'submitted';
+      } else {
+        resolvedStatus = 'draft';
+      }
+
+      const totalHoursVal = workOrder.totalHours ?? "0";
+      const laborRateVal = formLaborRate || "45.00";
+      const laborSubtotalVal = (parseFloat(String(totalHoursVal)) * parseFloat(String(laborRateVal))).toFixed(2);
+      const partsSubtotalVal = parseFloat(String(totalPartsCost || "0")).toFixed(2);
+      const taxAmount = ((parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal)) * 0.0825).toFixed(2);
+      const totalAmount = (parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal) + parseFloat(taxAmount)).toFixed(2);
 
       await storage.createBillingSheet({
-        ...rest,
         workOrderId,
-        technicianName: techName,
-        workDescription: workPerformed,
+        technicianName: techName || workOrder.assignedTechnicianName || "",
+        workDescription: workPerformed || "",
         customerName: workOrder.customerName,
         propertyAddress: workOrder.projectAddress || "",
         customerId: workOrder.customerId,
-        totalHours: workOrder.totalHours ?? "0",
+        totalHours: totalHoursVal,
+        laborRate: laborRateVal,
+        laborSubtotal: laborSubtotalVal,
+        partsSubtotal: partsSubtotalVal,
+        markupAmount: "0",
+        taxAmount,
+        totalAmount,
+        status: resolvedStatus,
+        notes: additionalNotes || technicianNotes || "",
+        photos: [],
+        workDate: new Date(),
       });
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {

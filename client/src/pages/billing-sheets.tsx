@@ -125,7 +125,7 @@ export default function BillingSheets() {
     sheet.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     sheet.billingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     sheet.technicianName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sheet.propertyAddress.toLowerCase().includes(searchQuery.toLowerCase());
+    (sheet.propertyAddress || "").toLowerCase().includes(searchQuery.toLowerCase());
 
   // Filter billing sheets based on search query
   const filteredDrafts = draftSheets.filter(matchesSearch);
