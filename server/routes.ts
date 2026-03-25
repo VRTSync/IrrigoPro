@@ -6604,8 +6604,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (isNaN(workOrderId) || workOrderId <= 0) {
         return res.status(400).json({ message: "Invalid work order ID" });
       }
-      const billingData = req.body;
-      await storage.createBillingSheet({ ...billingData, workOrderId });
+
+      // Fetch the work order to enrich billing sheet with required fields
+      const workOrder = await storage.getWorkOrder(workOrderId);
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+
+      const { techName, workPerformed, ...rest } = req.body;
+
+      await storage.createBillingSheet({
+        ...rest,
+        workOrderId,
+        technicianName: techName,
+        workDescription: workPerformed,
+        customerName: workOrder.customerName,
+        propertyAddress: workOrder.projectAddress || "",
+        customerId: workOrder.customerId,
+        totalHours: workOrder.totalHours ?? "0",
+      });
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to save billing sheet" });
