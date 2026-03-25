@@ -161,6 +161,7 @@ export function CustomerSelector({
                   </div>
                 </div>
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => setIsOpen(true)}
@@ -174,6 +175,7 @@ export function CustomerSelector({
           </Card>
         ) : (
           <Button
+            type="button"
             variant="outline"
             onClick={() => setIsOpen(true)}
             disabled={disabled}
@@ -214,6 +216,7 @@ export function CustomerSelector({
             {/* Create New Customer Button */}
             {canCreateCustomer && (
               <Button
+                type="button"
                 onClick={() => setShowNewCustomerDialog(true)}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white"
               >
@@ -229,7 +232,11 @@ export function CustomerSelector({
                   <Building className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No customers found</h3>
                   <p className="text-gray-600">
-                    {searchQuery ? "No customers match your search." : "No customers available."}
+                    {searchQuery
+                      ? canCreateCustomer
+                        ? "No customers match your search."
+                        : "Customer not found — contact your manager to have them added to the system."
+                      : "No customers available."}
                   </p>
                 </div>
               ) : (
