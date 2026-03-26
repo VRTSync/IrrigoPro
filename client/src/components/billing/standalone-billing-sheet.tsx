@@ -118,6 +118,7 @@ export function StandaloneBillingSheet({
   
   const isFieldTech = currentUser?.role === 'field_tech';
   const isIrrigationManager = currentUser?.role === 'irrigation_manager' || currentUser?.role === 'billing_manager';
+  const fieldTechAutoName = isFieldTech ? (currentUser?.name || currentUser?.username || "") : "";
 
   // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0];
@@ -131,7 +132,7 @@ export function StandaloneBillingSheet({
       customerName: prefillFromWorkOrder?.customerName || "",
       propertyAddress: prefillFromWorkOrder?.propertyAddress || "",
       workDate: today,
-      technicianName: isFieldTech ? (currentUser?.name || "") : "",
+      technicianName: isFieldTech ? (currentUser?.name || currentUser?.username || "") : "",
       workDescription: "",
       totalHours: 1,
       laborRate: 45,
@@ -271,10 +272,12 @@ export function StandaloneBillingSheet({
     if (
       currentUser &&
       (currentUser.role === 'field_tech' || currentUser.role === 'irrigation_manager') &&
-      !form.getValues('technicianName') &&
-      currentUser.name
+      !form.getValues('technicianName')
     ) {
-      form.setValue('technicianName', currentUser.name);
+      const autoFillName = currentUser.name || currentUser.username || "";
+      if (autoFillName) {
+        form.setValue('technicianName', autoFillName);
+      }
     }
   }, [currentUser, open]);
 
@@ -375,10 +378,20 @@ export function StandaloneBillingSheet({
   };
 
   const onValidationError = (errors: any) => {
-    const firstError = Object.values(errors)[0] as any;
+    console.error('Billing sheet validation errors:', errors);
+    const findFirstMessage = (obj: any): string | undefined => {
+      if (!obj || typeof obj !== 'object') return undefined;
+      if (typeof obj.message === 'string' && obj.message) return obj.message;
+      for (const val of Object.values(obj)) {
+        const msg = findFirstMessage(val);
+        if (msg) return msg;
+      }
+      return undefined;
+    };
+    const description = findFirstMessage(errors) || "Some required information is missing";
     toast({
       title: "Please complete all required fields",
-      description: firstError?.message || "Some required information is missing",
+      description,
       variant: "destructive",
     });
   };
@@ -842,8 +855,8 @@ export function StandaloneBillingSheet({
                                 <Input 
                                   {...field} 
                                   placeholder="Who performed the work"
-                                  disabled={isFieldTech}
-                                  className={isFieldTech ? "bg-gray-50" : ""}
+                                  disabled={isFieldTech && !!fieldTechAutoName}
+                                  className={isFieldTech && !!fieldTechAutoName ? "bg-gray-50" : ""}
                                 />
                               </FormControl>
                               <FormMessage />
