@@ -432,46 +432,32 @@ export function StandaloneBillingSheet({
           };
 
       setIsSubmitting(true);
-      fetch(url, {
-        method: method,
-        credentials: 'include',
-        headers: {
-          "Content-Type": "application/json",
-          "X-User-Role": currentUser?.role || ""
-        },
-        body: JSON.stringify(submissionData),
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`${response.status}: ${response.statusText}`);
-        }
-        return response.json();
-      })
-      .then(() => {
-        toast({
-          title: "Success",
-          description: isFieldTech 
-            ? "Billing sheet submitted successfully"
-            : "Billing sheet saved successfully",
+      apiRequest(url, method, submissionData)
+        .then(() => {
+          toast({
+            title: "Success",
+            description: isFieldTech
+              ? "Billing sheet submitted successfully"
+              : "Billing sheet saved successfully",
+          });
+          queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+          if (currentUser?.role === 'field_tech' && currentUser?.id) {
+            queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
+          }
+          forceClose();
+        })
+        .catch(error => {
+          console.error('Submission error:', error);
+          toast({
+            title: "Error",
+            description: error.message || "Failed to save billing sheet",
+            variant: "destructive",
+          });
+        })
+        .finally(() => {
+          isSubmittingRef.current = false;
+          setIsSubmitting(false);
         });
-        queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
-        if (currentUser?.role === 'field_tech' && currentUser?.id) {
-          queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets", "technician", currentUser.id] });
-        }
-        forceClose();
-      })
-      .catch(error => {
-        console.error('Submission error:', error);
-        toast({
-          title: "Error",
-          description: error.message || "Failed to save billing sheet",
-          variant: "destructive",
-        });
-      })
-      .finally(() => {
-        isSubmittingRef.current = false;
-        setIsSubmitting(false);
-      });
     } else {
       setShowReview(true);
     }
@@ -1068,30 +1054,34 @@ export function StandaloneBillingSheet({
                                 ) : partsSearchQuery ? (
                                   <div className="p-6 text-center text-gray-500">
                                     <p>No parts found matching "{partsSearchQuery}"</p>
-                                    <Button
-                                      type="button"
-                                      onClick={addManualItem}
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-2"
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      Add as Manual Item
-                                    </Button>
+                                    {!isFieldTech && (
+                                      <Button
+                                        type="button"
+                                        onClick={addManualItem}
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-2"
+                                      >
+                                        <Plus className="w-3 h-3 mr-1" />
+                                        Add as Manual Item
+                                      </Button>
+                                    )}
                                   </div>
                                 ) : (
                                   <div className="p-6 text-center text-gray-500">
                                     <p>Start typing to search for parts</p>
-                                    <Button
-                                      type="button"
-                                      onClick={addManualItem}
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-2"
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      Add Manual Item
-                                    </Button>
+                                    {!isFieldTech && (
+                                      <Button
+                                        type="button"
+                                        onClick={addManualItem}
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-2"
+                                      >
+                                        <Plus className="w-3 h-3 mr-1" />
+                                        Add Manual Item
+                                      </Button>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1099,16 +1089,18 @@ export function StandaloneBillingSheet({
                           )}
                         </div>
 
-                        {/* Manual Add Button */}
-                        <Button
-                          type="button"
-                          onClick={addManualItem}
-                          variant="outline"
-                          className="w-full"
-                        >
-                          <Plus className="w-4 h-4 mr-2" />
-                          Add Manual Item
-                        </Button>
+                        {/* Manual Add Button — hidden for field techs to prevent blank-item validation errors */}
+                        {!isFieldTech && (
+                          <Button
+                            type="button"
+                            onClick={addManualItem}
+                            variant="outline"
+                            className="w-full"
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add Manual Item
+                          </Button>
+                        )}
                       </div>
 
                       {/* Added Items List */}
