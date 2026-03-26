@@ -359,7 +359,7 @@ export function StandaloneBillingSheet({
         partName: part.name,
         partDescription: part.description || "",
         quantity,
-        unitPrice: parseFloat(part.price),
+        unitPrice: parseFloat(part.price) || 0,
         laborHours: 0,
         notes: "",
       });
