@@ -247,6 +247,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const handleSave = () => {
     const newErrors: Record<string, string> = {};
     if (!projectName.trim()) newErrors.projectName = "Project name is required";
+    if (customerBranches.length > 0 && !branchName) newErrors.branchName = "Branch is required for this customer";
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
