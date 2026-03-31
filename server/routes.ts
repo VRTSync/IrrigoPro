@@ -127,13 +127,13 @@ const createEstimateWithZonesSchema = z.object({
         price: z.union([z.string(), z.number()]),
         laborHours: z.union([z.string(), z.number()]).optional()
       }).optional(),
-      partId: z.number().optional(),
+      partId: z.number().nullable().optional(),
       partName: z.string().optional(),
       partPrice: z.union([z.string(), z.number()]).optional(),
       quantity: z.number(),
       laborHours: z.union([z.string(), z.number()]).optional(),
       totalPrice: z.union([z.string(), z.number()]),
-      totalLaborHours: z.number().optional()
+      totalLaborHours: z.number().nullable().optional()
     }))
   }))
 });
@@ -7439,7 +7439,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           description: z.string().optional(),
           priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
           scheduledDate: z.string().optional(), // ISO date string
-          estimatedHours: z.number().optional(),
+          estimatedHours: z.number().nullable().optional(),
           location: z.string().optional(),
           notes: z.string().optional(),
           externalReferenceId: z.string().optional() // ID from the external CRM

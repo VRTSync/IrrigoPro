@@ -21,8 +21,8 @@ import type { Customer } from "@shared/schema";
 
 const workOrderFormSchema = insertWorkOrderSchema.extend({
   scheduledDate: z.string().optional(),
-  workLocationLat: z.number().optional(),
-  workLocationLng: z.number().optional(),
+  workLocationLat: z.number().nullable().optional(),
+  workLocationLng: z.number().nullable().optional(),
   workLocationAddress: z.string().optional(),
   branchName: z.string().optional(),
 });

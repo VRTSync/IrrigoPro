@@ -43,7 +43,7 @@ import { apiRequest } from "@/lib/queryClient";
 import type { Customer, Part } from "@shared/schema";
 
 const billingItemSchema = z.object({
-  partId: z.number().optional(),
+  partId: z.number().nullable().optional(),
   partName: z.string().min(1, "Part name is required"),
   partDescription: z.string().optional(),
   quantity: z.coerce.number().min(0.01, "Quantity must be greater than 0"),
@@ -56,8 +56,8 @@ const billingSheetSchema = z.object({
   customerId: z.number().min(1, "Customer is required"),
   customerName: z.string().min(1, "Customer name is required"),
   propertyAddress: z.string().optional(),
-  workLocationLat: z.number().optional(),
-  workLocationLng: z.number().optional(),
+  workLocationLat: z.number().nullable().optional(),
+  workLocationLng: z.number().nullable().optional(),
   workLocationAddress: z.string().optional(),
   workDate: z.string().min(1, "Work date is required"),
   technicianName: z.string().min(1, "Technician name is required"),
@@ -245,7 +245,13 @@ export function StandaloneBillingSheet({
         totalHours: draftData.totalHours || 1,
         laborRate: draftData.laborRate || 45,
         notes: draftData.notes || "",
-        items: Array.isArray(draftData.items) ? draftData.items : [],
+        items: Array.isArray(draftData.items) ? draftData.items.map((item: any) => ({
+          ...item,
+          partId: item.partId ?? undefined,
+          quantity: item.quantity ?? undefined,
+          unitPrice: item.unitPrice ?? undefined,
+          laborHours: item.laborHours ?? undefined,
+        })) : [],
       };
       
       form.reset(formData);
@@ -379,16 +385,42 @@ export function StandaloneBillingSheet({
 
   const onValidationError = (errors: any) => {
     console.error('Billing sheet validation errors:', errors);
-    const findFirstMessage = (obj: any): string | undefined => {
+
+    const fieldLabels: Record<string, string> = {
+      customerId: "Customer",
+      customerName: "Customer name",
+      propertyAddress: "Property address",
+      workDate: "Work date",
+      technicianName: "Technician name",
+      workDescription: "Work description",
+      totalHours: "Total hours",
+      laborRate: "Labor rate",
+      workLocationLat: "Work location latitude",
+      workLocationLng: "Work location longitude",
+      partName: "Part name",
+      quantity: "Quantity",
+      unitPrice: "Unit price",
+      laborHours: "Labor hours",
+    };
+
+    const findFirstError = (obj: any, path: string[] = []): { message: string; path: string[] } | undefined => {
       if (!obj || typeof obj !== 'object') return undefined;
-      if (typeof obj.message === 'string' && obj.message) return obj.message;
-      for (const val of Object.values(obj)) {
-        const msg = findFirstMessage(val);
-        if (msg) return msg;
+      if (typeof obj.message === 'string' && obj.message) return { message: obj.message, path };
+      for (const [key, val] of Object.entries(obj)) {
+        const result = findFirstError(val, [...path, key]);
+        if (result) return result;
       }
       return undefined;
     };
-    const description = findFirstMessage(errors) || "Some required information is missing";
+
+    const found = findFirstError(errors);
+    let description = "Some required information is missing";
+    if (found) {
+      const fieldKey = found.path[found.path.length - 1];
+      const label = fieldKey && fieldLabels[fieldKey] ? fieldLabels[fieldKey] : undefined;
+      description = label ? `${label}: ${found.message}` : found.message;
+    }
+
     toast({
       title: "Please complete all required fields",
       description,
