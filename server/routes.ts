@@ -6373,9 +6373,33 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/work-orders", async (req, res) => {
     try {
-      const workOrderData = insertWorkOrderSchema.parse(req.body);
+      const { items, ...workOrderBody } = req.body;
+      const workOrderData = insertWorkOrderSchema.parse(workOrderBody);
       const workOrder = await storage.createWorkOrder(workOrderData);
-      
+
+      // Save items if provided at creation time
+      if (items !== undefined && Array.isArray(items) && items.length > 0) {
+        let computedPartsCost = 0;
+        for (const item of items) {
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.unitPrice) || Number(item.partPrice) || 0;
+          const lineTotal = qty * price;
+          computedPartsCost += lineTotal;
+          await storage.addWorkOrderItem({
+            workOrderId: workOrder.id,
+            partId: item.partId || null,
+            partName: item.partName,
+            partPrice: price.toString(),
+            quantity: qty,
+            laborHours: (Number(item.laborHours) || 0).toString(),
+            totalPrice: lineTotal.toString(),
+            notes: item.notes || null,
+            zoneId: item.zoneId || null,
+          });
+        }
+        await storage.updateWorkOrder(workOrder.id, { totalPartsCost: computedPartsCost.toFixed(2) });
+      }
+
       // Send notification if technician is assigned during creation
       if (workOrder.assignedTechnicianId) {
         await storage.createNotification({
@@ -6631,6 +6655,71 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const taxAmount = ((parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal)) * 0.0825).toFixed(2);
       const totalAmount = (parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal) + parseFloat(taxAmount)).toFixed(2);
 
+      type RawLineItem = {
+        partId?: number | null;
+        partName?: string;
+        partDescription?: string | null;
+        description?: string;
+        quantity?: number | string;
+        unitPrice?: number | string;
+        partPrice?: number | string;
+        laborHours?: number | string;
+        notes?: string | null;
+      };
+
+      type ResolvedBillingItem = {
+        partId?: number | null;
+        partName: string;
+        partDescription?: string | null;
+        quantity: string;
+        unitPrice: string;
+        totalPrice: string;
+        laborHours: string;
+        notes?: string | null;
+      };
+
+      function mapRawLineItem(item: RawLineItem): ResolvedBillingItem {
+        const qty = Number(item.quantity) || 0;
+        const price = Number(item.unitPrice) || Number(item.partPrice) || 0;
+        return {
+          partId: item.partId ?? null,
+          partName: item.partName || item.description || "Part",
+          partDescription: item.partDescription || item.description || null,
+          quantity: qty.toString(),
+          unitPrice: price.toString(),
+          totalPrice: (qty * price).toFixed(2),
+          laborHours: (Number(item.laborHours) || 0).toString(),
+          notes: item.notes ?? null,
+        };
+      }
+
+      // Build billing sheet items from materialItems and laborItems in the request body.
+      // Fall back to work_order_items if no items were provided in this request.
+      let resolvedItems: ResolvedBillingItem[] = [];
+
+      const rawMaterialItems: RawLineItem[] = Array.isArray(materialItems) ? materialItems : [];
+      const rawLaborItems: RawLineItem[] = Array.isArray(laborItems) ? laborItems : [];
+      const rawRequestItems = [...rawMaterialItems, ...rawLaborItems];
+
+      if (rawRequestItems.length > 0) {
+        resolvedItems = rawRequestItems.map(mapRawLineItem);
+      } else {
+        // Fall back to items already saved on the work order
+        const workOrderItemsList = await storage.getWorkOrderItems(workOrderId);
+        if (workOrderItemsList.length > 0) {
+          resolvedItems = workOrderItemsList.map((item) => ({
+            partId: item.partId || null,
+            partName: item.partName,
+            partDescription: null,
+            quantity: String(item.quantity),
+            unitPrice: item.partPrice,
+            totalPrice: item.totalPrice,
+            laborHours: item.laborHours,
+            notes: item.notes || null,
+          }));
+        }
+      }
+
       await storage.createBillingSheet({
         workOrderId,
         technicianName: techName || workOrder.assignedTechnicianName || "",
@@ -6649,6 +6738,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         notes: additionalNotes || technicianNotes || "",
         photos: [],
         workDate: new Date(),
+        items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
