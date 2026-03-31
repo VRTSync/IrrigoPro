@@ -29,11 +29,14 @@ export function PartsSearchModal({ open, onOpenChange, onSelectPart }: PartsSear
 
 
 
-  const filteredParts = parts?.filter(part =>
-    part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.sku.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredParts = parts?.filter(part => {
+    const words = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length === 0 || words.every(word =>
+      part.name.toLowerCase().includes(word) ||
+      part.description?.toLowerCase().includes(word) ||
+      part.sku.toLowerCase().includes(word)
+    );
+  });
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {

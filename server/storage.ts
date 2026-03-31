@@ -102,7 +102,7 @@ import {
   type AssemblyWithParts
 } from "@shared/schema";
 import { db } from "./db";
-import { sql, eq, like, desc, and, gte, lte, or } from "drizzle-orm";
+import { sql, eq, like, ilike, desc, and, gte, lte, or } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 type DrizzlePartInsert = typeof parts.$inferInsert;
@@ -744,7 +744,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async searchParts(query: string): Promise<Part[]> {
-    return await db.select().from(parts).where(like(parts.name, `%${query}%`));
+    const words = query.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      return await db.select().from(parts);
+    }
+    const conditions = words.map(word =>
+      or(
+        ilike(parts.name, `%${word}%`),
+        ilike(parts.description, `%${word}%`),
+        ilike(parts.sku, `%${word}%`)
+      )
+    );
+    return await db.select().from(parts).where(and(...conditions));
   }
 
   async createPart(part: InsertPart): Promise<Part> {

@@ -44,10 +44,12 @@ export default function PartsList() {
 
   // Filter parts based on search and category
   const filteredParts = parts?.filter(part => {
-    const matchesSearch = !searchQuery || 
-      part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.sku.toLowerCase().includes(searchQuery.toLowerCase());
+    const words = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const matchesSearch = words.length === 0 || words.every(word =>
+      part.name.toLowerCase().includes(word) ||
+      part.description?.toLowerCase().includes(word) ||
+      part.sku.toLowerCase().includes(word)
+    );
     
     const matchesCategory = selectedCategory === "all" || part.category === selectedCategory;
     

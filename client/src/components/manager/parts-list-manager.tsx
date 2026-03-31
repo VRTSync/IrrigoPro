@@ -27,12 +27,15 @@ export function PartsListManager({ onBack }: PartsListManagerProps) {
     queryKey: ["/api/parts/field-tech"], // This endpoint excludes pricing
   });
 
-  const filteredParts = parts?.filter(part =>
-    part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    part.category?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredParts = parts?.filter(part => {
+    const words = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length === 0 || words.every(word =>
+      part.name.toLowerCase().includes(word) ||
+      part.description?.toLowerCase().includes(word) ||
+      part.sku.toLowerCase().includes(word) ||
+      part.category?.toLowerCase().includes(word)
+    );
+  });
 
   const getCategoryColor = (category: string) => {
     const colors: Record<string, string> = {
