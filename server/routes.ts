@@ -6049,6 +6049,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ...cleanData,
       });
 
+      const createdItemCount = Array.isArray(cleanData.items) ? cleanData.items.length : 0;
+      console.log(`[AUDIT] billing_sheet_created billingSheetId=${billingSheet.id} billingNumber=${billingNumber} itemCount=${createdItemCount} status=${resolvedStatus}`);
+
       // Notify irrigation managers and admins that a billing sheet was submitted
       try {
         const allUsers = await storage.getUsers();
@@ -6095,27 +6098,37 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Billing sheet not found" });
       }
       
-      // Handle items if provided
+      // Handle items if provided (delete-and-recreate wrapped in a transaction)
       if (items && Array.isArray(items)) {
-        console.log('Updating billing sheet items:', items.length);
-        // For simplicity, we'll delete existing items and create new ones
-        // In production, you might want more sophisticated update logic
-        await storage.deleteBillingSheetItems(id);
-        
-        for (const item of items) {
-          await storage.addBillingSheetItem(id, {
-            partId: item.partId || null,
-            partName: item.partName,
-            partDescription: item.partDescription || "",
-            quantity: item.quantity,
-            unitPrice: item.unitPrice.toString(),
-            laborHours: item.laborHours.toString(),
-            totalPrice: (item.quantity * item.unitPrice).toString(),
-            notes: item.notes || "",
-          });
-        }
+        const countBefore = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
+        const itemsToInsert = items.map((item: any) => ({
+          billingSheetId: id,
+          partId: item.partId || null,
+          partName: item.partName,
+          partDescription: item.partDescription || "",
+          quantity: item.quantity,
+          unitPrice: item.unitPrice.toString(),
+          laborHours: item.laborHours.toString(),
+          totalPrice: (item.quantity * item.unitPrice).toString(),
+          notes: item.notes || "",
+        }));
+        await storage.replaceBillingSheetItemsInTransaction(id, itemsToInsert);
+        console.log(`[AUDIT] billing_sheet_items_replaced billingSheetId=${id} countBefore=${countBefore} countAfter=${items.length}`);
       }
-      
+
+      // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
+      if (billingSheetData.status === 'submitted' || billingSheetData.status === 'approved') {
+        const partsSubtotal = parseFloat(String(billingSheetData.partsSubtotal ?? billingSheet.partsSubtotal ?? '0'));
+        if (partsSubtotal > 0) {
+          const currentItems = (await storage.getBillingSheetById(id))?.items ?? [];
+          if (currentItems.length === 0) {
+            return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+          }
+        }
+        const currentItemCount = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
+        console.log(`[AUDIT] billing_sheet_status_change billingSheetId=${id} status=${billingSheetData.status} itemCount=${currentItemCount}`);
+      }
+
       res.json(billingSheet);
     } catch (error) {
       console.error('Error updating billing sheet:', error);
@@ -6400,6 +6413,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         await storage.updateWorkOrder(workOrder.id, { totalPartsCost: computedPartsCost.toFixed(2) });
       }
 
+      const woItemCount = (await storage.getWorkOrderItems(workOrder.id)).length;
+      console.log(`[AUDIT] work_order_created workOrderId=${workOrder.id} workOrderNumber=${workOrder.workOrderNumber} itemCount=${woItemCount}`);
+
+
       // Send notification if technician is assigned during creation
       if (workOrder.assignedTechnicianId) {
         await storage.createNotification({
@@ -6431,21 +6448,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const { items, ...workOrderBody } = req.body;
       const workOrderData = insertWorkOrderSchema.partial().parse(workOrderBody);
-      const workOrder = await storage.updateWorkOrder(id, workOrderData);
-      if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+      let workOrder;
+      if (Object.keys(workOrderData).length > 0) {
+        workOrder = await storage.updateWorkOrder(id, workOrderData);
+        if (!workOrder) {
+          return res.status(404).json({ message: "Work order not found" });
+        }
+      } else {
+        workOrder = await storage.getWorkOrder(id);
+        if (!workOrder) {
+          return res.status(404).json({ message: "Work order not found" });
+        }
       }
 
-      // Handle items if provided (delete-and-recreate pattern)
+      // Handle items if provided (delete-and-recreate pattern wrapped in a transaction)
       if (items !== undefined && Array.isArray(items)) {
-        await storage.deleteWorkOrderItems(id);
-        let computedPartsCost = 0;
-        for (const item of items) {
+        const countBefore = (await storage.getWorkOrderItems(id)).length;
+        const itemsToInsert = items.map((item: any) => {
           const qty = Number(item.quantity) || 0;
           const price = Number(item.unitPrice) || 0;
           const lineTotal = qty * price;
-          computedPartsCost += lineTotal;
-          await storage.addWorkOrderItem({
+          return {
             workOrderId: id,
             partId: item.partId || null,
             partName: item.partName,
@@ -6455,10 +6478,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             totalPrice: lineTotal.toString(),
             notes: item.notes || null,
             zoneId: item.zoneId || null,
-          });
-        }
-        // Persist the recomputed parts cost back to the work order
+          };
+        });
+        await storage.replaceWorkOrderItemsInTransaction(id, itemsToInsert);
+        const computedPartsCost = itemsToInsert.reduce((sum: number, i: any) => sum + Number(i.totalPrice), 0);
         await storage.updateWorkOrder(id, { totalPartsCost: computedPartsCost.toFixed(2) });
+        console.log(`[AUDIT] work_order_items_replaced workOrderId=${id} countBefore=${countBefore} countAfter=${items.length}`);
+      }
+
+      // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
+      if (workOrderData.status === 'submitted' || workOrderData.status === 'approved') {
+        const freshWorkOrder = await storage.getWorkOrder(id);
+        const partsSubtotal = parseFloat(String(freshWorkOrder?.partsSubtotal ?? '0'));
+        if (partsSubtotal > 0) {
+          const currentItems = await storage.getWorkOrderItems(id);
+          if (currentItems.length === 0) {
+            return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+          }
+        }
+        console.log(`[AUDIT] work_order_status_change workOrderId=${id} status=${workOrderData.status} itemCount=${(await storage.getWorkOrderItems(id)).length}`);
       }
 
       res.json(workOrder);
@@ -6720,8 +6758,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
-      await storage.createBillingSheet({
-        workOrderId,
+      const workOrderSourceItemCount = (await storage.getWorkOrderItems(workOrderId)).length;
+      const newBillingSheet = await storage.createBillingSheet({
         technicianName: techName || workOrder.assignedTechnicianName || "",
         workDescription: workPerformed || "",
         customerName: workOrder.customerName,
@@ -6740,6 +6778,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workDate: new Date(),
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
+      console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=0`);
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to save billing sheet" });

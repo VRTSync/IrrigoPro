@@ -302,6 +302,7 @@ export interface IStorage {
   updateWorkOrderItem(id: number, item: Partial<InsertWorkOrderItem>): Promise<WorkOrderItem | undefined>;
   deleteWorkOrderItem(id: number): Promise<boolean>;
   deleteWorkOrderItems(workOrderId: number): Promise<boolean>;
+  replaceWorkOrderItemsInTransaction(workOrderId: number, items: InsertWorkOrderItem[]): Promise<WorkOrderItem[]>;
   
   // Billing Sheets - for work done without work orders
   getAllBillingSheets(): Promise<BillingSheetWithItems[]>;
@@ -314,6 +315,7 @@ export interface IStorage {
   deleteBillingSheetItems(billingSheetId: number): Promise<boolean>;
   updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined>;
   deleteBillingSheetItem(itemId: number): Promise<boolean>;
+  replaceBillingSheetItemsInTransaction(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<BillingSheetItem[]>;
 
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
@@ -1883,6 +1885,15 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
+  async replaceWorkOrderItemsInTransaction(workOrderId: number, items: InsertWorkOrderItem[]): Promise<WorkOrderItem[]> {
+    return await db.transaction(async (tx) => {
+      await tx.delete(workOrderItems).where(eq(workOrderItems.workOrderId, workOrderId));
+      if (items.length === 0) return [];
+      const inserted = await tx.insert(workOrderItems).values(items).returning();
+      return inserted;
+    });
+  }
+
   // Standalone Billing Sheets - for work done without work orders
   async getAllBillingSheets(): Promise<BillingSheetWithItems[]> {
     const sheets = await db.select().from(billingSheets).orderBy(desc(billingSheets.createdAt));
@@ -2018,6 +2029,20 @@ export class DatabaseStorage implements IStorage {
   async deleteBillingSheetItems(billingSheetId: number): Promise<boolean> {
     const result = await db.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
     return result.rowCount !== null;
+  }
+
+  async replaceBillingSheetItemsInTransaction(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<BillingSheetItem[]> {
+    return await db.transaction(async (tx) => {
+      await tx.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
+      if (items.length === 0) return [];
+      const values = items.map(item => ({
+        ...item,
+        billingSheetId,
+        totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+      }));
+      const inserted = await tx.insert(billingSheetItems).values(values).returning();
+      return inserted;
+    });
   }
 
   async getBillingSheetItems(billingSheetId: number): Promise<BillingSheetItem[]> {
