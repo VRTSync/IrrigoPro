@@ -135,10 +135,23 @@ export class PDFGenerator {
       // Set the HTML content — no external fetches needed since images are embedded
       await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
 
+      // Generate PDF with page numbers in footer
       const pdf = await page.pdf({
         format: 'A4',
         printBackground: true,
-        margin: { top: '0.5in', right: '0.5in', bottom: '0.75in', left: '0.5in' },
+        displayHeaderFooter: true,
+        headerTemplate: '<span></span>',
+        footerTemplate: `
+          <div style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#6b7280;text-align:center;padding:0 0.5in;">
+            Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+          </div>
+        `,
+        margin: {
+          top: '0.5in',
+          right: '0.5in',
+          bottom: '0.75in',
+          left: '0.5in'
+        }
       });
       return Buffer.from(pdf);
     } finally {
@@ -154,13 +167,17 @@ export class PDFGenerator {
     const { company, invoice, workOrders, billingSheets } = vm;
 
     const workOrdersSection = workOrders.length > 0
-      ? `${sectionBanner('work-orders')}
-         ${workOrders.map((wo, i) => workRecordCard(wo, woPhotoMaps[i] ?? [])).join('')}`
+      ? `<div class="work-orders-section-wrapper">
+         ${sectionBanner('work-orders')}
+         ${workOrders.map((wo, i) => workRecordCard(wo, woPhotoMaps[i] ?? [])).join('')}
+         </div>`
       : '';
 
     const billingSheetsSection = billingSheets.length > 0
-      ? `${sectionBanner('billing-sheets')}
-         ${billingSheets.map((bs, i) => billingSheetCard(bs, bsPhotoMaps[i] ?? [])).join('')}`
+      ? `<div class="billing-sheets-section-wrapper">
+         ${sectionBanner('billing-sheets')}
+         ${billingSheets.map((bs, i) => billingSheetCard(bs, bsPhotoMaps[i] ?? [])).join('')}
+         </div>`
       : '';
 
     return `<!DOCTYPE html>
@@ -173,9 +190,11 @@ export class PDFGenerator {
 <body>
   ${pageFooter(invoice.invoiceNumber)}
   <div class="container">
-    ${invoiceHeader(invoice, company)}
-    ${billToBlock(invoice)}
-    ${summaryTotalsCard(vm.totals, workOrders.length, billingSheets.length)}
+    <div class="summary-page">
+      ${invoiceHeader(invoice, company)}
+      ${billToBlock(invoice)}
+      ${summaryTotalsCard(vm.totals, workOrders.length, billingSheets.length)}
+    </div>
     ${tableOfContents(workOrders, billingSheets)}
     ${workOrdersSection}
     ${billingSheetsSection}
@@ -185,3 +204,4 @@ export class PDFGenerator {
 </html>`;
   }
 }
+

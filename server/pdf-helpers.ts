@@ -323,42 +323,50 @@ export function workRecordCard(wo: PdfWorkOrderRow, photoDataUris: string[]): st
        </div>`
     : '';
 
+  const hasPhotos = photoDataUris && photoDataUris.length > 0;
+  const itemCount = wo.items ? wo.items.length : 0;
+  const isLargeRecord = hasPhotos || itemCount > 8;
+
   return `
-  <div class="record-card">
-    <div class="record-card-header">
-      <div class="record-card-title">Work Order #${wo.workOrderNumber}</div>
-      <div class="record-card-subtitle">${wo.projectName}</div>
+  <div class="record-card ${isLargeRecord ? 'large-record' : ''}">
+    <div class="record-details-block">
+      <div class="record-card-header">
+        <div class="record-card-title">Work Order #${wo.workOrderNumber}</div>
+        <div class="record-card-subtitle">${wo.projectName}</div>
+      </div>
+      ${locationHtml}
+      <div class="record-meta-grid">
+        <div class="meta-item">
+          <div class="meta-label">Technician</div>
+          <div class="meta-value">${wo.technicianName}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Date Completed</div>
+          <div class="meta-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Total Hours</div>
+          <div class="meta-value">${wo.totalHours} hrs</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Labor Rate</div>
+          <div class="meta-value">${formatCurrency(wo.laborRate)}/hr</div>
+        </div>
+      </div>
+      ${descHtml}
+      ${partsTableFromWO(wo.items)}
     </div>
-    ${locationHtml}
-    <div class="record-meta-grid">
-      <div class="meta-item">
-        <div class="meta-label">Technician</div>
-        <div class="meta-value">${wo.technicianName}</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Date Completed</div>
-        <div class="meta-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Total Hours</div>
-        <div class="meta-value">${wo.totalHours} hrs</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Labor Rate</div>
-        <div class="meta-value">${formatCurrency(wo.laborRate)}/hr</div>
-      </div>
+    ${hasPhotos ? `<div class="photo-grid-block">${photoGrid(photoDataUris)}</div>` : ''}
+    <div class="record-totals-block">
+      ${laborAndTotalsBox({
+        partsSubtotal: wo.partsSubtotal,
+        laborHours: wo.totalHours,
+        laborRate: wo.laborRate,
+        laborSubtotal: wo.laborSubtotal,
+        total: wo.rowTotal,
+        label: 'Work Order Total',
+      })}
     </div>
-    ${descHtml}
-    ${partsTableFromWO(wo.items)}
-    ${photoGrid(photoDataUris)}
-    ${laborAndTotalsBox({
-      partsSubtotal: wo.partsSubtotal,
-      laborHours: wo.totalHours,
-      laborRate: wo.laborRate,
-      laborSubtotal: wo.laborSubtotal,
-      total: wo.rowTotal,
-      label: 'Work Order Total',
-    })}
   </div>`;
 }
 
@@ -393,44 +401,51 @@ export function billingSheetCard(bs: PdfBillingSheetRow, photoDataUris: string[]
        </div>`
     : '';
 
+  const hasPhotos = photoDataUris && photoDataUris.length > 0;
+  const itemCount = bs.items ? bs.items.length : 0;
+  const isLargeRecord = hasPhotos || itemCount > 8;
+
   return `
-  <div class="record-card record-card-bs">
-    <div class="record-card-header">
-      <div class="record-card-title">Billing Sheet #${bs.billingNumber}</div>
-      <div class="record-card-subtitle">${bs.workDescription}</div>
+  <div class="record-card record-card-bs ${isLargeRecord ? 'large-record' : ''}">
+    <div class="record-details-block">
+      <div class="record-card-header">
+        <div class="record-card-title">Billing Sheet #${bs.billingNumber}</div>
+        <div class="record-card-subtitle">${bs.workDescription}</div>
+      </div>
+      ${locationHtml}
+      <div class="record-meta-grid">
+        <div class="meta-item">
+          <div class="meta-label">Technician</div>
+          <div class="meta-value">${bs.technicianName}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Work Date</div>
+          <div class="meta-value">${formatDate(bs.workDate)}</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Total Hours</div>
+          <div class="meta-value">${bs.totalHours} hrs</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Labor Rate</div>
+          <div class="meta-value">${formatCurrency(bs.laborRate)}/hr</div>
+        </div>
+      </div>
+      ${descHtml}
+      ${notesHtml}
+      ${partsTableFromBS(bs.items)}
     </div>
-    ${locationHtml}
-    <div class="record-meta-grid">
-      <div class="meta-item">
-        <div class="meta-label">Technician</div>
-        <div class="meta-value">${bs.technicianName}</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Work Date</div>
-        <div class="meta-value">${formatDate(bs.workDate)}</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Total Hours</div>
-        <div class="meta-value">${bs.totalHours} hrs</div>
-      </div>
-      <div class="meta-item">
-        <div class="meta-label">Labor Rate</div>
-        <div class="meta-value">${formatCurrency(bs.laborRate)}/hr</div>
-      </div>
+    ${hasPhotos ? `<div class="photo-grid-block">${photoGrid(photoDataUris)}</div>` : ''}
+    <div class="record-totals-block">
+      ${laborAndTotalsBox({
+        partsSubtotal: bs.partsSubtotal,
+        laborHours: bs.totalHours,
+        laborRate: bs.laborRate,
+        laborSubtotal: bs.laborSubtotal,
+        total: bs.rowTotal,
+        label: 'Billing Sheet Total',
+      })}
     </div>
-    ${serviceDescHtml}
-    ${descHtml}
-    ${notesHtml}
-    ${partsTableFromBS(bs.items)}
-    ${photoGrid(photoDataUris)}
-    ${laborAndTotalsBox({
-      partsSubtotal: bs.partsSubtotal,
-      laborHours: bs.totalHours,
-      laborRate: bs.laborRate,
-      laborSubtotal: bs.laborSubtotal,
-      total: bs.rowTotal,
-      label: 'Billing Sheet Total',
-    })}
   </div>`;
 }
 
@@ -597,6 +612,15 @@ export function buildFullCSS(): string {
   .toc-amount { text-align: right; font-weight: 600; }
 
   /* ───────── SECTION BANNER ───────── */
+  .section-header {
+    background: #f3f4f6;
+    border-left: 4px solid #3B82F6;
+    padding: 15px 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
   .section-banner {
     display: flex;
     align-items: center;
@@ -608,6 +632,8 @@ export function buildFullCSS(): string {
     font-weight: 700;
     color: white;
     page-break-inside: avoid;
+    break-after: avoid;
+    page-break-after: avoid;
   }
   .banner-wo { background: linear-gradient(90deg, #1d4ed8 0%, #3B82F6 100%); }
   .banner-bs { background: linear-gradient(90deg, #065f46 0%, #059669 100%); }
@@ -765,9 +791,20 @@ export function buildFullCSS(): string {
   @page { margin: 0.5in 0.5in 0.75in 0.5in; }
   .pdf-page-num::before { content: counter(page); }
 
+  .summary-page { break-inside: avoid; page-break-inside: avoid; }
+  .work-orders-section-wrapper { break-before: page; page-break-before: always; }
+  .billing-sheets-section-wrapper { break-before: page; page-break-before: always; }
+  .record-details-block { break-after: avoid; page-break-after: avoid; }
+  .record-totals-block { break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; }
+  .photo-grid-block { break-before: page; page-break-before: always; }
+  .page-break { break-after: page; page-break-after: always; }
+
+  .items-table thead { break-after: avoid; page-break-after: avoid; }
+
   /* ───────── PRINT ───────── */
   @media print {
     .record-card { page-break-inside: avoid; }
+    .record-card.large-record { page-break-inside: auto; }
     .section-banner { page-break-before: auto; }
     .final-summary { page-break-inside: avoid; }
   }

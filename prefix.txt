@@ -1,0 +1,16 @@
+   150	          top: '0.5in',
+   151	          right: '0.5in',
+   152	          bottom: '0.75in',
+   153	          left: '0.5in'
+   154	        }
+   155	      });
+   156	      });
+   157	      return Buffer.from(pdf);
+   158	    } finally {
+   159	      await browser.close();
+   160	    }
+   161	  }
+   162	
+   163	<<<<<<< HEAD
+   164	  private static generateInvoiceDetailHTML(
+   165	    vm: PdfViewModel,
