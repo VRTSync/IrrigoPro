@@ -1,0 +1,79 @@
+Replit prompt — Work Completed Description Generator
+
+We want to add GPT assistance to Irrigo Pro for writing the description of work completed on work orders and billing sheets.
+
+Objective
+
+Allow technicians and managers to enter simple structured job facts and generate a clean, professional work-completed description for customer-facing and internal records.
+
+Important rule
+
+GPT is not the source of truth.
+The source of truth remains the structured ticket data:
+	•	issue found
+	•	work performed
+	•	parts used
+	•	labor/time
+	•	location
+	•	outcome
+	•	follow-up needed
+
+GPT should only convert those facts into polished written language.
+
+What to build
+
+Add a Generate Description action to the work order and billing sheet forms.
+
+Required input fields
+	•	location / zone
+	•	issue found
+	•	work performed
+	•	parts used
+	•	labor/time
+	•	outcome / current status
+	•	follow-up needed
+	•	optional technician notes
+
+GPT output fields
+	•	short_work_completed_description
+	•	detailed_work_completed_description
+	•	missing_info_warnings
+
+Output rules
+
+The generated description must:
+	•	sound professional and clear
+	•	be concise but specific
+	•	describe only completed or observed work based on the provided inputs
+	•	never invent parts, labor, repairs, or outcomes
+	•	never say a repair was completed unless the input states that clearly
+	•	mention follow-up only if supplied
+	•	use irrigation service language appropriate for billing records
+
+UX requirements
+	•	generated description appears in an editable text box
+	•	user can regenerate after changing the inputs
+	•	manager can review and edit before final submission
+	•	save both the structured inputs and generated description for auditability
+
+System design requirements
+	•	do not allow AI output to overwrite structured parts or labor fields
+	•	keep AI narrative separate from structured system-of-record data
+	•	store prompts/templates server-side
+	•	add logs for generation requests and outputs
+	•	support different templates later:
+	•	technician version
+	•	manager/customer-facing version
+
+Guardrails
+	•	if critical fields are missing, show warnings instead of silently generating overly confident text
+	•	if no work was completed, description should reflect diagnosis / site visit only
+	•	if follow-up is required, description should clearly indicate that additional work is needed
+
+Acceptance criteria
+
+Done means:
+	•	a technician can enter quick job details and generate a polished work completed description
+	•	the description reflects only actual entered ticket data
+	•	the output is editable before saving/submitting
+	•	billing sheets and work orders can both use this same generator safely
