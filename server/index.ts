@@ -483,6 +483,53 @@ async function runStartupMigrations() {
   } catch (err) {
     logger.error('Startup migration (recompute-zero-subtotals) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
+
+  // Prune truly empty work order items and billing sheet items (no name, no price, no hours, no quantity)
+  try {
+    const toNum2 = (val: string | number | null | undefined): number => {
+      if (val === null || val === undefined) return 0;
+      const n = typeof val === 'string' ? parseFloat(val) : val;
+      return isNaN(n) ? 0 : n;
+    };
+
+    const allWoItems = await db.select().from(workOrderItems);
+    let woItemsPruned = 0;
+    for (const item of allWoItems) {
+      const hasName = item.partName && item.partName.trim() !== '';
+      const hasPrice = toNum2(item.partPrice) !== 0;
+      const hasQty = toNum2(item.quantity) !== 0;
+      const hasLabor = toNum2(item.laborHours) !== 0;
+      if (!hasName && !hasPrice && !hasQty && !hasLabor) {
+        await db.delete(workOrderItems).where(eq(workOrderItems.id, item.id));
+        woItemsPruned++;
+        logger.info(`Startup migration (prune-empty-items): deleted empty work_order_item id=${item.id} workOrderId=${item.workOrderId}`, 'Server Startup');
+      }
+    }
+
+    const allBsItems = await db.select().from(billingSheetItems);
+    let bsItemsPruned = 0;
+    for (const item of allBsItems) {
+      const hasName = item.partName && item.partName.trim() !== '';
+      const hasDescription = item.partDescription && item.partDescription.trim() !== '';
+      const hasPrice = toNum2(item.unitPrice) !== 0;
+      const hasQty = toNum2(item.quantity) !== 0;
+      const hasLabor = toNum2(item.laborHours) !== 0;
+      if (!hasName && !hasDescription && !hasPrice && !hasQty && !hasLabor) {
+        await db.delete(billingSheetItems).where(eq(billingSheetItems.id, item.id));
+        bsItemsPruned++;
+        logger.info(`Startup migration (prune-empty-items): deleted empty billing_sheet_item id=${item.id} billingSheetId=${item.billingSheetId}`, 'Server Startup');
+      }
+    }
+
+    if (woItemsPruned > 0 || bsItemsPruned > 0) {
+      logger.info(
+        `Startup migration (prune-empty-items): removed ${woItemsPruned} empty work order item(s), ${bsItemsPruned} empty billing sheet item(s)`,
+        'Server Startup'
+      );
+    }
+  } catch (err) {
+    logger.error('Startup migration (prune-empty-items) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
 }
 
 (async () => {

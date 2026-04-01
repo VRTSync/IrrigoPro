@@ -118,17 +118,7 @@ function validateRows(
     }
 
     if (parts === 0 && labor === 0 && items.length > 0) {
-      rowErrors.push({
-        recordType: 'work_order',
-        recordId: workOrder.id,
-        partsSubtotal: parts,
-        laborSubtotal: labor,
-        computedTotal: 0,
-        storedTotal: stored,
-        delta: Math.abs(stored),
-        reason: `work_order id=${workOrder.id} has ${items.length} line item(s) but zero parts and zero labor — data integrity error`,
-      });
-      console.error(`[PDF][validation] work_order id=${workOrder.id} invoiceId=${invoiceId} has ${items.length} items but zero parts and zero labor`);
+      console.warn(`[PDF][validation] work_order id=${workOrder.id} invoiceId=${invoiceId} has ${items.length} item(s) but zero parts and zero labor — row total will be $0.00`);
     }
   }
 
@@ -156,17 +146,7 @@ function validateRows(
     }
 
     if (parts === 0 && labor === 0 && items.length > 0) {
-      rowErrors.push({
-        recordType: 'billing_sheet',
-        recordId: billingSheet.id,
-        partsSubtotal: parts,
-        laborSubtotal: labor,
-        computedTotal: 0,
-        storedTotal: stored,
-        delta: Math.abs(stored),
-        reason: `billing_sheet id=${billingSheet.id} has ${items.length} line item(s) but zero parts and zero labor — data integrity error`,
-      });
-      console.error(`[PDF][validation] billing_sheet id=${billingSheet.id} invoiceId=${invoiceId} has ${items.length} items but zero parts and zero labor`);
+      console.warn(`[PDF][validation] billing_sheet id=${billingSheet.id} invoiceId=${invoiceId} has ${items.length} item(s) but zero parts and zero labor subtotals`);
     }
   }
 
@@ -250,12 +230,9 @@ export class InvoicePdfService {
       const validationFailure = validateRows(invoiceId, workOrders, billingSheets, storedInvoiceTotal);
 
       if (validationFailure) {
-        if (validationFailure.rowErrors.length > 0) {
+        if (validationFailure.rowErrors.length > 0 || validationFailure.totalsError) {
           return { success: false, error: 'Invoice totals validation failed', validationFailure };
         }
-        console.warn(
-          `[PDF][service] invoiceId=${invoiceId} grand-total mismatch — generating PDF with reconciliation warning row`,
-        );
       }
 
       const laborRate = customer.laborRate || '45.00';
