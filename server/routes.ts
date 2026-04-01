@@ -6335,14 +6335,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Invoice not found" });
       }
 
+      const customer = await storage.getCustomerById(invoice.customerId);
+      const periodStart = new Date(invoice.periodStart);
+      const periodEnd = new Date(invoice.periodEnd);
+      const fmtDateShort = (d: Date) => `${d.getMonth()+1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
+      const propertyName = customer?.irrigoName ?? customer?.name ?? 'Unknown';
+      const newFilename = `${propertyName} - Irrigation Billing Detail - (${fmtDateShort(periodStart)}_${fmtDateShort(periodEnd)}).pdf`;
+
       let pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
       if (!pdf) {
-        const customer = await storage.getCustomerById(invoice.customerId);
         const companyId = customer?.companyId ?? 1;
-        const periodStart = new Date(invoice.periodStart);
-        const periodEnd = new Date(invoice.periodEnd);
-        const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        const filename = `Invoice_${invoice.invoiceNumber}_${fmtDate(periodStart)}-${fmtDate(periodEnd)}_Detail.pdf`;
 
         const pdfService = new InvoicePdfService(storage);
         const result = await pdfService.generatePdfBuffer(invoiceId);
@@ -6356,12 +6358,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           customerId: invoice.customerId,
           companyId,
           pdfUrl: 'generated-on-demand',
-          filename,
+          filename: newFilename,
           status: 'generated',
         });
       }
       
-      res.json(pdf);
+      res.json({ ...pdf, filename: newFilename });
     } catch (error) {
       console.error('Error fetching invoice PDF:', error);
       res.status(500).json({ message: "Failed to fetch invoice PDF" });
@@ -6386,12 +6388,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const invoice = await storage.getInvoiceById(invoiceId);
+      const customer = invoice ? await storage.getCustomerById(invoice.customerId) : null;
       const periodStart = invoice ? new Date(invoice.periodStart) : new Date();
       const periodEnd = invoice ? new Date(invoice.periodEnd) : new Date();
-      const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const fmtDateShort = (d: Date) => `${d.getMonth()+1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
+      const propertyName = customer?.irrigoName ?? customer?.name ?? 'Unknown';
       const filename = invoice
-        ? `Invoice_${invoice.invoiceNumber}_${fmtDate(periodStart)}-${fmtDate(periodEnd)}_Detail.pdf`
-        : `Invoice_${invoiceId}_Detail.pdf`;
+        ? `${propertyName} - Irrigation Billing Detail - (${fmtDateShort(periodStart)}_${fmtDateShort(periodEnd)}).pdf`
+        : `Irrigation Billing Detail - ${invoiceId}.pdf`;
 
       res.set({
         'Content-Type': 'application/pdf',
