@@ -2488,34 +2488,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? 'https://quickbooks.api.intuit.com' 
           : 'https://sandbox-quickbooks.api.intuit.com';
         
-        // Look up the QB Service item ID dynamically
-        let resolvedItemId: string = process.env.QUICKBOOKS_DEFAULT_ITEM_ID || "1";
-        let resolvedItemName: string = "Services";
-        try {
-          const itemQuery = encodeURIComponent("SELECT * FROM Item WHERE Type = 'Service' AND Active = true MAXRESULTS 1");
-          const itemQueryResponse = await makeQuickBooksRequest(
-            `${apiBase}/v3/company/${integration.realmId}/query?query=${itemQuery}`,
-            {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${integration.accessToken}`,
-                'Accept': 'application/json'
-              }
-            },
-            'QB Service Item Lookup'
+        // Look up the QB Service item ID dynamically (shared helper)
+        const qbServiceItem = await lookupQBServiceItem(apiBase, integration.realmId, integration.accessToken);
+        if (!qbServiceItem) {
+          throw new Error(
+            'Could not find an active Service item in your QuickBooks account. ' +
+            'Please create at least one Service-type item in QuickBooks and try again.'
           );
-          if (itemQueryResponse.ok) {
-            const itemQueryResult = await itemQueryResponse.json();
-            const items = itemQueryResult?.QueryResponse?.Item;
-            if (items && items.length > 0) {
-              resolvedItemId = items[0].Id;
-              resolvedItemName = items[0].Name || "Services";
-            }
-          }
-        } catch (itemLookupError: any) {
-          console.warn('Failed to look up QB service item, using fallback ID:', resolvedItemId, itemLookupError.message);
         }
-        console.log(`Resolved QB service item ID: ${resolvedItemId} (${resolvedItemName})`);
+        const resolvedItemId = qbServiceItem.id;
+        const resolvedItemName = qbServiceItem.name;
+        console.log(`[QB] Resolved service item: ${resolvedItemId} (${resolvedItemName})`);
 
         const qbLineItems = [];
         
@@ -2560,17 +2543,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
+        if (!customer.quickbooksId) {
+          throw new Error(
+            `Customer "${customer.name}" has not been synced to QuickBooks. ` +
+            'Please sync this customer in the Customers section and try again.'
+          );
+        }
+
         const invoiceData = {
           Line: qbLineItems,
           CustomerRef: {
-            value: customer.quickbooksId || integration.defaultCustomerId || "1"
+            value: customer.quickbooksId
           },
           DocNumber: invoiceNumber,
           TxnDate: currentDate.toISOString().split('T')[0],
-          DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          SalesTermRef: {
-            value: "3"
-          }
+          DueDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         };
 
         console.log("Sending invoice to QuickBooks:", JSON.stringify(invoiceData, null, 2));
@@ -2596,14 +2583,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           const errorText = await invoiceResponse.text();
           const intuitTid = invoiceResponse.headers.get('intuit_tid');
-          
+          console.error('[QB] Monthly invoice creation failed:', invoiceResponse.status, invoiceResponse.statusText);
+          console.error('[QB] Full error body:', errorText);
+          if (intuitTid) console.error('[QB] TID:', intuitTid);
+
           if (errorText.includes('InvalidRef') || errorText.includes('Customer')) {
-            quickbooksError = `Customer not found in QuickBooks. Please sync customers first or verify the customer exists in your QuickBooks account.${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
+            quickbooksError = `Customer not found in QuickBooks. Please sync this customer first.${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
           } else {
             quickbooksError = `QuickBooks API Error: ${invoiceResponse.status} ${invoiceResponse.statusText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`;
           }
-          
-          console.error('Failed to create QuickBooks invoice:', invoiceResponse.status, errorText);
         }
       } catch (qbError: any) {
         console.error('Error connecting to QuickBooks:', qbError);
@@ -4531,6 +4519,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     return response;
   }
 
+  // Shared helper: look up the first active Service item in a QB account.
+  // Returns { id, name } on success, or null if the lookup fails.
+  async function lookupQBServiceItem(
+    apiBase: string,
+    realmId: string,
+    accessToken: string
+  ): Promise<{ id: string; name: string } | null> {
+    try {
+      const itemQuery = encodeURIComponent(
+        "SELECT * FROM Item WHERE Type = 'Service' AND Active = true MAXRESULTS 1"
+      );
+      const res = await makeQuickBooksRequest(
+        `${apiBase}/v3/company/${realmId}/query?query=${itemQuery}`,
+        { method: 'GET', headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } },
+        'QB Service Item Lookup'
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const items = data?.QueryResponse?.Item;
+        if (items && items.length > 0) {
+          return { id: String(items[0].Id), name: items[0].Name || 'Services' };
+        }
+      } else {
+        const txt = await res.text();
+        console.warn('[QB] Service item lookup failed:', res.status, txt);
+      }
+    } catch (err: any) {
+      console.warn('[QB] Service item lookup threw:', err.message);
+    }
+    return null;
+  }
+
   // Function to exchange authorization code for access tokens
   async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
     const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI;
@@ -5207,24 +5227,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
-      const defaultItemId = process.env.QUICKBOOKS_DEFAULT_ITEM_ID || "1";
+      // Look up service item dynamically (shared helper — no hardcoded IDs)
+      const qbServiceItem = await lookupQBServiceItem(apiBase, integration.realmId, integration.accessToken);
+      if (!qbServiceItem) {
+        return res.status(502).json({
+          success: false,
+          message: 'Could not find an active Service item in your QuickBooks account. Please create at least one Service-type item in QuickBooks and try again.'
+        });
+      }
+
+      const lineAmount = parseFloat(estimate.totalAmount);
 
       // Prepare invoice data for QuickBooks
       const invoiceData = {
         Line: [{
-          Amount: parseFloat(estimate.totalAmount),
+          Amount: lineAmount,
           DetailType: "SalesItemLineDetail",
           SalesItemLineDetail: {
             ItemRef: {
-              value: defaultItemId,
-              name: "Services"
-            }
-          }
+              value: qbServiceItem.id,
+              name: qbServiceItem.name
+            },
+            UnitPrice: lineAmount,
+            Qty: 1
+          },
+          Description: estimate.title || 'Estimate'
         }],
         CustomerRef: {
           value: qbCustomerId
         }
       };
+
+      console.log('[QB] Sending estimate invoice:', JSON.stringify(invoiceData, null, 2));
 
       const invoiceResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
         method: 'POST',
@@ -5234,13 +5268,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(invoiceData)
-      }, 'Invoice Creation');
+      }, 'Estimate Invoice Creation');
 
       if (invoiceResponse.ok) {
         const invoiceResult = await invoiceResponse.json();
         const qbInvoiceId = invoiceResult?.Invoice?.Id;
         if (!qbInvoiceId) {
-          console.error('QuickBooks invoice created but no ID returned in response', invoiceResult);
+          console.error('[QB] Invoice created but no ID returned:', invoiceResult);
         }
         res.json({ 
           success: true,
@@ -5250,10 +5284,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       } else {
         const errorText = await invoiceResponse.text();
         const intuitTid = invoiceResponse.headers.get('intuit_tid');
-        console.error('Failed to create QuickBooks invoice:', invoiceResponse.status, errorText);
-        res.status(500).json({ 
+        console.error('[QB] Estimate invoice creation failed:', invoiceResponse.status, invoiceResponse.statusText);
+        console.error('[QB] Full error body:', errorText);
+        if (intuitTid) console.error('[QB] TID:', intuitTid);
+        res.status(502).json({ 
           success: false,
-          message: `Failed to create QuickBooks invoice: ${invoiceResponse.status}${intuitTid ? ` [TID: ${intuitTid}]` : ''}` 
+          message: `Failed to create QuickBooks invoice: ${invoiceResponse.status}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`
         });
       }
     } catch (error) {
