@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Trash2, Plus, Check, X } from "lucide-react";
+import { Edit, Trash2, Plus, Check, X, Download } from "lucide-react";
 
 type RefEntry = { id: number; name: string; companyId: number; markupPercent?: string };
 type CreatePayload = { name: string; markupPercent?: string };
@@ -241,14 +241,94 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
   );
 }
 
+function escapeCSVCell(value: string): string {
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function exportPartsSettingsCSV(
+  categories: RefEntry[],
+  brands: RefEntry[],
+  sizes: RefEntry[],
+  materials: RefEntry[],
+  fittingTypes: RefEntry[],
+) {
+  const lines: string[] = [];
+
+  lines.push("Categories");
+  lines.push("Name,Markup %");
+  for (const c of categories) {
+    lines.push(`${escapeCSVCell(c.name)},${escapeCSVCell(c.markupPercent ?? "0.00")}`);
+  }
+
+  lines.push("");
+  lines.push("Brands");
+  lines.push("Name");
+  for (const b of brands) {
+    lines.push(escapeCSVCell(b.name));
+  }
+
+  lines.push("");
+  lines.push("Sizes");
+  lines.push("Name");
+  for (const s of sizes) {
+    lines.push(escapeCSVCell(s.name));
+  }
+
+  lines.push("");
+  lines.push("Materials");
+  lines.push("Name");
+  for (const m of materials) {
+    lines.push(escapeCSVCell(m.name));
+  }
+
+  lines.push("");
+  lines.push("Fitting Types");
+  lines.push("Name");
+  for (const f of fittingTypes) {
+    lines.push(escapeCSVCell(f.name));
+  }
+
+  return lines.join("\n");
+}
+
 export default function PartsSettings() {
+  const { data: categories = [], isLoading: loadingCategories } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: brands = [], isLoading: loadingBrands } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/brands"] });
+  const { data: sizes = [], isLoading: loadingSizes } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/sizes"] });
+  const { data: materials = [], isLoading: loadingMaterials } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/materials"] });
+  const { data: fittingTypes = [], isLoading: loadingFittingTypes } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/fitting-types"] });
+
+  const isLoading = loadingCategories || loadingBrands || loadingSizes || loadingMaterials || loadingFittingTypes;
+
+  const handleExport = () => {
+    const csv = exportPartsSettingsCSV(categories, brands, sizes, materials, fittingTypes);
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `parts-settings-${date}.csv`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="max-w-4xl mx-auto py-6 px-4">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Parts Settings</h1>
-        <p className="text-gray-500 mt-1">
-          Manage the reference lists used throughout your parts catalog. Changes apply company-wide.
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Parts Settings</h1>
+          <p className="text-gray-500 mt-1">
+            Manage the reference lists used throughout your parts catalog. Changes apply company-wide.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={isLoading} className="flex items-center gap-1.5 mt-1">
+          <Download className="h-4 w-4" />
+          Export
+        </Button>
       </div>
 
       <Tabs defaultValue="categories">
