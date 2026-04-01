@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { EmailService } from "./email-service";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
+import { buildWorkDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "./ai-prompt-templates";
 
 /// <reference path="./types/express.d.ts" />
 
@@ -5788,7 +5789,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalHours,
         usedParts,
         photos,
-        totalPartsCost
+        totalPartsCost,
+        aiInputs: reqAiInputs,
+        aiShortDescription,
+        aiDetailedDescription,
       } = req.body;
 
       const completedByUserId = req.authenticatedUserId;
@@ -5827,7 +5831,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalHours: laborHours.toString(),
         photos: mergedPhotos,
         totalPartsCost: partsCost.toString(),
-        totalAmount: totalAmount.toFixed(2)
+        totalAmount: totalAmount.toFixed(2),
+        ...(reqAiInputs ? { aiInputs: reqAiInputs } : {}),
+        ...(aiShortDescription ? { aiShortDescription } : {}),
+        ...(aiDetailedDescription ? { aiDetailedDescription } : {}),
       });
 
       if (!workOrder) {
@@ -5848,6 +5855,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             totalPrice: part.totalCost,
             laborHours: "0"
           });
+        }
+      }
+
+      // Log AI generation data if provided
+      if (reqAiInputs) {
+        try {
+          await storage.createAiGenerationLog({
+            userId: completedByUserId || null,
+            entityType: "work_order",
+            entityId: workOrderId,
+            inputs: reqAiInputs,
+            rawOutput: JSON.stringify({ aiShortDescription, aiDetailedDescription }),
+            templateVersion: "v1",
+          });
+        } catch (logErr) {
+          console.error("[AI] Failed to write audit log for work order completion:", logErr);
         }
       }
 
@@ -6674,7 +6697,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Work order not found" });
       }
 
-      const { techName, workPerformed, additionalNotes, totalPartsCost, arrivalPhoto, finishedPhoto, actualStartTime, actualEndTime, materialItems, laborItems, additionalCharges, technicianNotes, laborRate: formLaborRate, ...rest } = req.body;
+      const { techName, workPerformed, additionalNotes, totalPartsCost, arrivalPhoto, finishedPhoto, actualStartTime, actualEndTime, materialItems, laborItems, additionalCharges, technicianNotes, laborRate: formLaborRate, aiInputs: reqAiInputs, aiShortDescription, aiDetailedDescription, ...rest } = req.body;
 
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
       let resolvedStatus: string;
@@ -6776,6 +6799,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         notes: additionalNotes || technicianNotes || "",
         photos: [],
         workDate: new Date(),
+        aiInputs: reqAiInputs || null,
+        aiShortDescription: aiShortDescription || null,
+        aiDetailedDescription: aiDetailedDescription || null,
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
       console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=0`);
@@ -7642,6 +7668,159 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
     });
   }
+
+  // ============================================================================
+  // AI Work Description Generator
+  // ============================================================================
+  app.post("/api/ai/generate-work-description", requireAuthentication, async (req: any, res) => {
+    try {
+      const {
+        locationZone,
+        issueFound,
+        workPerformed,
+        partsUsed,
+        laborTime,
+        outcomeStatus,
+        followUpNeeded,
+        technicianNotes,
+        entityType,
+        entityId,
+      } = req.body;
+
+      // Validate entityType and entityId for clean audit logs
+      const validEntityTypes = ["billing_sheet", "work_order"];
+      const safeEntityType: string = validEntityTypes.includes(entityType) ? entityType : "unknown";
+      const safeEntityId: number | null = entityId && Number.isInteger(Number(entityId)) && Number(entityId) > 0
+        ? Number(entityId)
+        : null;
+
+      const inputs: WorkDescriptionInputs = {
+        locationZone: locationZone?.trim() || undefined,
+        issueFound: issueFound?.trim() || undefined,
+        workPerformed: workPerformed?.trim() || undefined,
+        partsUsed: partsUsed?.trim() || undefined,
+        laborTime: laborTime?.trim() || undefined,
+        outcomeStatus: outcomeStatus?.trim() || undefined,
+        followUpNeeded: followUpNeeded?.trim() || undefined,
+        technicianNotes: technicianNotes?.trim() || undefined,
+      };
+
+      // Check for missing critical fields
+      const missingCritical: string[] = [];
+      for (const field of CRITICAL_FIELDS) {
+        if (!inputs[field]) {
+          const labels: Record<string, string> = {
+            workPerformed: "Work Performed",
+            outcomeStatus: "Outcome/Current Status",
+          };
+          missingCritical.push(`Missing critical field: "${labels[field] || field}"`);
+        }
+      }
+
+      if (missingCritical.length > 0) {
+        // Log the failed/blocked generation attempt for auditability
+        try {
+          await storage.createAiGenerationLog({
+            userId: req.authenticatedUserId || null,
+            entityType: safeEntityType,
+            entityId: safeEntityId,
+            inputs: JSON.stringify(inputs),
+            rawOutput: JSON.stringify({ warnings: missingCritical, blocked: true }),
+            templateVersion: TEMPLATE_VERSION,
+          });
+        } catch (logErr) {
+          console.error("[AI] Failed to write audit log for blocked request:", logErr);
+        }
+        return res.json({
+          short_work_completed_description: "",
+          detailed_work_completed_description: "",
+          missing_info_warnings: missingCritical,
+        });
+      }
+
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        console.error("[AI] OPENAI_API_KEY environment secret not configured");
+        return res.status(503).json({ 
+          message: "AI generation is not configured. Please set the OPENAI_API_KEY environment secret." 
+        });
+      }
+
+      const prompt = buildWorkDescriptionPrompt(inputs);
+
+      // Call OpenAI API using native fetch
+      const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          max_tokens: 600,
+          temperature: 0.3,
+        }),
+      });
+
+      if (!openaiResponse.ok) {
+        const errText = await openaiResponse.text();
+        console.error("[AI] OpenAI API error:", openaiResponse.status, errText);
+        return res.status(502).json({ message: "AI service returned an error. Please try again." });
+      }
+
+      const openaiData: any = await openaiResponse.json();
+      const rawOutput = openaiData?.choices?.[0]?.message?.content || "";
+
+      // Parse the JSON response from GPT
+      let parsed: any = {};
+      try {
+        // Remove any markdown fences in case model adds them
+        const cleaned = rawOutput.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        parsed = JSON.parse(cleaned);
+      } catch (parseError) {
+        console.error("[AI] Failed to parse GPT JSON response:", rawOutput);
+        return res.status(502).json({ message: "AI returned an unexpected response format. Please try again." });
+      }
+
+      // Log the generation for audit
+      try {
+        await storage.createAiGenerationLog({
+          userId: req.authenticatedUserId || null,
+          entityType: safeEntityType,
+          entityId: safeEntityId,
+          inputs: JSON.stringify(inputs),
+          rawOutput,
+          templateVersion: TEMPLATE_VERSION,
+        });
+      } catch (logError) {
+        console.error("[AI] Failed to write audit log:", logError);
+        // Non-fatal — don't block the response
+      }
+
+      const warnings: string[] = [
+        ...(missingCritical),
+        ...(Array.isArray(parsed.missing_info_warnings) ? parsed.missing_info_warnings : []),
+      ].filter(Boolean);
+
+      console.log(`[AUDIT] ai_description_generated entityType=${entityType || "unknown"} entityId=${entityId || "none"} userId=${req.authenticatedUserId} templateVersion=${TEMPLATE_VERSION}`);
+
+      return res.json({
+        short_work_completed_description: parsed.short_work_completed_description || "",
+        detailed_work_completed_description: parsed.detailed_work_completed_description || "",
+        missing_info_warnings: warnings,
+      });
+
+    } catch (error) {
+      console.error("[AI] Unexpected error in generate-work-description:", error);
+      return res.status(500).json({ message: "Failed to generate description. Please try again." });
+    }
+  });
 
   return httpServer;
 }

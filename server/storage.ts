@@ -19,6 +19,7 @@ import {
   invoicePdfs,
   billingSheets,
   billingSheetItems,
+  aiGenerationLogs,
   notifications,
   quickbooksIntegration,
   siteMaps,
@@ -51,6 +52,7 @@ import {
   type InvoicePdf,
   type BillingSheet,
   type BillingSheetItem,
+  type AiGenerationLog,
   type Notification,
   type SiteMap,
   type Controller,
@@ -82,6 +84,7 @@ import {
   type InsertInvoicePdf,
   type InsertBillingSheet,
   type InsertBillingSheetItem,
+  type InsertAiGenerationLog,
   type InsertNotification,
   type InsertSiteMap,
   type InsertController,
@@ -341,6 +344,9 @@ export interface IStorage {
   deleteSiteMap(siteMapId: number): Promise<boolean>;
   saveControllers(siteMapId: number, controllers: InsertController[], companyId?: number): Promise<Controller[]>;
   saveZones(siteMapId: number, zones: InsertIrrigationZone[], companyId?: number): Promise<IrrigationZone[]>;
+
+  // AI Generation Logs
+  createAiGenerationLog(log: InsertAiGenerationLog): Promise<AiGenerationLog>;
 
   // Company Profile Management
   getCompanyProfile(companyId: number): Promise<Company | undefined>;
@@ -2706,6 +2712,11 @@ export class DatabaseStorage implements IStorage {
   async deletePartFittingType(id: number, companyId: number): Promise<boolean> {
     const result = await db.delete(partFittingTypes).where(and(eq(partFittingTypes.id, id), eq(partFittingTypes.companyId, companyId))).returning();
     return result.length > 0;
+  }
+
+  async createAiGenerationLog(log: InsertAiGenerationLog): Promise<AiGenerationLog> {
+    const [result] = await db.insert(aiGenerationLogs).values(log).returning();
+    return result;
   }
 }
 

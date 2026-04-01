@@ -203,8 +203,24 @@ export const billingSheets = pgTable("billing_sheets", {
   photos: text("photos").array().default([]),
   notes: text("notes"),
   branchName: text("branch_name"), // Selected branch for multi-location customers
+  // AI-generated description fields
+  aiInputs: text("ai_inputs"), // JSON blob of structured inputs used for AI generation
+  aiShortDescription: text("ai_short_description"), // Final accepted short description (user-editable)
+  aiDetailedDescription: text("ai_detailed_description"), // Final accepted detailed description (user-editable)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// AI generation log - audit trail for all GPT description generation requests
+export const aiGenerationLogs = pgTable("ai_generation_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  entityType: text("entity_type").notNull(), // "billing_sheet" or "work_order"
+  entityId: integer("entity_id"), // ID of the related billing sheet or work order
+  inputs: text("inputs").notNull(), // JSON snapshot of structured inputs sent to GPT
+  rawOutput: text("raw_output").notNull(), // Raw GPT response text
+  templateVersion: text("template_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // Items used in standalone billing sheets
@@ -429,6 +445,10 @@ export const workOrders = pgTable("work_orders", {
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   branchName: text("branch_name"), // Selected branch for multi-location customers
+  // AI-generated description fields (populated during completion)
+  aiInputs: text("ai_inputs"), // JSON blob of structured inputs used for AI generation
+  aiShortDescription: text("ai_short_description"), // Final accepted short description
+  aiDetailedDescription: text("ai_detailed_description"), // Final accepted detailed description
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -639,6 +659,7 @@ export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ i
 export const insertInvoicePdfSchema = createInsertSchema(invoicePdfs).omit({ id: true, createdAt: true });
 export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
+export const insertAiGenerationLogSchema = createInsertSchema(aiGenerationLogs).omit({ id: true, createdAt: true });
 export const insertPartUsageSchema = createInsertSchema(partUsage).omit({ id: true, updatedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertApiKeySchema = createInsertSchema(apiKeys).omit({ id: true, createdAt: true });
@@ -685,6 +706,7 @@ export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type InvoicePdf = typeof invoicePdfs.$inferSelect;
 export type BillingSheet = typeof billingSheets.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
+export type AiGenerationLog = typeof aiGenerationLogs.$inferSelect;
 export type PartUsage = typeof partUsage.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 
@@ -710,6 +732,7 @@ export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
 export type InsertInvoicePdf = z.infer<typeof insertInvoicePdfSchema>;
 export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
+export type InsertAiGenerationLog = z.infer<typeof insertAiGenerationLogSchema>;
 export type InsertPartUsage = z.infer<typeof insertPartUsageSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;

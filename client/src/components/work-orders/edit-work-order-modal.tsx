@@ -25,6 +25,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
+import { GenerateDescriptionPanel, type AiInputs, type AiOutputs } from "./generate-description-panel";
 import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
 
 const currency = (val: number | string | null | undefined) => {
@@ -114,6 +115,8 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const [partsLoaded, setPartsLoaded] = useState(false);
   const [showPartsEditor, setShowPartsEditor] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [aiInputs, setAiInputs] = useState<AiInputs | null>(null);
+  const [aiOutputs, setAiOutputs] = useState<AiOutputs>({ shortDescription: "", detailedDescription: "" });
 
   // Fetch the customer to get its branches
   const { data: customer } = useQuery({
@@ -164,6 +167,8 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     setAssignedTechnicianId(workOrder.assignedTechnicianId || null);
     setAssignedTechnicianName(workOrder.assignedTechnicianName || "");
     setBranchName((workOrder as any).branchName || "");
+    setAiInputs(null);
+    setAiOutputs({ shortDescription: "", detailedDescription: "" });
     setErrors({});
   }, [open, workOrder]);
 
@@ -227,6 +232,9 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
             notes: p.notes || null,
           })),
         totalPartsCost: partsTotal.toFixed(2),
+        ...(aiInputs ? { aiInputs: JSON.stringify(aiInputs) } : {}),
+        ...(aiOutputs.shortDescription ? { aiShortDescription: aiOutputs.shortDescription } : {}),
+        ...(aiOutputs.detailedDescription ? { aiDetailedDescription: aiOutputs.detailedDescription } : {}),
       };
       return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", submitData);
     },
@@ -575,6 +583,16 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                 </FieldRow>
               </div>
             </SectionCard>
+
+            {/* AI Description Generator */}
+            <GenerateDescriptionPanel
+              entityType="work_order"
+              entityId={workOrder.id}
+              onOutputChange={(outputs, inputs) => {
+                setAiOutputs(outputs);
+                setAiInputs(inputs);
+              }}
+            />
 
             {/* Financial Summary */}
             <SectionCard title="Financial Summary" icon={<DollarSign className="w-4 h-4" />}>

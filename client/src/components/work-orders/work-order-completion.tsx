@@ -2,6 +2,7 @@ import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import { GenerateDescriptionPanel, type AiOutputs, type AiInputs } from "./generate-description-panel";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -87,6 +88,8 @@ export function WorkOrderCompletion({
   const [showSummary, setShowSummary] = useState(false);
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
+  const [aiOutputs, setAiOutputs] = useState<AiOutputs>({ shortDescription: "", detailedDescription: "" });
+  const [aiInputs, setAiInputs] = useState<AiInputs | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -282,6 +285,9 @@ export function WorkOrderCompletion({
         })),
         photos: photos.map(photo => photo.url),
         totalPartsCost: getTotalPartsCost().toFixed(2),
+        aiInputs: aiInputs ? JSON.stringify(aiInputs) : undefined,
+        aiShortDescription: aiOutputs.shortDescription || undefined,
+        aiDetailedDescription: aiOutputs.detailedDescription || undefined,
       };
 
       await completeWorkOrderMutation.mutateAsync(finalData);
@@ -308,6 +314,8 @@ export function WorkOrderCompletion({
     form.reset();
     setUsedParts([]);
     setPhotos([]);
+    setAiOutputs({ shortDescription: "", detailedDescription: "" });
+    setAiInputs(null);
     onClose();
   };
 
@@ -782,6 +790,16 @@ export function WorkOrderCompletion({
                 />
               </CardContent>
             </Card>
+
+            {/* AI Description Generator */}
+            <GenerateDescriptionPanel
+              entityType="work_order"
+              entityId={workOrder.id}
+              onOutputChange={(outputs, inputs) => {
+                setAiOutputs(outputs);
+                setAiInputs(inputs);
+              }}
+            />
 
             <Separator />
 
