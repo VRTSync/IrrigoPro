@@ -1,4 +1,5 @@
 import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
+import { buildPdfViewModel } from './pdf-view-model';
 import type { IStorage } from './storage';
 import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@shared/schema';
 
@@ -48,6 +49,7 @@ interface InvoicePdfGenerationResult {
   success: boolean;
   pdfBuffer?: Buffer;
   error?: string;
+  validationWarning?: string;
 }
 
 export class InvoicePdfService {
@@ -109,7 +111,7 @@ export class InvoicePdfService {
         logoDataUri = await fetchLogoAsBase64(logoUrl);
       }
 
-      const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF({
+      const { viewModel, validationWarning } = buildPdfViewModel({
         invoice,
         company: {
           name: company.name,
@@ -124,7 +126,13 @@ export class InvoicePdfService {
         laborRate,
       });
 
-      return { success: true, pdfBuffer };
+      if (validationWarning) {
+        console.warn('[InvoicePdfService]', validationWarning);
+      }
+
+      const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF(viewModel);
+
+      return { success: true, pdfBuffer, validationWarning: validationWarning ?? undefined };
     } catch (error) {
       console.error('Error generating invoice PDF:', error);
       return { 
@@ -170,7 +178,7 @@ export class InvoicePdfService {
         status: 'generated',
       });
 
-      return { success: true, pdfBuffer: result.pdfBuffer };
+      return { success: true, pdfBuffer: result.pdfBuffer, validationWarning: result.validationWarning };
     } catch (error) {
       console.error('Error saving invoice PDF record:', error);
       return { 

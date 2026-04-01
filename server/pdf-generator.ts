@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
-import type { Invoice, InvoiceItem, WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@shared/schema';
+import type { PdfViewModel } from './pdf-view-model';
 
 export async function fetchLogoAsBase64(logoUrl: string): Promise<string | null> {
   const controller = new AbortController();
@@ -101,27 +101,6 @@ function getChromiumPath(): string {
   }
 }
 
-interface InvoiceDetailData {
-  invoice: Invoice;
-  company: {
-    name: string;
-    logo?: string;
-    logoDataUri?: string | null;
-    address?: string;
-    phone?: string;
-    email?: string;
-  };
-  workOrders: Array<{
-    workOrder: WorkOrder;
-    items: WorkOrderItem[];
-  }>;
-  billingSheets: Array<{
-    billingSheet: BillingSheet;
-    items: BillingSheetItem[];
-  }>;
-  laborRate?: string;
-}
-
 export class PDFGenerator {
   static async generateInvoicePDF(invoiceHtmlPath: string): Promise<Buffer> {
     const chromiumPath = getChromiumPath();
@@ -190,22 +169,18 @@ export class PDFGenerator {
     }
   }
 
-  static async generateInvoiceDetailPDF(data: InvoiceDetailData): Promise<Buffer> {
+  static async generateInvoiceDetailPDF(viewModel: PdfViewModel): Promise<Buffer> {
     const port = parseInt(process.env.PORT || '5000', 10);
 
     // Pre-load all photos as base64 data URIs before generating HTML
     const woPhotoMaps: string[][] = await Promise.all(
-      data.workOrders.map(wo =>
-        wo.workOrder.photos && wo.workOrder.photos.length > 0
-          ? preloadPhotos(wo.workOrder.photos, port)
-          : Promise.resolve([])
+      viewModel.workOrders.map(wo =>
+        wo.photos.length > 0 ? preloadPhotos(wo.photos, port) : Promise.resolve([])
       )
     );
     const bsPhotoMaps: string[][] = await Promise.all(
-      data.billingSheets.map(bs =>
-        bs.billingSheet.photos && bs.billingSheet.photos.length > 0
-          ? preloadPhotos(bs.billingSheet.photos, port)
-          : Promise.resolve([])
+      viewModel.billingSheets.map(bs =>
+        bs.photos.length > 0 ? preloadPhotos(bs.photos, port) : Promise.resolve([])
       )
     );
 
@@ -219,8 +194,8 @@ export class PDFGenerator {
     try {
       const page = await browser.newPage();
       
-      // Generate HTML content with pre-loaded photo data URIs
-      const htmlContent = this.generateInvoiceDetailHTML(data, woPhotoMaps, bsPhotoMaps);
+      // Generate HTML content from the pre-computed view model with pre-loaded photo data URIs
+      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps);
       
       // Set the HTML content — no external fetches needed since images are embedded
       await page.setContent(htmlContent, { 
@@ -245,18 +220,15 @@ export class PDFGenerator {
     }
   }
 
-  private static generateInvoiceDetailHTML(data: InvoiceDetailData, woPhotoMaps: string[][] = [], bsPhotoMaps: string[][] = []): string {
-    const { invoice, company, workOrders, billingSheets, laborRate: passedLaborRate } = data;
-    const laborRateNum = parseFloat(passedLaborRate || '45.00');
-    
-    const formatDate = (date: Date | string) => {
-      const d = new Date(date);
-      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  private static generateInvoiceDetailHTML(vm: PdfViewModel, woPhotoMaps: string[][] = [], bsPhotoMaps: string[][] = []): string {
+    const { company, invoice, workOrders, billingSheets, totals, totalJobs } = vm;
+
+    const formatDate = (date: Date) => {
+      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     };
 
-    const formatCurrency = (amount: string | number) => {
-      const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num || 0);
+    const formatCurrency = (amount: number) => {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
     };
 
     return `
@@ -581,7 +553,7 @@ export class PDFGenerator {
               <div class="invoice-meta">
                 <div><strong>Invoice #:</strong> ${invoice.invoiceNumber}</div>
                 <div><strong>Period:</strong> ${formatDate(invoice.periodStart)} - ${formatDate(invoice.periodEnd)}</div>
-                <div><strong>Generated:</strong> ${formatDate(new Date())}</div>
+                <div><strong>Generated:</strong> ${formatDate(invoice.generatedAt)}</div>
               </div>
             </div>
           </div>
@@ -592,7 +564,7 @@ export class PDFGenerator {
             <div class="customer-name">${invoice.customerName}</div>
             <div class="customer-details">
               ${invoice.customerEmail}<br>
-              ${invoice.customerPhone ? invoice.customerPhone : ''}
+              ${invoice.customerPhone}
             </div>
           </div>
           
@@ -601,15 +573,15 @@ export class PDFGenerator {
             <div class="summary-grid">
               <div class="summary-item">
                 <div class="summary-label">Total Jobs</div>
-                <div class="summary-value">${workOrders.length + billingSheets.length}</div>
+                <div class="summary-value">${totalJobs}</div>
               </div>
               <div class="summary-item">
                 <div class="summary-label">Labor</div>
-                <div class="summary-value">${formatCurrency(invoice.laborSubtotal)}</div>
+                <div class="summary-value">${formatCurrency(totals.laborSubtotal)}</div>
               </div>
               <div class="summary-item">
                 <div class="summary-label">Parts</div>
-                <div class="summary-value">${formatCurrency(invoice.partsSubtotal)}</div>
+                <div class="summary-value">${formatCurrency(totals.partsSubtotal)}</div>
               </div>
             </div>
           </div>
@@ -618,23 +590,23 @@ export class PDFGenerator {
           ${workOrders.map((wo, index) => `
             <div class="work-order-section">
               <div class="section-header">
-                <div class="section-title">Work Order #${wo.workOrder.workOrderNumber}</div>
-                <div class="section-subtitle">${wo.workOrder.projectName || 'Service Work'}</div>
+                <div class="section-title">Work Order #${wo.workOrderNumber}</div>
+                <div class="section-subtitle">${wo.projectName}</div>
               </div>
               
               <!-- Location Information -->
-              ${wo.workOrder.projectAddress || wo.workOrder.locationNotes ? `
+              ${wo.projectAddress || wo.locationNotes ? `
                 <div class="work-order-details">
-                  ${wo.workOrder.projectAddress ? `
+                  ${wo.projectAddress ? `
                     <div class="detail-item">
                       <div class="detail-label">Service Location</div>
-                      <div class="detail-value">${wo.workOrder.projectAddress}</div>
+                      <div class="detail-value">${wo.projectAddress}</div>
                     </div>
                   ` : ''}
-                  ${wo.workOrder.locationNotes ? `
+                  ${wo.locationNotes ? `
                     <div class="detail-item">
                       <div class="detail-label">Location Notes</div>
-                      <div class="detail-value">${wo.workOrder.locationNotes}</div>
+                      <div class="detail-value">${wo.locationNotes}</div>
                     </div>
                   ` : ''}
                 </div>
@@ -644,32 +616,32 @@ export class PDFGenerator {
               <div class="work-order-details">
                 <div class="detail-item">
                   <div class="detail-label">Technician</div>
-                  <div class="detail-value">${wo.workOrder.completedByUserName || wo.workOrder.assignedTechnicianName || 'N/A'}</div>
+                  <div class="detail-value">${wo.technicianName}</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Date Completed</div>
-                  <div class="detail-value">${wo.workOrder.completedAt ? formatDate(wo.workOrder.completedAt) : 'N/A'}</div>
+                  <div class="detail-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Total Hours</div>
-                  <div class="detail-value">${wo.workOrder.totalHours || '0'} hours</div>
+                  <div class="detail-value">${wo.totalHours} hours</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Labor Rate</div>
-                  <div class="detail-value">${formatCurrency(parseFloat(wo.workOrder.laborRate || '0') || laborRateNum)}/hr</div>
+                  <div class="detail-value">${formatCurrency(wo.laborRate)}/hr</div>
                 </div>
               </div>
               
               <!-- Work Description if available -->
-              ${(wo.workOrder.aiDetailedDescription || wo.workOrder.workSummary || wo.workOrder.description) ? `
+              ${(wo.aiDetailedDescription || wo.workSummary || wo.workDescription) ? `
                 <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
                   <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Work Description</div>
-                  <div style="color: #1f2937; font-size: 13px;">${wo.workOrder.aiDetailedDescription || wo.workOrder.workSummary || wo.workOrder.description}</div>
+                  <div style="color: #1f2937; font-size: 13px;">${wo.aiDetailedDescription || wo.workSummary || wo.workDescription}</div>
                 </div>
               ` : ''}
               
               <!-- Parts and Labor Breakdown -->
-              ${wo.items && wo.items.length > 0 ? `
+              ${wo.items.length > 0 ? `
                 <div style="margin-bottom: 15px;">
                   <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Parts & Labor Details</div>
                   <table class="items-table">
@@ -687,9 +659,9 @@ export class PDFGenerator {
                         <tr>
                           <td>${item.partName}${item.notes ? `<br><small style="color: #6b7280;">${item.notes}</small>` : ''}</td>
                           <td class="text-right">${item.quantity}</td>
-                          <td class="text-right">${formatCurrency(item.partPrice)}</td>
+                          <td class="text-right">${formatCurrency(item.unitPrice)}</td>
                           <td class="text-right">${item.laborHours}</td>
-                          <td class="text-right">${formatCurrency(item.totalPrice)}</td>
+                          <td class="text-right">${formatCurrency(item.rowTotal)}</td>
                         </tr>
                       `).join('')}
                     </tbody>
@@ -704,15 +676,15 @@ export class PDFGenerator {
               <div class="work-order-totals">
                 <div class="totals-row subtotal">
                   <span>Parts Subtotal:</span>
-                  <span>${formatCurrency(wo.workOrder.totalPartsCost || '0')}</span>
+                  <span>${formatCurrency(wo.partsSubtotal)}</span>
                 </div>
                 <div class="totals-row subtotal">
-                  <span>Labor Subtotal (${wo.workOrder.totalHours || '0'} hrs × ${formatCurrency(parseFloat(wo.workOrder.laborRate || '0') || laborRateNum)}):</span>
-                  <span>${formatCurrency(wo.workOrder.laborSubtotal || (parseFloat(wo.workOrder.totalHours || '0') * laborRateNum).toFixed(2))}</span>
+                  <span>Labor Subtotal (${wo.totalHours} hrs × ${formatCurrency(wo.laborRate)}):</span>
+                  <span>${formatCurrency(wo.laborSubtotal)}</span>
                 </div>
                 <div class="totals-row total">
                   <span>Work Order Total:</span>
-                  <span>${formatCurrency(wo.workOrder.totalAmount || '0')}</span>
+                  <span>${formatCurrency(wo.rowTotal)}</span>
                 </div>
               </div>
             </div>
@@ -722,16 +694,16 @@ export class PDFGenerator {
           ${billingSheets.map((bs, index) => `
             <div class="work-order-section">
               <div class="section-header">
-                <div class="section-title">Billing Sheet #${bs.billingSheet.billingNumber}</div>
-                <div class="section-subtitle">${bs.billingSheet.workDescription || 'Additional Work'}</div>
+                <div class="section-title">Billing Sheet #${bs.billingNumber}</div>
+                <div class="section-subtitle">${bs.workDescription}</div>
               </div>
               
               <!-- Location Information -->
-              ${bs.billingSheet.propertyAddress ? `
+              ${bs.propertyAddress ? `
                 <div class="work-order-details">
                   <div class="detail-item">
                     <div class="detail-label">Service Location</div>
-                    <div class="detail-value">${bs.billingSheet.propertyAddress}</div>
+                    <div class="detail-value">${bs.propertyAddress}</div>
                   </div>
                 </div>
               ` : ''}
@@ -740,40 +712,40 @@ export class PDFGenerator {
               <div class="work-order-details">
                 <div class="detail-item">
                   <div class="detail-label">Technician</div>
-                  <div class="detail-value">${bs.billingSheet.technicianName || 'N/A'}</div>
+                  <div class="detail-value">${bs.technicianName}</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Work Date</div>
-                  <div class="detail-value">${formatDate(bs.billingSheet.workDate)}</div>
+                  <div class="detail-value">${formatDate(bs.workDate)}</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Total Hours</div>
-                  <div class="detail-value">${bs.billingSheet.totalHours || '0'} hours</div>
+                  <div class="detail-value">${bs.totalHours} hours</div>
                 </div>
                 <div class="detail-item">
                   <div class="detail-label">Labor Rate</div>
-                  <div class="detail-value">${formatCurrency(bs.billingSheet.laborRate || '45')}/hr</div>
+                  <div class="detail-value">${formatCurrency(bs.laborRate)}/hr</div>
                 </div>
               </div>
               
               <!-- Work Description if available -->
-              ${(bs.billingSheet.aiDetailedDescription || bs.billingSheet.workDescription) ? `
+              ${(bs.aiDetailedDescription || bs.workDescription) ? `
                 <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
                   <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Work Description</div>
-                  <div style="color: #1f2937; font-size: 13px;">${bs.billingSheet.aiDetailedDescription || bs.billingSheet.workDescription}</div>
+                  <div style="color: #1f2937; font-size: 13px;">${bs.aiDetailedDescription || bs.workDescription}</div>
                 </div>
               ` : ''}
               
               <!-- Additional Notes if available -->
-              ${bs.billingSheet.notes ? `
+              ${bs.notes ? `
                 <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
                   <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Additional Notes</div>
-                  <div style="color: #1f2937; font-size: 13px;">${bs.billingSheet.notes}</div>
+                  <div style="color: #1f2937; font-size: 13px;">${bs.notes}</div>
                 </div>
               ` : ''}
               
               <!-- Parts and Labor Breakdown -->
-              ${bs.items && bs.items.length > 0 ? `
+              ${bs.items.length > 0 ? `
                 <div style="margin-bottom: 15px;">
                   <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Parts & Labor Details</div>
                   <table class="items-table">
@@ -793,7 +765,7 @@ export class PDFGenerator {
                           <td class="text-right">${item.quantity}</td>
                           <td class="text-right">${formatCurrency(item.unitPrice)}</td>
                           <td class="text-right">${item.laborHours}</td>
-                          <td class="text-right">${formatCurrency(item.totalPrice)}</td>
+                          <td class="text-right">${formatCurrency(item.rowTotal)}</td>
                         </tr>
                       `).join('')}
                     </tbody>
@@ -808,15 +780,15 @@ export class PDFGenerator {
               <div class="work-order-totals">
                 <div class="totals-row subtotal">
                   <span>Parts Subtotal:</span>
-                  <span>${formatCurrency(bs.billingSheet.partsSubtotal || '0')}</span>
+                  <span>${formatCurrency(bs.partsSubtotal)}</span>
                 </div>
                 <div class="totals-row subtotal">
-                  <span>Labor Subtotal (${bs.billingSheet.totalHours || '0'} hrs × ${formatCurrency(bs.billingSheet.laborRate || '45')}):</span>
-                  <span>${formatCurrency(bs.billingSheet.laborSubtotal || '0')}</span>
+                  <span>Labor Subtotal (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}):</span>
+                  <span>${formatCurrency(bs.laborSubtotal)}</span>
                 </div>
                 <div class="totals-row total">
                   <span>Billing Sheet Total:</span>
-                  <span>${formatCurrency(bs.billingSheet.totalAmount || parseFloat(bs.billingSheet.partsSubtotal || '0') + parseFloat(bs.billingSheet.laborSubtotal || '0'))}</span>
+                  <span>${formatCurrency(bs.rowTotal)}</span>
                 </div>
               </div>
             </div>
@@ -847,11 +819,11 @@ export class PDFGenerator {
                   <tbody>
                     ${workOrders.map(wo => `
                       <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 10px;">${wo.workOrder.workOrderNumber}</td>
-                        <td style="padding: 10px;">${wo.workOrder.projectName || 'Service Work'}</td>
-                        <td style="padding: 10px; text-align: right;">${formatCurrency(wo.workOrder.totalPartsCost || '0')}</td>
-                        <td style="padding: 10px; text-align: right;">${formatCurrency(wo.workOrder.laborSubtotal || (parseFloat(wo.workOrder.totalHours || '0') * laborRateNum).toFixed(2))}</td>
-                        <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(wo.workOrder.totalAmount || '0')}</td>
+                        <td style="padding: 10px;">${wo.workOrderNumber}</td>
+                        <td style="padding: 10px;">${wo.projectName}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(wo.partsSubtotal)}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(wo.laborSubtotal)}</td>
+                        <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(wo.rowTotal)}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -878,11 +850,11 @@ export class PDFGenerator {
                   <tbody>
                     ${billingSheets.map(bs => `
                       <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 10px;">${bs.billingSheet.billingNumber}</td>
-                        <td style="padding: 10px;">${bs.billingSheet.workDescription || 'Additional Work'}</td>
-                        <td style="padding: 10px; text-align: right;">${formatCurrency(bs.billingSheet.partsSubtotal || '0')}</td>
-                        <td style="padding: 10px; text-align: right;">${formatCurrency(bs.billingSheet.laborSubtotal || '0')}</td>
-                        <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(bs.billingSheet.totalAmount || parseFloat(bs.billingSheet.partsSubtotal || '0') + parseFloat(bs.billingSheet.laborSubtotal || '0'))}</td>
+                        <td style="padding: 10px;">${bs.billingNumber}</td>
+                        <td style="padding: 10px;">${bs.workDescription}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(bs.partsSubtotal)}</td>
+                        <td style="padding: 10px; text-align: right;">${formatCurrency(bs.laborSubtotal)}</td>
+                        <td style="padding: 10px; text-align: right; font-weight: 600;">${formatCurrency(bs.rowTotal)}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -894,15 +866,15 @@ export class PDFGenerator {
             <div style="margin-top: 25px; padding: 20px; background: white; border-radius: 6px; border: 2px solid #3B82F6;">
               <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: #6b7280;">
                 <span>Total Parts:</span>
-                <span>${formatCurrency(invoice.partsSubtotal)}</span>
+                <span>${formatCurrency(totals.partsSubtotal)}</span>
               </div>
               <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: #6b7280;">
                 <span>Total Labor:</span>
-                <span>${formatCurrency(invoice.laborSubtotal)}</span>
+                <span>${formatCurrency(totals.laborSubtotal)}</span>
               </div>
               <div style="display: flex; justify-content: space-between; padding: 12px 0; margin-top: 10px; border-top: 2px solid #3B82F6; font-size: 18px; font-weight: bold; color: #1f2937;">
                 <span>Invoice Total:</span>
-                <span style="color: #3B82F6;">${formatCurrency(invoice.totalAmount)}</span>
+                <span style="color: #3B82F6;">${formatCurrency(totals.grandTotal)}</span>
               </div>
             </div>
           </div>
@@ -910,7 +882,7 @@ export class PDFGenerator {
           <!-- Grand Total -->
           <div class="grand-total-section">
             <div class="grand-total-label">Invoice Total Amount</div>
-            <div class="grand-total-amount">${formatCurrency(invoice.totalAmount)}</div>
+            <div class="grand-total-amount">${formatCurrency(totals.grandTotal)}</div>
           </div>
         </div>
       </body>
