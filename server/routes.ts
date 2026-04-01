@@ -1981,6 +1981,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const unbilledWorkOrders = workOrders.filter(wo => 
         wo.status === 'completed' && !wo.invoiceId
       );
+      // A non-null invoiceId is the authoritative signal that a billing sheet has
+      // been billed — exclude it from unbilled regardless of status value.
       const unbilledBillingSheets = billingSheets.filter(bs => 
         (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
       );
@@ -2627,6 +2629,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           billedAt: currentDate,
           status: 'billed'
         });
+      }
+
+      // Reconciliation: ensure any billing sheet that is an invoice line item
+      // but was missed by the status update loop is also marked as billed.
+      try {
+        const invoiceItemsForReconciliation = await storage.getInvoiceItems(invoice.id);
+        for (const item of invoiceItemsForReconciliation) {
+          if (item.sourceType === 'billing_sheet' && item.sourceId) {
+            const bs = await storage.getBillingSheetById(item.sourceId);
+            if (bs && !bs.invoiceId) {
+              await storage.updateBillingSheet(bs.id, {
+                invoiceId: invoice.id,
+                billedAt: currentDate,
+                status: 'billed'
+              });
+              console.log(`Reconciliation: marked billing sheet ${bs.id} as billed for invoice ${invoice.id}`);
+            }
+          }
+        }
+      } catch (reconcileError) {
+        console.error('Error during billing sheet reconciliation:', reconcileError);
       }
 
       // Generate invoice detail PDF automatically in background

@@ -331,7 +331,8 @@ export default function CustomerBilling() {
         title: "Invoice Created Successfully",
         description: `Monthly invoice ${data.invoiceNumber} has been created${qbMessage}.`,
       });
-      queryClient.invalidateQueries({ queryKey: ['customer-billing', customerId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "billing"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
       queryClient.invalidateQueries({ queryKey: ['/api/customers/billing-preview'] });
       queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
     },
