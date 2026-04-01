@@ -551,11 +551,11 @@ export class PDFGenerator {
                 </div>
               </div>
               
-              <!-- Work Summary if available -->
-              ${wo.workOrder.workSummary ? `
+              <!-- Work Description if available -->
+              ${(wo.workOrder.aiDetailedDescription || wo.workOrder.workSummary || wo.workOrder.description) ? `
                 <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
-                  <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Work Summary</div>
-                  <div style="color: #1f2937; font-size: 13px;">${wo.workOrder.workSummary}</div>
+                  <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Work Description</div>
+                  <div style="color: #1f2937; font-size: 13px;">${wo.workOrder.aiDetailedDescription || wo.workOrder.workSummary || wo.workOrder.description}</div>
                 </div>
               ` : ''}
               
@@ -657,6 +657,14 @@ export class PDFGenerator {
               </div>
               
               <!-- Work Description if available -->
+              ${(bs.billingSheet.aiDetailedDescription || bs.billingSheet.workDescription) ? `
+                <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                  <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Work Description</div>
+                  <div style="color: #1f2937; font-size: 13px;">${bs.billingSheet.aiDetailedDescription || bs.billingSheet.workDescription}</div>
+                </div>
+              ` : ''}
+              
+              <!-- Additional Notes if available -->
               ${bs.billingSheet.notes ? `
                 <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
                   <div style="font-weight: 600; color: #6b7280; margin-bottom: 5px;">Additional Notes</div>

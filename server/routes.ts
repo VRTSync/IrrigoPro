@@ -2540,7 +2540,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: lineTotal,
                 Qty: 1
               },
-              Description: `BS-${billingSheet.billingNumber} - ${billingSheet.workDescription} ($${parseFloat(billingSheet.laborSubtotal || '0').toFixed(2)} labor, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts)`
+              Description: `BS-${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '45').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
             });
           }
         }
