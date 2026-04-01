@@ -45,11 +45,154 @@ function resolveLogoToFetchableUrl(storedLogo: string): string {
   return `${localBase}/api/public-objects/company-logos/${storedLogo}`;
 }
 
-interface InvoicePdfGenerationResult {
+const TOLERANCE = 0.01;
+
+interface RowValidationError {
+  recordType: 'work_order' | 'billing_sheet';
+  recordId: number;
+  partsSubtotal: number;
+  laborSubtotal: number;
+  computedTotal: number;
+  storedTotal: number;
+  delta: number;
+  reason: string;
+}
+
+interface TotalsValidationError {
+  invoiceId: number;
+  computedGrandTotal: number;
+  storedTotal: number;
+  delta: number;
+  largestContributors: Array<{ recordType: string; recordId: number; rowTotal: number }>;
+}
+
+export interface InvoicePdfValidationFailure {
+  validationFailed: true;
+  rowErrors: RowValidationError[];
+  totalsError?: TotalsValidationError;
+}
+
+export interface InvoicePdfGenerationResult {
   success: boolean;
   pdfBuffer?: Buffer;
   error?: string;
-  validationWarning?: string;
+  validationFailure?: InvoicePdfValidationFailure;
+}
+
+function toNum(val: string | number | null | undefined): number {
+  if (val === null || val === undefined) return 0;
+  const n = typeof val === 'string' ? parseFloat(val) : val;
+  return isNaN(n) ? 0 : n;
+}
+
+function validateRows(
+  invoiceId: number,
+  workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }>,
+  billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[] }>,
+  storedInvoiceTotal: number,
+): InvoicePdfValidationFailure | null {
+  const rowErrors: RowValidationError[] = [];
+  const rowTotals: Array<{ recordType: string; recordId: number; rowTotal: number }> = [];
+
+  for (const { workOrder, items } of workOrders) {
+    const parts = toNum(workOrder.partsSubtotal);
+    const labor = toNum(workOrder.laborSubtotal);
+    const stored = toNum(workOrder.totalAmount);
+    const computed = parts + labor;
+    const delta = Math.abs(computed - stored);
+
+    rowTotals.push({ recordType: 'work_order', recordId: workOrder.id, rowTotal: stored });
+
+    if (delta > TOLERANCE) {
+      rowErrors.push({
+        recordType: 'work_order',
+        recordId: workOrder.id,
+        partsSubtotal: parts,
+        laborSubtotal: labor,
+        computedTotal: computed,
+        storedTotal: stored,
+        delta,
+        reason: `partsSubtotal (${parts}) + laborSubtotal (${labor}) = ${computed} does not match storedTotal (${stored}), delta ${delta.toFixed(4)}`,
+      });
+      console.error(`[PDF][validation] work_order id=${workOrder.id} invoiceId=${invoiceId} partsSubtotal=${parts} laborSubtotal=${labor} computedTotal=${computed} storedTotal=${stored} delta=${delta.toFixed(4)}`);
+    }
+
+    if (parts === 0 && labor === 0 && items.length > 0) {
+      rowErrors.push({
+        recordType: 'work_order',
+        recordId: workOrder.id,
+        partsSubtotal: parts,
+        laborSubtotal: labor,
+        computedTotal: 0,
+        storedTotal: stored,
+        delta: Math.abs(stored),
+        reason: `work_order id=${workOrder.id} has ${items.length} line item(s) but zero parts and zero labor — data integrity error`,
+      });
+      console.error(`[PDF][validation] work_order id=${workOrder.id} invoiceId=${invoiceId} has ${items.length} items but zero parts and zero labor`);
+    }
+  }
+
+  for (const { billingSheet, items } of billingSheets) {
+    const parts = toNum(billingSheet.partsSubtotal);
+    const labor = toNum(billingSheet.laborSubtotal);
+    const stored = toNum(billingSheet.totalAmount);
+    const computed = parts + labor;
+    const delta = Math.abs(computed - stored);
+
+    rowTotals.push({ recordType: 'billing_sheet', recordId: billingSheet.id, rowTotal: stored });
+
+    if (delta > TOLERANCE) {
+      rowErrors.push({
+        recordType: 'billing_sheet',
+        recordId: billingSheet.id,
+        partsSubtotal: parts,
+        laborSubtotal: labor,
+        computedTotal: computed,
+        storedTotal: stored,
+        delta,
+        reason: `partsSubtotal (${parts}) + laborSubtotal (${labor}) = ${computed} does not match storedTotal (${stored}), delta ${delta.toFixed(4)}`,
+      });
+      console.error(`[PDF][validation] billing_sheet id=${billingSheet.id} invoiceId=${invoiceId} partsSubtotal=${parts} laborSubtotal=${labor} computedTotal=${computed} storedTotal=${stored} delta=${delta.toFixed(4)}`);
+    }
+
+    if (parts === 0 && labor === 0 && items.length > 0) {
+      rowErrors.push({
+        recordType: 'billing_sheet',
+        recordId: billingSheet.id,
+        partsSubtotal: parts,
+        laborSubtotal: labor,
+        computedTotal: 0,
+        storedTotal: stored,
+        delta: Math.abs(stored),
+        reason: `billing_sheet id=${billingSheet.id} has ${items.length} line item(s) but zero parts and zero labor — data integrity error`,
+      });
+      console.error(`[PDF][validation] billing_sheet id=${billingSheet.id} invoiceId=${invoiceId} has ${items.length} items but zero parts and zero labor`);
+    }
+  }
+
+  const computedGrandTotal = rowTotals.reduce((sum, r) => sum + r.rowTotal, 0);
+  const grandDelta = Math.abs(computedGrandTotal - storedInvoiceTotal);
+
+  let totalsError: TotalsValidationError | undefined;
+  if (grandDelta > TOLERANCE) {
+    const sortedContributors = [...rowTotals].sort((a, b) => b.rowTotal - a.rowTotal);
+    totalsError = {
+      invoiceId,
+      computedGrandTotal,
+      storedTotal: storedInvoiceTotal,
+      delta: grandDelta,
+      largestContributors: sortedContributors.slice(0, 5),
+    };
+    console.error(
+      `[PDF][validation] invoiceId=${invoiceId} grandTotal mismatch: computed=${computedGrandTotal} stored=${storedInvoiceTotal} delta=${grandDelta.toFixed(4)} topContributors=${JSON.stringify(sortedContributors.slice(0, 5))}`,
+    );
+  }
+
+  if (rowErrors.length > 0 || totalsError) {
+    return { validationFailed: true, rowErrors, totalsError };
+  }
+
+  return null;
 }
 
 export class InvoicePdfService {
@@ -103,6 +246,12 @@ export class InvoicePdfService {
         }
       }
 
+      const storedInvoiceTotal = toNum(invoice.totalAmount);
+      const validationFailure = validateRows(invoiceId, workOrders, billingSheets, storedInvoiceTotal);
+      if (validationFailure) {
+        return { success: false, error: 'Invoice totals validation failed', validationFailure };
+      }
+
       const laborRate = customer.laborRate || '45.00';
 
       let logoDataUri: string | null = null;
@@ -111,7 +260,7 @@ export class InvoicePdfService {
         logoDataUri = await fetchLogoAsBase64(logoUrl);
       }
 
-      const { viewModel, validationWarning } = buildPdfViewModel({
+      const { viewModel } = buildPdfViewModel({
         invoice,
         company: {
           name: company.name,
@@ -126,13 +275,9 @@ export class InvoicePdfService {
         laborRate,
       });
 
-      if (validationWarning) {
-        console.warn('[InvoicePdfService]', validationWarning);
-      }
-
       const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF(viewModel);
 
-      return { success: true, pdfBuffer, validationWarning: validationWarning ?? undefined };
+      return { success: true, pdfBuffer };
     } catch (error) {
       console.error('Error generating invoice PDF:', error);
       return { 
@@ -178,7 +323,7 @@ export class InvoicePdfService {
         status: 'generated',
       });
 
-      return { success: true, pdfBuffer: result.pdfBuffer, validationWarning: result.validationWarning };
+      return { success: true, pdfBuffer: result.pdfBuffer };
     } catch (error) {
       console.error('Error saving invoice PDF record:', error);
       return { 

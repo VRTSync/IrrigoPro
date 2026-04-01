@@ -6346,6 +6346,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const result = await pdfService.generatePdfBuffer(invoiceId);
 
       if (!result.success || !result.pdfBuffer) {
+        if (result.validationFailure) {
+          return res.status(422).json({
+            message: result.error || "Invoice totals validation failed",
+            validationFailure: result.validationFailure,
+          });
+        }
         return res.status(500).json({ message: result.error || "Failed to generate PDF" });
       }
 
@@ -6377,6 +6383,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       if (!invoice) {
         return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      const pdfService = new InvoicePdfService(storage);
+      const validationResult = await pdfService.generatePdfBuffer(invoiceId);
+      if (!validationResult.success) {
+        if (validationResult.validationFailure) {
+          return res.status(422).json({
+            message: validationResult.error || "Invoice totals validation failed",
+            validationFailure: validationResult.validationFailure,
+          });
+        }
+        return res.status(500).json({ message: validationResult.error || "Failed to validate invoice PDF" });
       }
 
       const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
