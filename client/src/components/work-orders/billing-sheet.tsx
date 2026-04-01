@@ -29,7 +29,6 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, WorkOrderItem } from "@shared/schema";
 import logoPath from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
-import { GenerateDescriptionPanel, type AiOutputs, type AiInputs } from "./generate-description-panel";
 
 const billingItemSchema = z.object({
   description: z.string().min(1, "Description is required"),
@@ -66,8 +65,6 @@ interface BillingSheetProps {
 
 export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [aiOutputs, setAiOutputs] = useState<AiOutputs>({ shortDescription: "", detailedDescription: "" });
-  const [aiInputs, setAiInputs] = useState<AiInputs | null>(null);
   const arrivalPhotoRef = useRef<HTMLInputElement>(null);
   const finishedPhotoRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -155,12 +152,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
 
   const saveBillingSheet = useMutation({
     mutationFn: async (data: BillingSheetData) => {
-      return apiRequest(`/api/work-orders/${workOrder.id}/billing-sheet`, 'POST', {
-        ...data,
-        aiInputs: aiInputs ? JSON.stringify(aiInputs) : undefined,
-        aiShortDescription: aiOutputs.shortDescription || undefined,
-        aiDetailedDescription: aiOutputs.detailedDescription || undefined,
-      });
+      return apiRequest(`/api/work-orders/${workOrder.id}/billing-sheet`, 'POST', data);
     },
     onSuccess: () => {
       toast({
@@ -812,16 +804,6 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                   />
                 </CardContent>
               </Card>
-
-              {/* AI Description Generator */}
-              <GenerateDescriptionPanel
-                entityType="billing_sheet"
-                entityId={workOrder.id}
-                onOutputChange={(outputs, inputs) => {
-                  setAiOutputs(outputs);
-                  setAiInputs(inputs);
-                }}
-              />
 
               {/* Submit Button */}
               <div className="flex justify-end space-x-4">

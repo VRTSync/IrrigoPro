@@ -32,8 +32,10 @@ import {
   Minus,
   Search,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Sparkles
 } from "lucide-react";
+import { AiGenerateDescriptionDialog } from "@/components/billing/ai-generate-description-dialog";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
@@ -103,6 +105,7 @@ export function StandaloneBillingSheet({
   const [isAllPartsExpanded, setIsAllPartsExpanded] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
+  const [showAiDialog, setShowAiDialog] = useState(false);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -888,13 +891,33 @@ export function StandaloneBillingSheet({
                         name="workDescription"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Work Description</FormLabel>
+                            <div className="flex items-center justify-between">
+                              <FormLabel>Work Description</FormLabel>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowAiDialog(true)}
+                                className="h-7 px-2 text-xs gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                Generate with AI
+                              </Button>
+                            </div>
                             <FormControl>
                               <Textarea {...field} placeholder="Describe the work performed" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
+                      />
+
+                      <AiGenerateDescriptionDialog
+                        open={showAiDialog}
+                        onOpenChange={setShowAiDialog}
+                        onGenerated={(description) => {
+                          form.setValue("workDescription", description, { shouldDirty: true });
+                        }}
                       />
 
                       {/* Labor & Time */}
