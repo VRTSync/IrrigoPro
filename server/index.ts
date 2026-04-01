@@ -4,7 +4,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 import { db, pool } from "./db";
-import { customers, parts, billingSheets, billingSheetItems, users } from "@shared/schema";
+import { customers, parts, billingSheets, billingSheetItems, users, workOrders, workOrderItems, invoices } from "@shared/schema";
 import { ne, eq, inArray, or, and } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
@@ -339,6 +339,149 @@ async function runStartupMigrations() {
     }
   } catch (err) {
     logger.error('Startup migration error (irrigation manager billing sheets, non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Recompute zero subtotals for work orders and billing sheets that have line items
+  try {
+    const toNum = (val: string | number | null | undefined): number => {
+      if (val === null || val === undefined) return 0;
+      const n = typeof val === 'string' ? parseFloat(val) : val;
+      return isNaN(n) ? 0 : n;
+    };
+
+    // Find work orders with zero parts and zero labor subtotals
+    const allWorkOrders = await db.select().from(workOrders);
+    const affectedInvoiceIds = new Set<number>();
+    let woRepaired = 0;
+
+    for (const wo of allWorkOrders) {
+      const partsAmt = toNum(wo.partsSubtotal);
+      const laborAmt = toNum(wo.laborSubtotal);
+      if (partsAmt !== 0 || laborAmt !== 0) continue;
+
+      // Check if this work order has items
+      const items = await db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, wo.id));
+      if (items.length === 0) continue;
+
+      // Compute correct subtotals from totalHours/totalPartsCost (same formula as completion route)
+      // Fall back to summing item totalPrices if those fields are also zero
+      const totalHoursVal = toNum(wo.totalHours);
+      const totalPartsCostVal = toNum(wo.totalPartsCost);
+      const laborRateVal = toNum(wo.laborRate) || 45;
+
+      let computedLabor = totalHoursVal * laborRateVal;
+      let computedParts = totalPartsCostVal;
+
+      // If those are also zero, sum item prices as best approximation
+      if (computedLabor === 0 && computedParts === 0) {
+        for (const item of items) {
+          const itemParts = toNum(item.partPrice) * toNum(item.quantity);
+          const itemLabor = toNum(item.laborHours) * laborRateVal;
+          computedParts += itemParts;
+          computedLabor += itemLabor;
+        }
+      }
+
+      const newTotal = computedParts + computedLabor;
+      await db.update(workOrders)
+        .set({
+          partsSubtotal: computedParts.toFixed(2),
+          laborSubtotal: computedLabor.toFixed(2),
+          totalAmount: newTotal.toFixed(2),
+        })
+        .where(eq(workOrders.id, wo.id));
+
+      woRepaired++;
+      if (wo.invoiceId) affectedInvoiceIds.add(wo.invoiceId);
+      logger.info(`Startup migration: repaired work_order id=${wo.id} partsSubtotal=${computedParts.toFixed(2)} laborSubtotal=${computedLabor.toFixed(2)} totalAmount=${newTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    // Find billing sheets with zero parts and zero labor subtotals
+    const allSheets2 = await db.select().from(billingSheets);
+    let bsRepaired = 0;
+
+    for (const sheet of allSheets2) {
+      const partsAmt = toNum(sheet.partsSubtotal);
+      const laborAmt = toNum(sheet.laborSubtotal);
+      if (partsAmt !== 0 || laborAmt !== 0) continue;
+
+      const sheetItems = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, sheet.id));
+      if (sheetItems.length === 0) continue;
+
+      // Compute labor from totalHours * laborRate (same approach as existing billing-sheets migration)
+      // Compute parts by summing item totalPrices (items are parts-only; labor is tracked via totalHours)
+      const totalHoursVal = toNum(sheet.totalHours);
+      const laborRateVal = toNum(sheet.laborRate) || 45;
+      const computedLabor = totalHoursVal * laborRateVal;
+
+      // Sum item totalPrices as parts subtotal (billing sheet items are parts, not labor rows)
+      let computedParts = 0;
+      for (const item of sheetItems) {
+        computedParts += toNum(item.totalPrice);
+      }
+
+      const markupAmount = toNum(sheet.markupAmount);
+      const taxAmount = toNum(sheet.taxAmount);
+      const newTotal = computedParts + computedLabor + markupAmount + taxAmount;
+
+      await db.update(billingSheets)
+        .set({
+          partsSubtotal: computedParts.toFixed(2),
+          laborSubtotal: computedLabor.toFixed(2),
+          totalAmount: newTotal.toFixed(2),
+        })
+        .where(eq(billingSheets.id, sheet.id));
+
+      bsRepaired++;
+      if (sheet.invoiceId) affectedInvoiceIds.add(sheet.invoiceId);
+      logger.info(`Startup migration: repaired billing_sheet id=${sheet.id} partsSubtotal=${computedParts.toFixed(2)} laborSubtotal=${computedLabor.toFixed(2)} totalAmount=${newTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    // Recompute invoice totals for affected invoices
+    let invoicesRepaired = 0;
+    for (const invoiceId of affectedInvoiceIds) {
+      const invoice = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+      if (!invoice[0]) continue;
+
+      // Sum work order totals linked to this invoice
+      const linkedWorkOrders = await db.select().from(workOrders).where(eq(workOrders.invoiceId, invoiceId));
+      const linkedBillingSheets = await db.select().from(billingSheets).where(eq(billingSheets.invoiceId, invoiceId));
+
+      let newPartsSubtotal = 0;
+      let newLaborSubtotal = 0;
+      for (const wo of linkedWorkOrders) {
+        newPartsSubtotal += toNum(wo.partsSubtotal);
+        newLaborSubtotal += toNum(wo.laborSubtotal);
+      }
+      for (const bs of linkedBillingSheets) {
+        newPartsSubtotal += toNum(bs.partsSubtotal);
+        newLaborSubtotal += toNum(bs.laborSubtotal);
+      }
+
+      const markupAmount = toNum(invoice[0].markupAmount);
+      const taxAmount = toNum(invoice[0].taxAmount);
+      const newTotal = newPartsSubtotal + newLaborSubtotal + markupAmount + taxAmount;
+
+      await db.update(invoices)
+        .set({
+          partsSubtotal: newPartsSubtotal.toFixed(2),
+          laborSubtotal: newLaborSubtotal.toFixed(2),
+          totalAmount: newTotal.toFixed(2),
+        })
+        .where(eq(invoices.id, invoiceId));
+
+      invoicesRepaired++;
+      logger.info(`Startup migration: recomputed invoice id=${invoiceId} totalAmount=${newTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    if (woRepaired > 0 || bsRepaired > 0 || invoicesRepaired > 0) {
+      logger.info(
+        `Startup migration (recompute-zero-subtotals): repaired ${woRepaired} work order(s), ${bsRepaired} billing sheet(s), ${invoicesRepaired} invoice(s)`,
+        'Server Startup'
+      );
+    }
+  } catch (err) {
+    logger.error('Startup migration (recompute-zero-subtotals) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 }
 

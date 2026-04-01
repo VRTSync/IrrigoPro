@@ -37,6 +37,28 @@ interface InvoicePdf {
   sentAt?: string;
 }
 
+interface RowValidationError {
+  recordType: string;
+  recordId: number;
+  partsSubtotal: number;
+  laborSubtotal: number;
+  computedTotal: number;
+  storedTotal: number;
+  delta: number;
+  reason: string;
+}
+
+interface ValidationFailure {
+  validationFailed: boolean;
+  rowErrors: RowValidationError[];
+  totalsError?: {
+    invoiceId: number;
+    computedGrandTotal: number;
+    storedTotal: number;
+    delta: number;
+  };
+}
+
 export function InvoicePdfPreviewModal({
   invoiceId,
   invoiceNumber,
@@ -46,6 +68,8 @@ export function InvoicePdfPreviewModal({
 }: InvoicePdfPreviewModalProps) {
   const { toast } = useToast();
   const [showEmailConfirm, setShowEmailConfirm] = useState(false);
+  const [pdfError, setPdfError] = useState<{ message: string; validationFailure?: ValidationFailure } | null>(null);
+  const [isViewingPdf, setIsViewingPdf] = useState(false);
 
   // Fetch PDF details
   const { data: pdf, isLoading, error } = useQuery<InvoicePdf>({
@@ -53,15 +77,13 @@ export function InvoicePdfPreviewModal({
     enabled: open,
   });
 
-  // Build PDF URL with auth headers as query params for better compatibility
-  const getPdfUrl = () => {
+  const getAuthParams = () => {
     const user = JSON.parse(safeGet("user") || "{}");
-    const params = new URLSearchParams({
-      'user-id': user.id?.toString() || '',
-      'user-role': user.role || '',
-      'user-company-id': user.companyId?.toString() || '',
+    return new URLSearchParams({
+      'x-user-id': user.id?.toString() || '',
+      'x-user-role': user.role || '',
+      'x-user-company-id': user.companyId?.toString() || '',
     });
-    return `/api/invoices/${invoiceId}/pdf/download?${params.toString()}`;
   };
 
   // Send email mutation
@@ -98,28 +120,53 @@ export function InvoicePdfPreviewModal({
     },
   });
 
-  const handleViewPdf = () => {
-    // Open PDF in new tab
-    const user = JSON.parse(safeGet("user") || "{}");
-    const params = new URLSearchParams({
-      'x-user-id': user.id?.toString() || '',
-      'x-user-role': user.role || '',
-      'x-user-company-id': user.companyId?.toString() || '',
-    });
-    
-    window.open(`/api/invoices/${invoiceId}/pdf/download?${params.toString()}`, '_blank');
+  const handleViewPdf = async () => {
+    setPdfError(null);
+    setIsViewingPdf(true);
+    // Open a blank tab synchronously (within the user gesture) to avoid popup blockers
+    const newTab = window.open("", "_blank");
+    try {
+      const params = getAuthParams();
+      const url = `/api/invoices/${invoiceId}/pdf/download?${params.toString()}`;
+      const response = await fetch(url);
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (response.ok && contentType.includes("application/pdf")) {
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        if (newTab) {
+          newTab.location.href = objectUrl;
+          // Revoke the object URL after a short delay to free memory
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+        } else {
+          // Fallback if popup was blocked
+          const link = document.createElement("a");
+          link.href = objectUrl;
+          link.target = "_blank";
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+        }
+      } else {
+        if (newTab) newTab.close();
+        const data = await response.json().catch(() => ({ message: "Unknown error generating PDF" }));
+        setPdfError({
+          message: data.message || "Failed to generate PDF",
+          validationFailure: data.validationFailure,
+        });
+      }
+    } catch (err) {
+      if (newTab) newTab.close();
+      setPdfError({ message: "A network error occurred while loading the PDF. Please try again." });
+    } finally {
+      setIsViewingPdf(false);
+    }
   };
 
   const handleDownload = () => {
     if (!pdf) return;
     
-    // Trigger download using a temporary link
-    const user = JSON.parse(safeGet("user") || "{}");
-    const params = new URLSearchParams({
-      'x-user-id': user.id?.toString() || '',
-      'x-user-role': user.role || '',
-      'x-user-company-id': user.companyId?.toString() || '',
-    });
+    const params = getAuthParams();
     
     const link = document.createElement("a");
     link.href = `/api/invoices/${invoiceId}/pdf/download?${params.toString()}`;
@@ -181,6 +228,33 @@ export function InvoicePdfPreviewModal({
               </div>
             )}
 
+            {pdfError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <h4 className="font-medium text-red-900 mb-1">PDF Cannot Be Generated</h4>
+                    <p className="text-sm text-red-700 mb-2">{pdfError.message}</p>
+                    {pdfError.validationFailure && pdfError.validationFailure.rowErrors.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-sm font-medium text-red-800 mb-1">Data integrity issues found:</p>
+                        <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+                          {pdfError.validationFailure.rowErrors.map((err, i) => (
+                            <li key={i}>
+                              {err.recordType === 'work_order' ? 'Work Order' : 'Billing Sheet'} #{err.recordId}: {err.reason}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-xs text-red-600 mt-2">
+                          Please contact support to repair these records before generating the PDF.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {pdf && !isLoading && !error && (
               <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -195,9 +269,14 @@ export function InvoicePdfPreviewModal({
                         <Button
                           onClick={handleViewPdf}
                           size="sm"
+                          disabled={isViewingPdf}
                           data-testid="button-view-pdf"
                         >
-                          <FileText className="w-4 h-4 mr-2" />
+                          {isViewingPdf ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <FileText className="w-4 h-4 mr-2" />
+                          )}
                           View PDF
                         </Button>
                         <Button
