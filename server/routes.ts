@@ -2346,11 +2346,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      if (integration.expiresAt && new Date(integration.expiresAt) <= new Date()) {
-        return res.status(400).json({
-          message: "QuickBooks access token has expired. Please reconnect QuickBooks before creating invoices.",
-          quickbooksError: "Your QuickBooks session has expired. Go to the QuickBooks section to reconnect your account."
-        });
+      // Proactively refresh if token is expired or within 5-minute buffer
+      if (integration.expiresAt && new Date(integration.expiresAt) <= new Date(Date.now() + 5 * 60 * 1000)) {
+        const tokenActuallyExpired = new Date(integration.expiresAt) <= new Date();
+        console.log(`QuickBooks access token ${tokenActuallyExpired ? 'expired' : 'expiring soon'}, attempting proactive refresh...`);
+        if (!integration.refreshToken) {
+          if (tokenActuallyExpired) {
+            return res.status(400).json({
+              message: "QuickBooks session has expired and cannot be refreshed. Please reconnect QuickBooks.",
+              quickbooksError: "Your QuickBooks session has expired. Go to the QuickBooks section to reconnect your account."
+            });
+          }
+          console.warn('QuickBooks refresh token missing during buffer window; proceeding with existing token');
+        } else {
+          try {
+            const newTokenData = await refreshQuickBooksToken(integration.refreshToken);
+            const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
+            await storage.saveQuickBooksIntegration({
+              companyId: integration.companyId,
+              accessToken: newTokenData.access_token,
+              refreshToken: newTokenData.refresh_token || integration.refreshToken,
+              realmId: integration.realmId,
+              expiresAt: new Date(Date.now() + expiresInSeconds * 1000)
+            });
+            integration.accessToken = newTokenData.access_token;
+            integration.refreshToken = newTokenData.refresh_token || integration.refreshToken;
+            integration.expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
+            console.log('Proactive QuickBooks token refresh succeeded');
+          } catch (refreshErr) {
+            console.error('Proactive QuickBooks token refresh failed:', refreshErr);
+            if (tokenActuallyExpired) {
+              return res.status(400).json({
+                message: "QuickBooks session has expired and could not be refreshed. Please reconnect QuickBooks.",
+                quickbooksError: "Your QuickBooks session has expired. Go to the QuickBooks section to reconnect your account."
+              });
+            }
+            console.warn('Proactive refresh failed within buffer window; proceeding with existing token — makeQuickBooksRequest will retry on 401');
+          }
+        }
       }
 
       // Get customer details
