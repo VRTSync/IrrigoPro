@@ -26,6 +26,69 @@ export async function fetchLogoAsBase64(logoUrl: string): Promise<string | null>
   }
 }
 
+const PHOTO_LOAD_TIMEOUT_MS = 8000;
+const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
+
+async function fetchPhotoAsDataUri(photoUrl: string, port: number): Promise<string> {
+  try {
+    const absoluteUrl = photoUrl.startsWith('/')
+      ? `http://localhost:${port}${photoUrl}`
+      : photoUrl;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PHOTO_LOAD_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(absoluteUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) return FAILED_PHOTO_SENTINEL;
+    const contentType = response.headers.get('content-type') || '';
+    const mimeType = contentType.split(';')[0].trim().toLowerCase();
+    if (!mimeType.startsWith('image/')) return FAILED_PHOTO_SENTINEL;
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return FAILED_PHOTO_SENTINEL;
+  }
+}
+
+async function preloadPhotos(urls: string[], port: number): Promise<string[]> {
+  return Promise.all(urls.map(url => fetchPhotoAsDataUri(url, port)));
+}
+
+function renderPhotoCell(dataUri: string): string {
+  if (dataUri === FAILED_PHOTO_SENTINEL) {
+    return `<div style="width:180px;height:140px;background:#f3f4f6;border:2px dashed #d1d5db;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#9ca3af;text-align:center;">Image unavailable</div>`;
+  }
+  return `<img src="${dataUri}" alt="Work photo" style="width:180px;height:140px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;display:block;">`;
+}
+
+function renderPhotoGrid(dataUris: string[]): string {
+  if (dataUris.length === 0) return '';
+  const COLS = 3;
+  const rows: string[][] = [];
+  for (let i = 0; i < dataUris.length; i += COLS) {
+    rows.push(dataUris.slice(i, i + COLS));
+  }
+  const tableRows = rows.map(row => {
+    const tds = row.map(uri => `<td style="padding:4px;vertical-align:top;">${renderPhotoCell(uri)}</td>`).join('');
+    const emptyCols = COLS - row.length;
+    const emptyTds = emptyCols > 0
+      ? Array(emptyCols).fill(`<td style="padding:4px;width:188px;"></td>`).join('')
+      : '';
+    return `<tr>${tds}${emptyTds}</tr>`;
+  }).join('');
+  return `
+    <div style="margin-bottom:20px;">
+      <div style="font-weight:600;color:#1f2937;margin-bottom:10px;font-size:14px;">Work Photos</div>
+      <table style="border-collapse:separate;border-spacing:0;">
+        ${tableRows}
+      </table>
+    </div>
+  `;
+}
 // Get system chromium path for Replit
 function getChromiumPath(): string {
   try {
@@ -128,6 +191,24 @@ export class PDFGenerator {
   }
 
   static async generateInvoiceDetailPDF(data: InvoiceDetailData): Promise<Buffer> {
+    const port = parseInt(process.env.PORT || '5000', 10);
+
+    // Pre-load all photos as base64 data URIs before generating HTML
+    const woPhotoMaps: string[][] = await Promise.all(
+      data.workOrders.map(wo =>
+        wo.workOrder.photos && wo.workOrder.photos.length > 0
+          ? preloadPhotos(wo.workOrder.photos, port)
+          : Promise.resolve([])
+      )
+    );
+    const bsPhotoMaps: string[][] = await Promise.all(
+      data.billingSheets.map(bs =>
+        bs.billingSheet.photos && bs.billingSheet.photos.length > 0
+          ? preloadPhotos(bs.billingSheet.photos, port)
+          : Promise.resolve([])
+      )
+    );
+
     const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
@@ -138,12 +219,12 @@ export class PDFGenerator {
     try {
       const page = await browser.newPage();
       
-      // Generate HTML content
-      const htmlContent = this.generateInvoiceDetailHTML(data);
+      // Generate HTML content with pre-loaded photo data URIs
+      const htmlContent = this.generateInvoiceDetailHTML(data, woPhotoMaps, bsPhotoMaps);
       
-      // Set the HTML content
+      // Set the HTML content — no external fetches needed since images are embedded
       await page.setContent(htmlContent, { 
-        waitUntil: 'networkidle0' 
+        waitUntil: 'domcontentloaded' 
       });
       
       // Generate PDF with professional settings
@@ -164,7 +245,7 @@ export class PDFGenerator {
     }
   }
 
-  private static generateInvoiceDetailHTML(data: InvoiceDetailData): string {
+  private static generateInvoiceDetailHTML(data: InvoiceDetailData, woPhotoMaps: string[][] = [], bsPhotoMaps: string[][] = []): string {
     const { invoice, company, workOrders, billingSheets, laborRate: passedLaborRate } = data;
     const laborRateNum = parseFloat(passedLaborRate || '45.00');
     
@@ -617,16 +698,7 @@ export class PDFGenerator {
               ` : '<p style="color: #6b7280; padding: 10px;">No line items</p>'}
               
               <!-- Photos if available -->
-              ${wo.workOrder.photos && wo.workOrder.photos.length > 0 ? `
-                <div style="margin-bottom: 20px;">
-                  <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Work Photos</div>
-                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
-                    ${wo.workOrder.photos.map(photo => `
-                      <img src="${photo}" alt="Work photo" style="width: 100%; height: 150px; object-fit: cover; border-radius: 6px; border: 1px solid #e5e7eb;">
-                    `).join('')}
-                  </div>
-                </div>
-              ` : ''}
+              ${(woPhotoMaps[index] && woPhotoMaps[index].length > 0) ? renderPhotoGrid(woPhotoMaps[index]) : ''}
               
               <!-- Work Order Totals -->
               <div class="work-order-totals">
@@ -730,16 +802,7 @@ export class PDFGenerator {
               ` : '<p style="color: #6b7280; padding: 10px;">No line items</p>'}
               
               <!-- Photos if available -->
-              ${bs.billingSheet.photos && bs.billingSheet.photos.length > 0 ? `
-                <div style="margin-bottom: 20px;">
-                  <div style="font-weight: 600; color: #1f2937; margin-bottom: 10px; font-size: 14px;">Work Photos</div>
-                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
-                    ${bs.billingSheet.photos.map(photo => `
-                      <img src="${photo}" alt="Work photo" style="width: 100%; height: 150px; object-fit: cover; border-radius: 6px; border: 1px solid #e5e7eb;">
-                    `).join('')}
-                  </div>
-                </div>
-              ` : ''}
+              ${(bsPhotoMaps[index] && bsPhotoMaps[index].length > 0) ? renderPhotoGrid(bsPhotoMaps[index]) : ''}
               
               <!-- Billing Sheet Totals -->
               <div class="work-order-totals">
