@@ -174,6 +174,8 @@ export const parts = pgTable("parts", {
   detail: text("detail"), // Additional specifications like "Pressure Vacuum Breaker"
   quickbooksId: text("quickbooks_id"), // QuickBooks item ID for integration
   isActive: boolean("is_active").notNull().default(true),
+  approvalStatus: text("approval_status").notNull().default("approved"), // pending | approved
+  approvedAt: timestamp("approved_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -235,6 +237,20 @@ export const billingSheetItems = pgTable("billing_sheet_items", {
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
   notes: text("notes"),
+});
+
+// Manual part reviews - for parts entered manually on billing sheets (no catalog match)
+export const manualPartReviews = pgTable("manual_part_reviews", {
+  id: serial("id").primaryKey(),
+  billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id).notNull(),
+  billingSheetItemId: integer("billing_sheet_item_id").references(() => billingSheetItems.id),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  partName: text("part_name").notNull(),
+  proposedPrice: decimal("proposed_price", { precision: 10, scale: 2 }).notNull(),
+  reviewedPrice: decimal("reviewed_price", { precision: 10, scale: 2 }),
+  approvalStatus: text("approval_status").notNull().default("pending"), // pending | approved
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // Part assemblies - pre-configured bundles of parts for common repairs
@@ -659,6 +675,7 @@ export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ i
 export const insertInvoicePdfSchema = createInsertSchema(invoicePdfs).omit({ id: true, createdAt: true });
 export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
+export const insertManualPartReviewSchema = createInsertSchema(manualPartReviews).omit({ id: true, createdAt: true });
 export const insertAiGenerationLogSchema = createInsertSchema(aiGenerationLogs).omit({ id: true, createdAt: true });
 export const insertPartUsageSchema = createInsertSchema(partUsage).omit({ id: true, updatedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
@@ -706,6 +723,7 @@ export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type InvoicePdf = typeof invoicePdfs.$inferSelect;
 export type BillingSheet = typeof billingSheets.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
+export type ManualPartReview = typeof manualPartReviews.$inferSelect;
 export type AiGenerationLog = typeof aiGenerationLogs.$inferSelect;
 export type PartUsage = typeof partUsage.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
@@ -732,6 +750,7 @@ export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
 export type InsertInvoicePdf = z.infer<typeof insertInvoicePdfSchema>;
 export type InsertBillingSheet = z.infer<typeof insertBillingSheetSchema>;
 export type InsertBillingSheetItem = z.infer<typeof insertBillingSheetItemSchema>;
+export type InsertManualPartReview = z.infer<typeof insertManualPartReviewSchema>;
 export type InsertAiGenerationLog = z.infer<typeof insertAiGenerationLogSchema>;
 export type InsertPartUsage = z.infer<typeof insertPartUsageSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;

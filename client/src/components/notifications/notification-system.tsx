@@ -83,6 +83,9 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         return <Receipt className="h-4 w-4 text-orange-600" />;
       case "estimate_pending_approval":
         return <FileText className="h-4 w-4 text-orange-600" />;
+      case "part_pending_approval":
+      case "manual_part_pending_review":
+        return <Receipt className="h-4 w-4 text-amber-600" />;
       default:
         return <Bell className="h-4 w-4 text-gray-600" />;
     }
@@ -102,6 +105,9 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         return "bg-orange-50 border-orange-200";
       case "estimate_pending_approval":
         return "bg-orange-50 border-orange-200";
+      case "part_pending_approval":
+      case "manual_part_pending_review":
+        return "bg-amber-50 border-amber-200";
       default:
         return "bg-gray-50 border-gray-200";
     }
@@ -113,6 +119,12 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
     }
     
     // Navigate to related entity if available
+    if (notification.type === "part_pending_approval" || notification.type === "manual_part_pending_review") {
+      setIsOpen(false);
+      window.location.href = "/parts-pending-approval";
+      return;
+    }
+
     if (notification.relatedEntityType && notification.relatedEntityId) {
       let path = "";
       switch (notification.relatedEntityType) {

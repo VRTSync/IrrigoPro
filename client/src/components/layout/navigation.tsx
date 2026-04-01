@@ -8,8 +8,25 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState, useEffect } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
+import type { Part, ManualPartReview } from "@shared/schema";
+
+type NavDropdownItem = {
+  path: string;
+  label: string;
+  icon: LucideIcon;
+  badge?: number;
+};
+
+type NavItem = {
+  path: string;
+  label: string;
+  icon: LucideIcon;
+  isCenter?: boolean;
+  isDropdown?: boolean;
+  dropdownItems?: NavDropdownItem[];
+};
 
 export default function Navigation() {
   const [location] = useLocation();
@@ -24,6 +41,19 @@ export default function Navigation() {
   const user = JSON.parse(safeGet("user") || "{}");
   const userRole = user.role;
   const companyId = user.companyId;
+
+  // Fetch pending parts approval count for billing manager badge
+  const { data: pendingParts = [] } = useQuery<Part[]>({
+    queryKey: ["/api/parts/pending-approval"],
+    enabled: userRole === 'billing_manager' || userRole === 'company_admin',
+    refetchInterval: 60000,
+  });
+  const { data: pendingReviews = [] } = useQuery<ManualPartReview[]>({
+    queryKey: ["/api/manual-part-reviews"],
+    enabled: userRole === 'billing_manager' || userRole === 'company_admin',
+    refetchInterval: 60000,
+  });
+  const pendingApprovalCount = (pendingParts?.length || 0) + (pendingReviews?.length || 0);
 
   // Fetch company profile to get company logo
   const { data: company } = useQuery({
@@ -167,6 +197,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/parts", label: "Parts Catalog", icon: Package },
               { path: "/parts-settings", label: "Parts Settings", icon: Settings },
+              { path: "/parts-pending-approval", label: "Parts Pending Approval", icon: ShieldCheck, badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined },
             ]
           },
         ];
@@ -229,13 +260,18 @@ export default function Navigation() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent>
-                          {item.dropdownItems.map((dropdownItem) => (
+                          {item.dropdownItems.map((dropdownItem: NavDropdownItem) => (
                             <Link key={dropdownItem.path} href={dropdownItem.path}>
                               <DropdownMenuItem className={`flex items-center space-x-2 ${
                                 isActive(dropdownItem.path) ? "bg-primary/10" : ""
                               }`}>
                                 <dropdownItem.icon className="w-4 h-4" />
                                 <span>{dropdownItem.label}</span>
+                                {dropdownItem.badge && (
+                                  <Badge variant="destructive" className="ml-auto h-5 w-5 p-0 flex items-center justify-center text-xs">
+                                    {dropdownItem.badge > 99 ? "99+" : dropdownItem.badge}
+                                  </Badge>
+                                )}
                               </DropdownMenuItem>
                             </Link>
                           ))}
@@ -432,7 +468,7 @@ export default function Navigation() {
                   // Then add Team (most important admin function)
                   const adminItem = otherItems.find(item => item.label === 'Admin');
                   if (adminItem?.dropdownItems) {
-                    const teamItem = adminItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Team');
+                    const teamItem = adminItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Team');
                     if (teamItem) {
                       expandedItems.push(teamItem);
                     }
@@ -442,7 +478,7 @@ export default function Navigation() {
                   const customersItem = otherItems.find(item => item.label === 'Customers' && item.isDropdown);
                   if (customersItem?.dropdownItems) {
                     // Add direct customers link instead of Maps
-                    const customersLink = customersItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Customers');
+                    const customersLink = customersItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Customers');
                     if (customersLink) {
                       expandedItems.push(customersLink);
                     }
@@ -457,7 +493,7 @@ export default function Navigation() {
                   // Add Customers (primary customer access) instead of Parts Catalog
                   const customersItem = otherItems.find(item => item.label === 'Customers' && item.isDropdown);
                   if (customersItem?.dropdownItems) {
-                    const customersLink = customersItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Customers');
+                    const customersLink = customersItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Customers');
                     if (customersLink) {
                       expandedItems.push(customersLink);
                     }
@@ -473,7 +509,7 @@ export default function Navigation() {
                   // Add Parts Catalog as the last mobile slot
                   const partsItem = otherItems.find(item => item.label === 'Parts' && item.isDropdown);
                   if (partsItem?.dropdownItems) {
-                    const partsLink = partsItem.dropdownItems.find((dropdownItem: any) => dropdownItem.label === 'Parts Catalog');
+                    const partsLink = partsItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Parts Catalog');
                     if (partsLink && expandedItems.length < 4) expandedItems.push(partsLink);
                   }
                 } else {

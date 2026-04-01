@@ -19,6 +19,7 @@ import {
   invoicePdfs,
   billingSheets,
   billingSheetItems,
+  manualPartReviews,
   aiGenerationLogs,
   notifications,
   quickbooksIntegration,
@@ -52,6 +53,7 @@ import {
   type InvoicePdf,
   type BillingSheet,
   type BillingSheetItem,
+  type ManualPartReview,
   type AiGenerationLog,
   type Notification,
   type SiteMap,
@@ -84,6 +86,7 @@ import {
   type InsertInvoicePdf,
   type InsertBillingSheet,
   type InsertBillingSheetItem,
+  type InsertManualPartReview,
   type InsertAiGenerationLog,
   type InsertNotification,
   type InsertSiteMap,
@@ -105,7 +108,7 @@ import {
   type AssemblyWithParts
 } from "@shared/schema";
 import { db } from "./db";
-import { sql, eq, like, ilike, desc, and, gte, lte, or } from "drizzle-orm";
+import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 type DrizzlePartInsert = typeof parts.$inferInsert;
@@ -344,6 +347,16 @@ export interface IStorage {
   deleteSiteMap(siteMapId: number): Promise<boolean>;
   saveControllers(siteMapId: number, controllers: InsertController[], companyId?: number): Promise<Controller[]>;
   saveZones(siteMapId: number, zones: InsertIrrigationZone[], companyId?: number): Promise<IrrigationZone[]>;
+
+  // Manual Part Reviews
+  getManualPartReviews(companyId: number): Promise<ManualPartReview[]>;
+  getManualPartReview(id: number): Promise<ManualPartReview | undefined>;
+  createManualPartReview(review: InsertManualPartReview): Promise<ManualPartReview>;
+  approveManualPartReview(id: number, reviewedPrice: string): Promise<ManualPartReview | undefined>;
+
+  // Parts Pending Approval
+  getPendingParts(companyId: number): Promise<Part[]>;
+  approvePart(id: number, price: string, cost?: string, companyId?: number): Promise<Part | undefined>;
 
   // AI Generation Logs
   createAiGenerationLog(log: InsertAiGenerationLog): Promise<AiGenerationLog>;
@@ -2717,6 +2730,98 @@ export class DatabaseStorage implements IStorage {
   async createAiGenerationLog(log: InsertAiGenerationLog): Promise<AiGenerationLog> {
     const [result] = await db.insert(aiGenerationLogs).values(log).returning();
     return result;
+  }
+
+  // Manual Part Reviews
+  async getManualPartReviews(companyId: number): Promise<ManualPartReview[]> {
+    return await db.select().from(manualPartReviews)
+      .where(and(eq(manualPartReviews.companyId, companyId), eq(manualPartReviews.approvalStatus, 'pending')))
+      .orderBy(desc(manualPartReviews.createdAt));
+  }
+
+  async getManualPartReview(id: number): Promise<ManualPartReview | undefined> {
+    const [result] = await db.select().from(manualPartReviews).where(eq(manualPartReviews.id, id));
+    return result;
+  }
+
+  async createManualPartReview(review: InsertManualPartReview): Promise<ManualPartReview> {
+    const [result] = await db.insert(manualPartReviews).values(review).returning();
+    return result;
+  }
+
+  async approveManualPartReview(id: number, reviewedPrice: string): Promise<ManualPartReview | undefined> {
+    const review = await this.getManualPartReview(id);
+    if (!review) return undefined;
+
+    // Update the review record
+    const [updatedReview] = await db.update(manualPartReviews)
+      .set({ approvalStatus: 'approved', reviewedPrice, approvedAt: new Date() })
+      .where(eq(manualPartReviews.id, id))
+      .returning();
+
+    // If linked to a billing sheet item, update its unit price
+    if (review.billingSheetItemId) {
+      await db.update(billingSheetItems)
+        .set({ unitPrice: reviewedPrice })
+        .where(eq(billingSheetItems.id, review.billingSheetItemId));
+    }
+
+    return updatedReview;
+  }
+
+  // Parts Pending Approval
+  async getPendingParts(companyId: number): Promise<Part[]> {
+    return await db.select().from(parts)
+      .where(and(eq(parts.companyId, companyId), eq(parts.approvalStatus, 'pending')))
+      .orderBy(desc(parts.createdAt));
+  }
+
+  async approvePart(id: number, price: string, cost?: string, companyId?: number): Promise<Part | undefined> {
+    // Update the part itself
+    const updateFields: Partial<typeof parts.$inferInsert> = {
+      approvalStatus: 'approved',
+      approvedAt: new Date(),
+      price,
+      updatedAt: new Date(),
+    };
+    if (cost !== undefined) updateFields.cost = cost;
+
+    const [updatedPart] = await db.update(parts)
+      .set(updateFields)
+      .where(eq(parts.id, id))
+      .returning();
+
+    if (!updatedPart) return undefined;
+
+    // Propagate the new price to all uninvoiced billing_sheet_items referencing this part.
+    // Parts are inherently company-scoped (each part belongs to one company), so filtering by
+    // partId alone prevents cross-tenant contamination without needing a companyId join.
+    const uninvoicedBillingSheets = await db.select({ id: billingSheets.id })
+      .from(billingSheets)
+      .where(isNull(billingSheets.invoiceId));
+
+    if (uninvoicedBillingSheets.length > 0) {
+      for (const bs of uninvoicedBillingSheets) {
+        await db.update(billingSheetItems)
+          .set({ unitPrice: price })
+          .where(and(eq(billingSheetItems.partId, id), eq(billingSheetItems.billingSheetId, bs.id)));
+      }
+    }
+
+    // Propagate the new price to all uninvoiced work_order_items referencing this part.
+    const uninvoicedWorkOrders = await db.select({ id: workOrders.id })
+      .from(workOrders)
+      .where(isNull(workOrders.invoiceId));
+
+    if (uninvoicedWorkOrders.length > 0) {
+      for (const wo of uninvoicedWorkOrders) {
+        await db.update(workOrderItems)
+          .set({ partPrice: price })
+          .where(and(eq(workOrderItems.partId, id), eq(workOrderItems.workOrderId, wo.id)));
+      }
+    }
+
+    return updatedPart;
   }
 }
 

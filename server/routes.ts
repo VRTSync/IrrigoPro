@@ -103,7 +103,8 @@ import {
   insertAssemblySchema,
   insertAssemblyPartSchema,
   type InsertEstimateZone,
-  type InsertEstimateItem
+  type InsertEstimateItem,
+  type BillingSheetItem
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -3017,6 +3018,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET pending parts for approval (billing manager only) - must be before /api/parts/:id
+  app.get("/api/parts/pending-approval", requireAuthentication, async (req, res) => {
+    try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'billing_manager' && userRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+      const companyId = req.authenticatedUserCompanyId;
+      if (!companyId) return res.status(400).json({ message: "Company ID required" });
+      const pendingParts = await storage.getPendingParts(companyId);
+      res.json(pendingParts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch pending parts" });
+    }
+  });
+
   app.get("/api/parts/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -3052,8 +3069,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         companyId: req.authenticatedUserCompanyId || rawData.companyId,
       };
 
-      const partData = insertPartSchema.parse(processedData);
+      const partData = insertPartSchema.parse({
+        ...processedData,
+        approvalStatus: 'pending',
+      });
       const part = await storage.createPart(partData);
+
+      // Notify billing managers for the part's company that a new part is pending approval
+      // Use part.companyId directly to avoid null-companyId leaking cross-tenant (e.g. super_admin creating parts)
+      if (part.companyId) {
+        try {
+          const companyUsers = await storage.getUsers(part.companyId);
+          const billingManagers = companyUsers.filter(u => u.role === 'billing_manager');
+          for (const bm of billingManagers) {
+            await storage.createNotification({
+              userId: bm.id,
+              type: "part_pending_approval",
+              title: "New Part Awaiting Approval",
+              message: `Part "${part.name}" (SKU: ${part.sku}) has been added to the catalog and requires your approval.`,
+              relatedEntityType: "part",
+              relatedEntityId: part.id,
+              isRead: false,
+            });
+          }
+        } catch (notifError) {
+          console.error('Failed to send part approval notifications:', notifError);
+        }
+      }
+
       res.status(201).json(part);
     } catch (error) {
       console.error("Error creating part:", error instanceof Error ? error.message : error);
@@ -3845,6 +3888,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Part usage tracked successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to track part usage" });
+    }
+  });
+
+  // POST approve a catalog part
+  app.post("/api/parts/:id/approve", requireAuthentication, async (req, res) => {
+    try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'billing_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) return res.status(400).json({ message: "Invalid part ID" });
+
+      // Verify company ownership (except super_admin who can approve any)
+      const existingPart = await storage.getPart(id);
+      if (!existingPart) return res.status(404).json({ message: "Part not found" });
+      const companyId = req.authenticatedUserCompanyId;
+      if (userRole !== 'super_admin' && companyId !== null && existingPart.companyId !== companyId) {
+        return res.status(403).json({ message: "Access denied. You can only approve parts from your company." });
+      }
+
+      const { price, cost } = req.body;
+      if (!price) return res.status(400).json({ message: "price is required" });
+
+      const updatedPart = await storage.approvePart(id, String(price), cost ? String(cost) : undefined, existingPart.companyId);
+      if (!updatedPart) return res.status(404).json({ message: "Part not found" });
+
+      res.json(updatedPart);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to approve part" });
+    }
+  });
+
+  // GET pending manual part reviews (billing manager only)
+  app.get("/api/manual-part-reviews", requireAuthentication, async (req, res) => {
+    try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'billing_manager' && userRole !== 'company_admin') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+      const companyId = req.authenticatedUserCompanyId;
+      if (!companyId) return res.status(400).json({ message: "Company ID required" });
+      const reviews = await storage.getManualPartReviews(companyId);
+      res.json(reviews);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch manual part reviews" });
+    }
+  });
+
+  // POST approve a manual part review
+  app.post("/api/manual-part-reviews/:id/approve", requireAuthentication, async (req, res) => {
+    try {
+      const userRole = req.authenticatedUserRole;
+      if (userRole !== 'billing_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) return res.status(400).json({ message: "Invalid review ID" });
+
+      // Verify company ownership (except super_admin who can approve any)
+      const existingReview = await storage.getManualPartReview(id);
+      if (!existingReview) return res.status(404).json({ message: "Review not found" });
+      const companyId = req.authenticatedUserCompanyId;
+      if (userRole !== 'super_admin' && companyId !== null && existingReview.companyId !== companyId) {
+        return res.status(403).json({ message: "Access denied. You can only approve reviews from your company." });
+      }
+
+      const { reviewedPrice } = req.body;
+      if (!reviewedPrice) return res.status(400).json({ message: "reviewedPrice is required" });
+
+      const updated = await storage.approveManualPartReview(id, String(reviewedPrice));
+      if (!updated) return res.status(404).json({ message: "Review not found" });
+
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to approve manual part review" });
     }
   });
 
@@ -6253,6 +6372,56 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         console.error('Failed to send billing sheet notifications:', notifError);
       }
 
+      // If the billing sheet was submitted (by a field tech), check for manual parts (no partId)
+      // and create manualPartReview records + notify billing managers
+      if (resolvedStatus === 'submitted' && Array.isArray(cleanData.items)) {
+        try {
+          const companyId = req.authenticatedUserCompanyId;
+          // Collect only items without a catalog partId (manually typed by tech)
+          const manualItemIndices: number[] = [];
+          (cleanData.items as Array<{ partId?: number | null }>).forEach((item, idx) => {
+            if (!item.partId) manualItemIndices.push(idx);
+          });
+          if (manualItemIndices.length > 0 && companyId) {
+            // Fetch the saved items to get their IDs; match by insertion order (same order as cleanData.items)
+            const savedSheet = await storage.getBillingSheetById(billingSheet.id);
+            const savedItems: BillingSheetItem[] = savedSheet?.items || [];
+            // Build an index of saved manual items (no partId) in order
+            const savedManualItems = savedItems.filter(si => !si.partId);
+
+            for (let i = 0; i < manualItemIndices.length; i++) {
+              const manualItem = cleanData.items[manualItemIndices[i]] as { partName?: string; unitPrice?: string | number };
+              const savedItem = savedManualItems[i]; // Positional match — same order as submitted
+              await storage.createManualPartReview({
+                billingSheetId: billingSheet.id,
+                billingSheetItemId: savedItem?.id ?? null,
+                companyId,
+                partName: manualItem.partName || 'Unknown Part',
+                proposedPrice: String(manualItem.unitPrice || '0'),
+                approvalStatus: 'pending',
+              });
+
+              // Notify billing managers only (company-scoped)
+              const allUsers = await storage.getUsers(companyId);
+              const billingManagers = allUsers.filter(u => u.role === 'billing_manager');
+              for (const bm of billingManagers) {
+                await storage.createNotification({
+                  userId: bm.id,
+                  type: "manual_part_pending_review",
+                  title: "Manual Part Needs Pricing Review",
+                  message: `A manually entered part "${manualItem.partName}" on billing sheet ${billingNumber} needs your price review.`,
+                  relatedEntityType: "billing_sheet",
+                  relatedEntityId: billingSheet.id,
+                  isRead: false,
+                });
+              }
+            }
+          }
+        } catch (manualPartError) {
+          console.error('Failed to create manual part reviews:', manualPartError);
+        }
+      }
+
       res.json(billingSheet);
     } catch (error) {
       console.error('Error creating billing sheet:', error);
@@ -6299,14 +6468,53 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
       if (billingSheetData.status === 'submitted' || billingSheetData.status === 'approved') {
         const partsSubtotal = parseFloat(String(billingSheetData.partsSubtotal ?? billingSheet.partsSubtotal ?? '0'));
-        if (partsSubtotal > 0) {
-          const currentItems = (await storage.getBillingSheetById(id))?.items ?? [];
-          if (currentItems.length === 0) {
-            return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+        const currentSheet = await storage.getBillingSheetById(id);
+        const currentItems = currentSheet?.items ?? [];
+        if (partsSubtotal > 0 && currentItems.length === 0) {
+          return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+        }
+        console.log(`[AUDIT] billing_sheet_status_change billingSheetId=${id} status=${billingSheetData.status} itemCount=${currentItems.length}`);
+
+        // When status transitions to submitted, create manualPartReview records for manual items
+        if (billingSheetData.status === 'submitted') {
+          try {
+            const patchCompanyId = req.authenticatedUserCompanyId;
+            const manualItems = currentItems.filter((item: { partId?: number | null }) => !item.partId);
+            if (manualItems.length > 0 && patchCompanyId) {
+              const billingNumber = currentSheet?.billingNumber || `#${id}`;
+              for (const manualItem of manualItems as Array<{ id?: number; partId?: number | null; partName?: string; unitPrice?: string }>) {
+                // Only create review if one doesn't already exist for this item
+                const existingReviews = await storage.getManualPartReviews(patchCompanyId);
+                const alreadyExists = existingReviews.some(r => r.billingSheetItemId === (manualItem.id ?? null) && r.billingSheetId === id);
+                if (!alreadyExists) {
+                  await storage.createManualPartReview({
+                    billingSheetId: id,
+                    billingSheetItemId: manualItem.id ?? null,
+                    companyId: patchCompanyId,
+                    partName: manualItem.partName || 'Unknown Part',
+                    proposedPrice: String(manualItem.unitPrice || '0'),
+                    approvalStatus: 'pending',
+                  });
+                  const companyUsers = await storage.getUsers(patchCompanyId);
+                  const billingManagers = companyUsers.filter(u => u.role === 'billing_manager');
+                  for (const bm of billingManagers) {
+                    await storage.createNotification({
+                      userId: bm.id,
+                      type: "manual_part_pending_review",
+                      title: "Manual Part Needs Pricing Review",
+                      message: `A manually entered part "${manualItem.partName || 'Unknown Part'}" on billing sheet ${billingNumber} needs your price review.`,
+                      relatedEntityType: "billing_sheet",
+                      relatedEntityId: id,
+                      isRead: false,
+                    });
+                  }
+                }
+              }
+            }
+          } catch (manualPartError) {
+            console.error('Failed to create manual part reviews from PATCH:', manualPartError);
           }
         }
-        const currentItemCount = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
-        console.log(`[AUDIT] billing_sheet_status_change billingSheetId=${id} status=${billingSheetData.status} itemCount=${currentItemCount}`);
       }
 
       res.json(billingSheet);
