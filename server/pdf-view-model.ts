@@ -91,6 +91,7 @@ export interface PdfViewModel {
   billingSheets: PdfBillingSheetRow[];
   totals: PdfTotals;
   totalJobs: number;
+  validationWarning: string | null;
 }
 
 // ── Raw input type ──────────────────────────────────────────────────────────
@@ -289,6 +290,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     billingSheets: billingSheetRows,
     totals,
     totalJobs: workOrderRows.length + billingSheetRows.length,
+    validationWarning,
   };
 
   return { viewModel, validationWarning };

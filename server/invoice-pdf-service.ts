@@ -248,8 +248,14 @@ export class InvoicePdfService {
 
       const storedInvoiceTotal = toNum(invoice.totalAmount);
       const validationFailure = validateRows(invoiceId, workOrders, billingSheets, storedInvoiceTotal);
+
       if (validationFailure) {
-        return { success: false, error: 'Invoice totals validation failed', validationFailure };
+        if (validationFailure.rowErrors.length > 0) {
+          return { success: false, error: 'Invoice totals validation failed', validationFailure };
+        }
+        console.warn(
+          `[PDF][service] invoiceId=${invoiceId} grand-total mismatch — generating PDF with reconciliation warning row`,
+        );
       }
 
       const laborRate = customer.laborRate || '45.00';

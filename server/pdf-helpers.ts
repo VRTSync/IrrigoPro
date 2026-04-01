@@ -450,36 +450,86 @@ export function billingSheetCard(bs: PdfBillingSheetRow, photoDataUris: string[]
 }
 
 export function finalSummaryTable(vm: PdfViewModel): string {
-  const { workOrders, billingSheets, totals } = vm;
+  const { workOrders, billingSheets, totals, validationWarning } = vm;
+
+  const woPartsSubtotal = workOrders.reduce((s, wo) => s + wo.partsSubtotal, 0);
+  const woLaborSubtotal = workOrders.reduce((s, wo) => s + wo.laborSubtotal, 0);
+  const woGroupTotal = workOrders.reduce((s, wo) => s + wo.rowTotal, 0);
+
+  const bsPartsSubtotal = billingSheets.reduce((s, bs) => s + bs.partsSubtotal, 0);
+  const bsLaborSubtotal = billingSheets.reduce((s, bs) => s + bs.laborSubtotal, 0);
+  const bsGroupTotal = billingSheets.reduce((s, bs) => s + bs.rowTotal, 0);
+
+  const woGroupHeaderRow = workOrders.length > 0 ? `
+    <tr class="fs-group-header fs-group-header-wo">
+      <td colspan="6">Work Orders</td>
+    </tr>` : '';
 
   const woRows = workOrders.map(wo => `
     <tr>
+      <td class="fs-ref">${wo.workOrderNumber}</td>
       <td class="fs-type fs-type-wo">Work Order</td>
-      <td>${wo.workOrderNumber}</td>
       <td>${wo.projectName}</td>
       <td class="text-right">${formatCurrency(wo.partsSubtotal)}</td>
       <td class="text-right">${formatCurrency(wo.laborSubtotal)}</td>
       <td class="text-right fs-total">${formatCurrency(wo.rowTotal)}</td>
     </tr>`).join('');
 
+  const woSubtotalRow = workOrders.length > 0 ? `
+    <tr class="fs-subtotal-row">
+      <td colspan="3" class="fs-subtotal-label">Work Orders Subtotal</td>
+      <td class="text-right">${formatCurrency(woPartsSubtotal)}</td>
+      <td class="text-right">${formatCurrency(woLaborSubtotal)}</td>
+      <td class="text-right fs-total">${formatCurrency(woGroupTotal)}</td>
+    </tr>` : '';
+
+  const bsGroupHeaderRow = billingSheets.length > 0 ? `
+    <tr class="fs-group-header fs-group-header-bs">
+      <td colspan="6">Billing Sheets</td>
+    </tr>` : '';
+
   const bsRows = billingSheets.map(bs => `
     <tr>
+      <td class="fs-ref">${bs.billingNumber}</td>
       <td class="fs-type fs-type-bs">Billing Sheet</td>
-      <td>${bs.billingNumber}</td>
       <td>${bs.workDescription}</td>
       <td class="text-right">${formatCurrency(bs.partsSubtotal)}</td>
       <td class="text-right">${formatCurrency(bs.laborSubtotal)}</td>
       <td class="text-right fs-total">${formatCurrency(bs.rowTotal)}</td>
     </tr>`).join('');
 
+  const bsSubtotalRow = billingSheets.length > 0 ? `
+    <tr class="fs-subtotal-row">
+      <td colspan="3" class="fs-subtotal-label">Billing Sheets Subtotal</td>
+      <td class="text-right">${formatCurrency(bsPartsSubtotal)}</td>
+      <td class="text-right">${formatCurrency(bsLaborSubtotal)}</td>
+      <td class="text-right fs-total">${formatCurrency(bsGroupTotal)}</td>
+    </tr>` : '';
+
+  const warningRow = validationWarning ? `
+    <tr class="fs-warning-row">
+      <td colspan="6">
+        <span class="fs-warning-icon">&#9888;</span>
+        Reconciliation Warning: ${validationWarning}
+      </td>
+    </tr>` : '';
+
+  const grandTotalRow = `
+    <tr class="fs-grand-total-row">
+      <td colspan="3" class="fs-grand-total-label">Grand Total</td>
+      <td class="text-right">${formatCurrency(totals.partsSubtotal)}</td>
+      <td class="text-right">${formatCurrency(totals.laborSubtotal)}</td>
+      <td class="text-right fs-total">${formatCurrency(totals.grandTotal)}</td>
+    </tr>`;
+
   return `
   <div class="final-summary">
-    <div class="final-summary-title">Invoice Summary</div>
+    <div class="final-summary-title">Invoice Summary &amp; Reconciliation</div>
     <table class="fs-table">
       <thead>
         <tr>
+          <th>Reference #</th>
           <th>Type</th>
-          <th>Number</th>
           <th>Description</th>
           <th class="text-right">Parts</th>
           <th class="text-right">Labor</th>
@@ -487,8 +537,14 @@ export function finalSummaryTable(vm: PdfViewModel): string {
         </tr>
       </thead>
       <tbody>
+        ${woGroupHeaderRow}
         ${woRows}
+        ${woSubtotalRow}
+        ${bsGroupHeaderRow}
         ${bsRows}
+        ${bsSubtotalRow}
+        ${warningRow}
+        ${grandTotalRow}
       </tbody>
     </table>
     <div class="fs-grand-totals">
@@ -749,10 +805,33 @@ export function buildFullCSS(): string {
   .fs-table tbody tr:nth-child(even) { background: #ffffff; }
   .fs-table td { padding: 9px 12px; color: #1f2937; }
   .fs-table td.text-right { text-align: right; }
+  .fs-ref { font-weight: 600; font-size: 12px; color: #374151; }
   .fs-type { font-weight: 600; font-size: 11px; }
   .fs-type-wo { color: #1d4ed8; }
   .fs-type-bs { color: #047857; }
   .fs-total { font-weight: 700; }
+  .fs-group-header td {
+    font-weight: 700; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 10px 12px;
+  }
+  .fs-group-header-wo td { background: #dbeafe; color: #1e40af; border-top: 2px solid #93c5fd; }
+  .fs-group-header-bs td { background: #d1fae5; color: #065f46; border-top: 2px solid #6ee7b7; }
+  .fs-subtotal-row td {
+    background: #f3f4f6; font-weight: 600; font-size: 12px;
+    padding: 9px 12px; border-top: 1px solid #d1d5db; border-bottom: 2px solid #d1d5db;
+    color: #374151;
+  }
+  .fs-subtotal-label { font-style: italic; }
+  .fs-warning-row td {
+    background: #fef3c7; color: #92400e; font-size: 12px; font-weight: 600;
+    padding: 10px 12px; border-top: 2px solid #fbbf24; border-bottom: 2px solid #fbbf24;
+  }
+  .fs-warning-icon { margin-right: 6px; font-size: 14px; }
+  .fs-grand-total-row td {
+    background: #1e3a8a; color: white; font-weight: 700; font-size: 13px;
+    padding: 12px 12px; border-top: 3px solid #1d4ed8;
+  }
+  .fs-grand-total-label { font-size: 13px; letter-spacing: 0.3px; }
   .fs-grand-totals {
     margin-top: 8px; padding: 16px 20px;
     background: white; border-radius: 8px; border: 2px solid #3B82F6;
