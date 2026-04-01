@@ -1,6 +1,48 @@
-import { PDFGenerator } from './pdf-generator';
+import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
 import type { IStorage } from './storage';
 import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@shared/schema';
+
+const LOGO_PATH_PATTERNS = [
+  /\/api\/public-objects\/company-logos\/(.+)/,
+  /\/api\/company-logo\/(.+)/,
+];
+
+function resolveLogoToFetchableUrl(storedLogo: string): string {
+  const port = process.env.PORT || 5000;
+  const localBase = `http://localhost:${port}`;
+
+  if (storedLogo.startsWith('http://') || storedLogo.startsWith('https://')) {
+    let pathname: string;
+    try {
+      pathname = new URL(storedLogo).pathname;
+    } catch {
+      console.warn(`[PDF] Invalid logo URL: ${storedLogo}`);
+      return storedLogo;
+    }
+    for (const pattern of LOGO_PATH_PATTERNS) {
+      const match = pathname.match(pattern);
+      if (match) {
+        return `${localBase}/api/public-objects/company-logos/${match[1]}`;
+      }
+    }
+    console.warn(`[PDF] Logo URL does not match known app paths, skipping: ${storedLogo}`);
+    return storedLogo;
+  }
+
+  if (storedLogo.startsWith('/api/public-objects/company-logos/')) {
+    return `${localBase}${storedLogo}`;
+  }
+  if (storedLogo.startsWith('/api/')) {
+    return `${localBase}${storedLogo}`;
+  }
+  if (storedLogo.startsWith('/')) {
+    return `${localBase}/api/public-objects/company-logos${storedLogo}`;
+  }
+  if (storedLogo.startsWith('company-logos/')) {
+    return `${localBase}/api/public-objects/${storedLogo}`;
+  }
+  return `${localBase}/api/public-objects/company-logos/${storedLogo}`;
+}
 
 interface InvoicePdfGenerationResult {
   success: boolean;
@@ -61,11 +103,18 @@ export class InvoicePdfService {
 
       const laborRate = customer.laborRate || '45.00';
 
+      let logoDataUri: string | null = null;
+      if (company.logo) {
+        const logoUrl = resolveLogoToFetchableUrl(company.logo);
+        logoDataUri = await fetchLogoAsBase64(logoUrl);
+      }
+
       const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF({
         invoice,
         company: {
           name: company.name,
           logo: company.logo || undefined,
+          logoDataUri,
           address: company.address || undefined,
           phone: company.phone || undefined,
           email: company.email || undefined,

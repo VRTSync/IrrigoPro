@@ -4,6 +4,28 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import type { Invoice, InvoiceItem, WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@shared/schema';
 
+export async function fetchLogoAsBase64(logoUrl: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(logoUrl, { signal: controller.signal });
+    if (!response.ok) {
+      console.warn(`[PDF] Logo fetch returned non-OK status ${response.status} for URL: ${logoUrl}`);
+      return null;
+    }
+    const contentType = response.headers.get('content-type') || 'image/png';
+    const mimeType = contentType.split(';')[0].trim();
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    return `data:${mimeType};base64,${base64}`;
+  } catch (error) {
+    console.warn(`[PDF] Failed to fetch logo from ${logoUrl}:`, error instanceof Error ? error.message : error);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // Get system chromium path for Replit
 function getChromiumPath(): string {
   try {
@@ -21,6 +43,7 @@ interface InvoiceDetailData {
   company: {
     name: string;
     logo?: string;
+    logoDataUri?: string | null;
     address?: string;
     phone?: string;
     email?: string;
@@ -193,11 +216,16 @@ export class PDFGenerator {
           
           .company-info {
             flex: 1;
+            min-height: 70px;
           }
           
           .company-logo {
-            width: 120px;
+            max-width: 180px;
+            max-height: 60px;
+            width: auto;
             height: auto;
+            object-fit: contain;
+            display: block;
             margin-bottom: 10px;
           }
           
@@ -458,7 +486,7 @@ export class PDFGenerator {
           <!-- Header -->
           <div class="header">
             <div class="company-info">
-              ${company.logo ? `<img src="${company.logo}" class="company-logo" alt="${company.name}">` : ''}
+              ${company.logoDataUri ? `<img src="${company.logoDataUri}" class="company-logo" alt="${company.name}">` : ''}
               <div class="company-name">${company.name}</div>
               <div class="company-details">
                 ${company.address ? `${company.address}<br>` : ''}
