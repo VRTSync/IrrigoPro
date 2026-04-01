@@ -2,7 +2,7 @@ import { safeGet } from "@/utils/safeStorage";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { AiExpandButton } from "@/components/ui/ai-expand-button";
+import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -88,6 +88,7 @@ export function WorkOrderCompletion({
   const [showSummary, setShowSummary] = useState(false);
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -502,7 +503,7 @@ export function WorkOrderCompletion({
                         <FormLabel>Work Summary *</FormLabel>
                         <AiExpandButton
                           getValue={() => field.value || ""}
-                          onExpanded={(v) => form.setValue("workSummary", v)}
+                          onSuggestion={setAiSuggestion}
                         />
                       </div>
                       <FormControl>
@@ -512,6 +513,11 @@ export function WorkOrderCompletion({
                           {...field}
                         />
                       </FormControl>
+                      <AiSuggestionCard
+                        suggestion={aiSuggestion}
+                        onAccept={() => { form.setValue("workSummary", aiSuggestion!); setAiSuggestion(null); }}
+                        onDismiss={() => setAiSuggestion(null)}
+                      />
                       <FormMessage />
                     </FormItem>
                   )}

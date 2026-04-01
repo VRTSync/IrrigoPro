@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
-import { AiExpandButton } from "@/components/ui/ai-expand-button";
+import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { BillingSheet, BillingSheetItem } from "@shared/schema";
 
 const currency = (val: number | string | null | undefined) => {
@@ -113,6 +113,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   });
   const customerBranches: string[] = (customer as any)?.branches || [];
 
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const photos: string[] = billingSheet.photos ?? [];
@@ -452,7 +453,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Work Description *</p>
                     <AiExpandButton
                       getValue={() => workDescription}
-                      onExpanded={(v) => setWorkDescription(v)}
+                      onSuggestion={setAiSuggestion}
                     />
                   </div>
                   <Textarea
@@ -460,6 +461,11 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                     onChange={(e) => setWorkDescription(e.target.value)}
                     placeholder="Describe the work performed..."
                     className={`min-h-[80px] text-sm resize-none ${errors.workDescription ? "border-red-400" : ""}`}
+                  />
+                  <AiSuggestionCard
+                    suggestion={aiSuggestion}
+                    onAccept={() => { setWorkDescription(aiSuggestion!); setAiSuggestion(null); }}
+                    onDismiss={() => setAiSuggestion(null)}
                   />
                   {errors.workDescription && (
                     <p className="text-xs text-red-500 mt-1">{errors.workDescription}</p>

@@ -34,7 +34,7 @@ import {
   ChevronDown,
   ChevronUp
 } from "lucide-react";
-import { AiExpandButton } from "@/components/ui/ai-expand-button";
+import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
@@ -104,6 +104,7 @@ export function StandaloneBillingSheet({
   const [isAllPartsExpanded, setIsAllPartsExpanded] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -892,12 +893,20 @@ export function StandaloneBillingSheet({
                               <FormLabel>Work Description</FormLabel>
                               <AiExpandButton
                                 getValue={() => field.value || ""}
-                                onExpanded={(v) => form.setValue("workDescription", v, { shouldDirty: true })}
+                                onSuggestion={setAiSuggestion}
                               />
                             </div>
                             <FormControl>
                               <Textarea {...field} placeholder="Describe the work performed" />
                             </FormControl>
+                            <AiSuggestionCard
+                              suggestion={aiSuggestion}
+                              onAccept={() => {
+                                form.setValue("workDescription", aiSuggestion!, { shouldDirty: true });
+                                setAiSuggestion(null);
+                              }}
+                              onDismiss={() => setAiSuggestion(null)}
+                            />
                             <FormMessage />
                           </FormItem>
                         )}

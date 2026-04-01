@@ -25,7 +25,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
-import { AiExpandButton } from "@/components/ui/ai-expand-button";
+import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
 
 const currency = (val: number | string | null | undefined) => {
@@ -115,6 +115,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const [partsLoaded, setPartsLoaded] = useState(false);
   const [showPartsEditor, setShowPartsEditor] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
 
   // Fetch the customer to get its branches
   const { data: customer } = useQuery({
@@ -165,6 +166,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     setAssignedTechnicianId(workOrder.assignedTechnicianId || null);
     setAssignedTechnicianName(workOrder.assignedTechnicianName || "");
     setBranchName((workOrder as any).branchName || "");
+    setAiSuggestion(null);
     setErrors({});
   }, [open, workOrder]);
 
@@ -555,7 +557,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Work Description</p>
                     <AiExpandButton
                       getValue={() => description}
-                      onExpanded={(v) => setDescription(v)}
+                      onSuggestion={setAiSuggestion}
                     />
                   </div>
                   <Textarea
@@ -563,6 +565,11 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Describe the work..."
                     className="min-h-[80px] text-sm resize-none"
+                  />
+                  <AiSuggestionCard
+                    suggestion={aiSuggestion}
+                    onAccept={() => { setDescription(aiSuggestion!); setAiSuggestion(null); }}
+                    onDismiss={() => setAiSuggestion(null)}
                   />
                 </div>
                 <FieldRow label="Special Instructions">
