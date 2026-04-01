@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import type { InsertInvoice } from "@shared/schema";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "./email-service";
@@ -2332,7 +2333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create monthly invoice for customer - consolidates selected or all unbilled work
   app.post("/api/invoices/monthly", requireAuthentication, async (req, res) => {
     try {
-      const { customerId, workOrderIds = [], billingSheetIds = [] } = req.body;
+      const { customerId, workOrderIds = [], billingSheetIds = [], periodStart: periodStartInput, periodEnd: periodEndInput } = req.body;
 
       // Pre-flight: verify QuickBooks connection before doing anything
       // req.authenticatedUserCompanyId is set by requireAuthentication middleware from the x-user-company-id header
@@ -2403,6 +2404,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create the consolidated monthly invoice
       const currentDate = new Date();
       const invoiceNumber = `${Date.now().toString().slice(-5)}`;
+
+      // Resolve billing period — use caller-supplied dates or fall back to current calendar month
+      let periodStart: Date;
+      let periodEnd: Date;
+      if (periodStartInput && periodEndInput) {
+        const parsedStart = new Date(periodStartInput);
+        const parsedEnd = new Date(periodEndInput);
+        if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
+          return res.status(400).json({ message: "Invalid periodStart or periodEnd date value." });
+        }
+        if (parsedStart > parsedEnd) {
+          return res.status(400).json({ message: "periodStart must not be after periodEnd." });
+        }
+        periodStart = parsedStart;
+        periodEnd = parsedEnd;
+      } else {
+        periodStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+        periodEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+      }
       
       const laborSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
@@ -2417,16 +2437,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totalAmount = laborSubtotal + partsSubtotal;
 
       // Create the invoice record (not yet marking items as billed)
-      const invoice = await storage.createInvoice({
+      let invoice = await storage.createInvoice({
         invoiceNumber,
         customerId,
         customerName: customer.name,
         customerEmail: customer.email,
         customerPhone: customer.phone || null,
-        invoiceMonth: currentDate.getMonth() + 1,
-        invoiceYear: currentDate.getFullYear(),
-        periodStart: new Date(currentDate.getFullYear(), currentDate.getMonth(), 1),
-        periodEnd: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0),
+        invoiceMonth: periodStart.getMonth() + 1,
+        invoiceYear: periodStart.getFullYear(),
+        periodStart,
+        periodEnd,
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: partsSubtotal.toFixed(2),
         markupAmount: markupAmount.toFixed(2),
@@ -2578,9 +2598,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const invoiceResult = await invoiceResponse.json();
           quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
           console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
-          
-          if (quickbooksId) {
-            await storage.updateInvoice(invoice.id, { quickbooksInvoiceId: quickbooksId.toString() });
+
+          const qbDocNumber: string | undefined = invoiceResult?.Invoice?.DocNumber;
+          const qbUpdateFields: Partial<InsertInvoice> & { invoiceNumber?: string } = {};
+          if (quickbooksId) qbUpdateFields.quickbooksInvoiceId = quickbooksId.toString();
+          if (qbDocNumber) {
+            qbUpdateFields.invoiceNumber = qbDocNumber;
+            console.log(`[QB] Syncing invoice number from QB DocNumber: ${qbDocNumber}`);
+          }
+          if (Object.keys(qbUpdateFields).length > 0) {
+            const updated = await storage.updateInvoice(invoice.id, qbUpdateFields);
+            if (updated) {
+              invoice = updated;
+            }
           }
         } else {
           const errorText = await invoiceResponse.text();
@@ -2667,7 +2697,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         message: "Monthly invoice created successfully and synced to QuickBooks",
         invoice,
-        invoiceNumber,
+        invoiceNumber: invoice.invoiceNumber,
         totalAmount: totalAmount.toFixed(2),
         itemCount: selectedWorkOrders.length + selectedBillingSheets.length,
         quickbooksId,

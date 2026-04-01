@@ -124,6 +124,23 @@ export default function CustomerBilling() {
 
   // Delete confirmation state
   const [itemToDelete, setItemToDelete] = useState<{ type: "work_order" | "billing_sheet"; id: number; label: string } | null>(null);
+
+  // Billing period state — default to first/last day of previous calendar month
+  // Use local date formatting to avoid UTC offset shifting the day
+  const toLocalDateString = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const [billingPeriodStart, setBillingPeriodStart] = useState<string>(() => {
+    const now = new Date();
+    return toLocalDateString(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  });
+  const [billingPeriodEnd, setBillingPeriodEnd] = useState<string>(() => {
+    const now = new Date();
+    return toLocalDateString(new Date(now.getFullYear(), now.getMonth(), 0));
+  });
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -296,10 +313,12 @@ export default function CustomerBilling() {
 
   // Create Invoice Mutation (after preview confirmation)
   const createInvoiceMutation = useMutation({
-    mutationFn: async ({ customerId, workOrderIds, billingSheetIds }: { 
+    mutationFn: async ({ customerId, workOrderIds, billingSheetIds, periodStart, periodEnd }: { 
       customerId: number, 
       workOrderIds?: number[], 
-      billingSheetIds?: number[] 
+      billingSheetIds?: number[],
+      periodStart?: string,
+      periodEnd?: string
     }) => {
       try {
         const connectionData = await apiRequest("/api/quickbooks/connection");
@@ -314,7 +333,9 @@ export default function CustomerBilling() {
       return await apiRequest("/api/invoices/monthly", "POST", {
         customerId,
         workOrderIds,
-        billingSheetIds
+        billingSheetIds,
+        periodStart,
+        periodEnd
       });
     },
     onSuccess: (data, { customerId }) => {
@@ -2002,7 +2023,7 @@ export default function CustomerBilling() {
                     <div className="space-y-1 text-sm">
                       <div><span className="font-medium">Invoice #:</span> {previewInvoiceData.invoiceNumber}</div>
                       <div><span className="font-medium">Date:</span> {formatDate(new Date())}</div>
-                      <div><span className="font-medium">Period:</span> {formatDate(previewInvoiceData.periodStart)} - {formatDate(previewInvoiceData.periodEnd)}</div>
+                      <div><span className="font-medium">Period:</span> {formatDate(billingPeriodStart)} - {formatDate(billingPeriodEnd)}</div>
                     </div>
                   </div>
                   <div>
@@ -2090,7 +2111,9 @@ export default function CustomerBilling() {
                   onClick={() => createInvoiceMutation.mutate({
                     customerId: selectedCustomerId!,
                     workOrderIds: Array.from(selectedWorkOrderIds),
-                    billingSheetIds: Array.from(selectedBillingSheetIds)
+                    billingSheetIds: Array.from(selectedBillingSheetIds),
+                    periodStart: billingPeriodStart,
+                    periodEnd: billingPeriodEnd
                   })}
                   disabled={createInvoiceMutation.isPending}
                   className="bg-green-600 hover:bg-green-700"
@@ -2125,6 +2148,34 @@ export default function CustomerBilling() {
           
           {customerBillingData && (
             <div className="space-y-6">
+              {/* Billing Period Picker */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="text-sm font-medium text-blue-900 mb-3 flex items-center gap-2">
+                  <Calendar className="w-4 h-4" />
+                  Billing Period
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-blue-700 mb-1 block">Start Date</label>
+                    <Input
+                      type="date"
+                      value={billingPeriodStart}
+                      onChange={(e) => setBillingPeriodStart(e.target.value)}
+                      className="h-9 text-sm bg-white"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-blue-700 mb-1 block">End Date</label>
+                    <Input
+                      type="date"
+                      value={billingPeriodEnd}
+                      onChange={(e) => setBillingPeriodEnd(e.target.value)}
+                      className="h-9 text-sm bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Selection Controls */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">

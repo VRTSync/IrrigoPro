@@ -324,7 +324,7 @@ export interface IStorage {
   getInvoices(): Promise<Invoice[]>;
   getInvoiceById(id: number): Promise<InvoiceWithItems | undefined>;
   createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice>;
-  updateInvoice(id: number, invoice: Partial<InsertInvoice>): Promise<Invoice | undefined>;
+  updateInvoice(id: number, invoice: Partial<InsertInvoice> & { invoiceNumber?: string }): Promise<Invoice | undefined>;
   deleteInvoice(id: number): Promise<boolean>;
   deleteInvoiceItemsByInvoiceId(invoiceId: number): Promise<boolean>;
   createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem>;
@@ -2306,7 +2306,7 @@ export class DatabaseStorage implements IStorage {
     return newInvoice;
   }
 
-  async updateInvoice(id: number, invoice: Partial<InsertInvoice>): Promise<Invoice | undefined> {
+  async updateInvoice(id: number, invoice: Partial<InsertInvoice> & { invoiceNumber?: string }): Promise<Invoice | undefined> {
     const [updatedInvoice] = await db.update(invoices).set(invoice).where(eq(invoices.id, id)).returning();
     return updatedInvoice || undefined;
   }
