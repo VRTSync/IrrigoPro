@@ -8,6 +8,7 @@ import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink } from "lucide-re
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
+import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 
 interface WorkOrdersManagerProps {
   onBack: () => void;
@@ -15,6 +16,8 @@ interface WorkOrdersManagerProps {
 
 export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -62,6 +65,11 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
     }).format(amount);
   };
 
+  const handleViewDetails = (workOrder: WorkOrder) => {
+    setSelectedWorkOrder(workOrder);
+    setShowDetailModal(true);
+  };
+
   if (showCreateForm) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -96,124 +104,143 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
-          </Button>
-          <h1 className="text-3xl font-bold text-gray-900">Work Orders</h1>
-        </div>
-        <Button onClick={() => setShowCreateForm(true)} className="bg-green-600 hover:bg-green-700">
-          <Plus className="w-4 h-4 mr-2" />
-          New Work Order
-        </Button>
-      </div>
-
-      {/* Work Orders List */}
-      <div className="space-y-4">
-        {isLoading ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">Loading work orders...</p>
+    <>
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <Button variant="outline" onClick={onBack}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Dashboard
+            </Button>
+            <h1 className="text-3xl font-bold text-gray-900">Work Orders</h1>
           </div>
-        ) : workOrders?.length === 0 ? (
-          <Card>
-            <CardContent className="text-center py-8">
-              <p className="text-gray-500 mb-4">No work orders found</p>
-              <Button onClick={() => setShowCreateForm(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create First Work Order
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          workOrders?.map((workOrder) => (
-            <Card key={workOrder.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold">Work Order #{workOrder.id}</h3>
-                      <Badge className={getStatusColor(workOrder.status)}>
-                        {workOrder.status.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                    <p className="text-gray-600 mb-1">Customer: {workOrder.customerName}</p>
-                    <p className="text-gray-600 mb-1">Property: {workOrder.projectAddress}</p>
-                    <p className="text-sm text-gray-500">
-                      Created: {new Date(workOrder.createdAt).toLocaleDateString()}
-                    </p>
-                    {workOrder.estimateId && (
-                      <p className="text-sm text-purple-600 mt-1 flex items-center gap-1">
-                        <ExternalLink className="w-3 h-3" />
-                        From Estimate #{workOrder.estimateId}
-                      </p>
-                    )}
-                    {workOrder.assignedTechnicianName && (
-                      <p className="text-sm text-blue-600 mt-1">
-                        Assigned to: {workOrder.assignedTechnicianName}
-                      </p>
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-lg font-semibold text-gray-900">
-                        {workOrder.status === 'completed' ? 'Completed' : workOrder.priority.toUpperCase()}
-                      </p>
-                      <p className="text-sm text-gray-500">Priority</p>
-                    </div>
-                    
-                    <div className="flex flex-col gap-2">
-                      <Button variant="outline" size="sm">
-                        <Eye className="w-4 h-4 mr-2" />
-                        View Details
-                      </Button>
-                      
-                      {workOrder.status === 'pending' && (
-                        <Select onValueChange={(techId) => {
-                          assignTechnician.mutate({ 
-                            workOrderId: workOrder.id, 
-                            technicianId: parseInt(techId) 
-                          });
-                        }}>
-                          <SelectTrigger className="w-40">
-                            <SelectValue placeholder="Assign Tech" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="3">Field Tech</SelectItem>
-                            <SelectItem value="4">Tech 2</SelectItem>
-                            <SelectItem value="5">Tech 3</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
+          <Button onClick={() => setShowCreateForm(true)} className="bg-green-600 hover:bg-green-700">
+            <Plus className="w-4 h-4 mr-2" />
+            New Work Order
+          </Button>
+        </div>
 
-                      {workOrder.status === 'in_progress' && (
-                        <Button 
-                          size="sm" 
-                          className="bg-green-600 hover:bg-green-700"
-                          onClick={() => {
-                            // Quick complete action
-                            toast({
-                              title: "Work Order Completed",
-                              description: `Work Order #${workOrder.id} marked as completed`,
-                            });
-                          }}
-                        >
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          Mark Complete
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+        {/* Work Orders List */}
+        <div className="space-y-4">
+          {isLoading ? (
+            <div className="text-center py-8">
+              <p className="text-gray-500">Loading work orders...</p>
+            </div>
+          ) : workOrders?.length === 0 ? (
+            <Card>
+              <CardContent className="text-center py-8">
+                <p className="text-gray-500 mb-4">No work orders found</p>
+                <Button onClick={() => setShowCreateForm(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create First Work Order
+                </Button>
               </CardContent>
             </Card>
-          ))
-        )}
+          ) : (
+            workOrders?.map((workOrder) => (
+              <Card key={workOrder.id} className="hover:shadow-md transition-shadow">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-lg font-semibold">Work Order #{workOrder.id}</h3>
+                        <Badge className={getStatusColor(workOrder.status)}>
+                          {workOrder.status.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <p className="text-gray-600 mb-1">Customer: {workOrder.customerName}</p>
+                      <p className="text-gray-600 mb-1">Property: {workOrder.projectAddress}</p>
+                      <p className="text-sm text-gray-500">
+                        Created: {new Date(workOrder.createdAt).toLocaleDateString()}
+                      </p>
+                      {workOrder.estimateId && (
+                        <p className="text-sm text-purple-600 mt-1 flex items-center gap-1">
+                          <ExternalLink className="w-3 h-3" />
+                          From Estimate #{workOrder.estimateId}
+                        </p>
+                      )}
+                      {workOrder.assignedTechnicianName && (
+                        <p className="text-sm text-blue-600 mt-1">
+                          Assigned to: {workOrder.assignedTechnicianName}
+                        </p>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-lg font-semibold text-gray-900">
+                          {workOrder.status === 'completed' ? 'Completed' : workOrder.priority.toUpperCase()}
+                        </p>
+                        <p className="text-sm text-gray-500">Priority</p>
+                      </div>
+                      
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleViewDetails(workOrder)}
+                        >
+                          <Eye className="w-4 h-4 mr-2" />
+                          View Details
+                        </Button>
+                        
+                        {workOrder.status === 'pending' && (
+                          <Select onValueChange={(techId) => {
+                            assignTechnician.mutate({ 
+                              workOrderId: workOrder.id, 
+                              technicianId: parseInt(techId) 
+                            });
+                          }}>
+                            <SelectTrigger className="w-40">
+                              <SelectValue placeholder="Assign Tech" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="3">Field Tech</SelectItem>
+                              <SelectItem value="4">Tech 2</SelectItem>
+                              <SelectItem value="5">Tech 3</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+
+                        {workOrder.status === 'in_progress' && (
+                          <Button 
+                            size="sm" 
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => {
+                              toast({
+                                title: "Work Order Completed",
+                                description: `Work Order #${workOrder.id} marked as completed`,
+                              });
+                            }}
+                          >
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Mark Complete
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
       </div>
-    </div>
+
+      {selectedWorkOrder && (
+        <CompletedWorkDetailModal
+          type="work_order"
+          id={selectedWorkOrder.id}
+          data={selectedWorkOrder}
+          open={showDetailModal}
+          onOpenChange={(open) => {
+            setShowDetailModal(open);
+            if (!open) setSelectedWorkOrder(null);
+          }}
+          showPricing={true}
+        />
+      )}
+    </>
   );
 }
