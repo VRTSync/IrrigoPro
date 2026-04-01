@@ -111,11 +111,13 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     workOrder.assignedTechnicianName || ""
   );
   const [branchName, setBranchName] = useState((workOrder as any).branchName || "");
+  const [workSummary, setWorkSummary] = useState(workOrder.workSummary || "");
   const [parts, setParts] = useState<EditPartRow[]>([]);
   const [partsLoaded, setPartsLoaded] = useState(false);
   const [showPartsEditor, setShowPartsEditor] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiSuggestionWorkSummary, setAiSuggestionWorkSummary] = useState<string | null>(null);
 
   // Fetch the customer to get its branches
   const { data: customer } = useQuery({
@@ -166,7 +168,9 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     setAssignedTechnicianId(workOrder.assignedTechnicianId || null);
     setAssignedTechnicianName(workOrder.assignedTechnicianName || "");
     setBranchName((workOrder as any).branchName || "");
+    setWorkSummary(workOrder.workSummary || "");
     setAiSuggestion(null);
+    setAiSuggestionWorkSummary(null);
     setErrors({});
   }, [open, workOrder]);
 
@@ -215,6 +219,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
         laborRate: laborRate || null,
         specialInstructions: specialInstructions || "",
         notes: notes || "",
+        workSummary: workSummary || null,
         branchName: branchName || null,
         assignedTechnicianId: assignedTechnicianId ? Number(assignedTechnicianId) : null,
         assignedTechnicianName: assignedTechnicianId ? assignedTechnicianName : "",
@@ -570,6 +575,26 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                     suggestion={aiSuggestion}
                     onAccept={() => { setDescription(aiSuggestion!); setAiSuggestion(null); }}
                     onDismiss={() => setAiSuggestion(null)}
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Work Summary (Completed)</p>
+                    <AiExpandButton
+                      getValue={() => workSummary}
+                      onSuggestion={setAiSuggestionWorkSummary}
+                    />
+                  </div>
+                  <Textarea
+                    value={workSummary}
+                    onChange={(e) => setWorkSummary(e.target.value)}
+                    placeholder="Summary of work completed by the technician..."
+                    className="min-h-[80px] text-sm resize-none"
+                  />
+                  <AiSuggestionCard
+                    suggestion={aiSuggestionWorkSummary}
+                    onAccept={() => { setWorkSummary(aiSuggestionWorkSummary!); setAiSuggestionWorkSummary(null); }}
+                    onDismiss={() => setAiSuggestionWorkSummary(null)}
                   />
                 </div>
                 <FieldRow label="Special Instructions">
