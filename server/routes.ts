@@ -2488,6 +2488,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? 'https://quickbooks.api.intuit.com' 
           : 'https://sandbox-quickbooks.api.intuit.com';
         
+        // Look up the QB Service item ID dynamically
+        let resolvedItemId: string = process.env.QUICKBOOKS_DEFAULT_ITEM_ID || "1";
+        let resolvedItemName: string = "Services";
+        try {
+          const itemQuery = encodeURIComponent("SELECT * FROM Item WHERE Type = 'Service' AND Active = true MAXRESULTS 1");
+          const itemQueryResponse = await makeQuickBooksRequest(
+            `${apiBase}/v3/company/${integration.realmId}/query?query=${itemQuery}`,
+            {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${integration.accessToken}`,
+                'Accept': 'application/json'
+              }
+            },
+            'QB Service Item Lookup'
+          );
+          if (itemQueryResponse.ok) {
+            const itemQueryResult = await itemQueryResponse.json();
+            const items = itemQueryResult?.QueryResponse?.Item;
+            if (items && items.length > 0) {
+              resolvedItemId = items[0].Id;
+              resolvedItemName = items[0].Name || "Services";
+            }
+          }
+        } catch (itemLookupError: any) {
+          console.warn('Failed to look up QB service item, using fallback ID:', resolvedItemId, itemLookupError.message);
+        }
+        console.log(`Resolved QB service item ID: ${resolvedItemId} (${resolvedItemName})`);
+
         const qbLineItems = [];
         
         for (const workOrder of selectedWorkOrders) {
@@ -2501,9 +2530,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               DetailType: "SalesItemLineDetail",
               SalesItemLineDetail: {
                 ItemRef: {
-                  value: "1",
-                  name: "Services"
-                }
+                  value: resolvedItemId,
+                  name: resolvedItemName
+                },
+                UnitPrice: totalLineAmount,
+                Qty: 1
               },
               Description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor, $${partsAmount} parts)`
             });
@@ -2518,9 +2549,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               DetailType: "SalesItemLineDetail", 
               SalesItemLineDetail: {
                 ItemRef: {
-                  value: "1",
-                  name: "Services"
-                }
+                  value: resolvedItemId,
+                  name: resolvedItemName
+                },
+                UnitPrice: lineTotal,
+                Qty: 1
               },
               Description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`
             });
