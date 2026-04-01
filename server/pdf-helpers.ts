@@ -9,6 +9,28 @@ import type {
 
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
 
+export function formatWorkSummary(text: string | null | undefined): string {
+  if (!text || text.trim().length === 0) return '';
+  const trimmed = text.trim();
+  const paragraphs = trimmed.split(/\n\n+/);
+  if (paragraphs.length > 1) {
+    return paragraphs
+      .map(p => `<p style="margin: 0 0 8px 0;">${p.trim().replace(/\n/g, '<br>')}</p>`)
+      .join('');
+  }
+  if (trimmed.length > 300 && !trimmed.includes('\n')) {
+    const sentences = trimmed
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    if (sentences.length > 1) {
+      const items = sentences.map(s => `<li style="margin-bottom: 4px;">${s}</li>`).join('');
+      return `<ul style="margin: 0; padding-left: 18px; list-style-type: disc;">${items}</ul>`;
+    }
+  }
+  return `<p style="margin: 0;">${trimmed.replace(/\n/g, '<br>')}</p>`;
+}
+
 export async function fetchLogoAsBase64(logoUrl: string): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
@@ -288,9 +310,9 @@ export function photoGrid(dataUris: string[]): string {
 
 export function workRecordCard(wo: PdfWorkOrderRow, photoDataUris: string[]): string {
   const descHtml = (wo.aiDetailedDescription || wo.workSummary || wo.workDescription)
-    ? `<div class="record-description">
-         <div class="record-description-label">Work Description</div>
-         <div class="record-description-body">${wo.aiDetailedDescription || wo.workSummary || wo.workDescription}</div>
+    ? `<div class="record-description" style="border-left: 3px solid #d1d5db;">
+         <div class="record-description-label">Work Performed</div>
+         <div class="record-description-body" style="line-height: 1.6;">${formatWorkSummary(wo.aiDetailedDescription || wo.workSummary || wo.workDescription)}</div>
        </div>`
     : '';
 
@@ -341,17 +363,24 @@ export function workRecordCard(wo: PdfWorkOrderRow, photoDataUris: string[]): st
 }
 
 export function billingSheetCard(bs: PdfBillingSheetRow, photoDataUris: string[]): string {
-  const descHtml = (bs.aiDetailedDescription || bs.workDescription)
-    ? `<div class="record-description">
-         <div class="record-description-label">Work Description</div>
-         <div class="record-description-body">${bs.aiDetailedDescription || bs.workDescription}</div>
+  const serviceDescHtml = (bs.workDescription && bs.notes && bs.workDescription.trim() !== bs.notes.trim())
+    ? `<div style="background: #f9fafb; padding: 10px 15px; border-radius: 6px; margin-bottom: 12px;">
+         <span style="font-weight: 600; color: #6b7280; font-size: 12px;">Service Description:</span>
+         <span style="color: #1f2937; font-size: 13px; margin-left: 6px;">${bs.workDescription}</span>
+       </div>`
+    : '';
+
+  const descHtml = bs.aiDetailedDescription
+    ? `<div class="record-description" style="border-left: 3px solid #d1d5db;">
+         <div class="record-description-label">Work Performed</div>
+         <div class="record-description-body" style="line-height: 1.6;">${formatWorkSummary(bs.aiDetailedDescription)}</div>
        </div>`
     : '';
 
   const notesHtml = bs.notes
-    ? `<div class="record-description">
-         <div class="record-description-label">Additional Notes</div>
-         <div class="record-description-body">${bs.notes}</div>
+    ? `<div class="record-description" style="border-left: 3px solid #d1d5db;">
+         <div class="record-description-label">Work Notes</div>
+         <div class="record-description-body" style="line-height: 1.6;">${formatWorkSummary(bs.notes)}</div>
        </div>`
     : '';
 
@@ -389,6 +418,7 @@ export function billingSheetCard(bs: PdfBillingSheetRow, photoDataUris: string[]
         <div class="meta-value">${formatCurrency(bs.laborRate)}/hr</div>
       </div>
     </div>
+    ${serviceDescHtml}
     ${descHtml}
     ${notesHtml}
     ${partsTableFromBS(bs.items)}
