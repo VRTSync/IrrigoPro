@@ -342,6 +342,7 @@ export function StandaloneBillingSheet({
     setUploadedPhotos([]);
     setSelectedCustomer(null);
     setPartsSearchQuery("");
+    setAiSuggestion(null);
   };
 
   const forceClose = () => {

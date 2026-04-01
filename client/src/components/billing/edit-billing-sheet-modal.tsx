@@ -114,6 +114,11 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   const customerBranches: string[] = (customer as any)?.branches || [];
 
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+
+  const handleClose = () => {
+    setAiSuggestion(null);
+    onClose();
+  };
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const photos: string[] = billingSheet.photos ?? [];
@@ -204,7 +209,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       onSuccess();
-      onClose();
+      handleClose();
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message || "Failed to update billing sheet", variant: "destructive" });
@@ -243,7 +248,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onClose}>
+      <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="w-[95vw] max-w-3xl max-h-[95vh] overflow-hidden p-0 flex flex-col">
           {/* Header — mirrors CompletedWorkDetailModal */}
           <DialogHeader className="flex-shrink-0 p-0">
@@ -510,7 +515,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                 <span>Billing Sheet {billingSheet.billingNumber ?? `#${billingSheet.id}`}</span>
               </div>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={onClose}>
+                <Button type="button" variant="outline" size="sm" onClick={handleClose}>
                   <X className="w-4 h-4 mr-1.5" />
                   Cancel
                 </Button>
