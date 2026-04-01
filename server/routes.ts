@@ -2494,8 +2494,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const qbServiceItem = await lookupQBServiceItem(apiBase, integration.realmId, integration.accessToken);
         if (!qbServiceItem) {
           throw new Error(
-            'Could not find an active Service item in your QuickBooks account. ' +
-            'Please create at least one Service-type item in QuickBooks and try again.'
+            `Could not find the QuickBooks item "${QB_SERVICE_ITEM_NAME}". ` +
+            `Please create an active Service-type item with that exact name in QuickBooks and try again.`
           );
         }
         const resolvedItemId = qbServiceItem.id;
@@ -2521,7 +2521,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: totalLineAmount,
                 Qty: 1
               },
-              Description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor, $${partsAmount} parts)`
+              Description: `WO-${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor @ $45/h, $${partsAmount.toFixed(2)} parts)`
             });
           }
         }
@@ -2540,7 +2540,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: lineTotal,
                 Qty: 1
               },
-              Description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`
+              Description: `BS-${billingSheet.billingNumber} - ${billingSheet.workDescription} ($${parseFloat(billingSheet.laborSubtotal || '0').toFixed(2)} labor, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts)`
             });
           }
         }
@@ -4542,7 +4542,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     return response;
   }
 
-  // Shared helper: look up the first active Service item in a QB account.
+  const QB_SERVICE_ITEM_NAME = 'Irrigation Services - IrrigoPro';
+
+  // Shared helper: look up the "Irrigation Services - IrrigoPro" item in a QB account.
   // Returns { id, name } on success, or null if the lookup fails.
   async function lookupQBServiceItem(
     apiBase: string,
@@ -4551,7 +4553,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   ): Promise<{ id: string; name: string } | null> {
     try {
       const itemQuery = encodeURIComponent(
-        "SELECT * FROM Item WHERE Type = 'Service' AND Active = true MAXRESULTS 1"
+        `SELECT * FROM Item WHERE Name = '${QB_SERVICE_ITEM_NAME}' AND Active = true MAXRESULTS 1`
       );
       const res = await makeQuickBooksRequest(
         `${apiBase}/v3/company/${realmId}/query?query=${itemQuery}`,
@@ -4562,7 +4564,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const data = await res.json();
         const items = data?.QueryResponse?.Item;
         if (items && items.length > 0) {
-          return { id: String(items[0].Id), name: items[0].Name || 'Services' };
+          return { id: String(items[0].Id), name: items[0].Name || QB_SERVICE_ITEM_NAME };
         }
       } else {
         const txt = await res.text();
@@ -5255,7 +5257,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!qbServiceItem) {
         return res.status(502).json({
           success: false,
-          message: 'Could not find an active Service item in your QuickBooks account. Please create at least one Service-type item in QuickBooks and try again.'
+          message: `Could not find the QuickBooks item "${QB_SERVICE_ITEM_NAME}". Please create an active Service-type item with that exact name in QuickBooks and try again.`
         });
       }
 
