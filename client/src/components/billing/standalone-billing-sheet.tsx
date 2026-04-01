@@ -32,10 +32,9 @@ import {
   Minus,
   Search,
   ChevronDown,
-  ChevronUp,
-  Sparkles
+  ChevronUp
 } from "lucide-react";
-import { AiGenerateDescriptionDialog } from "@/components/billing/ai-generate-description-dialog";
+import { AiExpandButton } from "@/components/ui/ai-expand-button";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
@@ -105,8 +104,6 @@ export function StandaloneBillingSheet({
   const [isAllPartsExpanded, setIsAllPartsExpanded] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
-  const [showAiDialog, setShowAiDialog] = useState(false);
-
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -893,16 +890,10 @@ export function StandaloneBillingSheet({
                           <FormItem>
                             <div className="flex items-center justify-between">
                               <FormLabel>Work Description</FormLabel>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowAiDialog(true)}
-                                className="h-7 px-2 text-xs gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50"
-                              >
-                                <Sparkles className="w-3.5 h-3.5" />
-                                Generate with AI
-                              </Button>
+                              <AiExpandButton
+                                getValue={() => field.value || ""}
+                                onExpanded={(v) => form.setValue("workDescription", v, { shouldDirty: true })}
+                              />
                             </div>
                             <FormControl>
                               <Textarea {...field} placeholder="Describe the work performed" />
@@ -910,14 +901,6 @@ export function StandaloneBillingSheet({
                             <FormMessage />
                           </FormItem>
                         )}
-                      />
-
-                      <AiGenerateDescriptionDialog
-                        open={showAiDialog}
-                        onOpenChange={setShowAiDialog}
-                        onGenerated={(description) => {
-                          form.setValue("workDescription", description, { shouldDirty: true });
-                        }}
                       />
 
                       {/* Labor & Time */}

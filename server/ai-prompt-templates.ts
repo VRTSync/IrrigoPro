@@ -49,3 +49,22 @@ export function buildWorkDescriptionPrompt(inputs: WorkDescriptionInputs): strin
 
   return lines.join("\n");
 }
+
+export function buildExpandDescriptionPrompt(rawDescription: string): string {
+  const lines: string[] = [
+    "You are a professional irrigation service documentation assistant.",
+    "A user has entered a brief description of work performed. Expand it into a polished, professional work-completed description suitable for a customer-facing billing record.",
+    "",
+    "RULES:",
+    "- NEVER invent, add, or extrapolate any facts not present in the user's input.",
+    "- Do not mention pricing, labor rates, or costs.",
+    "- Keep it to 2-3 sentences, professional and clear.",
+    "- If the input is already well-written, return it improved in style but unchanged in meaning.",
+    "",
+    `USER INPUT: "${rawDescription}"`,
+    "",
+    "Respond with ONLY valid JSON (no markdown, no code fences):",
+    `{"expanded": "The polished 2-3 sentence description here."}`,
+  ];
+  return lines.join("\n");
+}

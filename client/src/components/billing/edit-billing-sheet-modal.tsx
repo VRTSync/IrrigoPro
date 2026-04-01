@@ -22,11 +22,10 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
-import { AiGenerateDescriptionDialog } from "@/components/billing/ai-generate-description-dialog";
+import { AiExpandButton } from "@/components/ui/ai-expand-button";
 import type { BillingSheet, BillingSheetItem } from "@shared/schema";
 
 const currency = (val: number | string | null | undefined) => {
@@ -114,7 +113,6 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   });
   const customerBranches: string[] = (customer as any)?.branches || [];
 
-  const [showAiDialog, setShowAiDialog] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const photos: string[] = billingSheet.photos ?? [];
@@ -452,16 +450,10 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Work Description *</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowAiDialog(true)}
-                      className="h-6 px-2 text-xs gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      Generate with AI
-                    </Button>
+                    <AiExpandButton
+                      getValue={() => workDescription}
+                      onExpanded={(v) => setWorkDescription(v)}
+                    />
                   </div>
                   <Textarea
                     value={workDescription}
@@ -473,12 +465,6 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                     <p className="text-xs text-red-500 mt-1">{errors.workDescription}</p>
                   )}
                 </div>
-
-                <AiGenerateDescriptionDialog
-                  open={showAiDialog}
-                  onOpenChange={setShowAiDialog}
-                  onGenerated={(description) => setWorkDescription(description)}
-                />
                 <FieldRow label="Additional Notes">
                   <Textarea
                     value={notes}

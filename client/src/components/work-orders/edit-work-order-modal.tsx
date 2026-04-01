@@ -25,7 +25,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
-import { GenerateDescriptionPanel, type AiInputs, type AiOutputs } from "./generate-description-panel";
+import { AiExpandButton } from "@/components/ui/ai-expand-button";
 import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
 
 const currency = (val: number | string | null | undefined) => {
@@ -115,8 +115,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const [partsLoaded, setPartsLoaded] = useState(false);
   const [showPartsEditor, setShowPartsEditor] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [aiInputs, setAiInputs] = useState<AiInputs | null>(null);
-  const [aiOutputs, setAiOutputs] = useState<AiOutputs>({ shortDescription: "", detailedDescription: "" });
 
   // Fetch the customer to get its branches
   const { data: customer } = useQuery({
@@ -167,8 +165,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     setAssignedTechnicianId(workOrder.assignedTechnicianId || null);
     setAssignedTechnicianName(workOrder.assignedTechnicianName || "");
     setBranchName((workOrder as any).branchName || "");
-    setAiInputs(null);
-    setAiOutputs({ shortDescription: "", detailedDescription: "" });
     setErrors({});
   }, [open, workOrder]);
 
@@ -232,9 +228,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
             notes: p.notes || null,
           })),
         totalPartsCost: partsTotal.toFixed(2),
-        ...(aiInputs ? { aiInputs: JSON.stringify(aiInputs) } : {}),
-        ...(aiOutputs.shortDescription ? { aiShortDescription: aiOutputs.shortDescription } : {}),
-        ...(aiOutputs.detailedDescription ? { aiDetailedDescription: aiOutputs.detailedDescription } : {}),
       };
       return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", submitData);
     },
@@ -557,14 +550,21 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                   />
                   {errors.projectName && <p className="text-xs text-red-500 mt-1">{errors.projectName}</p>}
                 </FieldRow>
-                <FieldRow label="Work Description">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Work Description</p>
+                    <AiExpandButton
+                      getValue={() => description}
+                      onExpanded={(v) => setDescription(v)}
+                    />
+                  </div>
                   <Textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Describe the work..."
                     className="min-h-[80px] text-sm resize-none"
                   />
-                </FieldRow>
+                </div>
                 <FieldRow label="Special Instructions">
                   <Textarea
                     value={specialInstructions}
@@ -583,16 +583,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                 </FieldRow>
               </div>
             </SectionCard>
-
-            {/* AI Description Generator */}
-            <GenerateDescriptionPanel
-              entityType="work_order"
-              entityId={workOrder.id}
-              onOutputChange={(outputs, inputs) => {
-                setAiOutputs(outputs);
-                setAiInputs(inputs);
-              }}
-            />
 
             {/* Financial Summary */}
             <SectionCard title="Financial Summary" icon={<DollarSign className="w-4 h-4" />}>

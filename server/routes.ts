@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { EmailService } from "./email-service";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
-import { buildWorkDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "./ai-prompt-templates";
+import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "./ai-prompt-templates";
 
 /// <reference path="./types/express.d.ts" />
 
@@ -7819,6 +7819,66 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error("[AI] Unexpected error in generate-work-description:", error);
       return res.status(500).json({ message: "Failed to generate description. Please try again." });
+    }
+  });
+
+  app.post("/api/ai/expand-description", requireAuthentication, async (req: any, res) => {
+    try {
+      const { rawDescription } = req.body;
+      const raw = typeof rawDescription === "string" ? rawDescription.trim() : "";
+      if (!raw) {
+        return res.status(400).json({ message: "rawDescription is required" });
+      }
+
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({ message: "AI generation is not configured. Please set the OPENAI_API_KEY environment secret." });
+      }
+
+      const prompt = buildExpandDescriptionPrompt(raw);
+
+      const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 300,
+          temperature: 0.3,
+        }),
+      });
+
+      if (!openaiResponse.ok) {
+        const errText = await openaiResponse.text();
+        console.error("[AI expand] OpenAI API error:", openaiResponse.status, errText);
+        return res.status(502).json({ message: "AI service returned an error. Please try again." });
+      }
+
+      const openaiData: any = await openaiResponse.json();
+      const rawOutput = openaiData?.choices?.[0]?.message?.content || "";
+
+      let parsed: any = {};
+      try {
+        const cleaned = rawOutput.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        parsed = JSON.parse(cleaned);
+      } catch {
+        console.error("[AI expand] Failed to parse GPT JSON response:", rawOutput);
+        return res.status(502).json({ message: "AI returned an unexpected response format. Please try again." });
+      }
+
+      const expanded = typeof parsed.expanded === "string" ? parsed.expanded.trim() : "";
+      if (!expanded) {
+        return res.status(502).json({ message: "AI returned an empty result. Please try again." });
+      }
+
+      return res.json({ expanded });
+
+    } catch (error) {
+      console.error("[AI expand] Unexpected error:", error);
+      return res.status(500).json({ message: "Failed to expand description. Please try again." });
     }
   });
 
