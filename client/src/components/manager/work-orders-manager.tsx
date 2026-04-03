@@ -53,10 +53,15 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
         return 'bg-blue-100 text-blue-800';
       case 'completed':
         return 'bg-green-100 text-green-800';
+      case 'billed':
+        return 'bg-purple-100 text-purple-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
+
+  const isBilled = (workOrder: WorkOrder) =>
+    workOrder.status === 'billed' || workOrder.invoiceId != null;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -139,15 +144,18 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
             </Card>
           ) : (
             workOrders?.map((workOrder) => (
-              <Card key={workOrder.id} className="hover:shadow-md transition-shadow">
+              <Card key={workOrder.id} className={`hover:shadow-md transition-shadow ${isBilled(workOrder) ? 'opacity-80' : ''}`}>
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-lg font-semibold">Work Order #{workOrder.id}</h3>
                         <Badge className={getStatusColor(workOrder.status)}>
-                          {workOrder.status.replace('_', ' ')}
+                          {workOrder.status.replace(/_/g, ' ')}
                         </Badge>
+                        {isBilled(workOrder) && (
+                          <Badge className="bg-purple-100 text-purple-800">Billed</Badge>
+                        )}
                       </div>
                       <p className="text-gray-600 mb-1">Customer: {workOrder.customerName}</p>
                       <p className="text-gray-600 mb-1">Property: {workOrder.projectAddress}</p>
@@ -165,12 +173,17 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                           Assigned to: {workOrder.assignedTechnicianName}
                         </p>
                       )}
+                      {isBilled(workOrder) && (
+                        <p className="text-xs text-purple-700 mt-1 font-medium">
+                          This record has been billed and cannot be edited.
+                        </p>
+                      )}
                     </div>
                     
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-lg font-semibold text-gray-900">
-                          {workOrder.status === 'completed' ? 'Completed' : workOrder.priority.toUpperCase()}
+                          {workOrder.status === 'completed' || isBilled(workOrder) ? 'Completed' : workOrder.priority.toUpperCase()}
                         </p>
                         <p className="text-sm text-gray-500">Priority</p>
                       </div>
@@ -185,7 +198,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                           View Details
                         </Button>
                         
-                        {workOrder.status === 'pending' && (
+                        {!isBilled(workOrder) && workOrder.status === 'pending' && (
                           <Select onValueChange={(techId) => {
                             assignTechnician.mutate({ 
                               workOrderId: workOrder.id, 
@@ -203,7 +216,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                           </Select>
                         )}
 
-                        {workOrder.status === 'in_progress' && (
+                        {!isBilled(workOrder) && workOrder.status === 'in_progress' && (
                           <Button 
                             size="sm" 
                             className="bg-green-600 hover:bg-green-700"

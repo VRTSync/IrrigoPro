@@ -66,7 +66,7 @@ const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
   submitted: "bg-yellow-100 text-yellow-800",
   approved: "bg-green-100 text-green-800",
-  billed: "bg-blue-100 text-blue-800",
+  billed: "bg-purple-100 text-purple-800",
 };
 
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
@@ -208,15 +208,27 @@ export function CompletedWorkDetailModal({
                     <p className="text-sm text-gray-600 mt-0.5 truncate">{customerName}</p>
                   </div>
                 </div>
-                <Badge className={`flex-shrink-0 capitalize ${statusColors[status] ?? "bg-gray-100 text-gray-700"}`}>
-                  {status.replace(/_/g, " ")}
-                </Badge>
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  {data.invoiceId && status !== 'billed' && (
+                    <Badge className="bg-purple-100 text-purple-800">Billed</Badge>
+                  )}
+                  <Badge className={`capitalize ${statusColors[status] ?? "bg-gray-100 text-gray-700"}`}>
+                    {status.replace(/_/g, " ")}
+                  </Badge>
+                </div>
               </div>
             </div>
           </DialogHeader>
 
           {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+
+            {/* Billed lock notice */}
+            {(status === 'billed' || data.invoiceId) && (
+              <div className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800">
+                <span className="font-medium">This record has been billed and cannot be edited.</span>
+              </div>
+            )}
 
             {/* Location & Job Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

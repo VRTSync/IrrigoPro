@@ -2712,7 +2712,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const workOrder of selectedWorkOrders) {
         await storage.updateWorkOrder(workOrder.id, { 
           invoiceId: invoice.id,
-          billedAt: currentDate
+          billedAt: currentDate,
+          status: 'billed'
         });
       }
 
@@ -6100,6 +6101,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         aiDetailedDescription,
       } = req.body;
 
+      // Billing lock: prevent completing an already-billed work order
+      const existingWoForComplete = await storage.getWorkOrder(workOrderId);
+      if (existingWoForComplete && (existingWoForComplete.invoiceId || existingWoForComplete.status === 'billed')) {
+        return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+      }
+
       const completedByUserId = req.authenticatedUserId;
       const completedByUser = completedByUserId ? await storage.getUser(completedByUserId) : undefined;
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
@@ -6510,6 +6517,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.patch("/api/billing-sheets/:id", requireBillingSheetUpdateAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+
+      // Billing lock: reject updates to billing sheets that have been invoiced
+      const existingBsForLockCheck = await storage.getBillingSheetById(id);
+      if (existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
+        return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+      }
+
       const { items, markupPercent, taxPercent, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
       
       console.log('Updating billing sheet:', id, 'with data:', billingSheetData);
@@ -6934,6 +6948,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid work order ID" });
       }
+
+      // Billing lock: reject updates to work orders that have been invoiced
+      const existingForLockCheck = await storage.getWorkOrder(id);
+      if (existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
+        return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+      }
+
       const { items, ...workOrderBody } = req.body;
       // Strip immutable financial snapshot fields so manager edits cannot alter
       // the rates/breakdown that were locked in at completion time.

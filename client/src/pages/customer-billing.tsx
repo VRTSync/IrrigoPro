@@ -543,7 +543,7 @@ export default function CustomerBilling() {
       draft: "bg-gray-100 text-gray-800",
       submitted: "bg-blue-100 text-blue-800",
       approved: "bg-green-100 text-green-800",
-      billed: "bg-emerald-100 text-emerald-800"
+      billed: "bg-purple-100 text-purple-800"
     };
     
     return (
@@ -1712,24 +1712,30 @@ export default function CustomerBilling() {
                                     <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
                                   )}
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => { setSelectedWorkOrder(wo); setShowEditWorkOrder(true); }}
-                                  className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
-                                >
-                                  <Edit className="w-3 h-3 mr-1" />
-                                  Edit
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
-                                  className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
-                                >
-                                  <Trash2 className="w-3 h-3 mr-1" />
-                                  Delete
-                                </Button>
+                                {wo.status === 'billed' || wo.invoiceId ? (
+                                  <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setSelectedWorkOrder(wo); setShowEditWorkOrder(true); }}
+                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
+                                  >
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                )}
+                                {!(wo.status === 'billed' || wo.invoiceId) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
+                                    className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                  >
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Delete
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1785,24 +1791,30 @@ export default function CustomerBilling() {
                                 <div className="text-sm font-medium">
                                   {formatCurrency(bs.laborCost + bs.partsCost)}
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => { setSelectedBillingSheet(bs); setShowEditBillingSheet(true); }}
-                                  className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
-                                >
-                                  <Edit className="w-3 h-3 mr-1" />
-                                  Edit
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
-                                  className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
-                                >
-                                  <Trash2 className="w-3 h-3 mr-1" />
-                                  Delete
-                                </Button>
+                                {bs.status === 'billed' || bs.invoiceId ? (
+                                  <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { setSelectedBillingSheet(bs); setShowEditBillingSheet(true); }}
+                                    className="h-6 px-2 text-xs hover:bg-blue-50 text-blue-600"
+                                  >
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Edit
+                                  </Button>
+                                )}
+                                {!(bs.status === 'billed' || bs.invoiceId) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
+                                    className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                  >
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Delete
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1957,7 +1969,11 @@ export default function CustomerBilling() {
           open={showWorkOrderDetail}
           onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
           showPricing={true}
-          onEdit={() => { setShowWorkOrderDetail(false); setShowEditWorkOrder(true); }}
+          onEdit={
+            !(selectedWorkOrder.status === 'billed' || selectedWorkOrder.invoiceId)
+              ? () => { setShowWorkOrderDetail(false); setShowEditWorkOrder(true); }
+              : undefined
+          }
         />
       )}
 
@@ -1970,7 +1986,11 @@ export default function CustomerBilling() {
           open={showBillingSheetDetail}
           onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
           showPricing={true}
-          onEdit={() => { setShowBillingSheetDetail(false); setShowEditBillingSheet(true); }}
+          onEdit={
+            !(selectedBillingSheet.status === 'billed' || selectedBillingSheet.invoiceId)
+              ? () => { setShowBillingSheetDetail(false); setShowEditBillingSheet(true); }
+              : undefined
+          }
         />
       )}
 
