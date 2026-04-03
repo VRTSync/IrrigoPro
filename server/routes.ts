@@ -620,14 +620,18 @@ async function withQbRefreshLock(
 ): Promise<string> {
   const existing = qbRefreshLock.get(realmId);
   if (existing) {
-    console.log(`[QB refresh lock] realmId=${realmId}: waiting for in-flight refresh (gen=${existing.generation})`);
+    const waitStart = Date.now();
+    console.log(`[QB refresh lock] realmId=${realmId} waitedOnLock=true gen=${existing.generation} waitStartedAt=${new Date(waitStart).toISOString()}`);
     return Promise.race([
-      existing.promise,
+      existing.promise.then((result) => {
+        console.log(`[QB refresh lock] realmId=${realmId} waitedOnLock=true lockWaitMs=${Date.now() - waitStart} outcome=resolved`);
+        return result;
+      }),
       new Promise<string>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`QB refresh lock wait-timeout for realmId=${realmId}`)),
-          QB_REFRESH_TIMEOUT_MS
-        )
+        setTimeout(() => {
+          console.warn(`[QB refresh lock] realmId=${realmId} waitedOnLock=true lockWaitMs=${Date.now() - waitStart} outcome=timeout`);
+          reject(new Error(`QB refresh lock wait-timeout for realmId=${realmId}`));
+        }, QB_REFRESH_TIMEOUT_MS)
       ),
     ]);
   }
@@ -2527,7 +2531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
               const refreshTokenToUse = fresh.refreshToken;
 
-              const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal);
+              const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal, { realmId: proactiveRealmId, calledFrom: 'monthlyInvoice/proactive' });
               const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
               const refreshSuccessAt = new Date();
 
@@ -2538,7 +2542,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 refreshToken: newTokenData.refresh_token,
                 realmId: proactiveRealmId,
                 expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
-                lastRefreshSuccess: refreshSuccessAt
+                lastRefreshAttempt: refreshSuccessAt,
+                lastRefreshSuccess: refreshSuccessAt,
               });
 
               return newTokenData.access_token;
@@ -4840,41 +4845,62 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   }
 
   // Function to refresh QuickBooks token
-  async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal) {
+  async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal, context?: { realmId?: string; calledFrom?: string }) {
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
     const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
+    const startedAt = Date.now();
+    const realmId = context?.realmId ?? 'unknown';
+    const calledFrom = context?.calledFrom ?? 'unknown';
+
+    console.log(`[QB token-refresh] START realmId=${realmId} calledFrom=${calledFrom} startedAt=${new Date(startedAt).toISOString()}`);
     
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken
     });
 
-    const response = await fetch(tokenEndpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${authHeader}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
-      },
-      body: body.toString(),
-      signal
-    });
+    let response: globalThis.Response;
+    try {
+      response = await fetch(tokenEndpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${authHeader}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        },
+        body: body.toString(),
+        signal
+      });
+    } catch (fetchErr: any) {
+      const durationMs = Date.now() - startedAt;
+      console.error(`[QB token-refresh] FAILURE realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} failureCode=FETCH_ERROR failureMessage=${fetchErr?.message}`);
+      throw fetchErr;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
+      const durationMs = Date.now() - startedAt;
       const category = classifyQbRefreshError(errorText, response.status);
-      console.error(`Token refresh failed [${category}]:`, response.status, errorText);
+      console.error(`[QB token-refresh] FAILURE realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} failureCode=${response.status} category=${category} failureMessage=${errorText}`);
       throw new QbRefreshError(`Token refresh failed: ${response.status} ${errorText}`, category);
     }
 
     const tokenData = await response.json();
     if (!tokenData.access_token) {
+      const durationMs = Date.now() - startedAt;
+      console.error(`[QB token-refresh] FAILURE realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} failureCode=MISSING_ACCESS_TOKEN failureMessage=Token refresh response missing access_token`);
       throw new QbRefreshError('Token refresh response missing access_token', 'reconnect_required');
     }
     if (!tokenData.refresh_token) {
+      const durationMs = Date.now() - startedAt;
+      console.error(`[QB token-refresh] FAILURE realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} failureCode=MISSING_REFRESH_TOKEN failureMessage=Token refresh response missing refresh_token`);
       throw new QbRefreshError('Token refresh response missing refresh_token — cannot commit partial token state', 'reconnect_required');
     }
-    console.log('Successfully refreshed QuickBooks token');
+
+    const durationMs = Date.now() - startedAt;
+    const tokenRotated = true;
+    const expiresInSeconds = tokenData.expires_in && tokenData.expires_in > 0 ? tokenData.expires_in : 3600;
+    console.log(`[QB token-refresh] SUCCESS realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} tokenRotated=${tokenRotated} newExpiresInSeconds=${expiresInSeconds}`);
     return tokenData;
   }
 
@@ -4934,18 +4960,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
                     'reconnect_required'
                   );
                 }
-                const newTokenData = await refreshQuickBooksToken(fresh.refreshToken, signal);
+                const newTokenData = await refreshQuickBooksToken(fresh.refreshToken, signal, { realmId, calledFrom: 'makeQuickBooksRequest/proactive' });
                 const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
                 if (!newTokenData.refresh_token) {
                   console.warn('[QB proactive refresh] Intuit did not return a new refresh_token; keeping the existing one');
                 }
+                const nowTs = new Date();
                 await storage.saveQuickBooksIntegration({
                   companyId: integration.companyId,
                   accessToken: newTokenData.access_token,
                   refreshToken: newTokenData.refresh_token || fresh.refreshToken,
                   realmId,
                   expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
-                  lastRefreshSuccess: new Date()
+                  lastRefreshAttempt: nowTs,
+                  lastRefreshSuccess: nowTs,
                 });
                 return newTokenData.access_token;
               });
@@ -5008,7 +5036,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             }
             const refreshTokenToUse = fresh.refreshToken;
 
-            const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal);
+            const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal, { realmId: realmIdForLock, calledFrom: 'makeQuickBooksRequest/401-retry' });
 
             // Guard against NaN when expires_in is missing or zero
             const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0
@@ -5019,13 +5047,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             }
 
             // Persist new tokens atomically before releasing the lock so all waiters see the updated token
+            const nowTs = new Date();
             await storage.saveQuickBooksIntegration({
               companyId: integration.companyId,
               accessToken: newTokenData.access_token,
               refreshToken: newTokenData.refresh_token,
               realmId: realmIdForLock,
               expiresAt: new Date(Date.now() + (expiresInSeconds * 1000)),
-              lastRefreshSuccess: new Date()
+              lastRefreshAttempt: nowTs,
+              lastRefreshSuccess: nowTs,
             });
 
             return newTokenData.access_token;
@@ -5047,11 +5077,33 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             console.log(`[QUICKBOOKS_TID] ${operation} - Retry: ${retryIntuitTid}`);
           }
         }
-      } catch (refreshError) {
-        console.error('Failed to refresh QuickBooks token:', refreshError);
-        // Classify and persist reconnect_required for unrecoverable failures
+      } catch (refreshError: any) {
+        const failureReason = refreshError?.message ?? String(refreshError);
+        console.error(`[QB token-refresh] CATCH realmId=${realmId ?? 'unknown'} failureMessage=${failureReason}`);
         if (realmId) {
-          await handleUnrecoverableRefreshError(refreshError, realmId);
+          // Persist reconnect_required for unrecoverable failures (stale/revoked token)
+          const marked = await handleUnrecoverableRefreshError(refreshError, realmId);
+          if (!marked) {
+            // Transient failure — still persist lastRefreshFailure for observability
+            try {
+              const integ = await storage.getQuickBooksIntegration(realmId);
+              if (integ) {
+                await storage.saveQuickBooksIntegration({
+                  companyId: integ.companyId,
+                  accessToken: integ.accessToken,
+                  refreshToken: integ.refreshToken,
+                  realmId: integ.realmId,
+                  expiresAt: integ.expiresAt,
+                  lastRefreshAttempt: new Date(),
+                  lastRefreshFailure: new Date(),
+                  connectionStatus: integ.connectionStatus,
+                  reconnectRequiredReason: failureReason,
+                });
+              }
+            } catch (persistErr) {
+              console.warn('[QB token-refresh] Failed to persist lastRefreshFailure:', persistErr);
+            }
+          }
         }
         // Return the original 401 response if refresh fails
       }
@@ -5513,6 +5565,41 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         reconnectRequiredReason: null,
         error: "Failed to check QuickBooks connection status"
       });
+    }
+  });
+
+  app.get("/api/quickbooks/health", requireAuthentication, async (req, res) => {
+    try {
+      const integrations = await storage.getQuickBooksAllIntegrations();
+      const now = new Date();
+
+      const health = integrations.map((integ) => {
+        const isTokenValid = integ.expiresAt ? new Date(integ.expiresAt) > now : false;
+        const tokenAgeMs = integ.expiresAt
+          ? new Date(integ.expiresAt).getTime() - now.getTime()
+          : null;
+
+        return {
+          realmId: integ.realmId,
+          companyId: integ.companyId,
+          connectionStatus: integ.connectionStatus,
+          isTokenValid,
+          tokenExpiresAt: integ.expiresAt,
+          tokenExpiresInMs: tokenAgeMs,
+          lastRefreshAttempt: integ.lastRefreshAttempt,
+          lastRefreshSuccess: integ.lastRefreshSuccess,
+          lastRefreshFailure: integ.lastRefreshFailure,
+          lastFailureReason: integ.reconnectRequiredReason ?? null,
+          reconnectRequired: integ.connectionStatus === 'reconnect_required',
+          tokenEnvironment: integ.tokenEnvironment,
+          updatedAt: integ.updatedAt,
+        };
+      });
+
+      res.json({ connections: health, count: health.length, checkedAt: now });
+    } catch (error) {
+      console.error("[QB health] Error fetching health data:", error);
+      res.status(500).json({ message: "Failed to fetch QuickBooks connection health" });
     }
   });
 

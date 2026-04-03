@@ -14,11 +14,13 @@ import {
   Building,
   Calendar,
   DollarSign,
-  ShieldAlert
+  ShieldAlert,
+  Activity,
+  XCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 
 interface QuickBooksConnectionProps {
   className?: string;
@@ -34,12 +36,158 @@ interface QbConnectionStatus {
   error?: string;
 }
 
+interface QBConnectionHealth {
+  realmId: string;
+  companyId: string;
+  connectionStatus: string;
+  isTokenValid: boolean;
+  tokenExpiresAt: string | null;
+  tokenExpiresInMs: number | null;
+  lastRefreshAttempt: string | null;
+  lastRefreshSuccess: string | null;
+  lastRefreshFailure: string | null;
+  lastFailureReason: string | null;
+  reconnectRequired: boolean;
+  tokenEnvironment: string;
+  updatedAt: string | null;
+}
+
+interface QBHealthResponse {
+  connections: QBConnectionHealth[];
+  count: number;
+  checkedAt: string;
+}
+
+function ConnectionHealthPanel() {
+  const { data: health, isLoading, refetch } = useQuery<QBHealthResponse>({
+    queryKey: ["/api/quickbooks/health"],
+    retry: false,
+    throwOnError: false,
+    refetchInterval: 60000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+        <RefreshCw className="w-4 h-4 animate-spin" />
+        Loading connection health...
+      </div>
+    );
+  }
+
+  if (!health || health.count === 0) {
+    return (
+      <Alert>
+        <Activity className="h-4 w-4" />
+        <AlertDescription>
+          No QuickBooks connections found. Connect an account to see health data.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  const getStatusBadge = (conn: QBConnectionHealth) => {
+    if (conn.reconnectRequired) {
+      return <Badge className="bg-red-100 text-red-800"><ShieldAlert className="w-3 h-3 mr-1" />Reconnect Required</Badge>;
+    }
+    if (!conn.isTokenValid) {
+      return <Badge className="bg-orange-100 text-orange-800"><XCircle className="w-3 h-3 mr-1" />Token Expired</Badge>;
+    }
+    if (conn.connectionStatus === "error") {
+      return <Badge className="bg-red-100 text-red-800"><AlertTriangle className="w-3 h-3 mr-1" />Error</Badge>;
+    }
+    if (conn.connectionStatus === "connected") {
+      return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Healthy</Badge>;
+    }
+    return <Badge variant="outline">{conn.connectionStatus}</Badge>;
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">
+          Checked {formatDistanceToNow(new Date(health.checkedAt), { addSuffix: true })}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => refetch()} className="h-6 px-2 text-xs">
+          <RefreshCw className="w-3 h-3 mr-1" />
+          Refresh
+        </Button>
+      </div>
+
+      {health.connections.map((conn) => (
+        <div key={conn.realmId} className="border rounded-lg p-3 space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-medium">
+              <Building className="w-4 h-4 text-muted-foreground" />
+              <span className="font-mono text-xs">{conn.realmId}</span>
+              <Badge variant="outline" className="text-xs">{conn.tokenEnvironment}</Badge>
+            </div>
+            {getStatusBadge(conn)}
+          </div>
+
+          <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1">
+              <Clock className="w-3 h-3 flex-shrink-0" />
+              <span>
+                Token expires:{" "}
+                {conn.tokenExpiresAt
+                  ? `${format(new Date(conn.tokenExpiresAt), "MMM d, yyyy HH:mm")} (${
+                      conn.tokenExpiresInMs != null
+                        ? conn.tokenExpiresInMs > 0
+                          ? `in ${Math.round(conn.tokenExpiresInMs / 60000)}m`
+                          : `${Math.abs(Math.round(conn.tokenExpiresInMs / 60000))}m ago`
+                        : "unknown"
+                    })`
+                  : "unknown"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <CheckCircle className="w-3 h-3 flex-shrink-0 text-green-500" />
+              <span>
+                Last success:{" "}
+                {conn.lastRefreshSuccess
+                  ? formatDistanceToNow(new Date(conn.lastRefreshSuccess), { addSuffix: true })
+                  : "never"}
+              </span>
+            </div>
+
+            {conn.lastRefreshFailure && (
+              <div className="flex items-start gap-1">
+                <AlertTriangle className="w-3 h-3 flex-shrink-0 text-red-500 mt-0.5" />
+                <span className="text-red-600">
+                  Last failure:{" "}
+                  {formatDistanceToNow(new Date(conn.lastRefreshFailure), { addSuffix: true })}
+                  {conn.lastFailureReason && (
+                    <span className="block text-red-500 font-mono text-xs mt-0.5 break-all">
+                      {conn.lastFailureReason}
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {conn.lastRefreshAttempt && (
+              <div className="flex items-center gap-1">
+                <Activity className="w-3 h-3 flex-shrink-0" />
+                <span>
+                  Last attempt:{" "}
+                  {formatDistanceToNow(new Date(conn.lastRefreshAttempt), { addSuffix: true })}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) {
   const [isConnecting, setIsConnecting] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
-  // Component initialization
   useEffect(() => {
     console.log("QuickBooks Integration component loaded");
   }, []);
@@ -73,7 +221,6 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
         description: data.message || `${data.customersAdded || 0} added, ${data.customersAlreadySynced || 0} already synced`,
         variant: "default"
       });
-      // Refresh customer list
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
     },
@@ -91,7 +238,6 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const handleQuickBooksConnect = async () => {
     console.log("QuickBooks button clicked - starting connection");
     
-    // Prevent double clicks
     if (isConnecting) {
       console.log("Already connecting, ignoring click");
       return;
@@ -108,13 +254,11 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
         const data = response;
         
         if (data?.authUrl) {
-          // Show user-friendly message and redirect to avoid popup blocking
           toast({
             title: "Connecting to QuickBooks",
             description: "You'll be redirected to QuickBooks to authorize the connection.",
           });
           
-          // Small delay to let user see the message, then redirect
           setTimeout(() => {
             window.location.href = data.authUrl;
           }, 1500);
@@ -290,6 +434,17 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 </button>
               </div>
             ) : null}
+          </div>
+
+          <Separator />
+
+          {/* Connection Health Panel */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Activity className="w-5 h-5" />
+              Connection Health
+            </h3>
+            <ConnectionHealthPanel />
           </div>
 
           <Separator />

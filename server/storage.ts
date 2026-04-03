@@ -190,7 +190,8 @@ export interface IStorage {
   updateAssembly(id: number, assembly: Partial<InsertAssembly>, parts?: InsertAssemblyPart[]): Promise<AssemblyWithParts | undefined>;
   deleteAssembly(id: number): Promise<boolean>;
   trackAssemblyUsage(companyId: number, assemblyId: number): Promise<void>;
-  getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }>;
+  getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number; connectionStatus?: string; reconnectRequiredReason?: string | null; companyId?: string | null; realmId?: string | null }>;
+  getQuickBooksAllIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
   connectGoogleSheetsCustomers(sheetUrl: string): Promise<void>;
   disconnectGoogleSheetsCustomers(): Promise<void>;
   getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }>;
@@ -1534,6 +1535,15 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error('Error marking QuickBooks reconnect required:', error);
       throw error;
+    }
+  }
+
+  async getQuickBooksAllIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]> {
+    try {
+      return await db.select().from(quickbooksIntegration).orderBy(quickbooksIntegration.realmId);
+    } catch (error) {
+      console.error('Error getting all QuickBooks integrations:', error);
+      return [];
     }
   }
 
