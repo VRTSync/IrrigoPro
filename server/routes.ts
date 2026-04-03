@@ -9086,5 +9086,126 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // QB7 — Background health-check / keep-alive job
+  //
+  // Runs once at startup and then every QB_HEALTH_CHECK_INTERVAL_MS thereafter.
+  // For each "connected" realm we check whether lastRefreshSuccess is older
+  // than QB_IDLE_THRESHOLD_DAYS.  If it is (or null), we proactively refresh
+  // through the existing per-realm mutex so that the refresh token never goes
+  // 100 days without activity, which would silently revoke it.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const QB_HEALTH_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const QB_IDLE_THRESHOLD_DAYS = 90; // refresh any connection idle ≥ 90 days
+
+  async function runQbHealthCheckJob(): Promise<void> {
+    const jobStart = Date.now();
+    console.log(`[QB health-check] Job started at ${new Date(jobStart).toISOString()}`);
+
+    let integrations: Awaited<ReturnType<typeof storage.getAllActiveQuickBooksIntegrations>>;
+    try {
+      integrations = await storage.getAllActiveQuickBooksIntegrations();
+    } catch (err) {
+      console.error('[QB health-check] Failed to fetch active integrations:', err);
+      return;
+    }
+
+    console.log(`[QB health-check] Checking ${integrations.length} active connection(s)`);
+
+    const thresholdMs = QB_IDLE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    let refreshed = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const integration of integrations) {
+      const { realmId, lastRefreshSuccess, companyId } = integration;
+
+      // Determine whether this connection is approaching the idle threshold
+      const lastSuccessMs = lastRefreshSuccess ? new Date(lastRefreshSuccess).getTime() : 0;
+      const idleMs = now - lastSuccessMs;
+
+      if (idleMs < thresholdMs) {
+        console.log(
+          `[QB health-check] realmId=${realmId} companyId=${companyId}: healthy (idle ${Math.round(idleMs / 86_400_000)}d < threshold ${QB_IDLE_THRESHOLD_DAYS}d) — skipping`
+        );
+        skipped++;
+        continue;
+      }
+
+      console.log(
+        `[QB health-check] realmId=${realmId} companyId=${companyId}: idle ${Math.round(idleMs / 86_400_000)}d ≥ threshold — attempting proactive refresh`
+      );
+
+      try {
+        await withQbRefreshLock(realmId, async (signal) => {
+          // Re-read inside the lock to pick up any concurrent rotation
+          const fresh = await storage.getQuickBooksIntegration(realmId);
+          if (!fresh) {
+            throw new Error(`[QB health-check] Integration for realmId=${realmId} disappeared before refresh`);
+          }
+          if (fresh.connectionStatus === 'reconnect_required') {
+            throw new QbRefreshError(
+              `Connection already marked as reconnect_required for realmId=${realmId}`,
+              'reconnect_required'
+            );
+          }
+
+          const newTokenData = await refreshQuickBooksToken(fresh.refreshToken, signal);
+          const expiresInSeconds =
+            newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
+
+          await storage.saveQuickBooksIntegration({
+            companyId: fresh.companyId,
+            accessToken: newTokenData.access_token,
+            refreshToken: newTokenData.refresh_token ?? fresh.refreshToken,
+            realmId,
+            expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+            lastRefreshSuccess: new Date(),
+            connectionStatus: 'connected',
+          });
+
+          return newTokenData.access_token;
+        });
+
+        console.log(`[QB health-check] realmId=${realmId} companyId=${companyId}: proactive refresh succeeded`);
+        refreshed++;
+      } catch (err) {
+        const wasHandled = await handleUnrecoverableRefreshError(err, realmId);
+        if (wasHandled) {
+          console.warn(
+            `[QB health-check] realmId=${realmId} companyId=${companyId}: unrecoverable error — marked reconnect_required`
+          );
+        } else {
+          console.error(
+            `[QB health-check] realmId=${realmId} companyId=${companyId}: transient refresh failure — will retry next cycle`,
+            err instanceof Error ? err.message : err
+          );
+        }
+        failed++;
+      }
+    }
+
+    const elapsedMs = Date.now() - jobStart;
+    console.log(
+      `[QB health-check] Job complete in ${elapsedMs}ms — refreshed=${refreshed} skipped=${skipped} failed=${failed}`
+    );
+  }
+
+  // Run once shortly after startup, then on the daily interval
+  setTimeout(() => {
+    runQbHealthCheckJob().catch((err) =>
+      console.error('[QB health-check] Unhandled error in initial run:', err)
+    );
+  }, 30_000); // 30-second delay to let the server fully start
+
+  setInterval(() => {
+    runQbHealthCheckJob().catch((err) =>
+      console.error('[QB health-check] Unhandled error in scheduled run:', err)
+    );
+  }, QB_HEALTH_CHECK_INTERVAL_MS);
+
   return httpServer;
 }

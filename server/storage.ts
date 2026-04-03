@@ -197,6 +197,7 @@ export interface IStorage {
   getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }>;
   disconnectQuickBooksCustomers(): Promise<void>;
   markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void>;
+  getAllActiveQuickBooksIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
 
   // Parts Reference Lists (per-company: categories, brands, sizes, materials, fitting types)
   getPartCategories(companyId: number): Promise<PartCategory[]>;
@@ -1543,6 +1544,16 @@ export class DatabaseStorage implements IStorage {
       return await db.select().from(quickbooksIntegration).orderBy(quickbooksIntegration.realmId);
     } catch (error) {
       console.error('Error getting all QuickBooks integrations:', error);
+      return [];
+    }
+  }
+
+  async getAllActiveQuickBooksIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]> {
+    try {
+      return await db.select().from(quickbooksIntegration)
+        .where(eq(quickbooksIntegration.connectionStatus, 'connected'));
+    } catch (error) {
+      console.error('Error fetching all active QuickBooks integrations:', error);
       return [];
     }
   }
