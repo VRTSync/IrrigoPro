@@ -96,38 +96,11 @@ export function formatCurrency(amount: number): string {
 export function coverPage(
   vm: PdfViewModel
 ): string {
-  const { company, invoice, workOrders, billingSheets, totals } = vm;
-
-  const woCount = workOrders.length;
-  const bsCount = billingSheets.length;
-  const woLaborSubtotal = workOrders.reduce((s, wo) => s + wo.laborSubtotal, 0);
-  const woPartsSubtotal = workOrders.reduce((s, wo) => s + wo.partsSubtotal, 0);
-  const woGroupTotal = workOrders.reduce((s, wo) => s + wo.rowTotal, 0);
-  const bsLaborSubtotal = billingSheets.reduce((s, bs) => s + bs.laborSubtotal, 0);
-  const bsPartsSubtotal = billingSheets.reduce((s, bs) => s + bs.partsSubtotal, 0);
-  const bsGroupTotal = billingSheets.reduce((s, bs) => s + bs.rowTotal, 0);
+  const { company, invoice } = vm;
 
   const logoHtml = company.logoDataUri
     ? `<img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}">`
     : `<div class="cover-company-name-fallback">${company.name}</div>`;
-
-  const woRowHtml = woCount > 0 ? `
-    <tr>
-      <td class="cover-breakdown-type cover-breakdown-type-wo">Work Orders</td>
-      <td class="cover-breakdown-count">${woCount}</td>
-      <td class="cover-breakdown-amount">${formatCurrency(woLaborSubtotal)}</td>
-      <td class="cover-breakdown-amount">${formatCurrency(woPartsSubtotal)}</td>
-      <td class="cover-breakdown-total">${formatCurrency(woGroupTotal)}</td>
-    </tr>` : '';
-
-  const bsRowHtml = bsCount > 0 ? `
-    <tr>
-      <td class="cover-breakdown-type cover-breakdown-type-bs">Billing Sheets</td>
-      <td class="cover-breakdown-count">${bsCount}</td>
-      <td class="cover-breakdown-amount">${formatCurrency(bsLaborSubtotal)}</td>
-      <td class="cover-breakdown-amount">${formatCurrency(bsPartsSubtotal)}</td>
-      <td class="cover-breakdown-total">${formatCurrency(bsGroupTotal)}</td>
-    </tr>` : '';
 
   return `
   <div class="cover-page">
@@ -145,7 +118,6 @@ export function coverPage(
         <div class="cover-invoice-label">INVOICE</div>
         <div class="cover-invoice-number">#${invoice.invoiceNumber}</div>
         <div class="cover-meta-item"><span class="cover-meta-label">Billing Period</span><span class="cover-meta-value">${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</span></div>
-        <div class="cover-meta-item"><span class="cover-meta-label">Generated</span><span class="cover-meta-value">${formatDate(invoice.generatedAt)}</span></div>
       </div>
     </div>
 
@@ -154,39 +126,6 @@ export function coverPage(
       <div class="cover-bill-to-name">${invoice.customerName}</div>
       ${invoice.customerEmail ? `<div class="cover-bill-to-detail">${invoice.customerEmail}</div>` : ''}
       ${invoice.customerPhone ? `<div class="cover-bill-to-detail">${invoice.customerPhone}</div>` : ''}
-    </div>
-
-    <div class="cover-total-block">
-      <div class="cover-total-label">TOTAL INVOICE AMOUNT</div>
-      <div class="cover-total-amount">${formatCurrency(totals.grandTotal)}</div>
-      <div class="cover-total-period">For period ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</div>
-    </div>
-
-    <div class="cover-breakdown">
-      <div class="cover-breakdown-heading">Billing Summary</div>
-      <table class="cover-breakdown-table">
-        <thead>
-          <tr>
-            <th class="cover-breakdown-type">Category</th>
-            <th class="cover-breakdown-count">Count</th>
-            <th class="cover-breakdown-amount">Labor</th>
-            <th class="cover-breakdown-amount">Parts</th>
-            <th class="cover-breakdown-total">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${woRowHtml}
-          ${bsRowHtml}
-        </tbody>
-        <tfoot>
-          <tr class="cover-breakdown-grand">
-            <td colspan="2" class="cover-breakdown-grand-label">Grand Total</td>
-            <td class="cover-breakdown-amount">${formatCurrency(totals.laborSubtotal)}</td>
-            <td class="cover-breakdown-amount">${formatCurrency(totals.partsSubtotal)}</td>
-            <td class="cover-breakdown-total">${formatCurrency(totals.grandTotal)}</td>
-          </tr>
-        </tfoot>
-      </table>
     </div>
   </div>`;
 }
@@ -235,18 +174,11 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
   return `
   <div class="ticket-page">
     <div class="ticket-header ticket-header-wo">
-      <div class="ticket-header-left">
-        <div class="ticket-type-badge ticket-type-wo">Work Order</div>
-        <div class="ticket-number">WO #${wo.workOrderNumber}</div>
-        <div class="ticket-subtitle">${wo.projectName}</div>
-        ${locationLine ? `<div class="ticket-location">&#128205; ${locationLine}</div>` : ''}
-      </div>
-      <div class="ticket-header-right">
+      <div class="ticket-header-condensed">
         ${logoHtml}
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Invoice #</span><span class="ticket-meta-value">${invoiceNumber}</span></div>
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Date</span><span class="ticket-meta-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</span></div>
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Technician</span><span class="ticket-meta-value">${wo.technicianName}</span></div>
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Hours</span><span class="ticket-meta-value">${wo.totalHours} hrs</span></div>
+        <div class="ticket-header-line1">Work Order #${wo.workOrderNumber} &nbsp;|&nbsp; Invoice #${invoiceNumber}</div>
+        <div class="ticket-header-line2">Date: ${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'} &nbsp;|&nbsp; Technician: ${wo.technicianName} &nbsp;|&nbsp; Hours: ${wo.totalHours} hrs</div>
+        ${locationLine ? `<div class="ticket-header-line3">&#128205; ${locationLine}</div>` : ''}
         ${approvalHtml}
       </div>
     </div>
@@ -321,17 +253,11 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
   return `
   <div class="ticket-page">
     <div class="ticket-header ticket-header-bs">
-      <div class="ticket-header-left">
-        <div class="ticket-type-badge ticket-type-bs">Billing Sheet</div>
-        <div class="ticket-number">BS #${bs.billingNumber}</div>
-        ${bs.propertyAddress ? `<div class="ticket-location">&#128205; ${bs.propertyAddress}</div>` : ''}
-      </div>
-      <div class="ticket-header-right">
+      <div class="ticket-header-condensed">
         ${bsLogoHtml}
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Invoice #</span><span class="ticket-meta-value">${invoiceNumber}</span></div>
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Date</span><span class="ticket-meta-value">${formatDate(bs.workDate)}</span></div>
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Technician</span><span class="ticket-meta-value">${bs.technicianName}</span></div>
-        <div class="ticket-meta-item"><span class="ticket-meta-label">Hours</span><span class="ticket-meta-value">${bs.totalHours} hrs</span></div>
+        <div class="ticket-header-line1">Billing Sheet #${bs.billingNumber} &nbsp;|&nbsp; Invoice #${invoiceNumber}</div>
+        <div class="ticket-header-line2">Date: ${formatDate(bs.workDate)} &nbsp;|&nbsp; Technician: ${bs.technicianName} &nbsp;|&nbsp; Hours: ${bs.totalHours} hrs</div>
+        ${bs.propertyAddress ? `<div class="ticket-header-line3">&#128205; ${bs.propertyAddress}</div>` : ''}
         ${approvalHtml}
       </div>
     </div>
@@ -841,15 +767,12 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   .ticket-page {
     page-break-before: always;
     break-before: page;
-    padding: 28px 0 32px;
+    padding: 16px 0 20px;
   }
 
   .ticket-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 20px 22px;
-    border-radius: 8px 8px 0 0;
+    padding: 12px 16px;
+    border-radius: 6px 6px 0 0;
     border-bottom: 1px solid rgba(0,0,0,0.1);
     page-break-inside: avoid;
     break-inside: avoid;
@@ -867,120 +790,84 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     color: white;
   }
 
-  .ticket-header-left {
-    flex: 1;
-  }
-
-  .ticket-header-right {
-    min-width: 200px;
-    text-align: right;
+  .ticket-header-condensed {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
+    gap: 3px;
   }
 
   .ticket-header-logo {
-    max-width: 100px;
-    max-height: 40px;
+    max-width: 80px;
+    max-height: 30px;
     width: auto;
     height: auto;
     object-fit: contain;
     display: block;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .ticket-header-company-name {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     color: rgba(255,255,255,0.9);
     letter-spacing: 0.5px;
-    margin-bottom: 6px;
-  }
-
-  .ticket-type-badge {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    opacity: 0.85;
     margin-bottom: 4px;
   }
 
-  .ticket-number {
-    font-size: 26px;
-    font-weight: 800;
-    line-height: 1;
-    margin-bottom: 4px;
-  }
-
-  .ticket-subtitle {
+  .ticket-header-line1 {
     font-size: 14px;
-    opacity: 0.9;
-    margin-bottom: 4px;
-    font-weight: 500;
+    font-weight: 800;
+    color: white;
+    line-height: 1.2;
   }
 
-  .ticket-location {
-    font-size: 12px;
-    opacity: 0.8;
-    margin-top: 4px;
-  }
-
-  .ticket-meta-item {
-    font-size: 12px;
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    justify-content: flex-end;
-  }
-
-  .ticket-meta-label {
-    opacity: 0.75;
+  .ticket-header-line2 {
     font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+    line-height: 1.3;
   }
 
-  .ticket-meta-value {
-    font-weight: 600;
+  .ticket-header-line3 {
+    font-size: 11px;
+    color: rgba(255,255,255,0.75);
+    line-height: 1.3;
   }
 
   .ticket-approval {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 6px;
+    gap: 5px;
+    margin-top: 4px;
     background: rgba(255,255,255,0.15);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 11px;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 10px;
+    width: fit-content;
   }
 
   .ticket-approval-icon {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 700;
   }
 
   .ticket-approval-details {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
   }
 
   .ticket-approval-by,
   .ticket-approval-at {
     display: block;
-    font-size: 11px;
+    font-size: 10px;
   }
 
   /* ── Ticket Sections ── */
   .ticket-section {
     border: 1px solid #e5e7eb;
     border-top: none;
-    padding: 16px 20px;
+    padding: 10px 14px;
   }
 
   .ticket-section:first-of-type {
@@ -988,31 +875,31 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   }
 
   .ticket-section-label {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1px;
     color: ${navy};
-    margin-bottom: 8px;
-    padding-bottom: 6px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
     border-bottom: 1px solid ${green};
   }
 
   /* Work bullet list */
   .ticket-work-list {
-    font-size: 13px;
+    font-size: 12px;
     color: ${black};
   }
 
   .work-bullet-list {
     margin: 0;
-    padding-left: 20px;
+    padding-left: 18px;
     list-style-type: disc;
   }
 
   .work-bullet-list li {
-    margin-bottom: 5px;
-    line-height: 1.6;
+    margin-bottom: 3px;
+    line-height: 1.4;
     color: ${black};
   }
 
@@ -1032,9 +919,9 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 0;
+    padding: 5px 0;
     border-bottom: 1px solid ${gray};
-    font-size: 13px;
+    font-size: 12px;
     color: ${black};
   }
 
@@ -1049,16 +936,16 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
 
   .ticket-fin-value {
     font-weight: 600;
-    min-width: 100px;
+    min-width: 90px;
     text-align: right;
     color: ${black};
   }
 
   .ticket-fin-total {
-    margin-top: 8px;
-    padding-top: 12px;
+    margin-top: 4px;
+    padding-top: 8px;
     border-top: 2px solid ${green} !important;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 800;
     color: ${black};
   }
@@ -1069,7 +956,7 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
 
   .ticket-fin-total .ticket-fin-value {
     color: ${brown};
-    font-size: 18px;
+    font-size: 16px;
   }
 
   /* Parts table */
@@ -1078,16 +965,16 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     break-inside: avoid;
   }
 
-  .items-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .items-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   .items-table thead { background: ${navy}; color: white; }
-  .items-table th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+  .items-table th { padding: 7px 10px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
   .items-table th.text-right { text-align: right; }
   .items-table tbody tr { border-bottom: 1px solid #e5e7eb; }
   .items-table tbody tr:nth-child(even) { background: ${gray}; }
-  .items-table td { padding: 10px 12px; color: ${black}; }
+  .items-table td { padding: 6px 10px; color: ${black}; }
   .items-table td.text-right { text-align: right; }
-  .item-note { color: #6b7280; font-size: 11px; }
-  .no-items-msg { color: #9ca3af; font-size: 12px; font-style: italic; }
+  .item-note { color: #6b7280; font-size: 10px; }
+  .no-items-msg { color: #9ca3af; font-size: 11px; font-style: italic; }
 
   /* Photos */
   .ticket-photos-section {

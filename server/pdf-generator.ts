@@ -177,8 +177,8 @@ export class PDFGenerator {
   ${pageFooter(invoice.invoiceNumber)}
   <div class="container">
     ${coverPage(vm)}
-    ${ticketPages}
     ${reconciliationPage(vm)}
+    ${ticketPages}
   </div>
 </body>
 </html>`;
