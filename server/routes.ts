@@ -546,6 +546,88 @@ setInterval(() => {
   }
 }, 60_000);
 
+// Per-realm refresh mutex — prevents concurrent token refreshes for the same QuickBooks realm
+// which would cause Intuit to reject the second attempt with invalid_grant.
+//
+// Each lock entry carries a monotonically increasing generation counter so that a
+// late-completing refresh from a timed-out operation cannot overwrite a newer entry.
+const QB_REFRESH_TIMEOUT_MS = 30_000; // 30 s max per token refresh attempt
+
+interface QbLockEntry {
+  promise: Promise<string>;
+  generation: number;
+  controller: AbortController;
+}
+
+const qbRefreshLock = new Map<string, QbLockEntry>();
+let qbLockGeneration = 0;
+
+/**
+ * Acquire the per-realm refresh lock.
+ *
+ * - If no lock exists for the realm, acquires one and starts the refresh.
+ * - If a refresh is already in flight, waits for it and reuses the result.
+ * - On timeout (QB_REFRESH_TIMEOUT_MS):
+ *   1. The in-flight request is aborted via AbortController.
+ *   2. The lock entry is evicted (only if it still belongs to this generation)
+ *      so future callers are not blocked indefinitely.
+ *   3. The caller that timed out receives a timeout error.
+ *
+ * Generation fencing: a late-completing fetch from a timed-out attempt checks
+ * its generation before evicting the lock, so it cannot accidentally remove a
+ * newer entry that was registered after the timeout eviction.
+ */
+async function withQbRefreshLock(
+  realmId: string,
+  doRefresh: (signal: AbortSignal) => Promise<string>
+): Promise<string> {
+  const existing = qbRefreshLock.get(realmId);
+  if (existing) {
+    console.log(`[QB refresh lock] realmId=${realmId}: waiting for in-flight refresh (gen=${existing.generation})`);
+    return Promise.race([
+      existing.promise,
+      new Promise<string>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`QB refresh lock wait-timeout for realmId=${realmId}`)),
+          QB_REFRESH_TIMEOUT_MS
+        )
+      ),
+    ]);
+  }
+
+  const generation = ++qbLockGeneration;
+  const controller = new AbortController();
+
+  const underlyingPromise = doRefresh(controller.signal).finally(() => {
+    // Release lock only if this generation still owns it (not superseded by a newer entry)
+    const current = qbRefreshLock.get(realmId);
+    if (current && current.generation === generation) {
+      qbRefreshLock.delete(realmId);
+    }
+  });
+
+  const entry: QbLockEntry = { promise: underlyingPromise, generation, controller };
+  qbRefreshLock.set(realmId, entry);
+
+  // Give the caller a bounded wait.  On timeout: abort the request, evict the
+  // lock so future callers are not blocked, and reject with a descriptive error.
+  return Promise.race([
+    underlyingPromise,
+    new Promise<string>((_, reject) => {
+      setTimeout(() => {
+        controller.abort();
+        // Evict lock only if this generation still owns it
+        const current = qbRefreshLock.get(realmId);
+        if (current && current.generation === generation) {
+          qbRefreshLock.delete(realmId);
+          console.warn(`[QB refresh lock] realmId=${realmId} gen=${generation}: timed out — lock released`);
+        }
+        reject(new Error(`QB refresh lock timeout for realmId=${realmId}`));
+      }, QB_REFRESH_TIMEOUT_MS);
+    }),
+  ]);
+}
+
 import { db } from "./db";
 import { 
   customers, estimates, workOrders, estimateItems, estimateZones, parts, billingSheets, billingSheetItems, 
@@ -2381,19 +2463,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           console.warn('QuickBooks refresh token missing during buffer window; proceeding with existing token');
         } else {
+          const proactiveRealmId = integration.realmId || 'default';
           try {
-            const newTokenData = await refreshQuickBooksToken(integration.refreshToken);
-            const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
-            await storage.saveQuickBooksIntegration({
-              companyId: integration.companyId,
-              accessToken: newTokenData.access_token,
-              refreshToken: newTokenData.refresh_token || integration.refreshToken,
-              realmId: integration.realmId,
-              expiresAt: new Date(Date.now() + expiresInSeconds * 1000)
+            const newAccessToken = await withQbRefreshLock(proactiveRealmId, async (signal) => {
+              // Re-read from storage by realmId so we get the latest rotated token
+              // (another concurrent caller that held the lock may have already refreshed it)
+              const fresh = await storage.getQuickBooksIntegration(proactiveRealmId);
+              if (!fresh) {
+                throw new Error(`[QB proactive refresh] Integration for realmId=${proactiveRealmId} not found; cannot refresh`);
+              }
+              const refreshTokenToUse = fresh.refreshToken;
+
+              const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal);
+              const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
+
+              if (!newTokenData.refresh_token) {
+                console.warn('[QB proactive refresh] Intuit did not return a new refresh_token; keeping the existing one');
+              }
+
+              // Persist before releasing lock so waiters always see the rotated token
+              await storage.saveQuickBooksIntegration({
+                companyId: integration.companyId,
+                accessToken: newTokenData.access_token,
+                refreshToken: newTokenData.refresh_token || refreshTokenToUse,
+                realmId: proactiveRealmId,
+                expiresAt: new Date(Date.now() + expiresInSeconds * 1000)
+              });
+
+              return newTokenData.access_token;
             });
-            integration.accessToken = newTokenData.access_token;
-            integration.refreshToken = newTokenData.refresh_token || integration.refreshToken;
-            integration.expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
+
+            // Re-read the fully persisted integration by realmId so downstream code sees the rotated token
+            const refreshed = await storage.getQuickBooksIntegration(proactiveRealmId);
+            if (refreshed) {
+              integration.accessToken = refreshed.accessToken;
+              integration.refreshToken = refreshed.refreshToken;
+              integration.expiresAt = refreshed.expiresAt;
+            } else {
+              integration.accessToken = newAccessToken;
+            }
             console.log('Proactive QuickBooks token refresh succeeded');
           } catch (refreshErr) {
             console.error('Proactive QuickBooks token refresh failed:', refreshErr);
@@ -4653,7 +4761,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Function to refresh QuickBooks token
-  async function refreshQuickBooksToken(refreshToken: string) {
+  async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal) {
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
     const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
     
@@ -4669,7 +4777,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json'
       },
-      body: body.toString()
+      body: body.toString(),
+      signal
     });
 
     if (!response.ok) {
@@ -4701,34 +4810,52 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       try {
         const integration = realmId ? await storage.getQuickBooksIntegration(realmId) : null;
         if (integration && integration.refreshToken) {
-          const newTokenData = await refreshQuickBooksToken(integration.refreshToken);
-          
-          // Guard against NaN when expires_in is missing or zero
-          const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0
-            ? newTokenData.expires_in
-            : 3600;
-          if (!newTokenData.expires_in || newTokenData.expires_in <= 0) {
-            console.warn('QuickBooks token refresh: expires_in missing or zero, defaulting to 3600 seconds');
-          }
+          const realmIdForLock = integration.realmId || realmId || 'default';
 
-          // Update the stored integration with new tokens
-          await storage.saveQuickBooksIntegration({
-            companyId: integration.companyId,
-            accessToken: newTokenData.access_token,
-            refreshToken: newTokenData.refresh_token || integration.refreshToken, // Keep old refresh token if new one not provided
-            realmId: integration.realmId,
-            expiresAt: new Date(Date.now() + (expiresInSeconds * 1000))
+          const newAccessToken = await withQbRefreshLock(realmIdForLock, async (signal) => {
+            // Re-read from storage by realmId so we get the latest rotated token
+            // (another concurrent caller that held the lock may have already refreshed it)
+            const fresh = await storage.getQuickBooksIntegration(realmIdForLock);
+            if (!fresh) {
+              throw new Error(`[QB refresh] Integration for realmId=${realmIdForLock} not found; cannot refresh`);
+            }
+            const refreshTokenToUse = fresh.refreshToken;
+
+            const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal);
+
+            // Guard against NaN when expires_in is missing or zero
+            const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0
+              ? newTokenData.expires_in
+              : 3600;
+            if (!newTokenData.expires_in || newTokenData.expires_in <= 0) {
+              console.warn('QuickBooks token refresh: expires_in missing or zero, defaulting to 3600 seconds');
+            }
+
+            if (!newTokenData.refresh_token) {
+              console.warn('[QB refresh] Intuit did not return a new refresh_token; keeping the existing one');
+            }
+
+            // Persist new tokens before releasing the lock so all waiters see the updated token
+            await storage.saveQuickBooksIntegration({
+              companyId: integration.companyId,
+              accessToken: newTokenData.access_token,
+              refreshToken: newTokenData.refresh_token || refreshTokenToUse,
+              realmId: realmIdForLock,
+              expiresAt: new Date(Date.now() + (expiresInSeconds * 1000))
+            });
+
+            return newTokenData.access_token;
           });
-          
+
           // Retry the original request with the new token
           const updatedOptions = { ...options };
           if (updatedOptions.headers) {
-            (updatedOptions.headers as Record<string, string>)['Authorization'] = `Bearer ${newTokenData.access_token}`;
+            (updatedOptions.headers as Record<string, string>)['Authorization'] = `Bearer ${newAccessToken}`;
           }
-          
+
           console.log('Retrying request with refreshed token...');
           response = await fetch(url, updatedOptions);
-          
+
           // Update intuit_tid from retry
           const retryIntuitTid = response.headers.get('intuit_tid');
           if (retryIntuitTid) {
