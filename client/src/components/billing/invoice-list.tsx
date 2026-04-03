@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Loader2, AlertCircle, Calendar, CheckCircle2, RefreshCw } from "lucide-react";
+import { FileText, Loader2, AlertCircle, Calendar, CheckCircle2, RefreshCw, ClipboardList } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { InvoiceAuditModal } from "./invoice-audit-modal";
 
 interface Invoice {
   id: number;
@@ -27,6 +29,7 @@ interface InvoiceListProps {
 
 export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListProps) {
   const { toast } = useToast();
+  const [auditInvoice, setAuditInvoice] = useState<{ id: number; label: string; total: string } | null>(null);
 
   const syncMutation = useMutation({
     mutationFn: async (invoiceId: number) => {
@@ -200,21 +203,49 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
               </div>
             </div>
 
-            {onOpenPdf && (
+            <div className="flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full"
-                onClick={() => onOpenPdf(invoice.id, invoice.invoiceNumber, invoice.customerEmail)}
-                data-testid={`button-view-pdf-${invoice.id}`}
+                className="flex-1"
+                onClick={() =>
+                  setAuditInvoice({
+                    id: invoice.id,
+                    label: `${formatMonthYear(invoice.periodStart)} · #${invoice.invoiceNumber}`,
+                    total: formatCurrency(invoice.totalAmount),
+                  })
+                }
+                data-testid={`button-audit-${invoice.id}`}
               >
-                <FileText className="w-4 h-4 mr-2" />
-                View Details
+                <ClipboardList className="w-4 h-4 mr-2" />
+                Audit
               </Button>
-            )}
+              {onOpenPdf && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => onOpenPdf(invoice.id, invoice.invoiceNumber, invoice.customerEmail)}
+                  data-testid={`button-view-pdf-${invoice.id}`}
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  View Details
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       ))}
+
+      {auditInvoice && (
+        <InvoiceAuditModal
+          open={!!auditInvoice}
+          onClose={() => setAuditInvoice(null)}
+          invoiceId={auditInvoice.id}
+          invoiceLabel={auditInvoice.label}
+          invoiceTotal={auditInvoice.total}
+        />
+      )}
     </div>
   );
 }

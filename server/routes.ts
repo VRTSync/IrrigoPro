@@ -7137,6 +7137,105 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  app.get("/api/invoices/:invoiceId/audit", requireAuthentication, requireBillingAccess, async (req, res) => {
+    try {
+      const invoiceId = parseInt(req.params.invoiceId);
+      const invoice = await storage.getInvoiceById(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Enforce tenant scoping: verify the invoice belongs to the authenticated user's company.
+      // Super admins (companyId === null) are allowed to access any invoice.
+      const userCompanyId = req.authenticatedUserCompanyId;
+      if (userCompanyId !== null && userCompanyId !== undefined) {
+        const invoiceCustomer = await storage.getCustomerById(invoice.customerId);
+        if (!invoiceCustomer || invoiceCustomer.companyId !== userCompanyId) {
+          return res.status(403).json({ message: "Access denied. You do not have permission to audit this invoice." });
+        }
+      }
+
+      // Deduplicate by (sourceType, sourceId) — one audit card per ticket regardless of
+      // how many invoice item rows exist for that ticket (legacy invoice paths may vary).
+      const seenTickets = new Map<string, boolean>();
+      const uniqueItems = invoice.items.filter((item) => {
+        const key = `${item.sourceType}:${item.sourceId}`;
+        if (seenTickets.has(key)) return false;
+        seenTickets.set(key, true);
+        return true;
+      });
+
+      const enrichedItems = await Promise.all(
+        uniqueItems.map(async (item) => {
+          let status = "billed";
+          let description = item.description;
+          let workDate = item.workDate;
+
+          // Derive financial amounts from source entities (authoritative totals)
+          // invoiceItem.totalPrice = full ticket total (labor + parts)
+          // invoiceItem.laborTotal = labor portion only
+          // so partsTotal = totalPrice - laborTotal (avoids double-counting)
+          let ticketTotal = parseFloat(item.totalPrice || "0");
+          let laborTotal = parseFloat(item.laborTotal || "0");
+          let partsTotal = ticketTotal - laborTotal;
+          if (partsTotal < 0) partsTotal = 0;
+
+          if (item.sourceType === "work_order" && item.workOrderId) {
+            const wo = await storage.getWorkOrder(item.workOrderId);
+            if (wo) {
+              status = wo.status || "billed";
+              description = wo.projectName || item.description;
+              workDate = wo.completedAt || wo.updatedAt || item.workDate;
+              // Use authoritative source totals when available
+              const woTotal = parseFloat(wo.totalAmount || "0");
+              const woLabor = parseFloat(wo.laborSubtotal || "0");
+              if (woTotal > 0) {
+                ticketTotal = woTotal;
+                laborTotal = woLabor;
+                partsTotal = Math.max(0, woTotal - woLabor);
+              }
+            }
+          } else if (item.sourceType === "billing_sheet" && item.billingSheetId) {
+            const bs = await storage.getBillingSheetById(item.billingSheetId);
+            if (bs) {
+              status = bs.status || "billed";
+              description = bs.workDescription || item.description;
+              workDate = bs.workDate || item.workDate;
+              // Use authoritative source totals when available
+              const bsLabor = parseFloat(bs.laborSubtotal || "0");
+              const bsParts = parseFloat(bs.partsSubtotal || "0");
+              const bsTotal = parseFloat(bs.totalAmount || "0");
+              if (bsTotal > 0) {
+                ticketTotal = bsTotal;
+                laborTotal = bsLabor;
+                partsTotal = bsParts;
+              }
+            }
+          }
+
+          return {
+            id: item.id,
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+            workOrderId: item.workOrderId,
+            billingSheetId: item.billingSheetId,
+            description,
+            status,
+            laborTotal,
+            partsTotal,
+            ticketTotal,
+            workDate,
+          };
+        })
+      );
+
+      res.json({ invoiceId, items: enrichedItems });
+    } catch (error) {
+      console.error("Error fetching invoice audit data:", error);
+      res.status(500).json({ message: "Failed to fetch invoice audit data" });
+    }
+  });
+
   app.post("/api/invoices/:id/sync-quickbooks", requireAuthentication, requireBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
