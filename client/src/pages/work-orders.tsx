@@ -64,6 +64,8 @@ export default function WorkOrders() {
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [activeExpanded, setActiveExpanded] = useState(true);
   const [completedExpanded, setCompletedExpanded] = useState(true);
+  const [billedExpanded, setBilledExpanded] = useState(false);
+  const [billedMonthsExpanded, setBilledMonthsExpanded] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -158,12 +160,27 @@ export default function WorkOrders() {
 
 
 
+  const isBilled = (workOrder: WorkOrder) =>
+    workOrder.status === 'billed' || (workOrder.invoiceId != null);
+
   const filteredWorkOrders = workOrders?.filter ? workOrders.filter(workOrder => {
     const matchesSearch = workOrder.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          workOrder.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          workOrder.workOrderNumber.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesStatus = statusFilter === "all" || workOrder.status === statusFilter;
+    let matchesStatus: boolean;
+    if (statusFilter === "all") {
+      matchesStatus = true;
+    } else if (statusFilter === "billed") {
+      matchesStatus = isBilled(workOrder);
+    } else if (statusFilter === "not_yet_billed") {
+      matchesStatus = workOrder.status === 'completed' && !isBilled(workOrder);
+    } else if (statusFilter === "assigned") {
+      // "Pending" pill — matches both 'pending' and 'assigned' statuses
+      matchesStatus = workOrder.status === 'pending' || workOrder.status === 'assigned';
+    } else {
+      matchesStatus = workOrder.status === statusFilter;
+    }
     
     return matchesSearch && matchesStatus;
   }) : [];
@@ -188,12 +205,18 @@ export default function WorkOrders() {
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">In Progress</Badge>;
       case 'completed':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Completed</Badge>;
+      case 'billed':
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>;
       case 'cancelled':
         return <Badge className="bg-red-100 text-red-800 border-red-200">Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
   };
+
+  const getBilledBadge = () => (
+    <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>
+  );
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
@@ -468,6 +491,24 @@ export default function WorkOrders() {
             >
               Completed
             </Button>
+            <Button 
+              variant={statusFilter === "not_yet_billed" ? "default" : "outline"}
+              onClick={() => setStatusFilter("not_yet_billed")}
+              size="sm"
+              className="flex-shrink-0"
+              data-testid="filter-not-yet-billed"
+            >
+              Not Yet Billed
+            </Button>
+            <Button 
+              variant={statusFilter === "billed" ? "default" : "outline"}
+              onClick={() => setStatusFilter("billed")}
+              size="sm"
+              className={`flex-shrink-0 ${statusFilter === "billed" ? "bg-purple-700 hover:bg-purple-800" : "border-purple-300 text-purple-700 hover:bg-purple-50"}`}
+              data-testid="filter-billed"
+            >
+              Billed
+            </Button>
           </div>
         </div>
 
@@ -597,7 +638,10 @@ export default function WorkOrders() {
                                     {workOrder.workOrderNumber}
                                   </h4>
                                 </div>
-                                {getStatusBadge(workOrder.status)}
+                                <div className="flex items-center gap-2">
+                                  {getStatusBadge(workOrder.status)}
+                                  {isBilled(workOrder) && workOrder.status !== 'billed' && getBilledBadge()}
+                                </div>
                               </div>
 
                               {/* Content Area */}
@@ -648,6 +692,16 @@ export default function WorkOrders() {
                                     <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
                                     <span className="text-green-700 text-sm font-medium">
                                       Completed by {workOrder.completedByUserName || 'Unknown'} on {formatDate(workOrder.completedAt)}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Billed Indicator */}
+                                {isBilled(workOrder) && (
+                                  <div className="flex items-center gap-2">
+                                    <CheckCircle className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                                    <span className="text-purple-700 text-sm font-medium">
+                                      Billed{workOrder.billedAt ? ` on ${formatDate(workOrder.billedAt)}` : ''}
                                     </span>
                                   </div>
                                 )}
@@ -752,8 +806,13 @@ export default function WorkOrders() {
             const completedStatuses = ['completed', 'cancelled'];
             const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status))
               .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-            const completedWorkOrders = filteredWorkOrders.filter(wo => completedStatuses.includes(wo.status))
+            // Completed but not billed
+            const notYetBilledWorkOrders = filteredWorkOrders.filter(wo => completedStatuses.includes(wo.status) && !isBilled(wo))
               .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+            // Billed work orders (completed + invoiced), sorted by billedAt descending
+            const billedWorkOrders = filteredWorkOrders.filter(wo => isBilled(wo))
+              .sort((a, b) => new Date(b.billedAt || b.completedAt || 0).getTime() - new Date(a.billedAt || a.completedAt || 0).getTime());
+            const completedWorkOrders = notYetBilledWorkOrders;
 
             const renderWorkOrderCard = (workOrder: WorkOrder) => (
               <Card key={workOrder.id} className={`border-0 shadow-sm hover:shadow-md transition-all duration-200 ${
@@ -784,7 +843,10 @@ export default function WorkOrders() {
                           )}
                         </h3>
                       </div>
-                      {getStatusBadge(workOrder.status)}
+                      <div className="flex items-center gap-2">
+                        {getStatusBadge(workOrder.status)}
+                        {isBilled(workOrder) && workOrder.status !== 'billed' && getBilledBadge()}
+                      </div>
                     </div>
 
                     {/* Content Area */}
@@ -867,6 +929,18 @@ export default function WorkOrders() {
                             <div className="flex-1">
                               <p className="text-sm font-semibold text-green-700">
                                 Completed by {workOrder.completedByUserName || 'Unknown'} on {formatDate(workOrder.completedAt)}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Billed Indicator */}
+                        {isBilled(workOrder) && (
+                          <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg p-2">
+                            <CheckCircle className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-purple-700">
+                                Billed{workOrder.billedAt ? ` on ${formatDate(workOrder.billedAt)}` : ''}
                               </p>
                             </div>
                           </div>
@@ -998,51 +1072,110 @@ export default function WorkOrders() {
 
             return (
               <div className="space-y-4">
-                {/* Active Section */}
-                <div>
-                  <button
-                    onClick={() => setActiveExpanded(!activeExpanded)}
-                    className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      {activeExpanded ? <ChevronDown className="w-5 h-5 text-blue-700" /> : <ChevronRight className="w-5 h-5 text-blue-700" />}
-                      <span className="text-base font-semibold text-blue-900">Active</span>
-                      <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{activeWorkOrders.length}</Badge>
-                    </div>
-                  </button>
-                  {activeExpanded && (
-                    <div className="mt-3 space-y-4">
-                      {activeWorkOrders.length === 0 ? (
-                        <p className="text-center text-gray-500 py-6">No active work orders</p>
-                      ) : (
-                        activeWorkOrders.map(renderWorkOrderCard)
-                      )}
-                    </div>
-                  )}
-                </div>
+                {/* Active Section — hidden when "Billed" or "Not Yet Billed" filter active */}
+                {(statusFilter === "all" || statusFilter === "assigned" || statusFilter === "in_progress") && (
+                  <div>
+                    <button
+                      onClick={() => setActiveExpanded(!activeExpanded)}
+                      className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        {activeExpanded ? <ChevronDown className="w-5 h-5 text-blue-700" /> : <ChevronRight className="w-5 h-5 text-blue-700" />}
+                        <span className="text-base font-semibold text-blue-900">Active</span>
+                        <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{activeWorkOrders.length}</Badge>
+                      </div>
+                    </button>
+                    {activeExpanded && (
+                      <div className="mt-3 space-y-4">
+                        {activeWorkOrders.length === 0 ? (
+                          <p className="text-center text-gray-500 py-6">No active work orders</p>
+                        ) : (
+                          activeWorkOrders.map(renderWorkOrderCard)
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-                {/* Completed Section */}
-                <div>
-                  <button
-                    onClick={() => setCompletedExpanded(!completedExpanded)}
-                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
-                      <span className="text-base font-semibold text-gray-700">Completed</span>
-                      <Badge variant="secondary">{completedWorkOrders.length}</Badge>
-                    </div>
-                  </button>
-                  {completedExpanded && (
-                    <div className="mt-3 space-y-4">
-                      {completedWorkOrders.length === 0 ? (
-                        <p className="text-center text-gray-500 py-6">No completed work orders</p>
-                      ) : (
-                        completedWorkOrders.map(renderWorkOrderCard)
-                      )}
-                    </div>
-                  )}
-                </div>
+                {/* Completed (Not Yet Billed) Section — hidden when "Billed" filter active */}
+                {(statusFilter === "all" || statusFilter === "completed" || statusFilter === "not_yet_billed") && (
+                  <div>
+                    <button
+                      onClick={() => setCompletedExpanded(!completedExpanded)}
+                      className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
+                        <span className="text-base font-semibold text-gray-700">Completed</span>
+                        <Badge variant="secondary">{completedWorkOrders.length}</Badge>
+                      </div>
+                    </button>
+                    {completedExpanded && (
+                      <div className="mt-3 space-y-4">
+                        {completedWorkOrders.length === 0 ? (
+                          <p className="text-center text-gray-500 py-6">No completed work orders</p>
+                        ) : (
+                          completedWorkOrders.map(renderWorkOrderCard)
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Billed Section */}
+                {billedWorkOrders.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setBilledExpanded(!billedExpanded)}
+                      className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        {billedExpanded ? <ChevronDown className="w-5 h-5 text-purple-700" /> : <ChevronRight className="w-5 h-5 text-purple-700" />}
+                        <span className="text-base font-semibold text-purple-900">Billed</span>
+                        <Badge className="bg-purple-200 text-purple-900 hover:bg-purple-200">{billedWorkOrders.length}</Badge>
+                      </div>
+                    </button>
+                    {billedExpanded && (
+                      <div className="mt-3 space-y-4">
+                        {(() => {
+                          const formatBilledMonth = (wo: WorkOrder) => {
+                            const d = wo.billedAt || wo.completedAt;
+                            if (!d) return 'Unknown';
+                            return new Date(d).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                          };
+                          const byMonth: Record<string, WorkOrder[]> = {};
+                          for (const wo of billedWorkOrders) {
+                            const key = formatBilledMonth(wo);
+                            if (!byMonth[key]) byMonth[key] = [];
+                            byMonth[key].push(wo);
+                          }
+                          return Object.entries(byMonth).map(([month, monthWorkOrders]) => {
+                            const isExpanded = billedMonthsExpanded[month] !== false;
+                            return (
+                              <div key={month}>
+                                <button
+                                  onClick={() => setBilledMonthsExpanded(prev => ({ ...prev, [month]: !isExpanded }))}
+                                  className="w-full flex items-center justify-between px-3 py-2 bg-purple-50 border border-purple-100 rounded-lg hover:bg-purple-100 transition-colors mb-2"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    {isExpanded ? <ChevronDown className="w-4 h-4 text-purple-600" /> : <ChevronRight className="w-4 h-4 text-purple-600" />}
+                                    <span className="text-sm font-semibold text-purple-800">{month} — Billed</span>
+                                    <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 text-xs">{monthWorkOrders.length}</Badge>
+                                  </div>
+                                </button>
+                                {isExpanded && (
+                                  <div className="space-y-3 ml-4">
+                                    {monthWorkOrders.map(renderWorkOrderCard)}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })()

@@ -271,12 +271,16 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">In Progress</Badge>;
       case 'completed':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Completed</Badge>;
+      case 'billed':
+        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>;
       case 'cancelled':
         return <Badge className="bg-red-100 text-red-800 border-red-200">Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
   };
+
+  const isBilledWorkOrder = workOrder.status === 'billed' || workOrder.invoiceId != null;
 
   const getPriorityBadge = (priority: string, showLabel: boolean = false) => {
     const priorityMap = {
@@ -370,6 +374,9 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
               <div className="flex items-center gap-3">
                 {getStatusBadge(workOrder.status)}
+                {isBilledWorkOrder && workOrder.status !== 'billed' && (
+                  <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>
+                )}
                 <div className="flex items-center gap-2">
                   {!isEditingPriority ? (
                     <>
@@ -455,8 +462,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Status:</span>
-                    <div className="mt-1">
+                    <div className="mt-1 flex items-center gap-2">
                       {getStatusBadge(workOrder.status)}
+                      {isBilledWorkOrder && workOrder.status !== 'billed' && (
+                        <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -533,8 +543,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                       <Target className="w-5 h-5 text-purple-600" />
                       <span className="font-medium text-purple-900">Status</span>
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
                       {getStatusBadge(workOrder.status)}
+                      {isBilledWorkOrder && workOrder.status !== 'billed' && (
+                        <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>
+                      )}
                     </div>
                   </div>
                 </div>
