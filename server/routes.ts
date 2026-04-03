@@ -5492,37 +5492,53 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ? 'https://quickbooks.api.intuit.com' 
         : 'https://sandbox-quickbooks.api.intuit.com';
       
-      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
-        headers: {
-          'Authorization': `Bearer ${integration.accessToken}`,
-          'Accept': 'application/json'
-        }
-      }, 'Customers Query', integration.realmId);
+      const qbCustomers: Record<string, unknown>[] = [];
+      let startPosition = 1;
+      const maxResults = 1000;
+      let fetchMore = true;
 
-      if (!customersResponse.ok) {
-        const errorText = await customersResponse.text();
-        const customersTid = customersResponse.headers.get('intuit_tid');
-        console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
-        
-        // Handle 403 authorization errors specifically
-        if (customersResponse.status === 403) {
-          return res.status(403).json({ 
+      while (fetchMore) {
+        const query = `SELECT * FROM Customer WHERE Active = true STARTPOSITION ${startPosition} MAXRESULTS ${maxResults}`;
+        const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=${encodeURIComponent(query)}`, {
+          headers: {
+            'Authorization': `Bearer ${integration.accessToken}`,
+            'Accept': 'application/json'
+          }
+        }, 'Customers Query', integration.realmId);
+
+        if (!customersResponse.ok) {
+          const errorText = await customersResponse.text();
+          const customersTid = customersResponse.headers.get('intuit_tid');
+          console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
+          
+          if (customersResponse.status === 403) {
+            return res.status(403).json({ 
+              success: false, 
+              message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.",
+              errorCode: "AUTHORIZATION_FAILED",
+              needsReconnection: true
+            });
+          }
+          
+          return res.status(500).json({ 
             success: false, 
-            message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.",
-            errorCode: "AUTHORIZATION_FAILED",
-            needsReconnection: true
+            message: `Failed to fetch customers from QuickBooks: ${customersResponse.status}${customersTid ? ` [TID: ${customersTid}]` : ''}` 
           });
         }
-        
-        return res.status(500).json({ 
-          success: false, 
-          message: `Failed to fetch customers from QuickBooks: ${customersResponse.status}${customersTid ? ` [TID: ${customersTid}]` : ''}` 
-        });
+
+        const qbData = await customersResponse.json();
+        const page: Record<string, unknown>[] = qbData?.QueryResponse?.Customer || [];
+        qbCustomers.push(...page);
+
+        console.log(`Fetched page starting at ${startPosition}: ${page.length} customers (total so far: ${qbCustomers.length})`);
+
+        if (page.length < maxResults) {
+          fetchMore = false;
+        } else {
+          startPosition += maxResults;
+        }
       }
 
-      const qbData = await customersResponse.json();
-      const qbCustomers = qbData?.QueryResponse?.Customer || [];
-      
       console.log(`Found ${qbCustomers.length} active customers in QuickBooks`);
       
       const quickBooksCustomers = (qbCustomers as Record<string, unknown>[]).map((customer: Record<string, unknown>) => ({
