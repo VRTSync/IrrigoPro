@@ -184,6 +184,37 @@ async function runStartupMigrations() {
     logger.error('Startup migration: work_orders financial snapshot columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // Add manager approval gate columns to work_orders and billing_sheets
+  try {
+    await pool.query(`
+      ALTER TABLE work_orders
+        ADD COLUMN IF NOT EXISTS approved_by text,
+        ADD COLUMN IF NOT EXISTS approved_by_user_id integer,
+        ADD COLUMN IF NOT EXISTS approved_at timestamptz,
+        ADD COLUMN IF NOT EXISTS approved_total DECIMAL(10, 2),
+        ADD COLUMN IF NOT EXISTS approved_parts_snapshot text,
+        ADD COLUMN IF NOT EXISTS approved_labor_snapshot text
+    `);
+    logger.info('Startup migration: ensured work_orders approval stamp columns exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: work_orders approval stamp columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  try {
+    await pool.query(`
+      ALTER TABLE billing_sheets
+        ADD COLUMN IF NOT EXISTS approved_by text,
+        ADD COLUMN IF NOT EXISTS approved_by_user_id integer,
+        ADD COLUMN IF NOT EXISTS approved_at timestamptz,
+        ADD COLUMN IF NOT EXISTS approved_total DECIMAL(10, 2),
+        ADD COLUMN IF NOT EXISTS approved_parts_snapshot text,
+        ADD COLUMN IF NOT EXISTS approved_labor_snapshot text
+    `);
+    logger.info('Startup migration: ensured billing_sheets approval stamp columns exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: billing_sheets approval stamp columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   // Add markup_percent column to customers if not present (default 15.00 = 15% parts markup)
   try {
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS markup_percent DECIMAL(5, 2) DEFAULT 15.00`);

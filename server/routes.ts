@@ -291,11 +291,12 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
     return next();
   }
 
-  // Field techs can only submit their own billing sheet for approval
+  // Field techs can only submit their own billing sheet for manager review
   if (userRole === 'field_tech') {
-    // Payload must be exactly { status: 'submitted' }
+    // Payload must be exactly { status: 'submitted' } or { status: 'pending_manager_review' }
     const keys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
-    if (keys.length !== 1 || updateData.status !== 'submitted') {
+    const isSubmit = keys.length === 1 && (updateData.status === 'submitted' || updateData.status === 'pending_manager_review');
+    if (!isSubmit) {
       return res.status(403).json({
         message: "Access denied. Field technicians can only submit billing sheets for approval."
       });
@@ -1901,16 +1902,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const estimates = await storage.getEstimatesByCustomer(customer.id);
           const billingSheets = await storage.getBillingSheetsByCustomer(customer.id);
           
-          const completedWorkOrders = workOrders.filter(wo => wo.status === 'completed');
+          const completedWorkOrders = workOrders.filter(wo => wo.status === 'approved_passed_to_billing');
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
-          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'completed' || bs.status === 'approved');
+          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'approved_passed_to_billing');
           
-          // Calculate unbilled amounts for this customer
+          // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
           const unbilledWorkOrders = completedWorkOrders.filter(wo => 
-            !wo.invoiceId && wo.status === 'completed'
+            !wo.invoiceId
           );
           const unbilledBillingSheets = completedBillingSheets.filter(bs => 
-            !bs.invoiceId && (bs.status === 'completed' || bs.status === 'approved')
+            !bs.invoiceId
           );
           
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
@@ -2064,14 +2065,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         completedDate: est.updatedAt
       }));
 
-      // Filter unbilled work (completed work orders and billing sheets without invoice linkage)
+      // Filter unbilled work: only approved_passed_to_billing tickets surface to billing intake
       const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'completed' && !wo.invoiceId
+        wo.status === 'approved_passed_to_billing' && !wo.invoiceId
       );
       // A non-null invoiceId is the authoritative signal that a billing sheet has
       // been billed — exclude it from unbilled regardless of status value.
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
+        bs.status === 'approved_passed_to_billing' && !bs.invoiceId
       );
 
       // Calculate total unbilled amount
@@ -2312,7 +2313,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
-          wo.status === 'completed' && 
+          wo.status === 'approved_passed_to_billing' && 
           !wo.invoiceId
         );
       }
@@ -2320,18 +2321,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          (bs.status === 'completed' || bs.status === 'approved') && 
+          bs.status === 'approved_passed_to_billing' && 
           !bs.invoiceId
         );
       }
 
-      // If no specific items selected, fall back to all unbilled items
+      // If no specific items selected, fall back to all approved unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          wo.status === 'completed' && !wo.invoiceId
+          wo.status === 'approved_passed_to_billing' && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
+          bs.status === 'approved_passed_to_billing' && !bs.invoiceId
         );
       }
 
@@ -2537,7 +2538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
-          wo.status === 'completed' && 
+          wo.status === 'approved_passed_to_billing' && 
           !wo.invoiceId
         );
       }
@@ -2545,18 +2546,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          (bs.status === 'completed' || bs.status === 'approved') && 
+          bs.status === 'approved_passed_to_billing' && 
           !bs.invoiceId
         );
       }
 
-      // If no specific items selected, fall back to all unbilled items
+      // If no specific items selected, fall back to all approved unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          wo.status === 'completed' && !wo.invoiceId
+          wo.status === 'approved_passed_to_billing' && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          (bs.status === 'completed' || bs.status === 'approved') && !bs.invoiceId
+          bs.status === 'approved_passed_to_billing' && !bs.invoiceId
         );
       }
 
@@ -6288,8 +6289,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const mergedPhotos = [...creationPhotos, ...completionPhotos];
 
       // Update work order with completion details and calculated totals
+      // Field completion routes into pending_manager_review for manager approval
       const workOrder = await storage.updateWorkOrder(workOrderId, {
-        status: 'completed',
+        status: 'pending_manager_review',
         completedAt: new Date(completedAt),
         completedByUserId: completedByUserId || undefined,
         completedByUserName: completedByUserName as string,
@@ -6404,8 +6406,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const taxAmount = subtotal * appliedTaxRate;
       const totalAmount = subtotal + taxAmount;
 
+      // Field completion routes into pending_manager_review for manager approval
       const workOrder = await storage.updateWorkOrder(id, {
-        status: "completed",
+        status: "pending_manager_review",
         completedAt: new Date(),
         completedByUserId: completedByUserId || undefined,
         completedByUserName: completedByUserName as string,
@@ -6422,7 +6425,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Work order not found" });
       }
 
-      // Notify managers about work order completion
+      // Notify managers about work order completion / pending review
       const managers = await storage.getUsers();
       const managerUsers = managers.filter(u => u.role === "irrigation_manager" || u.role === "admin");
       
@@ -6430,8 +6433,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         await storage.createNotification({
           userId: manager.id,
           type: "work_order_completed",
-          title: "Work Order Completed",
-          message: `Work order ${workOrder.workOrderNumber} has been completed by ${completedByUserName || workOrder.assignedTechnicianName}.`,
+          title: "Work Order Pending Review",
+          message: `Work order ${workOrder.workOrderNumber} has been completed and is awaiting your review.`,
           relatedEntityType: "work_order",
           relatedEntityId: id
         });
@@ -6441,6 +6444,171 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error("Error completing work order:", error);
       res.status(500).json({ message: "Failed to complete work order" });
+    }
+  });
+
+  // Manager approval gate endpoints
+  // Approve a work order — transitions pending_manager_review -> approved_passed_to_billing
+  app.post("/api/work-orders/:id/approve", requireAuthentication, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userRole = req.authenticatedUserRole;
+      const userId = req.authenticatedUserId;
+
+      if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Only irrigation managers and company admins can approve work orders." });
+      }
+
+      const workOrder = await storage.getWorkOrder(id);
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      if (workOrder.status !== 'pending_manager_review') {
+        return res.status(400).json({ message: "Work order must be in Pending Manager Review to approve." });
+      }
+
+      const approverUser = userId ? await storage.getUser(userId) : undefined;
+      const approverName = approverUser?.name || 'Manager';
+
+      const partsSnapshot = JSON.stringify({
+        partsSubtotal: workOrder.partsSubtotal,
+        markupAmount: workOrder.markupAmount,
+      });
+      const laborSnapshot = JSON.stringify({
+        totalHours: workOrder.totalHours,
+        laborRate: workOrder.appliedLaborRate || workOrder.laborRate,
+        laborSubtotal: workOrder.laborSubtotal,
+        taxAmount: workOrder.taxAmount,
+      });
+
+      const updated = await storage.updateWorkOrder(id, {
+        status: 'approved_passed_to_billing',
+        approvedBy: approverName,
+        approvedByUserId: userId || undefined,
+        approvedAt: new Date(),
+        approvedTotal: workOrder.totalAmount,
+        approvedPartsSnapshot: partsSnapshot,
+        approvedLaborSnapshot: laborSnapshot,
+      } as any);
+
+      res.json({ message: "Work order approved and passed to billing", workOrder: updated });
+    } catch (error) {
+      console.error("Error approving work order:", error);
+      res.status(500).json({ message: "Failed to approve work order" });
+    }
+  });
+
+  // Return a work order for correction — transitions pending_manager_review -> in_progress (editable)
+  app.post("/api/work-orders/:id/return-for-correction", requireAuthentication, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userRole = req.authenticatedUserRole;
+
+      if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Only irrigation managers and company admins can return work orders for correction." });
+      }
+
+      const workOrder = await storage.getWorkOrder(id);
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      if (workOrder.status !== 'pending_manager_review') {
+        return res.status(400).json({ message: "Work order must be in Pending Manager Review to return for correction." });
+      }
+
+      const { notes } = req.body;
+
+      const updated = await storage.updateWorkOrder(id, {
+        status: 'in_progress',
+        ...(notes ? { notes: `${workOrder.notes ? workOrder.notes + '\n' : ''}[Returned for correction: ${notes}]` } : {}),
+      } as any);
+
+      res.json({ message: "Work order returned for correction", workOrder: updated });
+    } catch (error) {
+      console.error("Error returning work order for correction:", error);
+      res.status(500).json({ message: "Failed to return work order for correction" });
+    }
+  });
+
+  // Approve a billing sheet — transitions pending_manager_review -> approved_passed_to_billing
+  app.post("/api/billing-sheets/:id/approve", requireAuthentication, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userRole = req.authenticatedUserRole;
+      const userId = req.authenticatedUserId;
+
+      if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Only irrigation managers and company admins can approve billing sheets." });
+      }
+
+      const billingSheet = await storage.getBillingSheetById(id);
+      if (!billingSheet) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+      if (billingSheet.status !== 'pending_manager_review') {
+        return res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to approve." });
+      }
+
+      const approverUser = userId ? await storage.getUser(userId) : undefined;
+      const approverName = approverUser?.name || 'Manager';
+
+      const partsSnapshot = JSON.stringify({
+        partsSubtotal: billingSheet.partsSubtotal,
+        markupAmount: billingSheet.markupAmount,
+      });
+      const laborSnapshot = JSON.stringify({
+        totalHours: billingSheet.totalHours,
+        laborRate: billingSheet.laborRate,
+        laborSubtotal: billingSheet.laborSubtotal,
+        taxAmount: billingSheet.taxAmount,
+      });
+
+      const updated = await storage.updateBillingSheet(id, {
+        status: 'approved_passed_to_billing',
+        approvedBy: approverName,
+        approvedByUserId: userId || undefined,
+        approvedAt: new Date(),
+        approvedTotal: billingSheet.totalAmount,
+        approvedPartsSnapshot: partsSnapshot,
+        approvedLaborSnapshot: laborSnapshot,
+      } as any);
+
+      res.json({ message: "Billing sheet approved and passed to billing", billingSheet: updated });
+    } catch (error) {
+      console.error("Error approving billing sheet:", error);
+      res.status(500).json({ message: "Failed to approve billing sheet" });
+    }
+  });
+
+  // Return a billing sheet for correction — transitions pending_manager_review -> submitted (or draft)
+  app.post("/api/billing-sheets/:id/return-for-correction", requireAuthentication, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userRole = req.authenticatedUserRole;
+
+      if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
+        return res.status(403).json({ message: "Only irrigation managers and company admins can return billing sheets for correction." });
+      }
+
+      const billingSheet = await storage.getBillingSheetById(id);
+      if (!billingSheet) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+      if (billingSheet.status !== 'pending_manager_review') {
+        return res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to return for correction." });
+      }
+
+      const { notes } = req.body;
+
+      const updated = await storage.updateBillingSheet(id, {
+        status: 'draft',
+        ...(notes ? { notes: `${billingSheet.notes ? billingSheet.notes + '\n' : ''}[Returned for correction: ${notes}]` } : {}),
+      } as any);
+
+      res.json({ message: "Billing sheet returned for correction", billingSheet: updated });
+    } catch (error) {
+      console.error("Error returning billing sheet for correction:", error);
+      res.status(500).json({ message: "Failed to return billing sheet for correction" });
     }
   });
 
@@ -6675,10 +6843,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const id = parseInt(req.params.id);
 
-      // Billing lock: reject updates to billing sheets that have been invoiced
+      // Billing lock: reject updates to billing sheets that have been invoiced or approved for billing
       const existingBsForLockCheck = await storage.getBillingSheetById(id);
       if (existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
         return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+      }
+      // Lock after manager approval — only admins can proceed
+      const patchUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      if (existingBsForLockCheck?.status === 'approved_passed_to_billing' &&
+          patchUserRole !== 'company_admin' && patchUserRole !== 'super_admin') {
+        return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
 
       const { items, markupPercent, taxPercent, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
@@ -7121,6 +7295,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const existingForLockCheck = await storage.getWorkOrder(id);
       if (existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
         return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+      }
+      // Lock after manager approval — only admins can proceed
+      const woUpdateUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      if (existingForLockCheck?.status === 'approved_passed_to_billing' &&
+          woUpdateUserRole !== 'company_admin' && woUpdateUserRole !== 'super_admin') {
+        return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
 
       const { items, ...workOrderBody } = req.body;

@@ -540,15 +540,23 @@ export default function CustomerBilling() {
       assigned: "bg-blue-100 text-blue-800",
       in_progress: "bg-purple-100 text-purple-800",
       completed: "bg-green-100 text-green-800",
+      pending_manager_review: "bg-orange-100 text-orange-800",
+      approved_passed_to_billing: "bg-teal-100 text-teal-800",
       draft: "bg-gray-100 text-gray-800",
       submitted: "bg-blue-100 text-blue-800",
       approved: "bg-green-100 text-green-800",
       billed: "bg-purple-100 text-purple-800"
     };
+
+    const statusLabels: Record<string, string> = {
+      pending_manager_review: "Pending Manager Review",
+      approved_passed_to_billing: "Approved / Passed to Billing",
+      in_progress: "In Progress",
+    };
     
     return (
       <Badge className={statusColors[status] || "bg-gray-100 text-gray-800"}>
-        {status.replace('_', ' ')}
+        {statusLabels[status] || status.replace(/_/g, ' ')}
       </Badge>
     );
   };

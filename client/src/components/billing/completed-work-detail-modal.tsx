@@ -65,8 +65,16 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-red-100 text-red-800",
   draft: "bg-gray-100 text-gray-700",
   submitted: "bg-yellow-100 text-yellow-800",
+  pending_manager_review: "bg-orange-100 text-orange-800",
+  approved_passed_to_billing: "bg-teal-100 text-teal-800",
   approved: "bg-green-100 text-green-800",
   billed: "bg-purple-100 text-purple-800",
+};
+
+const statusLabels: Record<string, string> = {
+  pending_manager_review: "Pending Manager Review",
+  approved_passed_to_billing: "Approved / Passed to Billing",
+  in_progress: "In Progress",
 };
 
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
@@ -148,6 +156,11 @@ export function CompletedWorkDetailModal({
   const locationNotes = isWorkOrder ? wo?.locationNotes : null;
   const branchName = isWorkOrder ? (wo as any)?.branchName : (bs as any)?.branchName;
 
+  // Approval stamp fields
+  const approvedBy = (data as any)?.approvedBy;
+  const approvedAt = (data as any)?.approvedAt;
+  const approvedTotal = (data as any)?.approvedTotal;
+
   const openLightbox = (url: string, index: number) => {
     setLightboxPhoto(url);
     setLightboxIndex(index);
@@ -213,7 +226,7 @@ export function CompletedWorkDetailModal({
                     <Badge className="bg-purple-100 text-purple-800">Billed</Badge>
                   )}
                   <Badge className={`capitalize ${statusColors[status] ?? "bg-gray-100 text-gray-700"}`}>
-                    {status.replace(/_/g, " ")}
+                    {statusLabels[status] ?? status.replace(/_/g, " ")}
                   </Badge>
                 </div>
               </div>
@@ -227,6 +240,31 @@ export function CompletedWorkDetailModal({
             {(status === 'billed' || data.invoiceId) && (
               <div className="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800">
                 <span className="font-medium">This record has been billed and cannot be edited.</span>
+              </div>
+            )}
+
+            {/* Pending Manager Review notice */}
+            {status === 'pending_manager_review' && (
+              <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                <span className="font-medium">Awaiting irrigation manager review before passing to billing.</span>
+              </div>
+            )}
+
+            {/* Approval stamp */}
+            {(status === 'approved_passed_to_billing' || status === 'billed') && approvedBy && (
+              <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
+                <div className="flex items-center gap-2 mb-1">
+                  <CheckCircle className="w-4 h-4 flex-shrink-0 text-teal-600" />
+                  <span className="font-semibold">Manager Approved</span>
+                </div>
+                <div className="text-teal-700 space-y-0.5 pl-6">
+                  <div>Approved by <strong>{approvedBy}</strong></div>
+                  {approvedAt && <div>on {fmtDateTime(approvedAt)}</div>}
+                  {approvedTotal && canSeePricing && (
+                    <div>Approved total: <strong>{currency(approvedTotal)}</strong></div>
+                  )}
+                </div>
               </div>
             )}
 

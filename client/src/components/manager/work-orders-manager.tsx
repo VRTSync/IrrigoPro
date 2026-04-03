@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink, ThumbsUp, RotateCcw, Clock, Shield, ChevronDown, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
@@ -50,21 +50,84 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
     },
   });
 
-  const isBilled = (wo: WorkOrder) => wo.status === 'billed' || wo.invoiceId != null;
+  const approveWorkOrder = useMutation({
+    mutationFn: async (workOrderId: number) => {
+      return await apiRequest(`/api/work-orders/${workOrderId}/approve`, "POST", {});
+    },
+    onSuccess: () => {
+      toast({
+        title: "Approved",
+        description: "Work order approved and passed to billing",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Error",
+        description: err?.message || "Failed to approve work order",
+        variant: "destructive",
+      });
+    },
+  });
 
-  const getStatusBadge = (status: string) => {
+  const returnForCorrection = useMutation({
+    mutationFn: async (workOrderId: number) => {
+      return await apiRequest(`/api/work-orders/${workOrderId}/return-for-correction`, "POST", {});
+    },
+    onSuccess: () => {
+      toast({
+        title: "Returned",
+        description: "Work order returned to field for correction",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Error",
+        description: err?.message || "Failed to return work order",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const getStatusColor = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>;
+        return 'bg-yellow-100 text-yellow-800';
+      case 'assigned':
+        return 'bg-blue-100 text-blue-800';
       case 'in_progress':
-        return <Badge className="bg-blue-100 text-blue-800">In Progress</Badge>;
+        return 'bg-blue-100 text-blue-800';
       case 'completed':
-        return <Badge className="bg-green-100 text-green-800">Completed</Badge>;
+        return 'bg-green-100 text-green-800';
+      case 'pending_manager_review':
+        return 'bg-orange-100 text-orange-800';
+      case 'approved_passed_to_billing':
+        return 'bg-teal-100 text-teal-800';
       case 'billed':
-        return <Badge className="bg-purple-100 text-purple-800">Billed</Badge>;
+        return 'bg-purple-100 text-purple-800';
       default:
-        return <Badge className="bg-gray-100 text-gray-800">{status.replace(/_/g, ' ')}</Badge>;
+        return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'pending_manager_review': return 'Pending Manager Review';
+      case 'approved_passed_to_billing': return 'Approved / Passed to Billing';
+      case 'in_progress': return 'In Progress';
+      default: return status.replace(/_/g, ' ');
+    }
+  };
+
+  const isBilled = (workOrder: WorkOrder) =>
+    workOrder.status === 'billed' || workOrder.invoiceId != null;
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(amount);
   };
 
   const handleViewDetails = (workOrder: WorkOrder) => {
@@ -82,8 +145,11 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
 
   const activeStatuses = ['pending', 'assigned', 'in_progress'];
   const completedStatuses = ['completed', 'cancelled'];
+  const pendingReviewOrders = filteredWorkOrders.filter(wo => wo.status === 'pending_manager_review');
   const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status));
-  const notYetBilledWorkOrders = filteredWorkOrders.filter(wo => completedStatuses.includes(wo.status) && !isBilled(wo));
+  const notYetBilledWorkOrders = filteredWorkOrders.filter(wo =>
+    (completedStatuses.includes(wo.status) || wo.status === 'approved_passed_to_billing') && !isBilled(wo)
+  );
   const billedWorkOrders = filteredWorkOrders.filter(wo => isBilled(wo))
     .sort((a, b) => new Date(b.billedAt || b.completedAt || 0).getTime() - new Date(a.billedAt || a.completedAt || 0).getTime());
 
@@ -93,13 +159,19 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
   };
 
   const renderWorkOrderCard = (workOrder: WorkOrder) => (
-    <Card key={workOrder.id} className={`hover:shadow-md transition-shadow ${isBilled(workOrder) ? 'opacity-80' : ''}`}>
+    <Card key={workOrder.id} className={`hover:shadow-md transition-shadow ${
+      workOrder.status === 'pending_manager_review' ? 'border-orange-300 bg-orange-50/30' :
+      workOrder.status === 'approved_passed_to_billing' ? 'border-teal-200' :
+      isBilled(workOrder) ? 'opacity-80' : ''
+    }`}>
       <CardContent className="p-6">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
               <h3 className="text-lg font-semibold">Work Order #{workOrder.id}</h3>
-              {getStatusBadge(workOrder.status)}
+              <Badge className={getStatusColor(workOrder.status)}>
+                {getStatusLabel(workOrder.status)}
+              </Badge>
               {isBilled(workOrder) && workOrder.status !== 'billed' && (
                 <Badge className="bg-purple-100 text-purple-800">Billed</Badge>
               )}
@@ -130,12 +202,27 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                 This record has been billed and cannot be edited.
               </p>
             )}
+            {/* Approval stamp display */}
+            {(workOrder as any).approvedBy && (workOrder as any).approvedAt && (
+              <div className="mt-2 p-2 bg-teal-50 border border-teal-200 rounded text-xs text-teal-800">
+                <div className="flex items-center gap-1 font-medium mb-1">
+                  <Shield className="w-3 h-3" />
+                  Approved by {(workOrder as any).approvedBy}
+                </div>
+                <div>on {new Date((workOrder as any).approvedAt).toLocaleString()}</div>
+                {(workOrder as any).approvedTotal && (
+                  <div className="mt-1 font-semibold">
+                    Approved Total: {formatCurrency(parseFloat((workOrder as any).approvedTotal))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-lg font-semibold text-gray-900">
-                {workOrder.status === 'completed' || isBilled(workOrder) ? 'Completed' : workOrder.priority.toUpperCase()}
+                {workOrder.status === 'completed' || workOrder.status === 'pending_manager_review' || workOrder.status === 'approved_passed_to_billing' || isBilled(workOrder) ? 'Completed' : workOrder.priority.toUpperCase()}
               </p>
               <p className="text-sm text-gray-500">Priority</p>
             </div>
@@ -166,6 +253,31 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                     <SelectItem value="5">Tech 3</SelectItem>
                   </SelectContent>
                 </Select>
+              )}
+
+              {/* Manager approval actions for pending_manager_review */}
+              {workOrder.status === 'pending_manager_review' && (
+                <div className="flex flex-col gap-2">
+                  <Button
+                    size="sm"
+                    className="bg-teal-600 hover:bg-teal-700 text-white"
+                    onClick={() => approveWorkOrder.mutate(workOrder.id)}
+                    disabled={approveWorkOrder.isPending}
+                  >
+                    <ThumbsUp className="w-3 h-3 mr-1" />
+                    Approve / Pass to Billing
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-orange-300 text-orange-700 hover:bg-orange-50"
+                    onClick={() => returnForCorrection.mutate(workOrder.id)}
+                    disabled={returnForCorrection.isPending}
+                  >
+                    <RotateCcw className="w-3 h-3 mr-1" />
+                    Return for Correction
+                  </Button>
+                </div>
               )}
 
               {!isBilled(workOrder) && workOrder.status === 'in_progress' && (
@@ -263,7 +375,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
         </div>
 
         {/* Work Orders List */}
-        <div className="space-y-4">
+        <div className="space-y-6">
           {isLoading ? (
             <div className="text-center py-8">
               <p className="text-gray-500">Loading work orders...</p>
@@ -280,8 +392,22 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
             </Card>
           ) : (
             <>
+              {/* Pending Manager Review section — always shown at top when present */}
+              {pendingReviewOrders.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3 px-1">
+                    <Clock className="w-5 h-5 text-orange-600" />
+                    <h2 className="text-base font-semibold text-orange-800">Pending Manager Review</h2>
+                    <Badge className="bg-orange-100 text-orange-800">{pendingReviewOrders.length}</Badge>
+                  </div>
+                  <div className="space-y-4">
+                    {pendingReviewOrders.map(renderWorkOrderCard)}
+                  </div>
+                </div>
+              )}
+
               {/* Active Section */}
-              {(statusFilter === "all" || statusFilter === "assigned" || statusFilter === "in_progress") && (
+              {(statusFilter === "all" || statusFilter === "assigned" || statusFilter === "in_progress") && activeWorkOrders.length > 0 && (
                 <div>
                   <button
                     onClick={() => setActiveExpanded(!activeExpanded)}
@@ -295,11 +421,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                   </button>
                   {activeExpanded && (
                     <div className="mt-3 space-y-4">
-                      {activeWorkOrders.length === 0 ? (
-                        <p className="text-center text-gray-500 py-6">No active work orders</p>
-                      ) : (
-                        activeWorkOrders.map(renderWorkOrderCard)
-                      )}
+                      {activeWorkOrders.map(renderWorkOrderCard)}
                     </div>
                   )}
                 </div>

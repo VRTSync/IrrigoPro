@@ -192,7 +192,7 @@ export const billingSheets = pgTable("billing_sheets", {
   technicianName: text("technician_name").notNull(),
   technicianId: integer("technician_id").references(() => users.id),
   workDescription: text("work_description").notNull(),
-  status: text("status").notNull().default("draft"), // draft, submitted, completed, billed
+  status: text("status").notNull().default("draft"), // draft, submitted, completed, pending_manager_review, approved_passed_to_billing, billed
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -210,6 +210,13 @@ export const billingSheets = pgTable("billing_sheets", {
   aiInputs: text("ai_inputs"), // JSON blob of structured inputs used for AI generation
   aiShortDescription: text("ai_short_description"), // Final accepted short description (user-editable)
   aiDetailedDescription: text("ai_detailed_description"), // Final accepted detailed description (user-editable)
+  // Manager approval stamp fields — populated when irrigation manager approves ticket
+  approvedBy: text("approved_by"), // Name of the manager who approved
+  approvedByUserId: integer("approved_by_user_id").references(() => users.id), // User ID of approver
+  approvedAt: timestamp("approved_at"), // When approval was granted
+  approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }), // Total at time of approval
+  approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
+  approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -440,7 +447,7 @@ export const workOrders = pgTable("work_orders", {
   locationNotes: text("location_notes"), // Additional location details
   accessInstructions: text("access_instructions"), // How to access the property
   workType: text("work_type").notNull().default("estimate_based"), // estimate_based, direct_billing, maintenance
-  status: text("status").notNull().default("pending"), // pending, assigned, in_progress, completed, cancelled, billed
+  status: text("status").notNull().default("pending"), // pending, assigned, in_progress, completed, pending_manager_review, approved_passed_to_billing, cancelled, billed
   priority: text("priority").notNull().default("medium"), // low, medium, high, urgent
   scheduledDate: timestamp("scheduled_date"),
   startedAt: timestamp("started_at"),
@@ -480,6 +487,13 @@ export const workOrders = pgTable("work_orders", {
   aiInputs: text("ai_inputs"), // JSON blob of structured inputs used for AI generation
   aiShortDescription: text("ai_short_description"), // Final accepted short description
   aiDetailedDescription: text("ai_detailed_description"), // Final accepted detailed description
+  // Manager approval stamp fields — populated when irrigation manager approves ticket
+  approvedBy: text("approved_by"), // Name of the manager who approved
+  approvedByUserId: integer("approved_by_user_id").references(() => users.id), // User ID of approver
+  approvedAt: timestamp("approved_at"), // When approval was granted
+  approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }), // Total at time of approval
+  approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
+  approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -677,7 +691,7 @@ export const insertFieldWorkSessionSchema = createInsertSchema(fieldWorkSessions
 export const insertFieldWorkItemSchema = createInsertSchema(fieldWorkItems).omit({ id: true });
 export const insertQuickbooksIntegrationSchema = createInsertSchema(quickbooksIntegration).omit({ id: true });
 export const insertQuickbooksSyncSchema = createInsertSchema(quickbooksSync).omit({ id: true });
-export const workOrderStatusValues = ['pending', 'assigned', 'in_progress', 'completed', 'cancelled', 'billed'] as const;
+export const workOrderStatusValues = ['pending', 'assigned', 'in_progress', 'completed', 'pending_manager_review', 'approved_passed_to_billing', 'cancelled', 'billed'] as const;
 export type WorkOrderStatus = typeof workOrderStatusValues[number];
 
 export const insertWorkOrderSchema = createInsertSchema(workOrders)

@@ -80,15 +80,15 @@ export default function BillingSheets() {
   ) || [];
   const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
 
-  // Active: draft (user's own) + submitted; Completed: approved + billed
-  const activeStatuses = ['draft', 'submitted'];
-  const completedStatuses = ['approved', 'billed'];
-  
+  // Active: draft (user's own) + submitted + pending_manager_review
+  // Completed: approved_passed_to_billing + billed (and legacy 'approved')
   const activeSheets = billingSheets?.filter(sheet => {
     if (sheet.status === 'draft') return sheet.technicianId === currentUser?.id;
-    return sheet.status === 'submitted';
+    return sheet.status === 'submitted' || sheet.status === 'pending_manager_review';
   }) || [];
-  const completedSheets = billingSheets?.filter(sheet => completedStatuses.includes(sheet.status)) || [];
+  const completedSheets = billingSheets?.filter(sheet =>
+    sheet.status === 'approved_passed_to_billing' || sheet.status === 'approved' || sheet.status === 'billed'
+  ) || [];
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -104,6 +104,10 @@ export default function BillingSheets() {
         return <Badge className="bg-gray-100 text-gray-800">Draft</Badge>;
       case 'submitted':
         return <Badge className="bg-blue-100 text-blue-800">Submitted</Badge>;
+      case 'pending_manager_review':
+        return <Badge className="bg-orange-100 text-orange-800">Pending Manager Review</Badge>;
+      case 'approved_passed_to_billing':
+        return <Badge className="bg-teal-100 text-teal-800">Approved / Passed to Billing</Badge>;
       case 'approved':
         return <Badge className="bg-green-100 text-green-800">Approved</Badge>;
       case 'billed':
@@ -200,61 +204,67 @@ export default function BillingSheets() {
   // Check if user can edit/delete billing sheets
   const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager' || currentUser?.role === 'irrigation_manager';
 
-  // Billing sheet approval mutation
+  // Manager: Approve billing sheet (pending_manager_review -> approved_passed_to_billing)
   const approveBillingSheet = useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`/api/billing-sheets/${id}`, {
-        method: 'PATCH',
+      const response = await fetch(`/api/billing-sheets/${id}/approve`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'approved' })
+        body: JSON.stringify({})
       });
-      if (!response.ok) throw new Error('Failed to approve billing sheet');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to approve billing sheet');
+      }
       return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
       toast({
-        title: "Success",
-        description: "Billing sheet approved successfully"
+        title: "Approved",
+        description: "Billing sheet approved and passed to billing"
       });
     },
-    onError: () => {
+    onError: (err: any) => {
       toast({
         title: "Error", 
-        description: "Failed to approve billing sheet",
+        description: err?.message || "Failed to approve billing sheet",
         variant: "destructive"
       });
     }
   });
 
-  // Billing sheet rejection mutation
-  const rejectBillingSheet = useMutation({
+  // Manager: Return billing sheet for correction (pending_manager_review -> draft)
+  const returnForCorrection = useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`/api/billing-sheets/${id}`, {
-        method: 'PATCH',
+      const response = await fetch(`/api/billing-sheets/${id}/return-for-correction`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'draft' })
+        body: JSON.stringify({})
       });
-      if (!response.ok) throw new Error('Failed to reject billing sheet');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to return billing sheet for correction');
+      }
       return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
       toast({
-        title: "Success",
-        description: "Billing sheet rejected and returned to draft"
+        title: "Returned",
+        description: "Billing sheet returned for correction"
       });
     },
-    onError: () => {
+    onError: (err: any) => {
       toast({
         title: "Error",
-        description: "Failed to reject billing sheet", 
+        description: err?.message || "Failed to return billing sheet for correction", 
         variant: "destructive"
       });
     }
   });
 
-  // Submit billing sheet for approval (field techs only)
+  // Submit billing sheet for manager review (field techs only)
   const submitForApproval = useMutation({
     mutationFn: async (id: number) => {
       const response = await fetch(`/api/billing-sheets/${id}`, {
@@ -268,8 +278,8 @@ export default function BillingSheets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
       toast({
-        title: "Success",
-        description: "Billing sheet submitted for manager approval"
+        title: "Submitted",
+        description: "Billing sheet submitted for manager review"
       });
     },
     onError: () => {
@@ -504,20 +514,31 @@ export default function BillingSheets() {
                                   <Send className="w-3 h-3 mr-1" />Submit for Approval
                                 </Button>
                               )}
-                              {/* View button for submitted sheets */}
+                              {/* View button for submitted/review sheets */}
                               {sheet.status !== 'draft' && (
                                 <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
                                   <Eye className="w-3 h-3 mr-1" />View
                                 </Button>
                               )}
-                              {/* Approval buttons for managers on submitted sheets */}
-                              {currentUser?.role !== 'field_tech' && sheet.status === 'submitted' && (
+                              {/* Manager approval gate: Approve or Return for Correction */}
+                              {(currentUser?.role === 'irrigation_manager' || currentUser?.role === 'company_admin') && sheet.status === 'pending_manager_review' && (
                                 <div className="flex gap-2">
-                                  <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-green-600 hover:bg-green-700 text-white px-3">
+                                  <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white px-3">
+                                    <Check className="w-3 h-3 mr-1" />Approve / Pass to Billing
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => returnForCorrection.mutate(sheet.id)} disabled={returnForCorrection.isPending} className="border-orange-300 text-orange-700 hover:bg-orange-50 px-3">
+                                    <X className="w-3 h-3 mr-1" />Return for Correction
+                                  </Button>
+                                </div>
+                              )}
+                              {/* Old submitted review for billing managers */}
+                              {currentUser?.role === 'billing_manager' && sheet.status === 'submitted' && (
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white px-3">
                                     <Check className="w-3 h-3 mr-1" />Approve
                                   </Button>
-                                  <Button size="sm" variant="outline" onClick={() => rejectBillingSheet.mutate(sheet.id)} disabled={rejectBillingSheet.isPending} className="border-red-300 text-red-600 hover:bg-red-50 px-3">
-                                    <X className="w-3 h-3 mr-1" />Reject
+                                  <Button size="sm" variant="outline" onClick={() => returnForCorrection.mutate(sheet.id)} disabled={returnForCorrection.isPending} className="border-orange-300 text-orange-700 hover:bg-orange-50 px-3">
+                                    <X className="w-3 h-3 mr-1" />Return
                                   </Button>
                                 </div>
                               )}
