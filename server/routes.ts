@@ -6103,6 +6103,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         usedParts,
         photos,
         totalPartsCost,
+        branchName: incomingBranchName,
         aiInputs: reqAiInputs,
         aiShortDescription,
         aiDetailedDescription,
@@ -6120,6 +6121,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       // Merge creation photos with completion photos (don't overwrite)
       const existingWorkOrder = await storage.getWorkOrder(workOrderId);
+
+      // Branch enforcement: if the customer has branches configured, branchName must be present
+      if (existingWorkOrder?.customerId) {
+        const customer = await storage.getCustomer(existingWorkOrder.customerId);
+        if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
+          const effectiveBranch = incomingBranchName || existingWorkOrder.branchName;
+          if (!effectiveBranch || String(effectiveBranch).trim() === '') {
+            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before completing the work order." });
+          }
+        }
+      }
 
       // Load customer to snapshot their labor rate and tax rate
       const customerForRates = existingWorkOrder?.customerId
@@ -6168,6 +6180,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         appliedLaborRate: appliedLaborRate.toFixed(2),
         appliedMarkupRate: appliedMarkupRate.toFixed(4),
         appliedTaxRate: appliedTaxRate.toFixed(4),
+        ...(incomingBranchName ? { branchName: incomingBranchName } : {}),
         ...(reqAiInputs ? { aiInputs: reqAiInputs } : {}),
         ...(aiShortDescription ? { aiShortDescription } : {}),
         ...(aiDetailedDescription ? { aiDetailedDescription } : {}),
@@ -6388,6 +6401,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       console.log('Received billing sheet data:', req.body);
       const billingSheetData = req.body;
+
+      // Branch enforcement: if the customer has branches configured, branchName is required
+      if (billingSheetData.customerId) {
+        const customer = await storage.getCustomer(Number(billingSheetData.customerId));
+        if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
+          if (!billingSheetData.branchName || String(billingSheetData.branchName).trim() === '') {
+            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+          }
+        }
+      }
       
       // Determine the correct status based on creator's role
       // irrigation_manager => 'approved' (skip manual approval step)
@@ -6897,6 +6920,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const { items, ...workOrderBody } = req.body;
       const workOrderData = insertWorkOrderSchema.parse(workOrderBody);
+
+      // Branch enforcement: if the customer has branches configured, branchName is required
+      if (workOrderData.customerId) {
+        const customer = await storage.getCustomer(workOrderData.customerId);
+        if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
+          if (!workOrderData.branchName || workOrderData.branchName.trim() === '') {
+            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+          }
+        }
+      }
+
       const workOrder = await storage.createWorkOrder(workOrderData);
 
       // Save items if provided at creation time
@@ -7265,6 +7299,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Work order not found" });
       }
 
+      // Branch enforcement: the work order must have a branchName if its customer has branches
+      if (workOrder.customerId) {
+        const customer = await storage.getCustomer(workOrder.customerId);
+        if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
+          // Accept branchName from the request body (tech may be selecting it now) or already set on the work order
+          const effectiveBranch = req.body.branchName || workOrder.branchName;
+          if (!effectiveBranch || String(effectiveBranch).trim() === '') {
+            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+          }
+        }
+      }
+
       const { techName, workPerformed, additionalNotes, totalPartsCost, arrivalPhoto, finishedPhoto, actualStartTime, actualEndTime, materialItems, laborItems, additionalCharges, technicianNotes, laborRate: formLaborRate, aiInputs: reqAiInputs, aiShortDescription, aiDetailedDescription, ...rest } = req.body;
 
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
@@ -7350,6 +7396,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const workOrderSourceItemCount = (await storage.getWorkOrderItems(workOrderId)).length;
+      // Use branchName from request body (tech may have selected it) or fall back to the work order's stored branch
+      const effectiveBranchName = req.body.branchName || workOrder.branchName || null;
       const newBillingSheet = await storage.createBillingSheet({
         technicianName: techName || workOrder.assignedTechnicianName || "",
         workDescription: workPerformed || "",
@@ -7370,6 +7418,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         aiInputs: reqAiInputs || null,
         aiShortDescription: aiShortDescription || null,
         aiDetailedDescription: aiDetailedDescription || null,
+        branchName: effectiveBranchName,
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
       console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=0`);

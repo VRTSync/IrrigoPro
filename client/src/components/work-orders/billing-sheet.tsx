@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -27,7 +28,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder, WorkOrderItem } from "@shared/schema";
+import type { WorkOrder, WorkOrderItem, Customer } from "@shared/schema";
 import logoPath from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 
 const billingItemSchema = z.object({
@@ -65,10 +66,21 @@ interface BillingSheetProps {
 
 export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<string>(workOrder.branchName || "");
   const arrivalPhotoRef = useRef<HTMLInputElement>(null);
   const finishedPhotoRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const { data: customer, isLoading: isCustomerLoading } = useQuery<Customer>({
+    queryKey: ["/api/customers", workOrder.customerId],
+    enabled: !!workOrder.customerId,
+  });
+
+  const customerBranches: string[] = Array.isArray(customer?.branches) ? customer.branches : [];
+  const needsBranchSelection = customerBranches.length > 0 && !workOrder.branchName;
+  // Block save while customer data is still being fetched (prevents timing-window bypass of branch check)
+  const isBranchCheckPending = !!workOrder.customerId && isCustomerLoading;
 
   const form = useForm<BillingSheetData>({
     resolver: zodResolver(billingSheetSchema),
@@ -152,7 +164,10 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
 
   const saveBillingSheet = useMutation({
     mutationFn: async (data: BillingSheetData) => {
-      return apiRequest(`/api/work-orders/${workOrder.id}/billing-sheet`, 'POST', data);
+      return apiRequest(`/api/work-orders/${workOrder.id}/billing-sheet`, 'POST', {
+        ...data,
+        branchName: selectedBranch || workOrder.branchName || undefined,
+      });
     },
     onSuccess: () => {
       toast({
@@ -172,6 +187,14 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
   });
 
   const onSubmit = (data: BillingSheetData) => {
+    if (needsBranchSelection && !selectedBranch) {
+      toast({
+        title: "Branch Required",
+        description: "Please select a branch location before saving the billing sheet.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSubmitting(true);
     saveBillingSheet.mutate(data);
   };
@@ -199,7 +222,35 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              
+
+              {/* Branch selector — shown when the customer has branches but the work order has no branch set */}
+              {needsBranchSelection && (
+                <Card className="border-2 border-orange-300 bg-orange-50">
+                  <CardContent className="p-4">
+                    <div className="space-y-2">
+                      <label className="font-semibold text-sm text-orange-800 flex items-center gap-1">
+                        <User className="w-4 h-4" />
+                        Branch Location *
+                      </label>
+                      <p className="text-xs text-orange-700">This customer has multiple branch locations. Please select the branch for this billing sheet.</p>
+                      <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                        <SelectTrigger className="bg-white border-orange-300">
+                          <SelectValue placeholder="Select branch location..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {customerBranches.map((branch) => (
+                            <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!selectedBranch && (
+                        <p className="text-xs text-red-600 font-medium">Branch selection is required before saving.</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Tech Information */}
               <Card className="border-2 border-gray-200">
                 <CardContent className="p-4">
@@ -809,13 +860,18 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
               <div className="flex justify-end space-x-4">
                 <Button
                   type="submit"
-                  disabled={isSubmitting || saveBillingSheet.isPending}
+                  disabled={isSubmitting || saveBillingSheet.isPending || isBranchCheckPending}
                   className="bg-primary text-white hover:bg-blue-700 min-h-[44px] px-6"
                 >
                   {isSubmitting || saveBillingSheet.isPending ? (
                     <>
                       <Save className="w-4 h-4 mr-2 animate-spin" />
                       Saving...
+                    </>
+                  ) : isBranchCheckPending ? (
+                    <>
+                      <Save className="w-4 h-4 mr-2 animate-spin" />
+                      Loading...
                     </>
                   ) : (
                     <>

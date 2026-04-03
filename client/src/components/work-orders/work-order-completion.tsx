@@ -20,6 +20,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,9 +42,10 @@ import {
   Search,
   Check,
   ShoppingCart,
-  Activity
+  Activity,
+  User
 } from "lucide-react";
-import type { WorkOrder, Part } from "@shared/schema";
+import type { WorkOrder, Part, Customer } from "@shared/schema";
 
 const workOrderCompletionSchema = z.object({
   workSummary: z.string().min(10, "Work summary must be at least 10 characters"),
@@ -89,8 +91,19 @@ export function WorkOrderCompletion({
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<string>(workOrder.branchName || "");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const { data: customer, isLoading: isCustomerLoading } = useQuery<Customer>({
+    queryKey: ["/api/customers", workOrder.customerId],
+    enabled: !!workOrder.customerId,
+  });
+
+  const customerBranches: string[] = Array.isArray(customer?.branches) ? customer.branches : [];
+  const needsBranchSelection = customerBranches.length > 0 && !workOrder.branchName;
+  // Block submit while customer data is still being fetched (prevents timing-window bypass of branch check)
+  const isBranchCheckPending = !!workOrder.customerId && isCustomerLoading;
 
   // Get user from localStorage (production-compatible)
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -242,6 +255,15 @@ export function WorkOrderCompletion({
   };
 
   const onSubmit = async (data: WorkOrderCompletionData) => {
+    if (needsBranchSelection && !selectedBranch) {
+      toast({
+        title: "Branch Required",
+        description: "Please select a branch location before completing this work order.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (usedParts.length === 0) {
       toast({
         title: "Parts Required",
@@ -284,6 +306,7 @@ export function WorkOrderCompletion({
         })),
         photos: photos.map(photo => photo.url),
         totalPartsCost: getTotalPartsCost().toFixed(2),
+        branchName: selectedBranch || workOrder.branchName || undefined,
       };
 
       await completeWorkOrderMutation.mutateAsync(finalData);
@@ -485,6 +508,34 @@ export function WorkOrderCompletion({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            {/* Branch selector — shown when the customer has branches but the work order has no branch set */}
+            {needsBranchSelection && (
+              <Card className="border-2 border-orange-300 bg-orange-50">
+                <CardContent className="p-4">
+                  <div className="space-y-2">
+                    <label className="font-semibold text-sm text-orange-800 flex items-center gap-1">
+                      <User className="w-4 h-4" />
+                      Branch Location *
+                    </label>
+                    <p className="text-xs text-orange-700">This customer has multiple branch locations. Please select the branch for this work order.</p>
+                    <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                      <SelectTrigger className="bg-white border-orange-300">
+                        <SelectValue placeholder="Select branch location..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {customerBranches.map((branch) => (
+                          <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!selectedBranch && (
+                      <p className="text-xs text-red-600 font-medium">Branch selection is required before completing this work order.</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Work Summary */}
             <Card>
               <CardHeader>
@@ -808,10 +859,10 @@ export function WorkOrderCompletion({
               )}
               <Button 
                 type="submit" 
-                disabled={isSubmitting}
+                disabled={isSubmitting || isBranchCheckPending}
                 className="bg-green-600 hover:bg-green-700 text-white w-full sm:w-auto min-h-[44px]"
               >
-                {isSubmitting ? "Reviewing..." : "Review Work Order"}
+                {isBranchCheckPending ? "Loading..." : isSubmitting ? "Reviewing..." : "Review Work Order"}
               </Button>
             </div>
           </form>
