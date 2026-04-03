@@ -4797,8 +4797,59 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     return tokenData;
   }
 
+  // How many ms before expiresAt we proactively refresh the access token
+  const QB_PROACTIVE_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+
   // Helper function to make QuickBooks API requests with intuit_tid capture and automatic token refresh
   async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = '', realmId?: string): Promise<globalThis.Response> {
+    // Proactive refresh: if the token is within the buffer window of expiry, refresh before sending
+    if (realmId) {
+      try {
+        const integration = await storage.getQuickBooksIntegration(realmId);
+        if (integration && integration.expiresAt && integration.refreshToken) {
+          const msUntilExpiry = new Date(integration.expiresAt).getTime() - Date.now();
+          if (msUntilExpiry <= QB_PROACTIVE_REFRESH_BUFFER_MS) {
+            console.log(`[QB proactive refresh] Token for realmId=${realmId} expires in ${Math.round(msUntilExpiry / 1000)}s — refreshing before request`);
+            try {
+              const newAccessToken = await withQbRefreshLock(realmId, async (signal) => {
+                // Re-read from storage in case another concurrent caller already refreshed
+                const fresh = await storage.getQuickBooksIntegration(realmId);
+                if (!fresh) {
+                  throw new Error(`[QB proactive refresh] Integration for realmId=${realmId} not found`);
+                }
+                const newTokenData = await refreshQuickBooksToken(fresh.refreshToken, signal);
+                const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
+                if (!newTokenData.refresh_token) {
+                  console.warn('[QB proactive refresh] Intuit did not return a new refresh_token; keeping the existing one');
+                }
+                await storage.saveQuickBooksIntegration({
+                  companyId: integration.companyId,
+                  accessToken: newTokenData.access_token,
+                  refreshToken: newTokenData.refresh_token || fresh.refreshToken,
+                  realmId,
+                  expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+                  lastRefreshSuccess: new Date()
+                });
+                return newTokenData.access_token;
+              });
+
+              // Swap the Authorization header so the actual request uses the fresh token
+              if (options.headers) {
+                (options.headers as Record<string, string>)['Authorization'] = `Bearer ${newAccessToken}`;
+              }
+              console.log(`[QB proactive refresh] Token refreshed successfully for realmId=${realmId}`);
+            } catch (proactiveErr) {
+              // Non-fatal: log and continue — the 401 fallback below will handle it if the token truly expired
+              console.warn(`[QB proactive refresh] Failed for realmId=${realmId}; proceeding with existing token:`, proactiveErr);
+            }
+          }
+        }
+      } catch (lookupErr) {
+        // Non-fatal: if we can't look up the integration, just proceed and let the 401 fallback handle it
+        console.warn(`[QB proactive refresh] Integration lookup failed for realmId=${realmId}:`, lookupErr);
+      }
+    }
+
     let response = await fetch(url, options);
     
     // Always capture intuit_tid from response headers
