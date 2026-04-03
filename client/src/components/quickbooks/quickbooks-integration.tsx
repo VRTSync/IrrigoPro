@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { 
   ExternalLink, 
   CheckCircle, 
@@ -13,7 +13,8 @@ import {
   RefreshCw,
   Building,
   Calendar,
-  DollarSign
+  DollarSign,
+  ShieldAlert
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -21,6 +22,16 @@ import { format } from "date-fns";
 
 interface QuickBooksConnectionProps {
   className?: string;
+}
+
+interface QbConnectionStatus {
+  companyId: string | null;
+  companyName: string | null;
+  isConnected: boolean;
+  lastSync: string | null;
+  connectionStatus?: string;
+  reconnectRequiredReason?: string | null;
+  error?: string;
 }
 
 export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) {
@@ -34,18 +45,14 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   }, []);
 
   // Fetch QuickBooks connection status
-  const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<{
-    companyId: string | null;
-    companyName: string | null;
-    isConnected: boolean;
-    lastSync: string | null;
-    error?: string;
-  }>({
+  const { data: connectionStatus, isLoading: loadingConnection, error: connectionError } = useQuery<QbConnectionStatus>({
     queryKey: ["/api/quickbooks/connection"],
     enabled: true,
     retry: false,
     throwOnError: false
   });
+
+  const isReconnectRequired = connectionStatus?.connectionStatus === 'reconnect_required';
 
   // Fetch estimates for sync status
   const { data: estimates = [], error: estimatesError } = useQuery<any[]>({
@@ -183,7 +190,12 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">Connection Status</h3>
-              {connectionStatus?.isConnected ? (
+              {isReconnectRequired ? (
+                <Badge className="bg-red-100 text-red-800">
+                  <ShieldAlert className="w-3 h-3 mr-1" />
+                  Reconnect Required
+                </Badge>
+              ) : connectionStatus?.isConnected ? (
                 <Badge className="bg-green-100 text-green-800">
                   <CheckCircle className="w-3 h-3 mr-1" />
                   Connected
@@ -196,7 +208,29 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
               )}
             </div>
 
-            {connectionStatus?.isConnected ? (
+            {/* Reconnect Required Banner */}
+            {isReconnectRequired && (
+              <Alert className="border-red-300 bg-red-50">
+                <ShieldAlert className="h-5 w-5 text-red-600" />
+                <AlertTitle className="text-red-900 font-semibold">QuickBooks Reauthorization Required</AlertTitle>
+                <AlertDescription className="text-red-800 mt-1">
+                  {connectionStatus?.reconnectRequiredReason || "Your QuickBooks authorization has expired or been revoked. You must reconnect to continue syncing data."}
+                </AlertDescription>
+                <div className="mt-3">
+                  <button
+                    onClick={handleQuickBooksConnect}
+                    disabled={isConnecting}
+                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-gray-400 font-medium"
+                    data-testid="quickbooks-reconnect-btn"
+                    type="button"
+                  >
+                    {isConnecting ? "Connecting..." : "Reconnect to QuickBooks"}
+                  </button>
+                </div>
+              </Alert>
+            )}
+
+            {!isReconnectRequired && connectionStatus?.isConnected ? (
               <div className="p-4 bg-green-50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <Building className="w-5 h-5 text-green-600" />
@@ -240,7 +274,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                   </p>
                 </div>
               </div>
-            ) : (
+            ) : !isReconnectRequired ? (
               <div className="p-4 bg-blue-50 rounded-lg">
                 <p className="text-blue-900 mb-3">
                   Connect your QuickBooks Online account to automatically sync estimates, invoices, and customer data.
@@ -254,10 +288,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                 >
                   {isConnecting ? "Connecting..." : "Connect to QuickBooks"}
                 </button>
-                
-
               </div>
-            )}
+            ) : null}
           </div>
 
           <Separator />

@@ -195,6 +195,7 @@ export interface IStorage {
   disconnectGoogleSheetsCustomers(): Promise<void>;
   getQuickBooksAuthUrl(): Promise<{ authUrl: string; state: string }>;
   disconnectQuickBooksCustomers(): Promise<void>;
+  markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void>;
 
   // Parts Reference Lists (per-company: categories, brands, sizes, materials, fitting types)
   getPartCategories(companyId: number): Promise<PartCategory[]>;
@@ -1520,7 +1521,23 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getQuickBooksCustomerStatus(companyId?: string | null): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number }> {
+  async markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void> {
+    try {
+      await db.update(quickbooksIntegration)
+        .set({
+          connectionStatus: 'reconnect_required',
+          reconnectRequiredReason: reason,
+          lastRefreshFailure: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(quickbooksIntegration.realmId, realmId));
+    } catch (error) {
+      console.error('Error marking QuickBooks reconnect required:', error);
+      throw error;
+    }
+  }
+
+  async getQuickBooksCustomerStatus(companyId?: string | null): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number; connectionStatus?: string; reconnectRequiredReason?: string | null; companyId?: string | null; realmId?: string | null }> {
     // Check if QuickBooks integration exists for this company
     let integration: (typeof quickbooksIntegration.$inferSelect)[];
     if (companyId) {
@@ -1540,18 +1557,27 @@ export class DatabaseStorage implements IStorage {
         isConnected: false,
         companyName: undefined,
         lastSync: undefined,
-        customerCount: allCustomers.length
+        customerCount: allCustomers.length,
+        connectionStatus: 'disconnected',
+        reconnectRequiredReason: null,
+        companyId: null,
+        realmId: null
       };
     }
     
     const qbIntegration = integration[0];
     const isTokenValid = qbIntegration.expiresAt > new Date();
+    const isReconnectRequired = qbIntegration.connectionStatus === 'reconnect_required';
     
     return {
-      isConnected: isTokenValid,
+      isConnected: isTokenValid && !isReconnectRequired,
       companyName: qbIntegration.companyId,
       lastSync: qbIntegration.updatedAt?.toISOString() || new Date().toISOString(),
-      customerCount: allCustomers.length
+      customerCount: allCustomers.length,
+      connectionStatus: qbIntegration.connectionStatus,
+      reconnectRequiredReason: qbIntegration.reconnectRequiredReason,
+      companyId: qbIntegration.companyId,
+      realmId: qbIntegration.realmId
     };
   }
 

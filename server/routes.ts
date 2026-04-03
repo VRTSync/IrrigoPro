@@ -547,6 +547,42 @@ setInterval(() => {
   }
 }, 60_000);
 
+// QuickBooks refresh failure categories
+type QbRefreshFailureCategory =
+  | 'transient'           // Network error or 5xx — safe to retry
+  | 'stale_refresh_token' // invalid_grant: refresh token is expired or already used
+  | 'revoked'             // access_denied / revoked authorization
+  | 'reconnect_required'; // Any other unrecoverable error
+
+/**
+ * Classify a QuickBooks token refresh error into one of four categories.
+ * The Intuit token endpoint returns JSON with an "error" field on failure.
+ */
+function classifyQbRefreshError(errorText: string, httpStatus: number): QbRefreshFailureCategory {
+  let errorCode = '';
+  try {
+    const parsed = JSON.parse(errorText);
+    errorCode = (parsed.error || parsed.error_code || '').toLowerCase();
+  } catch {
+    errorCode = errorText.toLowerCase();
+  }
+
+  if (errorCode === 'invalid_grant' || errorCode === 'invalid_refresh_token') {
+    return 'stale_refresh_token';
+  }
+  if (errorCode === 'access_denied' || errorCode === 'authorization_revoked' || errorCode === 'revoked_token') {
+    return 'revoked';
+  }
+  if (httpStatus >= 500 || errorCode === 'server_error' || errorCode === 'temporarily_unavailable') {
+    return 'transient';
+  }
+  // 400/401 with unrecognized codes are treated as unrecoverable
+  if (httpStatus >= 400 && httpStatus < 500) {
+    return 'reconnect_required';
+  }
+  return 'transient';
+}
+
 // Per-realm refresh mutex — prevents concurrent token refreshes for the same QuickBooks realm
 // which would cause Intuit to reject the second attempt with invalid_grant.
 //
@@ -2451,6 +2487,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Abort early if connection is already marked as reconnect_required — do not attempt any refresh
+      if (integration.connectionStatus === 'reconnect_required') {
+        return res.status(400).json({
+          message: "QuickBooks reauthorization is required. Please reconnect QuickBooks.",
+          quickbooksError: integration.reconnectRequiredReason || "QuickBooks connection requires reauthorization.",
+          reconnectRequired: true
+        });
+      }
+
       // Proactively refresh if token is expired or within 5-minute buffer
       if (integration.expiresAt && new Date(integration.expiresAt) <= new Date(Date.now() + 5 * 60 * 1000)) {
         const tokenActuallyExpired = new Date(integration.expiresAt) <= new Date();
@@ -2472,6 +2517,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const fresh = await storage.getQuickBooksIntegration(proactiveRealmId);
               if (!fresh) {
                 throw new Error(`[QB proactive refresh] Integration for realmId=${proactiveRealmId} not found; cannot refresh`);
+              }
+              // Bail out if another caller marked this as reconnect_required while we waited for the lock
+              if (fresh.connectionStatus === 'reconnect_required') {
+                throw new QbRefreshError(
+                  `Connection already marked as reconnect_required for realmId=${proactiveRealmId}`,
+                  'reconnect_required'
+                );
               }
               const refreshTokenToUse = fresh.refreshToken;
 
@@ -2504,6 +2556,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log('Proactive QuickBooks token refresh succeeded');
           } catch (refreshErr) {
             console.error('Proactive QuickBooks token refresh failed:', refreshErr);
+            // Classify and persist reconnect_required for unrecoverable failures
+            if (refreshErr instanceof QbRefreshError) {
+              const unrecoverable = refreshErr.category === 'stale_refresh_token'
+                || refreshErr.category === 'revoked'
+                || refreshErr.category === 'reconnect_required';
+              if (unrecoverable) {
+                const reason = buildReconnectReason(refreshErr.category);
+                await storage.markQuickBooksReconnectRequired(proactiveRealmId, reason).catch((e) => {
+                  console.error('Failed to persist reconnect_required state:', e);
+                });
+                console.warn(`[QB] Marked realmId=${proactiveRealmId} as reconnect_required (${refreshErr.category})`);
+                return res.status(400).json({
+                  message: "QuickBooks authorization has expired. Please reconnect QuickBooks to continue.",
+                  quickbooksError: reason,
+                  reconnectRequired: true
+                });
+              }
+            }
             if (tokenActuallyExpired) {
               return res.status(400).json({
                 message: "QuickBooks session has expired and could not be refreshed. Please reconnect QuickBooks.",
@@ -4759,6 +4829,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     res.sendFile('check-domain.html', { root: '.' });
   });
 
+  // Custom error class for classified QuickBooks refresh failures
+  class QbRefreshError extends Error {
+    category: QbRefreshFailureCategory;
+    constructor(message: string, category: QbRefreshFailureCategory) {
+      super(message);
+      this.name = 'QbRefreshError';
+      this.category = category;
+    }
+  }
+
   // Function to refresh QuickBooks token
   async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal) {
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -4782,16 +4862,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Token refresh failed:', response.status, errorText);
-      throw new Error(`Token refresh failed: ${response.status} ${errorText}`);
+      const category = classifyQbRefreshError(errorText, response.status);
+      console.error(`Token refresh failed [${category}]:`, response.status, errorText);
+      throw new QbRefreshError(`Token refresh failed: ${response.status} ${errorText}`, category);
     }
 
     const tokenData = await response.json();
     if (!tokenData.access_token) {
-      throw new Error('Token refresh response missing access_token');
+      throw new QbRefreshError('Token refresh response missing access_token', 'reconnect_required');
     }
     if (!tokenData.refresh_token) {
-      throw new Error('Token refresh response missing refresh_token — cannot commit partial token state');
+      throw new QbRefreshError('Token refresh response missing refresh_token — cannot commit partial token state', 'reconnect_required');
     }
     console.log('Successfully refreshed QuickBooks token');
     return tokenData;
@@ -4800,13 +4881,42 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // How many ms before expiresAt we proactively refresh the access token
   const QB_PROACTIVE_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
+  // Shared helper: build reconnect reason string from QbRefreshFailureCategory
+  function buildReconnectReason(category: QbRefreshFailureCategory): string {
+    const reasonMap: Record<QbRefreshFailureCategory, string> = {
+      stale_refresh_token: 'Refresh token expired (invalid_grant). Please reauthorize QuickBooks.',
+      revoked: 'QuickBooks authorization was revoked. Please reconnect.',
+      reconnect_required: 'QuickBooks token could not be refreshed. Please reauthorize.',
+      transient: ''
+    };
+    return reasonMap[category];
+  }
+
+  // Shared helper: persist reconnect_required for unrecoverable QbRefreshError
+  async function handleUnrecoverableRefreshError(err: unknown, realmId: string): Promise<boolean> {
+    if (!(err instanceof QbRefreshError)) return false;
+    const unrecoverable = err.category === 'stale_refresh_token'
+      || err.category === 'revoked'
+      || err.category === 'reconnect_required';
+    if (!unrecoverable) return false;
+    const reason = buildReconnectReason(err.category);
+    await storage.markQuickBooksReconnectRequired(realmId, reason).catch((e) => {
+      console.error('[QB] Failed to persist reconnect_required state:', e);
+    });
+    console.warn(`[QB] Marked realmId=${realmId} as reconnect_required (${err.category})`);
+    return true;
+  }
+
   // Helper function to make QuickBooks API requests with intuit_tid capture and automatic token refresh
   async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = '', realmId?: string): Promise<globalThis.Response> {
     // Proactive refresh: if the token is within the buffer window of expiry, refresh before sending
     if (realmId) {
       try {
         const integration = await storage.getQuickBooksIntegration(realmId);
-        if (integration && integration.expiresAt && integration.refreshToken) {
+        // Skip proactive refresh entirely if connection is already marked as reconnect_required
+        if (integration?.connectionStatus === 'reconnect_required') {
+          console.warn(`[QB] Skipping proactive refresh for realmId=${realmId}: connection is marked as reconnect_required`);
+        } else if (integration && integration.expiresAt && integration.refreshToken) {
           const msUntilExpiry = new Date(integration.expiresAt).getTime() - Date.now();
           if (msUntilExpiry <= QB_PROACTIVE_REFRESH_BUFFER_MS) {
             console.log(`[QB proactive refresh] Token for realmId=${realmId} expires in ${Math.round(msUntilExpiry / 1000)}s — refreshing before request`);
@@ -4816,6 +4926,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
                 const fresh = await storage.getQuickBooksIntegration(realmId);
                 if (!fresh) {
                   throw new Error(`[QB proactive refresh] Integration for realmId=${realmId} not found`);
+                }
+                // Bail out if another caller marked this as reconnect_required while we waited for the lock
+                if (fresh.connectionStatus === 'reconnect_required') {
+                  throw new QbRefreshError(
+                    `Connection already marked as reconnect_required for realmId=${realmId}`,
+                    'reconnect_required'
+                  );
                 }
                 const newTokenData = await refreshQuickBooksToken(fresh.refreshToken, signal);
                 const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
@@ -4839,7 +4956,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               }
               console.log(`[QB proactive refresh] Token refreshed successfully for realmId=${realmId}`);
             } catch (proactiveErr) {
-              // Non-fatal: log and continue — the 401 fallback below will handle it if the token truly expired
+              // Classify error: persist reconnect_required for unrecoverable failures
+              await handleUnrecoverableRefreshError(proactiveErr, realmId);
+              // Non-fatal for transient errors: log and continue — 401 fallback below will handle it
               console.warn(`[QB proactive refresh] Failed for realmId=${realmId}; proceeding with existing token:`, proactiveErr);
             }
           }
@@ -4865,6 +4984,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log('QuickBooks token expired, attempting to refresh...');
       try {
         const integration = realmId ? await storage.getQuickBooksIntegration(realmId) : null;
+        // Do not attempt refresh if connection is already marked as reconnect_required
+        if (integration?.connectionStatus === 'reconnect_required') {
+          console.warn(`[QB] Skipping token refresh for realmId=${realmId}: connection is marked as reconnect_required`);
+          return response;
+        }
         if (integration && integration.refreshToken) {
           const realmIdForLock = integration.realmId || realmId || 'default';
 
@@ -4874,6 +4998,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             const fresh = await storage.getQuickBooksIntegration(realmIdForLock);
             if (!fresh) {
               throw new Error(`[QB refresh] Integration for realmId=${realmIdForLock} not found; cannot refresh`);
+            }
+            // Bail out if another caller marked this as reconnect_required while we waited for the lock
+            if (fresh.connectionStatus === 'reconnect_required') {
+              throw new QbRefreshError(
+                `Connection already marked as reconnect_required for realmId=${realmIdForLock}`,
+                'reconnect_required'
+              );
             }
             const refreshTokenToUse = fresh.refreshToken;
 
@@ -4918,6 +5049,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       } catch (refreshError) {
         console.error('Failed to refresh QuickBooks token:', refreshError);
+        // Classify and persist reconnect_required for unrecoverable failures
+        if (realmId) {
+          await handleUnrecoverableRefreshError(refreshError, realmId);
+        }
         // Return the original 401 response if refresh fails
       }
     }
@@ -5135,7 +5270,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           accessToken: qbData.accessToken,
           refreshToken: qbData.refreshToken,
           realmId: realmId as string, // Keep QB realm ID for API calls
-          expiresAt: qbData.expiresAt
+          expiresAt: qbData.expiresAt,
+          connectionStatus: 'connected',        // Explicitly clear any previous reconnect_required state
+          reconnectRequiredReason: null
         });
 
         console.log(`QuickBooks connection established for company: ${realmId}`);
@@ -5351,6 +5488,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           companyName: null,
           isConnected: false,
           lastSync: null,
+          connectionStatus: 'disconnected',
+          reconnectRequiredReason: null,
           error: "QuickBooks credentials not configured"
         });
       }
@@ -5370,6 +5509,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         companyName: null,
         isConnected: false,
         lastSync: null,
+        connectionStatus: 'error',
+        reconnectRequiredReason: null,
         error: "Failed to check QuickBooks connection status"
       });
     }
