@@ -236,12 +236,21 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     try {
       const newUrls: string[] = [];
       for (let i = 0; i < selectedFiles.length; i++) {
-        const formData = new FormData();
-        formData.append('photo', selectedFiles[i]);
-        const response = await fetch('/api/upload/photo', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error(`Failed to upload ${selectedFiles[i].name}`);
-        const uploaded = await response.json();
-        newUrls.push(uploaded.url);
+        const file = selectedFiles[i];
+        // GCS-backed flow: get signed PUT URL, then PUT directly to GCS
+        const signUrlRes = await fetch(
+          `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
+          { method: 'POST' }
+        );
+        if (!signUrlRes.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
+        const { signedUrl, url: canonicalUrl } = await signUrlRes.json();
+        const putRes = await fetch(signedUrl, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        });
+        if (!putRes.ok) throw new Error(`Failed to upload ${file.name} to storage`);
+        newUrls.push(canonicalUrl);
       }
       const existingPhotos: string[] = Array.isArray(workOrder.photos) ? workOrder.photos as string[] : [];
       updatePhotos.mutate([...existingPhotos, ...newUrls]);
@@ -252,6 +261,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       setIsUploadingPhoto(false);
       if (photoInputRef.current) photoInputRef.current.value = '';
     }
+  };
+
+  const resolvePhotoUrl = (url: string): string => {
+    if (!url) return url;
+    if (url.startsWith('http') || url.startsWith('/api/')) return url;
+    if (url.startsWith('/uploads/')) return `/api/photos/${url.replace('/uploads/', '')}`;
+    return `/api/photos/${url}`;
   };
 
   const handleConfirmRemovePhoto = () => {
@@ -795,10 +811,10 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                       {(workOrder.photos as string[]).map((url: string, idx: number) => (
                         <div key={idx} className="relative group">
                           <button
-                            onClick={() => setLightboxPhoto(url)}
+                            onClick={() => setLightboxPhoto(resolvePhotoUrl(url))}
                             className="aspect-square w-full rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
-                            <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                            <img src={resolvePhotoUrl(url)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                           </button>
                           {canEditPhotos && (
                             <button

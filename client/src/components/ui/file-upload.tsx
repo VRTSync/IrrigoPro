@@ -37,21 +37,52 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
     try {
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
-        const formData = new FormData();
-        formData.append(type, file);
 
-        const response = await fetch(`/api/upload/${type}`, {
-          method: 'POST',
-          body: formData,
-        });
+        if (type === 'photo') {
+          // GCS-backed flow: request a signed PUT URL, then PUT directly to GCS
+          const signUrlRes = await fetch(
+            `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
+            { method: 'POST' }
+          );
+          if (!signUrlRes.ok) {
+            const err = await signUrlRes.json();
+            throw new Error(err.message || `Failed to get upload URL for ${file.name}`);
+          }
+          const { signedUrl, url: canonicalUrl, originalName } = await signUrlRes.json();
 
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || `Failed to upload ${file.name}`);
+          // PUT the file directly to GCS
+          const putRes = await fetch(signedUrl, {
+            method: 'PUT',
+            body: file,
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          });
+          if (!putRes.ok) {
+            throw new Error(`Failed to upload ${file.name} to storage`);
+          }
+
+          uploadedFiles.push({
+            url: canonicalUrl,
+            fileName: canonicalUrl,
+            originalName: originalName || file.name,
+          });
+        } else {
+          // Attachment: use existing multipart upload route
+          const formData = new FormData();
+          formData.append(type, file);
+
+          const response = await fetch(`/api/upload/${type}`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || `Failed to upload ${file.name}`);
+          }
+
+          const uploadedFile = await response.json();
+          uploadedFiles.push(uploadedFile);
         }
-
-        const uploadedFile = await response.json();
-        uploadedFiles.push(uploadedFile);
       }
 
       onFilesChange(multiple ? [...(Array.isArray(files) ? files : []), ...uploadedFiles] : uploadedFiles);
@@ -80,9 +111,23 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
     onFilesChange(updatedFiles);
   };
 
+  // Resolve a stored photo path to a displayable URL
+  const resolvePhotoUrl = (url: string): string => {
+    if (!url) return url;
+    // Already a full URL (https://) or already a /api/ route
+    if (url.startsWith('http') || url.startsWith('/api/')) return url;
+    // Legacy /uploads/ path
+    if (url.startsWith('/uploads/')) {
+      const fileName = url.replace('/uploads/', '');
+      return `/api/photos/${fileName}`;
+    }
+    // Canonical GCS path (e.g. "photos/<uuid>")
+    return `/api/photos/${url}`;
+  };
+
   const openFile = (file: UploadedFile) => {
     if (type === 'photo') {
-      setLightboxUrl(file.url);
+      setLightboxUrl(resolvePhotoUrl(file.url));
       setLightboxName(file.originalName);
     } else {
       window.open(file.url, '_blank');
@@ -159,7 +204,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
                 {type === 'photo' && (
                   <div className="mt-2 cursor-pointer" onClick={() => openFile(file)}>
                     <img
-                      src={file.url}
+                      src={resolvePhotoUrl(file.url)}
                       alt={file.originalName}
                       className="w-full h-24 object-cover rounded border"
                     />

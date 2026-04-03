@@ -119,6 +119,48 @@ export class ObjectStorageService {
     }
   }
 
+  // Gets the signed upload URL for a photo.
+  async getPhotoUploadURL(): Promise<{ signedUrl: string; photoId: string }> {
+    const publicSearchPaths = this.getPublicObjectSearchPaths();
+    if (publicSearchPaths.length === 0) {
+      throw new Error("No public search paths configured");
+    }
+
+    const photoId = `photos/${randomUUID()}`;
+    const fullPath = `${publicSearchPaths[0]}/${photoId}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+
+    const signedUrl = await signObjectURL({
+      bucketName,
+      objectName,
+      method: "PUT",
+      ttlSec: 900, // 15 minutes
+    });
+
+    return { signedUrl, photoId };
+  }
+
+  // Search for a photo in object storage by photoId (e.g. "photos/<uuid>").
+  async searchPhotoObject(photoId: string): Promise<File | null> {
+    return this.searchPublicObject(photoId);
+  }
+
+  // Returns a short-lived signed GET URL for downloading a photo from object storage.
+  async getPhotoDownloadURL(photoId: string, ttlSec = 900): Promise<string | null> {
+    const publicSearchPaths = this.getPublicObjectSearchPaths();
+    for (const basePath of publicSearchPaths) {
+      const fullPath = `${basePath}/${photoId}`;
+      const { bucketName, objectName } = parseObjectPath(fullPath);
+      try {
+        const url = await signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+        return url;
+      } catch {
+        // object may not exist under this path; try next
+      }
+    }
+    return null;
+  }
+
   // Gets the upload URL for a company logo.
   async getCompanyLogoUploadURL(): Promise<string> {
     const publicSearchPaths = this.getPublicObjectSearchPaths();

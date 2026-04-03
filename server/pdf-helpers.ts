@@ -139,6 +139,13 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
        </div>`
     : '';
 
+  const failedPhotoCount = photoDataUris.filter(u => u === FAILED_PHOTO_SENTINEL).length;
+  const photoFailWarning = failedPhotoCount > 0
+    ? `<div class="ticket-photo-fail-warning">
+         &#9888; Warning: ${failedPhotoCount} photo${failedPhotoCount > 1 ? 's' : ''} could not be loaded and ${failedPhotoCount > 1 ? 'were' : 'was'} omitted from this PDF.
+       </div>`
+    : '';
+
   const locationLine = [wo.projectAddress, wo.locationNotes].filter(Boolean).join(' — ');
 
   const markupRow = wo.markupAmount > 0
@@ -207,6 +214,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
 
     ${partsTableFromWO(wo.items)}
 
+    ${photoFailWarning}
     ${photoGridSection(photoDataUris)}
   </div>`;
 }
@@ -217,6 +225,13 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
     ? `<div class="ticket-section">
          <div class="ticket-section-label">WORK PERFORMED</div>
          <div class="ticket-work-list">${formatWorkSummaryAsBullets(workText)}</div>
+       </div>`
+    : '';
+
+  const failedPhotoCountBS = photoDataUris.filter(u => u === FAILED_PHOTO_SENTINEL).length;
+  const photoFailWarningBS = failedPhotoCountBS > 0
+    ? `<div class="ticket-photo-fail-warning">
+         &#9888; Warning: ${failedPhotoCountBS} photo${failedPhotoCountBS > 1 ? 's' : ''} could not be loaded and ${failedPhotoCountBS > 1 ? 'were' : 'was'} omitted from this PDF.
        </div>`
     : '';
 
@@ -286,6 +301,7 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
 
     ${partsTableFromBS(bs.items)}
 
+    ${photoFailWarningBS}
     ${photoGridSection(photoDataUris)}
   </div>`;
 }
@@ -998,6 +1014,16 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
   .photo-cell { flex: 1; }
   .photo-img { width: 100%; height: 160px; object-fit: cover; border-radius: 5px; border: 1px solid #e5e7eb; display: block; }
   .photo-empty { height: 160px; }
+
+  .ticket-photo-fail-warning {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #92400e;
+    margin-bottom: 8px;
+  }
 
   /* ═══════════════════════════════════
      RECONCILIATION PAGE

@@ -646,15 +646,22 @@ export function StandaloneBillingSheet({
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {uploadedPhotos.map((photo, index) => (
-                            <div key={index} className="relative aspect-square">
-                              <img 
-                                src={photo.url} 
-                                alt={`Photo ${index + 1}`}
-                                className="w-full h-full object-cover rounded-lg border"
-                              />
-                            </div>
-                          ))}
+                          {uploadedPhotos.map((photo, index) => {
+                            const displayUrl = photo.url.startsWith('http') || photo.url.startsWith('/api/')
+                              ? photo.url
+                              : photo.url.startsWith('/uploads/')
+                                ? `/api/photos/${photo.url.replace('/uploads/', '')}`
+                                : `/api/photos/${photo.url}`;
+                            return (
+                              <div key={index} className="relative aspect-square">
+                                <img 
+                                  src={displayUrl} 
+                                  alt={`Photo ${index + 1}`}
+                                  className="w-full h-full object-cover rounded-lg border"
+                                />
+                              </div>
+                            );
+                          })}
                         </div>
                       </CardContent>
                     </Card>

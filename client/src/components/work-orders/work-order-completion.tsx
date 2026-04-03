@@ -467,15 +467,22 @@ export function WorkOrderCompletion({
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 min-w-0">
-                    {photos.map((photo, index) => (
-                      <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                        <img 
-                          src={photo.url} 
-                          alt={`Completion photo ${index + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    ))}
+                    {photos.map((photo, index) => {
+                      const displayUrl = photo.url.startsWith('http') || photo.url.startsWith('/api/')
+                        ? photo.url
+                        : photo.url.startsWith('/uploads/')
+                          ? `/api/photos/${photo.url.replace('/uploads/', '')}`
+                          : `/api/photos/${photo.url}`;
+                      return (
+                        <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                          <img 
+                            src={displayUrl} 
+                            alt={`Completion photo ${index + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>

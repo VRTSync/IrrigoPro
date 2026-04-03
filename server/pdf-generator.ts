@@ -1,8 +1,10 @@
 import puppeteer from 'puppeteer';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
+import { join, basename } from 'path';
 import type { PdfViewModel, PdfBrandColors } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
+import { ObjectStorageService } from './objectStorage';
 import {
   FAILED_PHOTO_SENTINEL,
   fetchLogoAsBase64,
@@ -16,34 +18,84 @@ import {
 
 export { fetchLogoAsBase64 };
 
-async function fetchPhotoAsDataUri(photoUrl: string, port: number): Promise<string> {
+const _objectStorageService = new ObjectStorageService();
+
+/**
+ * Fetch a photo as a data URI, loading directly from object storage (GCS) or local disk.
+ * Avoids going through the authenticated HTTP route for server-side PDF generation.
+ */
+async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<string> {
   const PHOTO_LOAD_TIMEOUT_MS = 8000;
   try {
-    const absoluteUrl = photoUrl.startsWith('/')
-      ? `http://localhost:${port}${photoUrl}`
-      : photoUrl;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PHOTO_LOAD_TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await fetch(absoluteUrl, { signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
+    // Handle fully-qualified external URLs (e.g. old signed GCS URLs)
+    if (photoPath.startsWith('http')) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PHOTO_LOAD_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(photoPath, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!response.ok) return FAILED_PHOTO_SENTINEL;
+      const contentType = response.headers.get('content-type') || '';
+      const mimeType = contentType.split(';')[0].trim().toLowerCase();
+      if (!mimeType.startsWith('image/')) return FAILED_PHOTO_SENTINEL;
+      const arrayBuffer = await response.arrayBuffer();
+      return `data:${mimeType};base64,${Buffer.from(arrayBuffer).toString('base64')}`;
     }
-    if (!response.ok) return FAILED_PHOTO_SENTINEL;
-    const contentType = response.headers.get('content-type') || '';
-    const mimeType = contentType.split(';')[0].trim().toLowerCase();
+
+    // Normalize path: strip leading /uploads/ for legacy paths
+    let gcsKey = photoPath;
+    if (photoPath.startsWith('/uploads/')) {
+      // Legacy local file — serve from disk
+      const safeName = basename(photoPath);
+      const localPath = join('./uploads', safeName);
+      if (existsSync(localPath)) {
+        const data = readFileSync(localPath);
+        return `data:image/jpeg;base64,${data.toString('base64')}`;
+      }
+      return FAILED_PHOTO_SENTINEL;
+    }
+
+    // Strip /api/photos/ prefix if present
+    if (gcsKey.startsWith('/api/photos/')) {
+      gcsKey = gcsKey.replace('/api/photos/', '');
+    }
+
+    // Try GCS object storage
+    const file = await _objectStorageService.searchPhotoObject(gcsKey);
+    if (!file) return FAILED_PHOTO_SENTINEL;
+
+    // Download as buffer
+    const [metadata] = await file.getMetadata();
+    const mimeType = (metadata.contentType || 'image/jpeg').split(';')[0].trim();
     if (!mimeType.startsWith('image/')) return FAILED_PHOTO_SENTINEL;
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const stream = file.createReadStream();
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
+    const buffer = Buffer.concat(chunks);
     return `data:${mimeType};base64,${buffer.toString('base64')}`;
   } catch {
     return FAILED_PHOTO_SENTINEL;
   }
 }
 
+const PHOTO_BATCH_CONCURRENCY = 5;
+
 async function preloadPhotos(urls: string[], port: number): Promise<string[]> {
-  return Promise.all(urls.map(url => fetchPhotoAsDataUri(url, port)));
+  const results: string[] = new Array(urls.length);
+  for (let i = 0; i < urls.length; i += PHOTO_BATCH_CONCURRENCY) {
+    const batch = urls.slice(i, i + PHOTO_BATCH_CONCURRENCY);
+    const batchResults = await Promise.all(batch.map(url => fetchPhotoAsDataUri(url, port)));
+    batchResults.forEach((r, j) => { results[i + j] = r; });
+  }
+  return results;
 }
 
 function getChromiumPath(): string {
@@ -104,17 +156,27 @@ export class PDFGenerator {
 
   static async generateInvoiceDetailPDF(viewModel: PdfViewModel): Promise<Buffer> {
     const port = parseInt(process.env.PORT || '5000', 10);
+    const invoiceNumber = viewModel.invoice.invoiceNumber;
 
-    const woPhotoMaps: string[][] = await Promise.all(
-      viewModel.workOrders.map(wo =>
-        wo.photos.length > 0 ? preloadPhotos(wo.photos, port) : Promise.resolve([])
-      )
-    );
-    const bsPhotoMaps: string[][] = await Promise.all(
-      viewModel.billingSheets.map(bs =>
-        bs.photos.length > 0 ? preloadPhotos(bs.photos, port) : Promise.resolve([])
-      )
-    );
+    const woPhotoMaps: string[][] = [];
+    for (const wo of viewModel.workOrders) {
+      const result = wo.photos.length > 0 ? await preloadPhotos(wo.photos, port) : [];
+      const failCount = result.filter(r => r === FAILED_PHOTO_SENTINEL).length;
+      if (failCount > 0) {
+        console.warn(`[PDF] Invoice ${invoiceNumber}: Work Order ${wo.workOrderNumber} — ${failCount} photo(s) failed to load`);
+      }
+      woPhotoMaps.push(result);
+    }
+
+    const bsPhotoMaps: string[][] = [];
+    for (const bs of viewModel.billingSheets) {
+      const result = bs.photos.length > 0 ? await preloadPhotos(bs.photos, port) : [];
+      const failCount = result.filter(r => r === FAILED_PHOTO_SENTINEL).length;
+      if (failCount > 0) {
+        console.warn(`[PDF] Invoice ${invoiceNumber}: Billing Sheet ${bs.billingNumber} — ${failCount} photo(s) failed to load`);
+      }
+      bsPhotoMaps.push(result);
+    }
 
     const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({

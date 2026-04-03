@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import {
   MapPin,
   Calendar,
@@ -22,6 +23,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
@@ -114,6 +116,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   const customerBranches: string[] = (customer as any)?.branches || [];
 
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [editablePhotos, setEditablePhotos] = useState<UploadedFile[]>([]);
 
   const handleClose = () => {
     setAiSuggestion(null);
@@ -121,7 +124,17 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   };
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
-  const photos: string[] = billingSheet.photos ?? [];
+
+  // Resolve a stored photo path to a displayable URL
+  const resolvePhotoUrl = (url: string): string => {
+    if (!url) return url;
+    if (url.startsWith('http') || url.startsWith('/api/')) return url;
+    if (url.startsWith('/uploads/')) {
+      const fileName = url.replace('/uploads/', '');
+      return `/api/photos/${fileName}`;
+    }
+    return `/api/photos/${url}`;
+  };
 
   const { data: existingItems } = useQuery<BillingSheetItem[]>({
     queryKey: ["/api/billing-sheets", billingSheet.id, "items"],
@@ -137,6 +150,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
     if (!open) {
       setPartsLoaded(false);
       setParts([]);
+      setEditablePhotos([]);
       return;
     }
     setWorkDescription(billingSheet.workDescription || "");
@@ -147,6 +161,13 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
     setNotes(billingSheet.notes || "");
     setBranchName((billingSheet as any).branchName || "");
     setErrors({});
+    // Initialize editable photos from the billing sheet
+    const photosArr: string[] = billingSheet.photos ?? [];
+    setEditablePhotos(photosArr.map((url) => ({
+      url,
+      fileName: url,
+      originalName: url.split('/').pop() || 'photo',
+    })));
   }, [open, billingSheet]);
 
   useEffect(() => {
@@ -191,6 +212,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
         propertyAddress: propertyAddress || "",
         notes: notes || "",
         branchName: branchName || null,
+        photos: editablePhotos.map((p) => p.url),
         items: parts
           .filter((p) => p.partName.trim())
           .map((p) => ({
@@ -236,14 +258,14 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
     setLightboxIndex(index);
   };
   const prevPhoto = () => {
-    const newIdx = (lightboxIndex - 1 + photos.length) % photos.length;
+    const newIdx = (lightboxIndex - 1 + editablePhotos.length) % editablePhotos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(photos[newIdx]);
+    setLightboxPhoto(resolvePhotoUrl(editablePhotos[newIdx].url));
   };
   const nextPhoto = () => {
-    const newIdx = (lightboxIndex + 1) % photos.length;
+    const newIdx = (lightboxIndex + 1) % editablePhotos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(photos[newIdx]);
+    setLightboxPhoto(resolvePhotoUrl(editablePhotos[newIdx].url));
   };
 
   return (
@@ -432,23 +454,46 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
               </div>
             </SectionCard>
 
-            {/* Photos (read-only) */}
-            {photos.length > 0 && (
-              <SectionCard title={`Photos (${photos.length})`} icon={<Camera className="w-4 h-4" />}>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {photos.map((url, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => openLightbox(url, idx)}
-                      className="aspect-square rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all"
-                    >
-                      <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              </SectionCard>
-            )}
+            {/* Photos (editable — add/remove) */}
+            <SectionCard title={`Photos (${editablePhotos.length})`} icon={<Camera className="w-4 h-4" />}>
+              <div className="space-y-3">
+                {editablePhotos.length > 0 && (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {editablePhotos.map((photo, idx) => (
+                      <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-100">
+                        <button
+                          type="button"
+                          onClick={() => openLightbox(resolvePhotoUrl(photo.url), idx)}
+                          className="w-full h-full"
+                        >
+                          <img
+                            src={resolvePhotoUrl(photo.url)}
+                            alt={`Photo ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditablePhotos(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Remove photo"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <FileUpload
+                  type="photo"
+                  label="Add Photos"
+                  accept="image/*"
+                  multiple
+                  files={[]}
+                  onFilesChange={(newFiles) => setEditablePhotos(prev => [...prev, ...newFiles])}
+                />
+              </div>
+            </SectionCard>
 
             {/* Notes */}
             <SectionCard title="Notes & Description" icon={<FileText className="w-4 h-4" />}>
@@ -553,7 +598,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
             >
               <X className="w-5 h-5" />
             </button>
-            {photos.length > 1 && (
+            {editablePhotos.length > 1 && (
               <>
                 <button
                   onClick={prevPhoto}

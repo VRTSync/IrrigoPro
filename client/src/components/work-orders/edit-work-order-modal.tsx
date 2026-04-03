@@ -264,19 +264,26 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     updateWorkOrder.mutate();
   };
 
+  const resolvePhotoUrl = (url: string): string => {
+    if (!url) return url;
+    if (url.startsWith('http') || url.startsWith('/api/')) return url;
+    if (url.startsWith('/uploads/')) return `/api/photos/${url.replace('/uploads/', '')}`;
+    return `/api/photos/${url}`;
+  };
+
   const openLightbox = (url: string, index: number) => {
-    setLightboxPhoto(url);
+    setLightboxPhoto(resolvePhotoUrl(url));
     setLightboxIndex(index);
   };
   const prevPhoto = () => {
     const newIdx = (lightboxIndex - 1 + photos.length) % photos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(photos[newIdx]);
+    setLightboxPhoto(resolvePhotoUrl(photos[newIdx]));
   };
   const nextPhoto = () => {
     const newIdx = (lightboxIndex + 1) % photos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(photos[newIdx]);
+    setLightboxPhoto(resolvePhotoUrl(photos[newIdx]));
   };
 
   return (
@@ -538,7 +545,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                       onClick={() => openLightbox(url, idx)}
                       className="aspect-square rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all"
                     >
-                      <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      <img src={resolvePhotoUrl(url)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                     </button>
                   ))}
                 </div>

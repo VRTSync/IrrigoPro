@@ -8014,31 +8014,63 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // File upload routes for photos and attachments
-  app.post("/api/upload/photo", async (req, res) => {
+  // Returns a signed GCS PUT URL and canonical photo path; client PUTs directly to GCS
+  app.post("/api/upload/photo", requireAuthentication, async (req, res) => {
     try {
-      if (!req.files || !req.files.photo) {
-        return res.status(400).json({ message: "No photo file provided" });
+      // Validate that the intended file is an image (based on file extension in originalName)
+      const originalName = (req.query.originalName as string) || "photo";
+      const ext = originalName.split('.').pop()?.toLowerCase() || '';
+      const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'tiff', 'tif', 'avif'];
+      if (ext && !allowedExtensions.includes(ext)) {
+        return res.status(400).json({ message: "Only image files are allowed for photo uploads" });
       }
 
-      const photo = Array.isArray(req.files.photo) ? req.files.photo[0] : req.files.photo;
-      
-      // Validate file type (images only)
-      if (!photo.mimetype.startsWith('image/')) {
-        return res.status(400).json({ message: "Only image files are allowed for photos" });
-      }
-
-      const fileName = `photo_${Date.now()}_${photo.name.replace(/\s+/g, '_')}`;
-      const uploadPath = `./uploads/${fileName}`;
-
-      await photo.mv(uploadPath);
-      res.json({ url: `/uploads/${fileName}`, fileName, originalName: photo.name });
+      const photoService = new ObjectStorageService();
+      const { signedUrl, photoId } = await photoService.getPhotoUploadURL();
+      res.json({
+        signedUrl,
+        url: photoId,          // canonical path stored in DB (e.g. "photos/<uuid>")
+        fileName: photoId,
+        originalName,
+      });
     } catch (error) {
-      console.error("Photo upload error:", error);
-      res.status(500).json({ message: "Failed to upload photo" });
+      console.error("Photo upload URL generation error:", error);
+      res.status(500).json({ message: "Failed to generate photo upload URL" });
     }
   });
 
-  app.post("/api/upload/attachment", async (req, res) => {
+  // Authenticated photo-serving route — streams photos from object storage
+  // Legacy fallback: if photoId starts with a local filename pattern, serve from disk
+  app.get("/api/photos/:photoId(*)", requireAuthentication, async (req, res) => {
+    const photoId = req.params.photoId;
+    try {
+      const photoService = new ObjectStorageService();
+
+      // Try GCS first
+      const file = await photoService.searchPhotoObject(photoId);
+      if (file) {
+        return photoService.downloadObject(file, res);
+      }
+
+      // Legacy fallback: serve from local ./uploads directory
+      const path = await import("path");
+      const fs = await import("fs");
+      const safeName = path.basename(photoId.replace(/^\/uploads\//, ""));
+      const localPath = path.join("./uploads", safeName);
+      if (fs.existsSync(localPath)) {
+        return res.sendFile(path.resolve(localPath));
+      }
+
+      return res.status(404).json({ error: "Photo not found" });
+    } catch (error) {
+      console.error(`[PHOTO-SERVE] Error serving photo ${photoId}:`, error);
+      if (!res.headersSent) {
+        return res.status(500).json({ error: "Failed to serve photo" });
+      }
+    }
+  });
+
+  app.post("/api/upload/attachment", requireAuthentication, async (req, res) => {
     try {
       if (!req.files || !req.files.attachment) {
         return res.status(400).json({ message: "No attachment file provided" });
@@ -8049,15 +8081,32 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const uploadPath = `./uploads/${fileName}`;
 
       await attachment.mv(uploadPath);
-      res.json({ url: `/uploads/${fileName}`, fileName, originalName: attachment.name });
+      res.json({ url: `/api/attachments/${fileName}`, fileName, originalName: attachment.name });
     } catch (error) {
       console.error("Attachment upload error:", error);
       res.status(500).json({ message: "Failed to upload attachment" });
     }
   });
 
-  // Serve uploaded files
-  app.use('/uploads', express.static('./uploads'));
+  // Authenticated attachment serving route — serves attachments from local disk
+  // Also handles legacy /uploads/ URLs stored in DB before migration
+  app.get("/api/attachments/:fileName(*)", requireAuthentication, async (req, res) => {
+    try {
+      const pathMod = await import("path");
+      const fs = await import("fs");
+      const safeName = pathMod.basename(req.params.fileName);
+      const localPath = pathMod.join("./uploads", safeName);
+      if (fs.existsSync(localPath)) {
+        return res.sendFile(pathMod.resolve(localPath));
+      }
+      return res.status(404).json({ error: "Attachment not found" });
+    } catch (error) {
+      console.error(`[ATTACHMENT-SERVE] Error serving attachment ${req.params.fileName}:`, error);
+      if (!res.headersSent) {
+        return res.status(500).json({ error: "Failed to serve attachment" });
+      }
+    }
+  });
 
   const httpServer = createServer(app);
   // Notification routes
