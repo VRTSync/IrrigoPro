@@ -89,26 +89,24 @@ function resolveLogoToFetchableUrl(storedLogo: string): string {
     for (const pattern of LOGO_PATH_PATTERNS) {
       const match = pathname.match(pattern);
       if (match) {
-        return `${localBase}/api/public-objects/company-logos/${match[1]}`;
+        return `${localBase}/api/company-logo/${match[1]}`;
       }
     }
     console.warn(`[PDF] Logo URL does not match known app paths, skipping: ${storedLogo}`);
     return storedLogo;
   }
 
-  if (storedLogo.startsWith('/api/public-objects/company-logos/')) {
-    return `${localBase}${storedLogo}`;
-  }
   if (storedLogo.startsWith('/api/')) {
     return `${localBase}${storedLogo}`;
   }
   if (storedLogo.startsWith('/')) {
-    return `${localBase}/api/public-objects/company-logos${storedLogo}`;
+    return `${localBase}/api/company-logo${storedLogo}`;
   }
   if (storedLogo.startsWith('company-logos/')) {
-    return `${localBase}/api/public-objects/${storedLogo}`;
+    const logoId = storedLogo.replace('company-logos/', '');
+    return `${localBase}/api/company-logo/${logoId}`;
   }
-  return `${localBase}/api/public-objects/company-logos/${storedLogo}`;
+  return `${localBase}/api/company-logo/${storedLogo}`;
 }
 
 const TOLERANCE = 0.01;

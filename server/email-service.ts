@@ -99,9 +99,15 @@ export class EmailService {
       return logoPath; // Already a full URL
     }
     
-    // Convert stored path to public URL
     const baseUrl = this.baseUrl;
-    return `${baseUrl}/public-objects/company-logos/${logoPath}`;
+
+    // Relative path already pointing to the correct serving route
+    if (logoPath.startsWith('/api/')) {
+      return `${baseUrl}${logoPath}`;
+    }
+
+    // Bare logo ID — construct the correct serving route
+    return `${baseUrl}/api/company-logo/${logoPath}`;
   }
 
   private static generateEstimateEmailHTML(

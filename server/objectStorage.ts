@@ -146,13 +146,13 @@ export class ObjectStorageService {
     if (logoPath.startsWith('http')) {
       return logoPath; // Already a full URL
     }
+
+    if (logoPath.startsWith('/api/')) {
+      return logoPath; // Already a relative app route
+    }
     
-    // Convert object storage path to public URL (production-ready domain handling)
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://irrigopro.com' 
-      : `https://${process.env.REPL_SLUG}-00-${process.env.REPL_ID}.${process.env.REPLIT_CLUSTER}.replit.dev`;
-    
-    return `${baseUrl}/api/public-objects/company-logos/${logoPath}`;
+    // Use the actual serving route which streams from object storage
+    return `/api/company-logo/${logoPath}`;
   }
 
   // Normalizes a logo upload URL to a storable path
