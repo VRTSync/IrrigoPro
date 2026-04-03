@@ -1,7 +1,8 @@
 import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
-import type { PdfViewModel } from './pdf-view-model';
+import type { PdfViewModel, PdfBrandColors } from './pdf-view-model';
+import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import {
   FAILED_PHOTO_SENTINEL,
   fetchLogoAsBase64,
@@ -125,7 +126,7 @@ export class PDFGenerator {
     try {
       const page = await browser.newPage();
 
-      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps);
+      const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps, viewModel.brandColors);
 
       await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
 
@@ -156,12 +157,13 @@ export class PDFGenerator {
     vm: PdfViewModel,
     woPhotoMaps: string[][] = [],
     bsPhotoMaps: string[][] = [],
+    brandColors: PdfBrandColors = DEFAULT_BRAND_COLORS,
   ): string {
     const { invoice, workOrders, billingSheets } = vm;
 
     const ticketPages = [
-      ...workOrders.map((wo, i) => ticketPageWO(wo, invoice.invoiceNumber, woPhotoMaps[i] ?? [])),
-      ...billingSheets.map((bs, i) => ticketPageBS(bs, invoice.invoiceNumber, bsPhotoMaps[i] ?? [])),
+      ...workOrders.map((wo, i) => ticketPageWO(wo, invoice.invoiceNumber, woPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name)),
+      ...billingSheets.map((bs, i) => ticketPageBS(bs, invoice.invoiceNumber, bsPhotoMaps[i] ?? [], vm.company.logoDataUri, vm.company.name)),
     ].join('');
 
     return `<!DOCTYPE html>
@@ -169,7 +171,7 @@ export class PDFGenerator {
 <head>
   <meta charset="UTF-8">
   <title>Invoice ${invoice.invoiceNumber} – Billing Document</title>
-  <style>${buildFullCSS()}</style>
+  <style>${buildFullCSS(brandColors)}</style>
 </head>
 <body>
   ${pageFooter(invoice.invoiceNumber)}

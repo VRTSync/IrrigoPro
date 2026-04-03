@@ -92,6 +92,22 @@ export interface PdfTotals {
   storedTotalAmount: number;
 }
 
+export interface PdfBrandColors {
+  navy: string;
+  brown: string;
+  green: string;
+  black: string;
+  gray: string;
+}
+
+export const DEFAULT_BRAND_COLORS: PdfBrandColors = {
+  navy: '#2F4A7A',
+  brown: '#8B4F2B',
+  green: '#7FB539',
+  black: '#000000',
+  gray: '#F5F5F5',
+};
+
 export interface PdfViewModel {
   company: PdfCompanyHeader;
   invoice: PdfInvoiceHeader;
@@ -100,6 +116,7 @@ export interface PdfViewModel {
   totals: PdfTotals;
   totalJobs: number;
   validationWarning: string | null;
+  brandColors: PdfBrandColors;
 }
 
 // ── Raw input type ──────────────────────────────────────────────────────────
@@ -123,6 +140,7 @@ export interface InvoiceDetailData {
     items: BillingSheetItem[];
   }>;
   laborRate?: string;
+  brandColors?: PdfBrandColors;
 }
 
 // ── Build result ────────────────────────────────────────────────────────────
@@ -311,6 +329,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     totals,
     totalJobs: workOrderRows.length + billingSheetRows.length,
     validationWarning,
+    brandColors: data.brandColors ?? DEFAULT_BRAND_COLORS,
   };
 
   return { viewModel, validationWarning };

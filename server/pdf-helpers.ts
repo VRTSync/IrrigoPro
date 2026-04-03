@@ -5,7 +5,9 @@ import type {
   PdfWorkOrderRow,
   PdfBillingSheetRow,
   PdfTotals,
+  PdfBrandColors,
 } from './pdf-view-model';
+import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
 
@@ -189,7 +191,7 @@ export function coverPage(
   </div>`;
 }
 
-export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDataUris: string[]): string {
+export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDataUris: string[], logoDataUri?: string | null, companyName?: string): string {
   const workText = wo.aiDetailedDescription || wo.workSummary || wo.workDescription;
   const workBullets = workText
     ? `<div class="ticket-section">
@@ -224,6 +226,12 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
        </div>`
     : '';
 
+  const logoHtml = logoDataUri
+    ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
+    : companyName
+      ? `<div class="ticket-header-company-name">${companyName}</div>`
+      : '';
+
   return `
   <div class="ticket-page">
     <div class="ticket-header ticket-header-wo">
@@ -234,6 +242,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
         ${locationLine ? `<div class="ticket-location">&#128205; ${locationLine}</div>` : ''}
       </div>
       <div class="ticket-header-right">
+        ${logoHtml}
         <div class="ticket-meta-item"><span class="ticket-meta-label">Invoice #</span><span class="ticket-meta-value">${invoiceNumber}</span></div>
         <div class="ticket-meta-item"><span class="ticket-meta-label">Date</span><span class="ticket-meta-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</span></div>
         <div class="ticket-meta-item"><span class="ticket-meta-label">Technician</span><span class="ticket-meta-value">${wo.technicianName}</span></div>
@@ -270,7 +279,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
   </div>`;
 }
 
-export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, photoDataUris: string[]): string {
+export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, photoDataUris: string[], logoDataUri?: string | null, companyName?: string): string {
   const workText = bs.aiDetailedDescription || bs.notes || bs.workDescription;
   const workBullets = workText
     ? `<div class="ticket-section">
@@ -303,16 +312,22 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
        </div>`
     : '';
 
+  const bsLogoHtml = logoDataUri
+    ? `<img src="${logoDataUri}" class="ticket-header-logo" alt="Company logo">`
+    : companyName
+      ? `<div class="ticket-header-company-name">${companyName}</div>`
+      : '';
+
   return `
   <div class="ticket-page">
     <div class="ticket-header ticket-header-bs">
       <div class="ticket-header-left">
         <div class="ticket-type-badge ticket-type-bs">Billing Sheet</div>
         <div class="ticket-number">BS #${bs.billingNumber}</div>
-        <div class="ticket-subtitle">${bs.workDescription}</div>
         ${bs.propertyAddress ? `<div class="ticket-location">&#128205; ${bs.propertyAddress}</div>` : ''}
       </div>
       <div class="ticket-header-right">
+        ${bsLogoHtml}
         <div class="ticket-meta-item"><span class="ticket-meta-label">Invoice #</span><span class="ticket-meta-value">${invoiceNumber}</span></div>
         <div class="ticket-meta-item"><span class="ticket-meta-label">Date</span><span class="ticket-meta-value">${formatDate(bs.workDate)}</span></div>
         <div class="ticket-meta-item"><span class="ticket-meta-label">Technician</span><span class="ticket-meta-value">${bs.technicianName}</span></div>
@@ -548,13 +563,15 @@ export function pageFooter(invoiceNumber: string): string {
   </div>`;
 }
 
-export function buildFullCSS(): string {
+export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): string {
+  const { navy, brown, green, black, gray } = colors;
+
   return `
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    color: #1f2937;
+    color: ${black};
     line-height: 1.5;
     background: white;
     font-size: 13px;
@@ -584,7 +601,7 @@ export function buildFullCSS(): string {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    border-bottom: 3px solid #3B82F6;
+    border-bottom: 3px solid ${green};
     padding-bottom: 24px;
   }
 
@@ -606,13 +623,13 @@ export function buildFullCSS(): string {
   .cover-company-name-fallback {
     font-size: 24px;
     font-weight: 800;
-    color: #3B82F6;
+    color: ${navy};
   }
 
   .cover-company-name {
     font-size: 18px;
     font-weight: 700;
-    color: #1f2937;
+    color: ${black};
   }
 
   .cover-company-details {
@@ -634,7 +651,7 @@ export function buildFullCSS(): string {
   .cover-invoice-label {
     font-size: 11px;
     font-weight: 700;
-    color: #9ca3af;
+    color: ${navy};
     text-transform: uppercase;
     letter-spacing: 1.5px;
     margin-bottom: 4px;
@@ -643,7 +660,7 @@ export function buildFullCSS(): string {
   .cover-invoice-number {
     font-size: 30px;
     font-weight: 800;
-    color: #1f2937;
+    color: ${black};
     margin-bottom: 12px;
   }
 
@@ -657,28 +674,28 @@ export function buildFullCSS(): string {
   }
 
   .cover-meta-label {
-    color: #9ca3af;
+    color: ${navy};
     font-weight: 600;
     font-size: 11px;
     text-transform: uppercase;
   }
 
   .cover-meta-value {
-    color: #1f2937;
+    color: ${black};
     font-weight: 500;
   }
 
   .cover-bill-to {
-    background: #f9fafb;
+    background: ${gray};
     border-radius: 8px;
     padding: 18px 22px;
-    border-left: 4px solid #3B82F6;
+    border-left: 4px solid ${green};
   }
 
   .cover-bill-to-label {
     font-size: 10px;
     font-weight: 700;
-    color: #9ca3af;
+    color: ${navy};
     text-transform: uppercase;
     letter-spacing: 1px;
     margin-bottom: 6px;
@@ -687,7 +704,7 @@ export function buildFullCSS(): string {
   .cover-bill-to-name {
     font-size: 20px;
     font-weight: 700;
-    color: #1f2937;
+    color: ${black};
     margin-bottom: 4px;
   }
 
@@ -697,7 +714,7 @@ export function buildFullCSS(): string {
   }
 
   .cover-total-block {
-    background: linear-gradient(135deg, #1e40af 0%, #3B82F6 100%);
+    background: ${navy};
     border-radius: 12px;
     padding: 32px 36px;
     text-align: center;
@@ -719,6 +736,7 @@ export function buildFullCSS(): string {
     letter-spacing: -1px;
     line-height: 1;
     margin-bottom: 10px;
+    color: ${brown};
   }
 
   .cover-total-period {
@@ -735,9 +753,9 @@ export function buildFullCSS(): string {
   .cover-breakdown-heading {
     font-size: 13px;
     font-weight: 700;
-    color: #374151;
+    color: ${navy};
     padding: 12px 18px;
-    background: #f3f4f6;
+    background: ${gray};
     border-bottom: 1px solid #e5e7eb;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -750,7 +768,7 @@ export function buildFullCSS(): string {
   }
 
   .cover-breakdown-table thead tr {
-    background: #1f2937;
+    background: ${navy};
     color: white;
   }
 
@@ -775,15 +793,15 @@ export function buildFullCSS(): string {
 
   .cover-breakdown-table td {
     padding: 12px 16px;
-    color: #1f2937;
+    color: ${black};
   }
 
   .cover-breakdown-type {
     font-weight: 600;
   }
 
-  .cover-breakdown-type-wo { color: #1d4ed8; }
-  .cover-breakdown-type-bs { color: #047857; }
+  .cover-breakdown-type-wo { color: ${navy}; }
+  .cover-breakdown-type-bs { color: ${navy}; }
 
   .cover-breakdown-count,
   .cover-breakdown-amount,
@@ -797,12 +815,12 @@ export function buildFullCSS(): string {
   }
 
   .cover-breakdown-grand td {
-    background: #1e3a8a;
+    background: ${navy};
     color: white;
     font-weight: 700;
     font-size: 14px;
     padding: 14px 16px;
-    border-top: 2px solid #3B82F6;
+    border-top: 2px solid ${green};
     text-align: right;
   }
 
@@ -840,12 +858,12 @@ export function buildFullCSS(): string {
   }
 
   .ticket-header-wo {
-    background: linear-gradient(135deg, #1d4ed8 0%, #3B82F6 100%);
+    background: ${navy};
     color: white;
   }
 
   .ticket-header-bs {
-    background: linear-gradient(135deg, #065f46 0%, #059669 100%);
+    background: ${navy};
     color: white;
   }
 
@@ -860,6 +878,24 @@ export function buildFullCSS(): string {
     flex-direction: column;
     align-items: flex-end;
     gap: 6px;
+  }
+
+  .ticket-header-logo {
+    max-width: 100px;
+    max-height: 40px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .ticket-header-company-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
   }
 
   .ticket-type-badge {
@@ -956,14 +992,16 @@ export function buildFullCSS(): string {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: #9ca3af;
-    margin-bottom: 10px;
+    color: ${navy};
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid ${green};
   }
 
   /* Work bullet list */
   .ticket-work-list {
     font-size: 13px;
-    color: #1f2937;
+    color: ${black};
   }
 
   .work-bullet-list {
@@ -975,7 +1013,7 @@ export function buildFullCSS(): string {
   .work-bullet-list li {
     margin-bottom: 5px;
     line-height: 1.6;
-    color: #1f2937;
+    color: ${black};
   }
 
   /* Financial breakdown */
@@ -995,9 +1033,9 @@ export function buildFullCSS(): string {
     justify-content: space-between;
     align-items: center;
     padding: 8px 0;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid ${gray};
     font-size: 13px;
-    color: #4b5563;
+    color: ${black};
   }
 
   .ticket-fin-row:last-child {
@@ -1006,25 +1044,31 @@ export function buildFullCSS(): string {
 
   .ticket-fin-label {
     font-weight: 500;
+    color: ${black};
   }
 
   .ticket-fin-value {
     font-weight: 600;
     min-width: 100px;
     text-align: right;
+    color: ${black};
   }
 
   .ticket-fin-total {
     margin-top: 8px;
     padding-top: 12px;
-    border-top: 2px solid #3B82F6 !important;
+    border-top: 2px solid ${green} !important;
     font-size: 16px;
     font-weight: 800;
-    color: #1f2937;
+    color: ${black};
+  }
+
+  .ticket-fin-total .ticket-fin-label {
+    color: ${black};
   }
 
   .ticket-fin-total .ticket-fin-value {
-    color: #1d4ed8;
+    color: ${brown};
     font-size: 18px;
   }
 
@@ -1035,12 +1079,12 @@ export function buildFullCSS(): string {
   }
 
   .items-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .items-table thead { background: #1f2937; color: white; }
+  .items-table thead { background: ${navy}; color: white; }
   .items-table th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
   .items-table th.text-right { text-align: right; }
   .items-table tbody tr { border-bottom: 1px solid #e5e7eb; }
-  .items-table tbody tr:nth-child(even) { background: #f9fafb; }
-  .items-table td { padding: 10px 12px; color: #1f2937; }
+  .items-table tbody tr:nth-child(even) { background: ${gray}; }
+  .items-table td { padding: 10px 12px; color: ${black}; }
   .items-table td.text-right { text-align: right; }
   .item-note { color: #6b7280; font-size: 11px; }
   .no-items-msg { color: #9ca3af; font-size: 12px; font-style: italic; }
@@ -1052,7 +1096,7 @@ export function buildFullCSS(): string {
   }
 
   .photo-no-photos {
-    background: #f9fafb;
+    background: ${gray};
     border: 2px dashed #d1d5db;
     border-radius: 8px;
     padding: 28px;
@@ -1080,7 +1124,7 @@ export function buildFullCSS(): string {
   .recon-title {
     font-size: 24px;
     font-weight: 800;
-    color: #1f2937;
+    color: ${navy};
     margin-bottom: 4px;
   }
 
@@ -1098,7 +1142,7 @@ export function buildFullCSS(): string {
   }
 
   .recon-table thead tr {
-    background: #1f2937;
+    background: ${navy};
     color: white;
   }
 
@@ -1121,16 +1165,16 @@ export function buildFullCSS(): string {
 
   .recon-table td {
     padding: 10px 14px;
-    color: #1f2937;
+    color: ${black};
   }
 
   .recon-ref { font-weight: 600; }
-  .recon-ref-wo { color: #1d4ed8; }
-  .recon-ref-bs { color: #047857; }
+  .recon-ref-wo { color: ${navy}; }
+  .recon-ref-bs { color: ${navy}; }
 
   .recon-type { font-weight: 500; font-size: 12px; }
-  .recon-type-wo { color: #1d4ed8; }
-  .recon-type-bs { color: #047857; }
+  .recon-type-wo { color: ${navy}; }
+  .recon-type-bs { color: ${navy}; }
 
   .recon-total {
     text-align: right;
@@ -1146,25 +1190,25 @@ export function buildFullCSS(): string {
   }
 
   .recon-group-wo td {
-    background: #dbeafe;
-    color: #1e40af;
-    border-top: 1px solid #93c5fd;
+    background: ${gray};
+    color: ${navy};
+    border-top: 1px solid ${green};
   }
 
   .recon-group-bs td {
-    background: #d1fae5;
-    color: #065f46;
-    border-top: 1px solid #6ee7b7;
+    background: ${gray};
+    color: ${navy};
+    border-top: 1px solid ${green};
   }
 
   .recon-subtotal td {
-    background: #f3f4f6;
+    background: ${gray};
     font-weight: 700;
     font-size: 12px;
     padding: 9px 14px;
     border-top: 1px solid #d1d5db;
     border-bottom: 2px solid #d1d5db;
-    color: #374151;
+    color: ${black};
   }
 
   .recon-subtotal-label {
@@ -1187,12 +1231,12 @@ export function buildFullCSS(): string {
   }
 
   .recon-grand-total td {
-    background: #1e3a8a;
+    background: ${navy};
     color: white;
     font-weight: 800;
     font-size: 15px;
     padding: 14px 14px;
-    border-top: 3px solid #3B82F6;
+    border-top: 3px solid ${green};
   }
 
   .recon-grand-label {
@@ -1202,13 +1246,14 @@ export function buildFullCSS(): string {
   .recon-grand-amount {
     text-align: right;
     font-size: 18px;
+    color: ${brown};
   }
 
   .recon-totals-box {
-    border: 2px solid #3B82F6;
+    border: 2px solid ${navy};
     border-radius: 8px;
     padding: 18px 22px;
-    background: #f0f7ff;
+    background: ${gray};
     max-width: 360px;
     margin-left: auto;
   }
@@ -1218,8 +1263,8 @@ export function buildFullCSS(): string {
     justify-content: space-between;
     padding: 7px 0;
     font-size: 14px;
-    color: #4b5563;
-    border-bottom: 1px solid #dbeafe;
+    color: ${black};
+    border-bottom: 1px solid #e5e7eb;
   }
 
   .recon-totals-row:last-child {
@@ -1227,16 +1272,16 @@ export function buildFullCSS(): string {
   }
 
   .recon-totals-grand {
-    border-top: 2px solid #3B82F6 !important;
+    border-top: 2px solid ${green} !important;
     margin-top: 8px;
     padding-top: 12px;
     font-size: 18px;
     font-weight: 800;
-    color: #1f2937;
+    color: ${black};
   }
 
   .recon-totals-grand span:last-child {
-    color: #1d4ed8;
+    color: ${brown};
   }
 
   /* ═══════════════════════════════════

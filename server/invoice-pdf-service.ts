@@ -1,7 +1,73 @@
 import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
 import { buildPdfViewModel } from './pdf-view-model';
+import type { PdfBrandColors } from './pdf-view-model';
+import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import type { IStorage } from './storage';
 import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem } from '@shared/schema';
+
+async function extractBrandColorsFromDataUri(dataUri: string): Promise<PdfBrandColors> {
+  try {
+    const { Vibrant } = await import('node-vibrant/node');
+    const base64Data = dataUri.replace(/^data:image\/[^;]+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    const palette = await Vibrant.from(buffer).getPalette();
+
+    const swatches = [
+      palette.Vibrant,
+      palette.DarkVibrant,
+      palette.LightVibrant,
+      palette.Muted,
+      palette.DarkMuted,
+      palette.LightMuted,
+    ].filter(Boolean);
+
+    if (swatches.length === 0) {
+      return DEFAULT_BRAND_COLORS;
+    }
+
+    const toHex = (s: { r: number; g: number; b: number }) =>
+      '#' + [s.r, s.g, s.b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+
+    const getLuminance = (r: number, g: number, b: number): number =>
+      0.299 * r + 0.587 * g + 0.114 * b;
+
+    const getSaturation = (r: number, g: number, b: number): number => {
+      const max = Math.max(r, g, b) / 255;
+      const min = Math.min(r, g, b) / 255;
+      return max === 0 ? 0 : (max - min) / max;
+    };
+
+    const getWarmth = (r: number, g: number, b: number): number =>
+      r - b;
+
+    const swatchData = swatches.map(s => {
+      const [r, g, b] = s!.rgb;
+      return {
+        hex: toHex({ r, g, b }),
+        luminance: getLuminance(r, g, b),
+        saturation: getSaturation(r, g, b),
+        warmth: getWarmth(r, g, b),
+        r, g, b,
+      };
+    });
+
+    swatchData.sort((a, b) => a.luminance - b.luminance);
+    const navy = swatchData[0].hex;
+
+    swatchData.sort((a, b) => b.saturation - a.saturation);
+    const green = swatchData[0].hex;
+
+    const remaining = swatchData.filter(s => s.hex !== navy && s.hex !== green);
+    const warmSorted = remaining.sort((a, b) => b.warmth - a.warmth);
+    const brown = warmSorted.length > 0 ? warmSorted[0].hex : DEFAULT_BRAND_COLORS.brown;
+
+    console.log(`[PDF] Extracted brand colors — navy:${navy} brown:${brown} green:${green}`);
+    return { navy, brown, green, black: '#000000', gray: '#F5F5F5' };
+  } catch (err) {
+    console.warn('[PDF] Color extraction failed, using defaults:', err instanceof Error ? err.message : err);
+    return DEFAULT_BRAND_COLORS;
+  }
+}
 
 const LOGO_PATH_PATTERNS = [
   /\/api\/public-objects\/company-logos\/(.+)/,
@@ -243,6 +309,10 @@ export class InvoicePdfService {
         logoDataUri = await fetchLogoAsBase64(logoUrl);
       }
 
+      const brandColors = logoDataUri
+        ? await extractBrandColorsFromDataUri(logoDataUri)
+        : DEFAULT_BRAND_COLORS;
+
       const { viewModel } = buildPdfViewModel({
         invoice,
         company: {
@@ -256,6 +326,7 @@ export class InvoicePdfService {
         workOrders,
         billingSheets,
         laborRate,
+        brandColors,
       });
 
       const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF(viewModel);
