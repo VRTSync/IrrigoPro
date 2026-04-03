@@ -1,0 +1,125 @@
+#91 - Irrigation Manager Approval Gate Before Billing
+What & Why
+
+Irrigo needs a formal approval-gated workflow between field completion and billing. Right now, fixing the financial source of truth is the first priority, but that alone does not create operational accountability. The system also needs a controlled handoff where field users complete tickets, the irrigation manager reviews and edits them as needed, and only then approves them into a stable “passed to billing” state. This approval layer is meant to accomplish two things: (1) give the irrigation manager full autonomy to clean up and finalize tickets before billing manager involvement, and (2) create a clear approval stamp so responsibility for ticket quality shifts from the field to the irrigation manager before the billing manager ever touches the record. Once approved, the ticket should be operationally locked and ready for billing. Once billed, it remains fully locked per the billed-lock slice. This creates a clean audit trail, reduces billing-manager cleanup, and establishes a clear chain of responsibility.
+
+Done looks like
+Field-completed work orders and billing sheets move into a clear Pending Manager Review state rather than flowing directly into billing
+The irrigation manager has full edit authority while a ticket is in manager review
+The irrigation manager can explicitly Approve / Pass to Billing or Return for Correction
+Approval captures a formal manager stamp:
+approvedBy
+approvedAt
+approvedTotal
+approvedPartsSnapshot
+approvedLaborSnapshot
+Once approved, field users and the irrigation manager can no longer casually edit the record
+Billing manager views only intake tickets that are in Approved / Passed to Billing state
+Operational lists clearly distinguish:
+Pending Manager Review
+Approved / Passed to Billing
+Billed
+Billed behavior continues to follow the separate billed-lock and billed-visibility slices
+The approval step becomes the official responsibility handoff from operations to billing
+Out of scope
+Fixing the core work-order financial calculation issue itself (handled in #88)
+Locking records after invoicing (handled in #89)
+Billed grouping and month-based billed visibility improvements (handled in #90)
+Admin override / reopen-after-billed workflow
+Full audit logging beyond the approval stamp fields
+QuickBooks reversal / correction workflows
+Tasks
+Add manager-review lifecycle states
+
+Extend work order and billing sheet lifecycle behavior to support the approval gate. The minimum required states are:
+
+Draft / In Progress
+Completed - Pending Manager Review
+Approved - Passed to Billing
+Billed
+
+Optional future exception states such as Returned for Correction, Billing Hold, or Reopened may be added later, but the core workflow above must be implemented first. The key behavior is that field completion should no longer mean “ready for billing”; it should mean “ready for irrigation manager review.”
+
+Route field-completed tickets into Pending Manager Review
+
+When a field technician completes a work order or submits a billing sheet, the record should enter Pending Manager Review instead of flowing directly into the billing pipeline. This state should be visible in operational views and should clearly signal that the ticket is no longer an active field task but is not yet approved for billing.
+
+Give irrigation manager full edit control before approval
+
+While a ticket is in Pending Manager Review, the irrigation manager must have full authority to edit all operationally relevant fields needed to finalize the ticket, including notes, parts, labor inputs, photos, descriptions, and other accuracy-related fields. This is the operational cleanup window before the billing manager sees the record.
+
+Add Approve / Pass to Billing action
+
+Create an explicit irrigation-manager action to approve a ticket. This action moves the ticket from Pending Manager Review into Approved - Passed to Billing. Approval is the formal handoff into the billing pipeline and should only be available to the irrigation manager role (or company admin if you already allow admin supersets).
+
+Capture approval stamp fields
+
+On approval, persist the following fields on both work orders and billing sheets:
+
+approvedBy
+approvedAt
+approvedTotal
+approvedPartsSnapshot
+approvedLaborSnapshot
+
+These fields should reflect the financial and operational state of the ticket at the moment of manager approval. They are not decorative metadata; they are the formal sign-off record that shows what the irrigation manager approved before billing.
+
+Lock normal operational editing after approval
+
+Once a ticket is approved and passed to billing:
+
+field users lose edit access
+irrigation manager loses normal edit access
+the record becomes operationally read-only
+only billing-specific downstream actions should remain
+
+This is separate from the billed lock. The purpose here is to prevent silent drift after manager approval but before invoicing. Approval should mean the ticket is stable enough for billing intake.
+
+Add Return for Correction path
+
+Provide a manager action to return a ticket for correction instead of approving it. This should move the record back into an editable correction-ready state and clearly indicate that approval was not granted. Keep this simple in the first pass; the main goal is to avoid forcing approval on incomplete or inaccurate tickets.
+
+Restrict billing manager intake to approved tickets only
+
+Update billing manager intake and billing selection logic so that only tickets in Approved - Passed to Billing state are eligible to appear in billing-ready views and invoice workflows. Billing manager should no longer be cleaning up raw field-completed tickets. This is a key operational outcome of the slice.
+
+Update operational list grouping and badges
+
+In irrigation manager and field-facing views, update completed-ticket organization to distinguish:
+
+Pending Manager Review
+Approved / Passed to Billing
+Billed
+
+Use strong, obvious badges so users can immediately tell the ticket’s billing readiness and responsibility state. Approved tickets should remain visible but should sink below active review items. Billed tickets continue to sink lowest per the billed-visibility slice.
+
+Show approval details in ticket detail views
+
+In work order and billing sheet detail views, show the approval stamp when present:
+
+who approved it
+when it was approved
+approved total
+approved parts/labor snapshot summary
+
+This makes the handoff explicit and gives the billing manager immediate confidence that the ticket has already been reviewed operationally.
+
+Relevant files
+shared/schema.ts
+server/routes.ts
+client/src/components/manager/work-orders-manager.tsx
+client/src/pages/billing-sheets.tsx
+client/src/pages/customer-billing.tsx
+any work order / billing sheet detail components and PATCH handlers involved in edit permissions
+Dependencies
+#88 - Fix Core Billing Calculation Discrepancy
+#89 - Billing Lock After Invoicing
+#90 - Billed Status Visibility in Operational Views
+Acceptance criteria
+A field-completed work order does not become billing-ready until irrigation manager approval
+Irrigation manager can edit tickets during review but not after approval
+Approval stores a durable sign-off snapshot on the ticket
+Billing manager billing views only surface approved/passed-to-billing tickets
+Field users cannot continue editing after manager approval
+Operational views clearly distinguish pending review, approved, and billed tickets
+The approval gate creates a clear responsibility handoff from field → irrigation manager → billing manager
