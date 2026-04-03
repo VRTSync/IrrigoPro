@@ -25,7 +25,7 @@ const pdfGeneratorModule = await import('../server/pdf-generator.ts');
 const { PDFGenerator, fetchLogoAsBase64 } = pdfGeneratorModule;
 
 const pdfHelpersModule = await import('../server/pdf-helpers.ts');
-const { FAILED_PHOTO_SENTINEL, invoiceHeader, photoGrid } = pdfHelpersModule;
+const { FAILED_PHOTO_SENTINEL, coverPage, photoGridSection, ticketPageWO, ticketPageBS } = pdfHelpersModule;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ── Fixture Builders ──────────────────────────────────────────────────────────
@@ -654,67 +654,183 @@ describe('Image and logo fallback — buildPdfViewModel and pdf-helpers', () => 
     assert.equal(photos.length, 2);
   });
 
-  test('invoiceHeader HTML: no img tag when logoDataUri is null', () => {
-    const company = { name: 'Test Co', logo: '', logoDataUri: null, address: '', phone: '', email: '' };
-    const inv = {
-      invoiceNumber: 'INV-001',
-      periodStart: new Date('2026-04-01'),
-      periodEnd: new Date('2026-04-30'),
-      generatedAt: new Date(),
-      customerName: 'Customer',
-      customerEmail: 'c@e.com',
-      customerPhone: '',
+  test('coverPage HTML: no img tag when logoDataUri is null', () => {
+    const vm = {
+      company: { name: 'Test Co', logo: '', logoDataUri: null, address: '', phone: '', email: '' },
+      invoice: {
+        invoiceNumber: 'INV-001',
+        periodStart: new Date('2026-04-01'),
+        periodEnd: new Date('2026-04-30'),
+        generatedAt: new Date(),
+        customerName: 'Customer',
+        customerEmail: 'c@e.com',
+        customerPhone: '',
+      },
+      workOrders: [],
+      billingSheets: [],
+      totals: { partsSubtotal: 0, laborSubtotal: 0, grandTotal: 0, storedTotalAmount: 0 },
+      totalJobs: 0,
+      validationWarning: null,
     };
-    const html = invoiceHeader(inv, company);
+    const html = coverPage(vm);
     assert.ok(!html.includes('<img'), 'No <img> tag should appear when logoDataUri is null');
     assert.ok(html.includes('Test Co'), 'Company name should still appear');
   });
 
-  test('invoiceHeader HTML: img tag present when logoDataUri is provided', () => {
-    const company = { name: 'Test Co', logo: 'logo.png', logoDataUri: 'data:image/png;base64,abc', address: '', phone: '', email: '' };
-    const inv = {
-      invoiceNumber: 'INV-001',
-      periodStart: new Date('2026-04-01'),
-      periodEnd: new Date('2026-04-30'),
-      generatedAt: new Date(),
-      customerName: 'Customer',
-      customerEmail: 'c@e.com',
-      customerPhone: '',
+  test('coverPage HTML: img tag present when logoDataUri is provided', () => {
+    const vm = {
+      company: { name: 'Test Co', logo: 'logo.png', logoDataUri: 'data:image/png;base64,abc', address: '', phone: '', email: '' },
+      invoice: {
+        invoiceNumber: 'INV-001',
+        periodStart: new Date('2026-04-01'),
+        periodEnd: new Date('2026-04-30'),
+        generatedAt: new Date(),
+        customerName: 'Customer',
+        customerEmail: 'c@e.com',
+        customerPhone: '',
+      },
+      workOrders: [],
+      billingSheets: [],
+      totals: { partsSubtotal: 0, laborSubtotal: 0, grandTotal: 0, storedTotalAmount: 0 },
+      totalJobs: 0,
+      validationWarning: null,
     };
-    const html = invoiceHeader(inv, company);
+    const html = coverPage(vm);
     assert.ok(html.includes('<img'), 'An <img> tag should appear when logoDataUri is provided');
     assert.ok(html.includes('data:image/png;base64,abc'), 'The data URI should be embedded in the img src');
   });
 
   // ── Invalid photo src fallback ────────────────────────────────────────────
   // When a photo URL fails to load (e.g., broken link, 404, timeout),
-  // fetchPhotoAsDataUri() returns FAILED_PHOTO_SENTINEL. The photoGrid()
-  // helper detects this sentinel and renders a fallback "Image unavailable"
-  // cell instead of a broken <img> tag.
+  // fetchPhotoAsDataUri() returns FAILED_PHOTO_SENTINEL. The photoGridSection()
+  // helper detects this sentinel and renders a clean "No photos captured" fallback
+  // instead of broken <img> tags.
 
-  test('invalid photo src: photoGrid renders fallback cell for FAILED_PHOTO_SENTINEL', () => {
-    const html = photoGrid([FAILED_PHOTO_SENTINEL]);
-    assert.ok(html.includes('photo-unavailable'), 'Should include the photo-unavailable CSS class');
-    assert.ok(html.includes('Image unavailable'), 'Should render "Image unavailable" fallback text');
+  test('invalid photo src: photoGridSection renders fallback message for only-FAILED_PHOTO_SENTINEL', () => {
+    const html = photoGridSection([FAILED_PHOTO_SENTINEL]);
     assert.ok(!html.includes('<img'), 'Should NOT render a broken <img> tag for failed photos');
+    assert.ok(html.includes('No photos captured'), 'Should render a "No photos captured" fallback message');
   });
 
-  test('invalid photo src: mixed valid/invalid photos — valid photos get img tag, invalid get fallback', () => {
+  test('invalid photo src: mixed valid/invalid photos — valid photos get img tag, sentinel is filtered out', () => {
     const validUri = 'data:image/jpeg;base64,/9j/valid';
-    const html = photoGrid([validUri, FAILED_PHOTO_SENTINEL, validUri]);
-    // Valid photos should have <img> tags
+    const html = photoGridSection([validUri, FAILED_PHOTO_SENTINEL, validUri]);
     assert.ok(html.includes('<img'), 'Valid photos should render as <img> elements');
-    // Failed photo should have fallback
-    assert.ok(html.includes('photo-unavailable'), 'Failed photo should render fallback cell');
-    assert.ok(html.includes('Image unavailable'), 'Fallback text should appear for sentinel');
+    assert.ok(!html.includes(FAILED_PHOTO_SENTINEL), 'Sentinel string should never appear in output HTML');
   });
 
-  test('invalid photo src: all-failed photos produce only fallback cells, no img tags', () => {
-    const html = photoGrid([FAILED_PHOTO_SENTINEL, FAILED_PHOTO_SENTINEL]);
+  test('invalid photo src: all-failed photos produce no img tags and show fallback', () => {
+    const html = photoGridSection([FAILED_PHOTO_SENTINEL, FAILED_PHOTO_SENTINEL]);
     const imgCount = (html.match(/<img/g) || []).length;
     assert.equal(imgCount, 0, 'No <img> tags should appear when all photos failed');
-    const unavailableCount = (html.match(/photo-unavailable/g) || []).length;
-    assert.equal(unavailableCount, 2, 'Both cells should show as unavailable');
+    assert.ok(html.includes('No photos captured'), 'Fallback message should appear when all photos failed');
+  });
+
+  // ── Approval stamp visibility ─────────────────────────────────────────────
+  // ticketPageWO/ticketPageBS should show approval info when present and hide
+  // it entirely when approvedBy and approvedAt are both null.
+
+  test('approval stamp: WO ticket hides approval block when approvedBy and approvedAt are null', () => {
+    const wo = {
+      workOrderNumber: 'WO-001',
+      projectName: 'Test Project',
+      projectAddress: '123 Main St',
+      locationNotes: '',
+      technicianName: 'John Doe',
+      completedAt: new Date('2026-04-01'),
+      totalHours: 2,
+      laborRate: 50,
+      markupAmount: 0,
+      taxAmount: 0,
+      workDescription: 'Fixed sprinkler',
+      workSummary: '',
+      aiDetailedDescription: '',
+      photos: [],
+      items: [],
+      partsSubtotal: 0,
+      laborSubtotal: 100,
+      rowTotal: 100,
+      approvedBy: null,
+      approvedAt: null,
+    };
+    const html = ticketPageWO(wo, 'INV-001', []);
+    assert.ok(!html.includes('ticket-approval'), 'Approval block should not appear when both fields are null');
+    assert.ok(!html.includes('Approved By'), 'No "Approved By" text should appear');
+    assert.ok(!html.includes('Approved At'), 'No "Approved At" text should appear');
+  });
+
+  test('approval stamp: WO ticket shows approval block when approvedBy is set', () => {
+    const wo = {
+      workOrderNumber: 'WO-002',
+      projectName: 'Test Project',
+      projectAddress: '123 Main St',
+      locationNotes: '',
+      technicianName: 'John Doe',
+      completedAt: new Date('2026-04-01'),
+      totalHours: 2,
+      laborRate: 50,
+      markupAmount: 0,
+      taxAmount: 0,
+      workDescription: 'Fixed sprinkler',
+      workSummary: '',
+      aiDetailedDescription: '',
+      photos: [],
+      items: [],
+      partsSubtotal: 0,
+      laborSubtotal: 100,
+      rowTotal: 100,
+      approvedBy: 'Manager Jane',
+      approvedAt: new Date('2026-04-02'),
+    };
+    const html = ticketPageWO(wo, 'INV-001', []);
+    assert.ok(html.includes('ticket-approval'), 'Approval block should appear when approvedBy is set');
+    assert.ok(html.includes('Manager Jane'), 'Approver name should be rendered');
+  });
+
+  test('approval stamp: BS ticket shows approval block when approvedAt is set', () => {
+    const bs = {
+      billingNumber: 'BS-001',
+      workDescription: 'Irrigation maintenance',
+      propertyAddress: '456 Oak Ave',
+      technicianName: 'Tech Sam',
+      workDate: new Date('2026-04-01'),
+      totalHours: 3,
+      laborRate: 50,
+      markupAmount: 0,
+      taxAmount: 0,
+      aiDetailedDescription: '',
+      notes: '',
+      photos: [],
+      items: [],
+      partsSubtotal: 0,
+      laborSubtotal: 150,
+      rowTotal: 150,
+      approvedBy: null,
+      approvedAt: new Date('2026-04-03'),
+    };
+    const html = ticketPageBS(bs, 'INV-001', []);
+    assert.ok(html.includes('ticket-approval'), 'Approval block should appear when approvedAt is set');
+    assert.ok(html.includes('Approved At'), '"Approved At" label should appear');
+  });
+
+  test('approval stamp: buildPdfViewModel maps approvedBy and approvedAt from work order', () => {
+    const wo = makeWorkOrder({
+      totalAmount: '100.00',
+      laborSubtotal: '100.00',
+      partsSubtotal: '0.00',
+      totalPartsCost: '0.00',
+      approvedBy: 'Manager Jane',
+      approvedAt: new Date('2026-04-02'),
+    });
+    const { viewModel } = buildPdfViewModel({
+      invoice: makeInvoice({ totalAmount: '100.00', laborSubtotal: '100.00', partsSubtotal: '0.00' }),
+      company: makeCompany(),
+      workOrders: [{ workOrder: wo, items: [] }],
+      billingSheets: [],
+      laborRate: '50.00',
+    });
+    assert.equal(viewModel.workOrders[0].approvedBy, 'Manager Jane', 'approvedBy should be mapped from workOrder');
+    assert.ok(viewModel.workOrders[0].approvedAt instanceof Date, 'approvedAt should be a Date when set');
   });
 
   test('invalid photo src: PDF generation with failing photo URL does not throw', { timeout: 60000 }, async () => {

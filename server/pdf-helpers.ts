@@ -9,6 +9,36 @@ import type {
 
 export const FAILED_PHOTO_SENTINEL = '__PHOTO_UNAVAILABLE__';
 
+export function formatWorkSummaryAsBullets(text: string | null | undefined): string {
+  if (!text || text.trim().length === 0) return '';
+  const trimmed = text.trim();
+
+  const lines = trimmed.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length > 1) {
+    const items = lines.map(l => `<li>${l}</li>`).join('');
+    return `<ul class="work-bullet-list">${items}</ul>`;
+  }
+
+  const paragraphs = trimmed.split(/\n\n+/);
+  if (paragraphs.length > 1) {
+    const items = paragraphs.map(p => `<li>${p.trim().replace(/\n/g, ' ')}</li>`).join('');
+    return `<ul class="work-bullet-list">${items}</ul>`;
+  }
+
+  if (trimmed.length > 200) {
+    const sentences = trimmed
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    if (sentences.length > 1) {
+      const items = sentences.map(s => `<li>${s}</li>`).join('');
+      return `<ul class="work-bullet-list">${items}</ul>`;
+    }
+  }
+
+  return `<ul class="work-bullet-list"><li>${trimmed}</li></ul>`;
+}
+
 export function formatWorkSummary(text: string | null | undefined): string {
   if (!text || text.trim().length === 0) return '';
   const trimmed = text.trim();
@@ -61,140 +91,267 @@ export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
-export function invoiceHeader(invoice: PdfInvoiceHeader, company: PdfCompanyHeader): string {
-  return `
-  <div class="pdf-header">
-    <div class="pdf-company">
-      ${company.logoDataUri
-        ? `<img src="${company.logoDataUri}" class="company-logo" alt="${company.name}">`
-        : ''
-      }
-      <div class="company-name">${company.name}</div>
-      <div class="company-details">
-        ${company.address ? `${company.address}<br>` : ''}
-        ${company.phone ? `Phone: ${company.phone}<br>` : ''}
-        ${company.email ? `Email: ${company.email}` : ''}
-      </div>
-    </div>
-    <div class="pdf-invoice-meta">
-      <div class="invoice-title">INVOICE DETAIL REPORT</div>
-      <div class="invoice-subtitle">Comprehensive Work Breakdown</div>
-      <div class="invoice-meta-rows">
-        <div><span class="meta-label">Invoice #:</span> ${invoice.invoiceNumber}</div>
-        <div><span class="meta-label">Period:</span> ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</div>
-        <div><span class="meta-label">Generated:</span> ${formatDate(invoice.generatedAt)}</div>
-      </div>
-    </div>
-  </div>`;
-}
-
-export function billToBlock(invoice: PdfInvoiceHeader): string {
-  return `
-  <div class="bill-to-block">
-    <div class="bill-to-label">Bill To</div>
-    <div class="bill-to-name">${invoice.customerName}</div>
-    <div class="bill-to-details">
-      ${invoice.customerEmail ? `${invoice.customerEmail}<br>` : ''}
-      ${invoice.customerPhone ? invoice.customerPhone : ''}
-    </div>
-  </div>`;
-}
-
-export function summaryTotalsCard(
-  totals: PdfTotals,
-  workOrderCount: number,
-  billingSheetCount: number
+export function coverPage(
+  vm: PdfViewModel
 ): string {
+  const { company, invoice, workOrders, billingSheets, totals } = vm;
+
+  const woCount = workOrders.length;
+  const bsCount = billingSheets.length;
+  const woLaborSubtotal = workOrders.reduce((s, wo) => s + wo.laborSubtotal, 0);
+  const woPartsSubtotal = workOrders.reduce((s, wo) => s + wo.partsSubtotal, 0);
+  const woGroupTotal = workOrders.reduce((s, wo) => s + wo.rowTotal, 0);
+  const bsLaborSubtotal = billingSheets.reduce((s, bs) => s + bs.laborSubtotal, 0);
+  const bsPartsSubtotal = billingSheets.reduce((s, bs) => s + bs.partsSubtotal, 0);
+  const bsGroupTotal = billingSheets.reduce((s, bs) => s + bs.rowTotal, 0);
+
+  const logoHtml = company.logoDataUri
+    ? `<img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}">`
+    : `<div class="cover-company-name-fallback">${company.name}</div>`;
+
+  const woRowHtml = woCount > 0 ? `
+    <tr>
+      <td class="cover-breakdown-type cover-breakdown-type-wo">Work Orders</td>
+      <td class="cover-breakdown-count">${woCount}</td>
+      <td class="cover-breakdown-amount">${formatCurrency(woLaborSubtotal)}</td>
+      <td class="cover-breakdown-amount">${formatCurrency(woPartsSubtotal)}</td>
+      <td class="cover-breakdown-total">${formatCurrency(woGroupTotal)}</td>
+    </tr>` : '';
+
+  const bsRowHtml = bsCount > 0 ? `
+    <tr>
+      <td class="cover-breakdown-type cover-breakdown-type-bs">Billing Sheets</td>
+      <td class="cover-breakdown-count">${bsCount}</td>
+      <td class="cover-breakdown-amount">${formatCurrency(bsLaborSubtotal)}</td>
+      <td class="cover-breakdown-amount">${formatCurrency(bsPartsSubtotal)}</td>
+      <td class="cover-breakdown-total">${formatCurrency(bsGroupTotal)}</td>
+    </tr>` : '';
+
   return `
-  <div class="summary-totals-card">
-    <div class="summary-totals-grid">
-      <div class="summary-totals-item">
-        <div class="summary-totals-label">Work Orders</div>
-        <div class="summary-totals-value">${workOrderCount}</div>
+  <div class="cover-page">
+    <div class="cover-header">
+      <div class="cover-company-block">
+        ${logoHtml}
+        <div class="cover-company-details">
+          <div class="cover-company-name">${company.name}</div>
+          ${company.address ? `<div class="cover-company-line">${company.address}</div>` : ''}
+          ${company.phone ? `<div class="cover-company-line">${company.phone}</div>` : ''}
+          ${company.email ? `<div class="cover-company-line">${company.email}</div>` : ''}
+        </div>
       </div>
-      <div class="summary-totals-item">
-        <div class="summary-totals-label">Billing Sheets</div>
-        <div class="summary-totals-value">${billingSheetCount}</div>
+      <div class="cover-invoice-meta">
+        <div class="cover-invoice-label">INVOICE</div>
+        <div class="cover-invoice-number">#${invoice.invoiceNumber}</div>
+        <div class="cover-meta-item"><span class="cover-meta-label">Billing Period</span><span class="cover-meta-value">${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</span></div>
+        <div class="cover-meta-item"><span class="cover-meta-label">Generated</span><span class="cover-meta-value">${formatDate(invoice.generatedAt)}</span></div>
       </div>
-      <div class="summary-totals-item">
-        <div class="summary-totals-label">Total Labor</div>
-        <div class="summary-totals-value">${formatCurrency(totals.laborSubtotal)}</div>
-      </div>
-      <div class="summary-totals-item">
-        <div class="summary-totals-label">Total Parts</div>
-        <div class="summary-totals-value">${formatCurrency(totals.partsSubtotal)}</div>
-      </div>
-      <div class="summary-totals-item summary-totals-grand">
-        <div class="summary-totals-label">Invoice Total</div>
-        <div class="summary-totals-value summary-totals-grand-amount">${formatCurrency(totals.grandTotal)}</div>
-      </div>
+    </div>
+
+    <div class="cover-bill-to">
+      <div class="cover-bill-to-label">BILL TO</div>
+      <div class="cover-bill-to-name">${invoice.customerName}</div>
+      ${invoice.customerEmail ? `<div class="cover-bill-to-detail">${invoice.customerEmail}</div>` : ''}
+      ${invoice.customerPhone ? `<div class="cover-bill-to-detail">${invoice.customerPhone}</div>` : ''}
+    </div>
+
+    <div class="cover-total-block">
+      <div class="cover-total-label">TOTAL INVOICE AMOUNT</div>
+      <div class="cover-total-amount">${formatCurrency(totals.grandTotal)}</div>
+      <div class="cover-total-period">For period ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}</div>
+    </div>
+
+    <div class="cover-breakdown">
+      <div class="cover-breakdown-heading">Billing Summary</div>
+      <table class="cover-breakdown-table">
+        <thead>
+          <tr>
+            <th class="cover-breakdown-type">Category</th>
+            <th class="cover-breakdown-count">Count</th>
+            <th class="cover-breakdown-amount">Labor</th>
+            <th class="cover-breakdown-amount">Parts</th>
+            <th class="cover-breakdown-total">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${woRowHtml}
+          ${bsRowHtml}
+        </tbody>
+        <tfoot>
+          <tr class="cover-breakdown-grand">
+            <td colspan="2" class="cover-breakdown-grand-label">Grand Total</td>
+            <td class="cover-breakdown-amount">${formatCurrency(totals.laborSubtotal)}</td>
+            <td class="cover-breakdown-amount">${formatCurrency(totals.partsSubtotal)}</td>
+            <td class="cover-breakdown-total">${formatCurrency(totals.grandTotal)}</td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   </div>`;
 }
 
-export function tableOfContents(
-  workOrders: PdfWorkOrderRow[],
-  billingSheets: PdfBillingSheetRow[]
-): string {
-  if (workOrders.length === 0 && billingSheets.length === 0) return '';
+export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDataUris: string[]): string {
+  const workText = wo.aiDetailedDescription || wo.workSummary || wo.workDescription;
+  const workBullets = workText
+    ? `<div class="ticket-section">
+         <div class="ticket-section-label">WORK PERFORMED</div>
+         <div class="ticket-work-list">${formatWorkSummaryAsBullets(workText)}</div>
+       </div>`
+    : '';
 
-  const woRows = workOrders.map((wo, i) => `
-    <tr>
-      <td class="toc-num">${i + 1}</td>
-      <td class="toc-type toc-type-wo">Work Order</td>
-      <td>${wo.workOrderNumber}</td>
-      <td>${wo.projectName}</td>
-      <td class="toc-amount">${formatCurrency(wo.rowTotal)}</td>
-    </tr>`).join('');
+  const locationLine = [wo.projectAddress, wo.locationNotes].filter(Boolean).join(' — ');
 
-  const bsRows = billingSheets.map((bs, i) => `
-    <tr>
-      <td class="toc-num">${workOrders.length + i + 1}</td>
-      <td class="toc-type toc-type-bs">Billing Sheet</td>
-      <td>${bs.billingNumber}</td>
-      <td>${bs.workDescription}</td>
-      <td class="toc-amount">${formatCurrency(bs.rowTotal)}</td>
-    </tr>`).join('');
+  const markupRow = wo.markupAmount > 0
+    ? `<div class="ticket-fin-row">
+         <span class="ticket-fin-label">Markup</span>
+         <span class="ticket-fin-value">${formatCurrency(wo.markupAmount)}</span>
+       </div>`
+    : '';
+
+  const taxRow = wo.taxAmount > 0
+    ? `<div class="ticket-fin-row">
+         <span class="ticket-fin-label">Tax</span>
+         <span class="ticket-fin-value">${formatCurrency(wo.taxAmount)}</span>
+       </div>`
+    : '';
+
+  const approvalHtml = (wo.approvedBy || wo.approvedAt)
+    ? `<div class="ticket-approval">
+         <span class="ticket-approval-icon">&#10003;</span>
+         <div class="ticket-approval-details">
+           ${wo.approvedBy ? `<span class="ticket-approval-by">Approved By: <strong>${wo.approvedBy}</strong></span>` : ''}
+           ${wo.approvedAt ? `<span class="ticket-approval-at">Approved At: ${formatDate(wo.approvedAt)}</span>` : ''}
+         </div>
+       </div>`
+    : '';
 
   return `
-  <div class="toc-block">
-    <div class="toc-title">Document Overview</div>
-    <table class="toc-table">
-      <thead>
-        <tr>
-          <th class="toc-num">#</th>
-          <th>Type</th>
-          <th>Number</th>
-          <th>Description</th>
-          <th class="toc-amount">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${woRows}
-        ${bsRows}
-      </tbody>
-    </table>
+  <div class="ticket-page">
+    <div class="ticket-header ticket-header-wo">
+      <div class="ticket-header-left">
+        <div class="ticket-type-badge ticket-type-wo">Work Order</div>
+        <div class="ticket-number">WO #${wo.workOrderNumber}</div>
+        <div class="ticket-subtitle">${wo.projectName}</div>
+        ${locationLine ? `<div class="ticket-location">&#128205; ${locationLine}</div>` : ''}
+      </div>
+      <div class="ticket-header-right">
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Invoice #</span><span class="ticket-meta-value">${invoiceNumber}</span></div>
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Date</span><span class="ticket-meta-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</span></div>
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Technician</span><span class="ticket-meta-value">${wo.technicianName}</span></div>
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Hours</span><span class="ticket-meta-value">${wo.totalHours} hrs</span></div>
+        ${approvalHtml}
+      </div>
+    </div>
+
+    ${workBullets}
+
+    <div class="ticket-section ticket-financial">
+      <div class="ticket-section-label">FINANCIAL BREAKDOWN</div>
+      <div class="ticket-fin-rows">
+        <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Labor (${wo.totalHours} hrs × ${formatCurrency(wo.laborRate)}/hr)</span>
+          <span class="ticket-fin-value">${formatCurrency(wo.laborSubtotal)}</span>
+        </div>
+        <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Parts Subtotal</span>
+          <span class="ticket-fin-value">${formatCurrency(wo.partsSubtotal)}</span>
+        </div>
+        ${markupRow}
+        ${taxRow}
+        <div class="ticket-fin-row ticket-fin-total">
+          <span class="ticket-fin-label">TOTAL</span>
+          <span class="ticket-fin-value">${formatCurrency(wo.rowTotal)}</span>
+        </div>
+      </div>
+    </div>
+
+    ${partsTableFromWO(wo.items)}
+
+    ${photoGridSection(photoDataUris)}
   </div>`;
 }
 
-export function sectionBanner(type: 'work-orders' | 'billing-sheets'): string {
-  const isWO = type === 'work-orders';
-  const label = isWO ? 'Work Orders' : 'Billing Sheets';
-  const colorClass = isWO ? 'banner-wo' : 'banner-bs';
-  const icon = isWO
-    ? `<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>`
-    : `<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M8 4v5"/></svg>`;
+export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, photoDataUris: string[]): string {
+  const workText = bs.aiDetailedDescription || bs.notes || bs.workDescription;
+  const workBullets = workText
+    ? `<div class="ticket-section">
+         <div class="ticket-section-label">WORK PERFORMED</div>
+         <div class="ticket-work-list">${formatWorkSummaryAsBullets(workText)}</div>
+       </div>`
+    : '';
+
+  const markupRow = bs.markupAmount > 0
+    ? `<div class="ticket-fin-row">
+         <span class="ticket-fin-label">Markup</span>
+         <span class="ticket-fin-value">${formatCurrency(bs.markupAmount)}</span>
+       </div>`
+    : '';
+
+  const taxRow = bs.taxAmount > 0
+    ? `<div class="ticket-fin-row">
+         <span class="ticket-fin-label">Tax</span>
+         <span class="ticket-fin-value">${formatCurrency(bs.taxAmount)}</span>
+       </div>`
+    : '';
+
+  const approvalHtml = (bs.approvedBy || bs.approvedAt)
+    ? `<div class="ticket-approval">
+         <span class="ticket-approval-icon">&#10003;</span>
+         <div class="ticket-approval-details">
+           ${bs.approvedBy ? `<span class="ticket-approval-by">Approved By: <strong>${bs.approvedBy}</strong></span>` : ''}
+           ${bs.approvedAt ? `<span class="ticket-approval-at">Approved At: ${formatDate(bs.approvedAt)}</span>` : ''}
+         </div>
+       </div>`
+    : '';
 
   return `
-  <div class="section-banner ${colorClass}">
-    <span class="section-banner-icon">${icon}</span>
-    <span class="section-banner-label">${label}</span>
+  <div class="ticket-page">
+    <div class="ticket-header ticket-header-bs">
+      <div class="ticket-header-left">
+        <div class="ticket-type-badge ticket-type-bs">Billing Sheet</div>
+        <div class="ticket-number">BS #${bs.billingNumber}</div>
+        <div class="ticket-subtitle">${bs.workDescription}</div>
+        ${bs.propertyAddress ? `<div class="ticket-location">&#128205; ${bs.propertyAddress}</div>` : ''}
+      </div>
+      <div class="ticket-header-right">
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Invoice #</span><span class="ticket-meta-value">${invoiceNumber}</span></div>
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Date</span><span class="ticket-meta-value">${formatDate(bs.workDate)}</span></div>
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Technician</span><span class="ticket-meta-value">${bs.technicianName}</span></div>
+        <div class="ticket-meta-item"><span class="ticket-meta-label">Hours</span><span class="ticket-meta-value">${bs.totalHours} hrs</span></div>
+        ${approvalHtml}
+      </div>
+    </div>
+
+    ${workBullets}
+
+    <div class="ticket-section ticket-financial">
+      <div class="ticket-section-label">FINANCIAL BREAKDOWN</div>
+      <div class="ticket-fin-rows">
+        <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Labor (${bs.totalHours} hrs × ${formatCurrency(bs.laborRate)}/hr)</span>
+          <span class="ticket-fin-value">${formatCurrency(bs.laborSubtotal)}</span>
+        </div>
+        <div class="ticket-fin-row">
+          <span class="ticket-fin-label">Parts Subtotal</span>
+          <span class="ticket-fin-value">${formatCurrency(bs.partsSubtotal)}</span>
+        </div>
+        ${markupRow}
+        ${taxRow}
+        <div class="ticket-fin-row ticket-fin-total">
+          <span class="ticket-fin-label">TOTAL</span>
+          <span class="ticket-fin-value">${formatCurrency(bs.rowTotal)}</span>
+        </div>
+      </div>
+    </div>
+
+    ${partsTableFromBS(bs.items)}
+
+    ${photoGridSection(photoDataUris)}
   </div>`;
 }
 
 export function partsTableFromWO(items: PdfWorkOrderRow['items']): string {
   if (!items || items.length === 0) {
-    return `<p class="no-items-msg">No line items recorded.</p>`;
+    return `<div class="ticket-section"><p class="no-items-msg">No parts recorded for this work order.</p></div>`;
   }
   const rows = items.map(item => {
     const subLines = [item.partDescription, item.notes].filter(Boolean).map(s => `<small class="item-note">${s}</small>`).join('');
@@ -208,8 +365,8 @@ export function partsTableFromWO(items: PdfWorkOrderRow['items']): string {
       </tr>`;
   }).join('');
   return `
-  <div class="parts-table-wrap">
-    <div class="parts-table-heading">Parts &amp; Labor Details</div>
+  <div class="ticket-section ticket-parts-section">
+    <div class="ticket-section-label">PARTS &amp; LABOR DETAILS</div>
     <table class="items-table">
       <thead>
         <tr>
@@ -227,7 +384,7 @@ export function partsTableFromWO(items: PdfWorkOrderRow['items']): string {
 
 export function partsTableFromBS(items: PdfBillingSheetRow['items']): string {
   if (!items || items.length === 0) {
-    return `<p class="no-items-msg">No line items recorded.</p>`;
+    return `<div class="ticket-section"><p class="no-items-msg">No parts recorded for this billing sheet.</p></div>`;
   }
   const rows = items.map(item => {
     const subLines = [item.partDescription, item.notes].filter(Boolean).map(s => `<small class="item-note">${s}</small>`).join('');
@@ -241,8 +398,8 @@ export function partsTableFromBS(items: PdfBillingSheetRow['items']): string {
       </tr>`;
   }).join('');
   return `
-  <div class="parts-table-wrap">
-    <div class="parts-table-heading">Parts &amp; Labor Details</div>
+  <div class="ticket-section ticket-parts-section">
+    <div class="ticket-section-label">PARTS &amp; LABOR DETAILS</div>
     <table class="items-table">
       <thead>
         <tr>
@@ -258,41 +415,21 @@ export function partsTableFromBS(items: PdfBillingSheetRow['items']): string {
   </div>`;
 }
 
-export function laborAndTotalsBox(args: {
-  partsSubtotal: number;
-  laborHours: number;
-  laborRate: number;
-  laborSubtotal: number;
-  total: number;
-  label: string;
-}): string {
-  return `
-  <div class="totals-box">
-    <div class="totals-row">
-      <span class="totals-row-label">Parts Subtotal</span>
-      <span class="totals-row-value">${formatCurrency(args.partsSubtotal)}</span>
-    </div>
-    <div class="totals-row">
-      <span class="totals-row-label">Labor Subtotal (${args.laborHours} hrs × ${formatCurrency(args.laborRate)})</span>
-      <span class="totals-row-value">${formatCurrency(args.laborSubtotal)}</span>
-    </div>
-    <div class="totals-row totals-row-grand">
-      <span class="totals-row-label">${args.label}</span>
-      <span class="totals-row-value">${formatCurrency(args.total)}</span>
-    </div>
-  </div>`;
-}
+export function photoGridSection(dataUris: string[]): string {
+  const validUris = dataUris.filter(uri => uri !== FAILED_PHOTO_SENTINEL);
 
-export function photoGrid(dataUris: string[]): string {
-  if (!dataUris || dataUris.length === 0) return '';
+  if (!dataUris || dataUris.length === 0 || validUris.length === 0) {
+    return `
+    <div class="ticket-section ticket-photos-section">
+      <div class="ticket-section-label">WORK PHOTOS</div>
+      <div class="photo-no-photos">No photos captured for this service</div>
+    </div>`;
+  }
 
   const COLS = 3;
-  const cells = dataUris.map(uri => {
-    if (uri === FAILED_PHOTO_SENTINEL) {
-      return `<div class="photo-cell photo-unavailable">Image unavailable</div>`;
-    }
-    return `<div class="photo-cell"><img src="${uri}" alt="Work photo" class="photo-img"></div>`;
-  });
+  const cells = validUris.map(uri =>
+    `<div class="photo-cell"><img src="${uri}" alt="Work photo" class="photo-img"></div>`
+  );
 
   const rows: string[] = [];
   for (let i = 0; i < cells.length; i += COLS) {
@@ -302,261 +439,100 @@ export function photoGrid(dataUris: string[]): string {
   }
 
   return `
-  <div class="photo-grid-wrap">
-    <div class="photo-grid-heading">Work Photos</div>
+  <div class="ticket-section ticket-photos-section">
+    <div class="ticket-section-label">WORK PHOTOS</div>
     <div class="photo-grid">${rows.join('')}</div>
   </div>`;
 }
 
-export function workRecordCard(wo: PdfWorkOrderRow, photoDataUris: string[]): string {
-  const descHtml = (wo.aiDetailedDescription || wo.workSummary || wo.workDescription)
-    ? `<div class="record-description" style="border-left: 3px solid #d1d5db;">
-         <div class="record-description-label">Work Performed</div>
-         <div class="record-description-body" style="line-height: 1.6;">${formatWorkSummary(wo.aiDetailedDescription || wo.workSummary || wo.workDescription)}</div>
-       </div>`
-    : '';
-
-  const locationHtml = (wo.projectAddress || wo.locationNotes)
-    ? `<div class="record-meta-grid">
-         ${wo.projectAddress ? `<div class="meta-item"><div class="meta-label">Service Location</div><div class="meta-value">${wo.projectAddress}</div></div>` : ''}
-         ${wo.locationNotes ? `<div class="meta-item"><div class="meta-label">Location Notes</div><div class="meta-value">${wo.locationNotes}</div></div>` : ''}
-       </div>`
-    : '';
-
-  const hasPhotos = photoDataUris && photoDataUris.length > 0;
-  const itemCount = wo.items ? wo.items.length : 0;
-  const isLargeRecord = hasPhotos || itemCount > 8;
-
-  return `
-  <div class="record-card ${isLargeRecord ? 'large-record' : ''}">
-    <div class="record-details-block">
-      <div class="record-card-header">
-        <div class="record-card-title">Work Order #${wo.workOrderNumber}</div>
-        <div class="record-card-subtitle">${wo.projectName}</div>
-      </div>
-      ${locationHtml}
-      <div class="record-meta-grid">
-        <div class="meta-item">
-          <div class="meta-label">Technician</div>
-          <div class="meta-value">${wo.technicianName}</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Date Completed</div>
-          <div class="meta-value">${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'}</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Total Hours</div>
-          <div class="meta-value">${wo.totalHours} hrs</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Labor Rate</div>
-          <div class="meta-value">${formatCurrency(wo.laborRate)}/hr</div>
-        </div>
-      </div>
-      ${descHtml}
-      ${partsTableFromWO(wo.items)}
-    </div>
-    ${hasPhotos ? `<div class="photo-grid-block">${photoGrid(photoDataUris)}</div>` : ''}
-    <div class="record-totals-block">
-      ${laborAndTotalsBox({
-        partsSubtotal: wo.partsSubtotal,
-        laborHours: wo.totalHours,
-        laborRate: wo.laborRate,
-        laborSubtotal: wo.laborSubtotal,
-        total: wo.rowTotal,
-        label: 'Work Order Total',
-      })}
-    </div>
-  </div>`;
-}
-
-export function billingSheetCard(bs: PdfBillingSheetRow, photoDataUris: string[]): string {
-  const serviceDescHtml = (bs.workDescription && bs.notes && bs.workDescription.trim() !== bs.notes.trim())
-    ? `<div style="background: #f9fafb; padding: 10px 15px; border-radius: 6px; margin-bottom: 12px;">
-         <span style="font-weight: 600; color: #6b7280; font-size: 12px;">Service Description:</span>
-         <span style="color: #1f2937; font-size: 13px; margin-left: 6px;">${bs.workDescription}</span>
-       </div>`
-    : '';
-
-  const descHtml = bs.aiDetailedDescription
-    ? `<div class="record-description" style="border-left: 3px solid #d1d5db;">
-         <div class="record-description-label">Work Performed</div>
-         <div class="record-description-body" style="line-height: 1.6;">${formatWorkSummary(bs.aiDetailedDescription)}</div>
-       </div>`
-    : '';
-
-  const notesHtml = bs.notes
-    ? `<div class="record-description" style="border-left: 3px solid #d1d5db;">
-         <div class="record-description-label">Work Notes</div>
-         <div class="record-description-body" style="line-height: 1.6;">${formatWorkSummary(bs.notes)}</div>
-       </div>`
-    : '';
-
-  const locationHtml = bs.propertyAddress
-    ? `<div class="record-meta-grid">
-         <div class="meta-item">
-           <div class="meta-label">Service Location</div>
-           <div class="meta-value">${bs.propertyAddress}</div>
-         </div>
-       </div>`
-    : '';
-
-  const hasPhotos = photoDataUris && photoDataUris.length > 0;
-  const itemCount = bs.items ? bs.items.length : 0;
-  const isLargeRecord = hasPhotos || itemCount > 8;
-
-  return `
-  <div class="record-card record-card-bs ${isLargeRecord ? 'large-record' : ''}">
-    <div class="record-details-block">
-      <div class="record-card-header">
-        <div class="record-card-title">Billing Sheet #${bs.billingNumber}</div>
-        <div class="record-card-subtitle">${bs.workDescription}</div>
-      </div>
-      ${locationHtml}
-      <div class="record-meta-grid">
-        <div class="meta-item">
-          <div class="meta-label">Technician</div>
-          <div class="meta-value">${bs.technicianName}</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Work Date</div>
-          <div class="meta-value">${formatDate(bs.workDate)}</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Total Hours</div>
-          <div class="meta-value">${bs.totalHours} hrs</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Labor Rate</div>
-          <div class="meta-value">${formatCurrency(bs.laborRate)}/hr</div>
-        </div>
-      </div>
-      ${descHtml}
-      ${notesHtml}
-      ${partsTableFromBS(bs.items)}
-    </div>
-    ${hasPhotos ? `<div class="photo-grid-block">${photoGrid(photoDataUris)}</div>` : ''}
-    <div class="record-totals-block">
-      ${laborAndTotalsBox({
-        partsSubtotal: bs.partsSubtotal,
-        laborHours: bs.totalHours,
-        laborRate: bs.laborRate,
-        laborSubtotal: bs.laborSubtotal,
-        total: bs.rowTotal,
-        label: 'Billing Sheet Total',
-      })}
-    </div>
-  </div>`;
-}
-
-export function finalSummaryTable(vm: PdfViewModel): string {
+export function reconciliationPage(vm: PdfViewModel): string {
   const { workOrders, billingSheets, totals, validationWarning } = vm;
 
-  const woPartsSubtotal = workOrders.reduce((s, wo) => s + wo.partsSubtotal, 0);
-  const woLaborSubtotal = workOrders.reduce((s, wo) => s + wo.laborSubtotal, 0);
   const woGroupTotal = workOrders.reduce((s, wo) => s + wo.rowTotal, 0);
-
-  const bsPartsSubtotal = billingSheets.reduce((s, bs) => s + bs.partsSubtotal, 0);
-  const bsLaborSubtotal = billingSheets.reduce((s, bs) => s + bs.laborSubtotal, 0);
   const bsGroupTotal = billingSheets.reduce((s, bs) => s + bs.rowTotal, 0);
 
-  const woGroupHeaderRow = workOrders.length > 0 ? `
-    <tr class="fs-group-header fs-group-header-wo">
-      <td colspan="6">Work Orders</td>
+  const woSectionHeader = workOrders.length > 0 ? `
+    <tr class="recon-group-header recon-group-wo">
+      <td colspan="3">Work Orders</td>
     </tr>` : '';
 
   const woRows = workOrders.map(wo => `
     <tr>
-      <td class="fs-ref">${wo.workOrderNumber}</td>
-      <td class="fs-type fs-type-wo">Work Order</td>
-      <td>${wo.projectName}</td>
-      <td class="text-right">${formatCurrency(wo.partsSubtotal)}</td>
-      <td class="text-right">${formatCurrency(wo.laborSubtotal)}</td>
-      <td class="text-right fs-total">${formatCurrency(wo.rowTotal)}</td>
+      <td class="recon-ref recon-ref-wo">${wo.workOrderNumber}</td>
+      <td class="recon-type recon-type-wo">Work Order</td>
+      <td class="recon-total">${formatCurrency(wo.rowTotal)}</td>
     </tr>`).join('');
 
-  const woSubtotalRow = workOrders.length > 0 ? `
-    <tr class="fs-subtotal-row">
-      <td colspan="3" class="fs-subtotal-label">Work Orders Subtotal</td>
-      <td class="text-right">${formatCurrency(woPartsSubtotal)}</td>
-      <td class="text-right">${formatCurrency(woLaborSubtotal)}</td>
-      <td class="text-right fs-total">${formatCurrency(woGroupTotal)}</td>
+  const woSubtotal = workOrders.length > 0 ? `
+    <tr class="recon-subtotal">
+      <td colspan="2" class="recon-subtotal-label">Work Orders Subtotal</td>
+      <td class="recon-total">${formatCurrency(woGroupTotal)}</td>
     </tr>` : '';
 
-  const bsGroupHeaderRow = billingSheets.length > 0 ? `
-    <tr class="fs-group-header fs-group-header-bs">
-      <td colspan="6">Billing Sheets</td>
+  const bsSectionHeader = billingSheets.length > 0 ? `
+    <tr class="recon-group-header recon-group-bs">
+      <td colspan="3">Billing Sheets</td>
     </tr>` : '';
 
   const bsRows = billingSheets.map(bs => `
     <tr>
-      <td class="fs-ref">${bs.billingNumber}</td>
-      <td class="fs-type fs-type-bs">Billing Sheet</td>
-      <td>${bs.workDescription}</td>
-      <td class="text-right">${formatCurrency(bs.partsSubtotal)}</td>
-      <td class="text-right">${formatCurrency(bs.laborSubtotal)}</td>
-      <td class="text-right fs-total">${formatCurrency(bs.rowTotal)}</td>
+      <td class="recon-ref recon-ref-bs">${bs.billingNumber}</td>
+      <td class="recon-type recon-type-bs">Billing Sheet</td>
+      <td class="recon-total">${formatCurrency(bs.rowTotal)}</td>
     </tr>`).join('');
 
-  const bsSubtotalRow = billingSheets.length > 0 ? `
-    <tr class="fs-subtotal-row">
-      <td colspan="3" class="fs-subtotal-label">Billing Sheets Subtotal</td>
-      <td class="text-right">${formatCurrency(bsPartsSubtotal)}</td>
-      <td class="text-right">${formatCurrency(bsLaborSubtotal)}</td>
-      <td class="text-right fs-total">${formatCurrency(bsGroupTotal)}</td>
+  const bsSubtotal = billingSheets.length > 0 ? `
+    <tr class="recon-subtotal">
+      <td colspan="2" class="recon-subtotal-label">Billing Sheets Subtotal</td>
+      <td class="recon-total">${formatCurrency(bsGroupTotal)}</td>
     </tr>` : '';
 
   const warningRow = validationWarning ? `
-    <tr class="fs-warning-row">
-      <td colspan="6">
-        <span class="fs-warning-icon">&#9888;</span>
-        Reconciliation Warning: ${validationWarning}
+    <tr class="recon-warning">
+      <td colspan="3">
+        <span class="recon-warning-icon">&#9888;</span>
+        ${validationWarning}
       </td>
     </tr>` : '';
 
-  const grandTotalRow = `
-    <tr class="fs-grand-total-row">
-      <td colspan="3" class="fs-grand-total-label">Grand Total</td>
-      <td class="text-right">${formatCurrency(totals.partsSubtotal)}</td>
-      <td class="text-right">${formatCurrency(totals.laborSubtotal)}</td>
-      <td class="text-right fs-total">${formatCurrency(totals.grandTotal)}</td>
-    </tr>`;
-
   return `
-  <div class="final-summary">
-    <div class="final-summary-title">Invoice Summary &amp; Reconciliation</div>
-    <table class="fs-table">
+  <div class="recon-page">
+    <div class="recon-title">Invoice Reconciliation Summary</div>
+    <div class="recon-subtitle">Invoice #${vm.invoice.invoiceNumber} &nbsp;·&nbsp; ${formatDate(vm.invoice.periodStart)} – ${formatDate(vm.invoice.periodEnd)}</div>
+
+    <table class="recon-table">
       <thead>
         <tr>
-          <th>Reference #</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th class="text-right">Parts</th>
-          <th class="text-right">Labor</th>
-          <th class="text-right">Total</th>
+          <th class="recon-ref">Reference #</th>
+          <th class="recon-type">Type</th>
+          <th class="recon-total">Total</th>
         </tr>
       </thead>
       <tbody>
-        ${woGroupHeaderRow}
+        ${woSectionHeader}
         ${woRows}
-        ${woSubtotalRow}
-        ${bsGroupHeaderRow}
+        ${woSubtotal}
+        ${bsSectionHeader}
         ${bsRows}
-        ${bsSubtotalRow}
+        ${bsSubtotal}
         ${warningRow}
-        ${grandTotalRow}
+        <tr class="recon-grand-total">
+          <td colspan="2" class="recon-grand-label">GRAND TOTAL</td>
+          <td class="recon-total recon-grand-amount">${formatCurrency(totals.grandTotal)}</td>
+        </tr>
       </tbody>
     </table>
-    <div class="fs-grand-totals">
-      <div class="fs-grand-row">
-        <span>Total Parts</span>
-        <span>${formatCurrency(totals.partsSubtotal)}</span>
-      </div>
-      <div class="fs-grand-row">
+
+    <div class="recon-totals-box">
+      <div class="recon-totals-row">
         <span>Total Labor</span>
         <span>${formatCurrency(totals.laborSubtotal)}</span>
       </div>
-      <div class="fs-grand-row fs-grand-invoice-total">
+      <div class="recon-totals-row">
+        <span>Total Parts</span>
+        <span>${formatCurrency(totals.partsSubtotal)}</span>
+      </div>
+      <div class="recon-totals-row recon-totals-grand">
         <span>Invoice Total</span>
         <span>${formatCurrency(totals.grandTotal)}</span>
       </div>
@@ -579,7 +555,7 @@ export function buildFullCSS(): string {
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     color: #1f2937;
-    line-height: 1.6;
+    line-height: 1.5;
     background: white;
     font-size: 13px;
   }
@@ -589,154 +565,475 @@ export function buildFullCSS(): string {
     padding: 0 20px 80px 20px;
   }
 
-  /* ───────── HEADER ───────── */
-  .pdf-header {
+  /* ═══════════════════════════════════
+     COVER PAGE
+  ═══════════════════════════════════ */
+  .cover-page {
+    min-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    padding: 32px 0 40px;
+    page-break-after: always;
+    break-after: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .cover-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     border-bottom: 3px solid #3B82F6;
-    padding: 24px 0 20px;
-    margin-bottom: 28px;
+    padding-bottom: 24px;
   }
-  .pdf-company { flex: 1; }
-  .company-logo {
-    max-width: 180px;
-    max-height: 60px;
+
+  .cover-company-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .cover-logo {
+    max-width: 200px;
+    max-height: 70px;
     width: auto;
     height: auto;
     object-fit: contain;
     display: block;
-    margin-bottom: 10px;
   }
-  .company-name { font-size: 22px; font-weight: 700; color: #3B82F6; margin-bottom: 4px; }
-  .company-details { font-size: 11px; color: #6b7280; line-height: 1.5; }
 
-  .pdf-invoice-meta { text-align: right; }
-  .invoice-title { font-size: 26px; font-weight: 700; color: #1f2937; }
-  .invoice-subtitle { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
-  .invoice-meta-rows { font-size: 12px; line-height: 1.9; }
-  .meta-label { font-weight: 600; color: #1f2937; }
+  .cover-company-name-fallback {
+    font-size: 24px;
+    font-weight: 800;
+    color: #3B82F6;
+  }
 
-  /* ───────── BILL-TO ───────── */
-  .bill-to-block {
+  .cover-company-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .cover-company-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+  }
+
+  .cover-company-line {
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .cover-invoice-meta {
+    text-align: right;
+  }
+
+  .cover-invoice-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+  }
+
+  .cover-invoice-number {
+    font-size: 30px;
+    font-weight: 800;
+    color: #1f2937;
+    margin-bottom: 12px;
+  }
+
+  .cover-meta-item {
+    display: flex;
+    justify-content: flex-end;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  .cover-meta-label {
+    color: #9ca3af;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  .cover-meta-value {
+    color: #1f2937;
+    font-weight: 500;
+  }
+
+  .cover-bill-to {
     background: #f9fafb;
     border-radius: 8px;
-    padding: 16px 20px;
-    margin-bottom: 24px;
-  }
-  .bill-to-label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
-  .bill-to-name { font-size: 17px; font-weight: 700; color: #1f2937; margin-bottom: 4px; }
-  .bill-to-details { font-size: 12px; color: #4b5563; }
-
-  /* ───────── SUMMARY TOTALS CARD ───────── */
-  .summary-totals-card {
-    background: linear-gradient(135deg, #1e40af 0%, #3B82F6 100%);
-    border-radius: 10px;
-    padding: 24px;
-    margin-bottom: 24px;
-    color: white;
-  }
-  .summary-totals-grid {
-    display: flex;
-    gap: 0;
-    align-items: stretch;
-  }
-  .summary-totals-item {
-    flex: 1;
-    text-align: center;
-    padding: 0 12px;
-    border-right: 1px solid rgba(255,255,255,0.25);
-  }
-  .summary-totals-item:last-child { border-right: none; }
-  .summary-totals-label { font-size: 11px; opacity: 0.85; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
-  .summary-totals-value { font-size: 22px; font-weight: 700; }
-  .summary-totals-grand { background: rgba(255,255,255,0.12); border-radius: 8px; }
-  .summary-totals-grand-amount { font-size: 26px; }
-
-  /* ───────── TABLE OF CONTENTS ───────── */
-  .toc-block { margin-bottom: 32px; }
-  .toc-title { font-size: 16px; font-weight: 700; color: #1f2937; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 2px solid #e5e7eb; }
-  .toc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .toc-table thead tr { background: #f3f4f6; }
-  .toc-table th { padding: 10px 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #d1d5db; }
-  .toc-table tbody tr { border-bottom: 1px solid #e5e7eb; }
-  .toc-table td { padding: 9px 12px; color: #1f2937; }
-  .toc-num { width: 36px; font-weight: 600; color: #6b7280; }
-  .toc-type { font-weight: 600; }
-  .toc-type-wo { color: #1d4ed8; }
-  .toc-type-bs { color: #047857; }
-  .toc-amount { text-align: right; font-weight: 600; }
-
-  /* ───────── SECTION BANNER ───────── */
-  .section-header {
-    background: #f3f4f6;
+    padding: 18px 22px;
     border-left: 4px solid #3B82F6;
-    padding: 15px 20px;
-    margin-bottom: 20px;
-    border-radius: 4px;
-    break-after: avoid;
-    page-break-after: avoid;
   }
-  .section-banner {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 20px;
-    border-radius: 6px;
-    margin: 36px 0 20px;
-    font-size: 17px;
-    font-weight: 700;
-    color: white;
-    page-break-inside: avoid;
-    break-after: avoid;
-    page-break-after: avoid;
-  }
-  .banner-wo { background: linear-gradient(90deg, #1d4ed8 0%, #3B82F6 100%); }
-  .banner-bs { background: linear-gradient(90deg, #065f46 0%, #059669 100%); }
-  .section-banner-icon { opacity: 0.9; display: flex; align-items: center; }
-  .section-banner-label { letter-spacing: 0.3px; }
 
-  /* ───────── RECORD CARD ───────── */
-  .record-card {
+  .cover-bill-to-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .cover-bill-to-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 4px;
+  }
+
+  .cover-bill-to-detail {
+    font-size: 13px;
+    color: #4b5563;
+  }
+
+  .cover-total-block {
+    background: linear-gradient(135deg, #1e40af 0%, #3B82F6 100%);
+    border-radius: 12px;
+    padding: 32px 36px;
+    text-align: center;
+    color: white;
+  }
+
+  .cover-total-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    opacity: 0.85;
+    margin-bottom: 10px;
+  }
+
+  .cover-total-amount {
+    font-size: 52px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 10px;
+  }
+
+  .cover-total-period {
+    font-size: 13px;
+    opacity: 0.75;
+  }
+
+  .cover-breakdown {
     border: 1.5px solid #e5e7eb;
     border-radius: 8px;
-    margin-bottom: 28px;
     overflow: hidden;
-    page-break-inside: avoid;
   }
-  .record-card-bs { border-left: 4px solid #059669; }
 
-  .record-card-header {
+  .cover-breakdown-heading {
+    font-size: 13px;
+    font-weight: 700;
+    color: #374151;
+    padding: 12px 18px;
     background: #f3f4f6;
     border-bottom: 1px solid #e5e7eb;
-    padding: 14px 18px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
-  .record-card-title { font-size: 16px; font-weight: 700; color: #1f2937; }
-  .record-card-subtitle { font-size: 12px; color: #6b7280; margin-top: 2px; }
 
-  /* ───────── META GRID (inside card) ───────── */
-  .record-meta-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-    padding: 14px 18px;
-    background: #fafafa;
-    border-bottom: 1px solid #f0f0f0;
+  .cover-breakdown-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
   }
-  .meta-label { font-size: 10px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
-  .meta-value { font-size: 13px; color: #1f2937; font-weight: 500; }
 
-  /* ───────── DESCRIPTION BLOCK ───────── */
-  .record-description {
-    padding: 14px 18px;
-    border-bottom: 1px solid #f0f0f0;
+  .cover-breakdown-table thead tr {
+    background: #1f2937;
+    color: white;
   }
-  .record-description-label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
-  .record-description-body { font-size: 13px; color: #1f2937; line-height: 1.7; white-space: pre-wrap; }
 
-  /* ───────── PARTS TABLE ───────── */
-  .parts-table-wrap { padding: 14px 18px; border-bottom: 1px solid #f0f0f0; }
-  .parts-table-heading { font-size: 13px; font-weight: 600; color: #1f2937; margin-bottom: 10px; }
+  .cover-breakdown-table th {
+    padding: 10px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    text-align: left;
+  }
+
+  .cover-breakdown-table th.cover-breakdown-count,
+  .cover-breakdown-table th.cover-breakdown-amount,
+  .cover-breakdown-table th.cover-breakdown-total {
+    text-align: right;
+  }
+
+  .cover-breakdown-table tbody tr {
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .cover-breakdown-table td {
+    padding: 12px 16px;
+    color: #1f2937;
+  }
+
+  .cover-breakdown-type {
+    font-weight: 600;
+  }
+
+  .cover-breakdown-type-wo { color: #1d4ed8; }
+  .cover-breakdown-type-bs { color: #047857; }
+
+  .cover-breakdown-count,
+  .cover-breakdown-amount,
+  .cover-breakdown-total {
+    text-align: right;
+    font-weight: 500;
+  }
+
+  .cover-breakdown-total {
+    font-weight: 700;
+  }
+
+  .cover-breakdown-grand td {
+    background: #1e3a8a;
+    color: white;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 14px 16px;
+    border-top: 2px solid #3B82F6;
+    text-align: right;
+  }
+
+  .cover-breakdown-grand-label {
+    text-align: left !important;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+
+  .cover-breakdown-table tfoot td.cover-breakdown-type,
+  .cover-breakdown-table tfoot td.cover-breakdown-count {
+    text-align: left;
+  }
+
+  /* ═══════════════════════════════════
+     TICKET PAGES
+  ═══════════════════════════════════ */
+  .ticket-page {
+    page-break-before: always;
+    break-before: page;
+    padding: 28px 0 32px;
+  }
+
+  .ticket-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 20px 22px;
+    border-radius: 8px 8px 0 0;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+    page-break-inside: avoid;
+    break-inside: avoid;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .ticket-header-wo {
+    background: linear-gradient(135deg, #1d4ed8 0%, #3B82F6 100%);
+    color: white;
+  }
+
+  .ticket-header-bs {
+    background: linear-gradient(135deg, #065f46 0%, #059669 100%);
+    color: white;
+  }
+
+  .ticket-header-left {
+    flex: 1;
+  }
+
+  .ticket-header-right {
+    min-width: 200px;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+
+  .ticket-type-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    opacity: 0.85;
+    margin-bottom: 4px;
+  }
+
+  .ticket-number {
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .ticket-subtitle {
+    font-size: 14px;
+    opacity: 0.9;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+
+  .ticket-location {
+    font-size: 12px;
+    opacity: 0.8;
+    margin-top: 4px;
+  }
+
+  .ticket-meta-item {
+    font-size: 12px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .ticket-meta-label {
+    opacity: 0.75;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .ticket-meta-value {
+    font-weight: 600;
+  }
+
+  .ticket-approval {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  .ticket-approval-icon {
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .ticket-approval-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .ticket-approval-by,
+  .ticket-approval-at {
+    display: block;
+    font-size: 11px;
+  }
+
+  /* ── Ticket Sections ── */
+  .ticket-section {
+    border: 1px solid #e5e7eb;
+    border-top: none;
+    padding: 16px 20px;
+  }
+
+  .ticket-section:first-of-type {
+    border-top: 1px solid #e5e7eb;
+  }
+
+  .ticket-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #9ca3af;
+    margin-bottom: 10px;
+  }
+
+  /* Work bullet list */
+  .ticket-work-list {
+    font-size: 13px;
+    color: #1f2937;
+  }
+
+  .work-bullet-list {
+    margin: 0;
+    padding-left: 20px;
+    list-style-type: disc;
+  }
+
+  .work-bullet-list li {
+    margin-bottom: 5px;
+    line-height: 1.6;
+    color: #1f2937;
+  }
+
+  /* Financial breakdown */
+  .ticket-financial {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .ticket-fin-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .ticket-fin-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 13px;
+    color: #4b5563;
+  }
+
+  .ticket-fin-row:last-child {
+    border-bottom: none;
+  }
+
+  .ticket-fin-label {
+    font-weight: 500;
+  }
+
+  .ticket-fin-value {
+    font-weight: 600;
+    min-width: 100px;
+    text-align: right;
+  }
+
+  .ticket-fin-total {
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 2px solid #3B82F6 !important;
+    font-size: 16px;
+    font-weight: 800;
+    color: #1f2937;
+  }
+
+  .ticket-fin-total .ticket-fin-value {
+    color: #1d4ed8;
+    font-size: 18px;
+  }
+
+  /* Parts table */
+  .ticket-parts-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
   .items-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .items-table thead { background: #1f2937; color: white; }
   .items-table th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
@@ -746,108 +1043,205 @@ export function buildFullCSS(): string {
   .items-table td { padding: 10px 12px; color: #1f2937; }
   .items-table td.text-right { text-align: right; }
   .item-note { color: #6b7280; font-size: 11px; }
-  .no-items-msg { padding: 12px 18px; color: #9ca3af; font-size: 12px; font-style: italic; }
+  .no-items-msg { color: #9ca3af; font-size: 12px; font-style: italic; }
 
-  /* ───────── PHOTO GRID ───────── */
-  .photo-grid-wrap { padding: 14px 18px; border-bottom: 1px solid #f0f0f0; }
-  .photo-grid-heading { font-size: 13px; font-weight: 600; color: #1f2937; margin-bottom: 10px; }
+  /* Photos */
+  .ticket-photos-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .photo-no-photos {
+    background: #f9fafb;
+    border: 2px dashed #d1d5db;
+    border-radius: 8px;
+    padding: 28px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 13px;
+    font-style: italic;
+  }
+
   .photo-grid { display: flex; flex-direction: column; gap: 6px; }
   .photo-row { display: flex; gap: 6px; }
   .photo-cell { flex: 1; }
-  .photo-img { width: 100%; height: 140px; object-fit: cover; border-radius: 5px; border: 1px solid #e5e7eb; display: block; }
-  .photo-unavailable {
-    height: 140px; background: #f3f4f6; border: 2px dashed #d1d5db; border-radius: 5px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: #9ca3af; text-align: center;
-  }
-  .photo-empty { height: 140px; }
+  .photo-img { width: 100%; height: 160px; object-fit: cover; border-radius: 5px; border: 1px solid #e5e7eb; display: block; }
+  .photo-empty { height: 160px; }
 
-  /* ───────── LABOR & TOTALS BOX ───────── */
-  .totals-box { padding: 16px 18px; background: #f9fafb; }
-  .totals-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 6px 0;
+  /* ═══════════════════════════════════
+     RECONCILIATION PAGE
+  ═══════════════════════════════════ */
+  .recon-page {
+    page-break-before: always;
+    break-before: page;
+    padding: 32px 0 40px;
+  }
+
+  .recon-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: #1f2937;
+    margin-bottom: 4px;
+  }
+
+  .recon-subtitle {
     font-size: 13px;
     color: #6b7280;
-    border-bottom: 1px solid #f0f0f0;
+    margin-bottom: 28px;
   }
-  .totals-row:last-child { border-bottom: none; }
-  .totals-row-value { font-weight: 500; }
-  .totals-row-grand {
-    border-top: 2px solid #3B82F6;
-    margin-top: 8px;
-    padding-top: 10px;
-    font-size: 15px;
+
+  .recon-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+
+  .recon-table thead tr {
+    background: #1f2937;
+    color: white;
+  }
+
+  .recon-table th {
+    padding: 10px 14px;
+    font-size: 11px;
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: left;
+  }
+
+  .recon-table th.recon-total {
+    text-align: right;
+  }
+
+  .recon-table tbody tr {
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .recon-table td {
+    padding: 10px 14px;
     color: #1f2937;
   }
-  .totals-row-grand .totals-row-value { color: #1d4ed8; }
 
-  /* ───────── FINAL SUMMARY ───────── */
-  .final-summary {
-    margin-top: 40px;
-    padding: 24px;
-    background: #f9fafb;
-    border-radius: 10px;
-    border: 2px solid #e5e7eb;
-    page-break-inside: avoid;
+  .recon-ref { font-weight: 600; }
+  .recon-ref-wo { color: #1d4ed8; }
+  .recon-ref-bs { color: #047857; }
+
+  .recon-type { font-weight: 500; font-size: 12px; }
+  .recon-type-wo { color: #1d4ed8; }
+  .recon-type-bs { color: #047857; }
+
+  .recon-total {
+    text-align: right;
+    font-weight: 600;
   }
-  .final-summary-title {
-    font-size: 20px; font-weight: 700; color: #1f2937;
-    margin-bottom: 18px; padding-bottom: 10px; border-bottom: 2px solid #3B82F6;
+
+  .recon-group-header td {
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 14px;
   }
-  .fs-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
-  .fs-table thead tr { background: #e5e7eb; }
-  .fs-table th { padding: 10px 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 2px solid #d1d5db; }
-  .fs-table th.text-right { text-align: right; }
-  .fs-table tbody tr { border-bottom: 1px solid #e5e7eb; }
-  .fs-table tbody tr:nth-child(even) { background: #ffffff; }
-  .fs-table td { padding: 9px 12px; color: #1f2937; }
-  .fs-table td.text-right { text-align: right; }
-  .fs-ref { font-weight: 600; font-size: 12px; color: #374151; }
-  .fs-type { font-weight: 600; font-size: 11px; }
-  .fs-type-wo { color: #1d4ed8; }
-  .fs-type-bs { color: #047857; }
-  .fs-total { font-weight: 700; }
-  .fs-group-header td {
-    font-weight: 700; font-size: 12px; text-transform: uppercase;
-    letter-spacing: 0.5px; padding: 10px 12px;
+
+  .recon-group-wo td {
+    background: #dbeafe;
+    color: #1e40af;
+    border-top: 1px solid #93c5fd;
   }
-  .fs-group-header-wo td { background: #dbeafe; color: #1e40af; border-top: 2px solid #93c5fd; }
-  .fs-group-header-bs td { background: #d1fae5; color: #065f46; border-top: 2px solid #6ee7b7; }
-  .fs-subtotal-row td {
-    background: #f3f4f6; font-weight: 600; font-size: 12px;
-    padding: 9px 12px; border-top: 1px solid #d1d5db; border-bottom: 2px solid #d1d5db;
+
+  .recon-group-bs td {
+    background: #d1fae5;
+    color: #065f46;
+    border-top: 1px solid #6ee7b7;
+  }
+
+  .recon-subtotal td {
+    background: #f3f4f6;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 9px 14px;
+    border-top: 1px solid #d1d5db;
+    border-bottom: 2px solid #d1d5db;
     color: #374151;
   }
-  .fs-subtotal-label { font-style: italic; }
-  .fs-warning-row td {
-    background: #fef3c7; color: #92400e; font-size: 12px; font-weight: 600;
-    padding: 10px 12px; border-top: 2px solid #fbbf24; border-bottom: 2px solid #fbbf24;
-  }
-  .fs-warning-icon { margin-right: 6px; font-size: 14px; }
-  .fs-grand-total-row td {
-    background: #1e3a8a; color: white; font-weight: 700; font-size: 13px;
-    padding: 12px 12px; border-top: 3px solid #1d4ed8;
-  }
-  .fs-grand-total-label { font-size: 13px; letter-spacing: 0.3px; }
-  .fs-grand-totals {
-    margin-top: 8px; padding: 16px 20px;
-    background: white; border-radius: 8px; border: 2px solid #3B82F6;
-  }
-  .fs-grand-row {
-    display: flex; justify-content: space-between;
-    padding: 7px 0; font-size: 14px; color: #6b7280; border-bottom: 1px solid #f0f0f0;
-  }
-  .fs-grand-row:last-child { border-bottom: none; }
-  .fs-grand-invoice-total {
-    border-top: 2px solid #3B82F6; margin-top: 8px; padding-top: 12px;
-    font-size: 18px; font-weight: 700; color: #1f2937;
-  }
-  .fs-grand-invoice-total span:last-child { color: #1d4ed8; }
 
-  /* ───────── PAGE FOOTER ───────── */
+  .recon-subtotal-label {
+    font-style: italic;
+  }
+
+  .recon-warning td {
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-top: 2px solid #fbbf24;
+    border-bottom: 2px solid #fbbf24;
+  }
+
+  .recon-warning-icon {
+    margin-right: 6px;
+    font-size: 14px;
+  }
+
+  .recon-grand-total td {
+    background: #1e3a8a;
+    color: white;
+    font-weight: 800;
+    font-size: 15px;
+    padding: 14px 14px;
+    border-top: 3px solid #3B82F6;
+  }
+
+  .recon-grand-label {
+    letter-spacing: 0.5px;
+  }
+
+  .recon-grand-amount {
+    text-align: right;
+    font-size: 18px;
+  }
+
+  .recon-totals-box {
+    border: 2px solid #3B82F6;
+    border-radius: 8px;
+    padding: 18px 22px;
+    background: #f0f7ff;
+    max-width: 360px;
+    margin-left: auto;
+  }
+
+  .recon-totals-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 0;
+    font-size: 14px;
+    color: #4b5563;
+    border-bottom: 1px solid #dbeafe;
+  }
+
+  .recon-totals-row:last-child {
+    border-bottom: none;
+  }
+
+  .recon-totals-grand {
+    border-top: 2px solid #3B82F6 !important;
+    margin-top: 8px;
+    padding-top: 12px;
+    font-size: 18px;
+    font-weight: 800;
+    color: #1f2937;
+  }
+
+  .recon-totals-grand span:last-child {
+    color: #1d4ed8;
+  }
+
+  /* ═══════════════════════════════════
+     PAGE NUMBERING & FOOTER
+  ═══════════════════════════════════ */
   .pdf-footer {
     position: fixed;
     bottom: 0;
@@ -864,28 +1258,12 @@ export function buildFullCSS(): string {
     color: #9ca3af;
     z-index: 1000;
   }
+
   .pdf-footer-invoice { font-weight: 600; color: #6b7280; }
 
-  /* counter-based page numbering */
   @page { margin: 0.5in 0.5in 0.75in 0.5in; }
   .pdf-page-num::before { content: counter(page); }
 
-  .summary-page { break-inside: avoid; page-break-inside: avoid; }
-  .work-orders-section-wrapper { break-before: page; page-break-before: always; }
-  .billing-sheets-section-wrapper { break-before: page; page-break-before: always; }
-  .record-details-block { break-after: avoid; page-break-after: avoid; }
-  .record-totals-block { break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; }
-  .photo-grid-block { break-before: page; page-break-before: always; }
-  .page-break { break-after: page; page-break-after: always; }
-
-  .items-table thead { break-after: avoid; page-break-after: avoid; }
-
-  /* ───────── PRINT ───────── */
-  @media print {
-    .record-card { page-break-inside: avoid; }
-    .record-card.large-record { page-break-inside: auto; }
-    .section-banner { page-break-before: auto; }
-    .final-summary { page-break-inside: avoid; }
-  }
+  .text-right { text-align: right; }
   `;
 }

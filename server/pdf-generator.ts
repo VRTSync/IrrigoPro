@@ -5,14 +5,10 @@ import type { PdfViewModel } from './pdf-view-model';
 import {
   FAILED_PHOTO_SENTINEL,
   fetchLogoAsBase64,
-  invoiceHeader,
-  billToBlock,
-  summaryTotalsCard,
-  tableOfContents,
-  sectionBanner,
-  workRecordCard,
-  billingSheetCard,
-  finalSummaryTable,
+  coverPage,
+  ticketPageWO,
+  ticketPageBS,
+  reconciliationPage,
   pageFooter,
   buildFullCSS,
 } from './pdf-helpers';
@@ -129,13 +125,10 @@ export class PDFGenerator {
     try {
       const page = await browser.newPage();
 
-      // Generate HTML content from the pre-computed view model with pre-loaded photo data URIs
       const htmlContent = this.generateInvoiceDetailHTML(viewModel, woPhotoMaps, bsPhotoMaps);
 
-      // Set the HTML content — no external fetches needed since images are embedded
       await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
 
-      // Generate PDF with page numbers in footer
       const pdf = await page.pdf({
         format: 'A4',
         printBackground: true,
@@ -164,44 +157,28 @@ export class PDFGenerator {
     woPhotoMaps: string[][] = [],
     bsPhotoMaps: string[][] = [],
   ): string {
-    const { company, invoice, workOrders, billingSheets } = vm;
+    const { invoice, workOrders, billingSheets } = vm;
 
-    const workOrdersSection = workOrders.length > 0
-      ? `<div class="work-orders-section-wrapper">
-         ${sectionBanner('work-orders')}
-         ${workOrders.map((wo, i) => workRecordCard(wo, woPhotoMaps[i] ?? [])).join('')}
-         </div>`
-      : '';
-
-    const billingSheetsSection = billingSheets.length > 0
-      ? `<div class="billing-sheets-section-wrapper">
-         ${sectionBanner('billing-sheets')}
-         ${billingSheets.map((bs, i) => billingSheetCard(bs, bsPhotoMaps[i] ?? [])).join('')}
-         </div>`
-      : '';
+    const ticketPages = [
+      ...workOrders.map((wo, i) => ticketPageWO(wo, invoice.invoiceNumber, woPhotoMaps[i] ?? [])),
+      ...billingSheets.map((bs, i) => ticketPageBS(bs, invoice.invoiceNumber, bsPhotoMaps[i] ?? [])),
+    ].join('');
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Invoice ${invoice.invoiceNumber} – Detail Report</title>
+  <title>Invoice ${invoice.invoiceNumber} – Billing Document</title>
   <style>${buildFullCSS()}</style>
 </head>
 <body>
   ${pageFooter(invoice.invoiceNumber)}
   <div class="container">
-    <div class="summary-page">
-      ${invoiceHeader(invoice, company)}
-      ${billToBlock(invoice)}
-      ${summaryTotalsCard(vm.totals, workOrders.length, billingSheets.length)}
-    </div>
-    ${tableOfContents(workOrders, billingSheets)}
-    ${workOrdersSection}
-    ${billingSheetsSection}
-    ${finalSummaryTable(vm)}
+    ${coverPage(vm)}
+    ${ticketPages}
+    ${reconciliationPage(vm)}
   </div>
 </body>
 </html>`;
   }
 }
-

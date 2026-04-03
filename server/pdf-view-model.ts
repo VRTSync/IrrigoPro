@@ -40,6 +40,8 @@ export interface PdfWorkOrderRow {
   completedAt: Date | null;
   totalHours: number;
   laborRate: number;
+  markupAmount: number;
+  taxAmount: number;
   workDescription: string;
   workSummary: string;
   aiDetailedDescription: string;
@@ -48,6 +50,8 @@ export interface PdfWorkOrderRow {
   partsSubtotal: number;
   laborSubtotal: number;
   rowTotal: number;
+  approvedBy: string | null;
+  approvedAt: Date | null;
 }
 
 export interface PdfBillingSheetItemRow {
@@ -68,6 +72,8 @@ export interface PdfBillingSheetRow {
   workDate: Date;
   totalHours: number;
   laborRate: number;
+  markupAmount: number;
+  taxAmount: number;
   aiDetailedDescription: string;
   notes: string;
   photos: string[];
@@ -75,6 +81,8 @@ export interface PdfBillingSheetRow {
   partsSubtotal: number;
   laborSubtotal: number;
   rowTotal: number;
+  approvedBy: string | null;
+  approvedAt: Date | null;
 }
 
 export interface PdfTotals {
@@ -190,6 +198,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     const partsSubtotal = safeNum(workOrder.totalPartsCost, itemRows.reduce((s, r) => s + r.rowTotal, 0));
     const laborSubtotal = safeNum(workOrder.laborSubtotal, totalHours * woLaborRate);
     const rowTotal = safeNum(workOrder.totalAmount, partsSubtotal + laborSubtotal);
+    const markupAmount = safeNum(workOrder.markupAmount);
+    const taxAmount = safeNum(workOrder.taxAmount);
 
     return {
       workOrderNumber: safeStr(workOrder.workOrderNumber),
@@ -200,6 +210,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       completedAt: workOrder.completedAt ? new Date(workOrder.completedAt) : null,
       totalHours,
       laborRate: woLaborRate,
+      markupAmount,
+      taxAmount,
       workDescription: safeStr(workOrder.description),
       workSummary: safeStr(workOrder.workSummary),
       aiDetailedDescription: safeStr(workOrder.aiDetailedDescription),
@@ -208,6 +220,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       partsSubtotal,
       laborSubtotal,
       rowTotal,
+      approvedBy: safeStr(workOrder.approvedBy) || null,
+      approvedAt: workOrder.approvedAt ? new Date(workOrder.approvedAt) : null,
     };
   });
 
@@ -234,6 +248,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     const partsSubtotal = safeNum(billingSheet.partsSubtotal, itemRows.reduce((s, r) => s + r.rowTotal, 0));
     const laborSubtotal = safeNum(billingSheet.laborSubtotal, totalHours * bsLaborRate);
     const rowTotal = safeNum(billingSheet.totalAmount, partsSubtotal + laborSubtotal);
+    const markupAmount = safeNum(billingSheet.markupAmount);
+    const taxAmount = safeNum(billingSheet.taxAmount);
 
     return {
       billingNumber: safeStr(billingSheet.billingNumber),
@@ -243,6 +259,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       workDate: new Date(billingSheet.workDate),
       totalHours,
       laborRate: bsLaborRate,
+      markupAmount,
+      taxAmount,
       aiDetailedDescription: safeStr(billingSheet.aiDetailedDescription),
       notes: safeStr(billingSheet.notes),
       photos: safePhotos(billingSheet.photos),
@@ -250,6 +268,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       partsSubtotal,
       laborSubtotal,
       rowTotal,
+      approvedBy: safeStr(billingSheet.approvedBy) || null,
+      approvedAt: billingSheet.approvedAt ? new Date(billingSheet.approvedAt) : null,
     };
   });
 
