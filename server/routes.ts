@@ -2477,18 +2477,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
               const newTokenData = await refreshQuickBooksToken(refreshTokenToUse, signal);
               const expiresInSeconds = newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
-
-              if (!newTokenData.refresh_token) {
-                console.warn('[QB proactive refresh] Intuit did not return a new refresh_token; keeping the existing one');
-              }
+              const refreshSuccessAt = new Date();
 
               // Persist before releasing lock so waiters always see the rotated token
               await storage.saveQuickBooksIntegration({
                 companyId: integration.companyId,
                 accessToken: newTokenData.access_token,
-                refreshToken: newTokenData.refresh_token || refreshTokenToUse,
+                refreshToken: newTokenData.refresh_token,
                 realmId: proactiveRealmId,
-                expiresAt: new Date(Date.now() + expiresInSeconds * 1000)
+                expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+                lastRefreshSuccess: refreshSuccessAt
               });
 
               return newTokenData.access_token;
@@ -4789,6 +4787,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
 
     const tokenData = await response.json();
+    if (!tokenData.access_token) {
+      throw new Error('Token refresh response missing access_token');
+    }
+    if (!tokenData.refresh_token) {
+      throw new Error('Token refresh response missing refresh_token — cannot commit partial token state');
+    }
     console.log('Successfully refreshed QuickBooks token');
     return tokenData;
   }
@@ -4832,17 +4836,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               console.warn('QuickBooks token refresh: expires_in missing or zero, defaulting to 3600 seconds');
             }
 
-            if (!newTokenData.refresh_token) {
-              console.warn('[QB refresh] Intuit did not return a new refresh_token; keeping the existing one');
-            }
-
-            // Persist new tokens before releasing the lock so all waiters see the updated token
+            // Persist new tokens atomically before releasing the lock so all waiters see the updated token
             await storage.saveQuickBooksIntegration({
               companyId: integration.companyId,
               accessToken: newTokenData.access_token,
-              refreshToken: newTokenData.refresh_token || refreshTokenToUse,
+              refreshToken: newTokenData.refresh_token,
               realmId: realmIdForLock,
-              expiresAt: new Date(Date.now() + (expiresInSeconds * 1000))
+              expiresAt: new Date(Date.now() + (expiresInSeconds * 1000)),
+              lastRefreshSuccess: new Date()
             });
 
             return newTokenData.access_token;
