@@ -9,6 +9,18 @@ import { EmailService } from "./email-service";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "./ai-prompt-templates";
+import {
+  classifyQbRefreshError,
+  withQbRefreshLock,
+  QB_PROACTIVE_REFRESH_BUFFER_MS,
+  UNRECOVERABLE_CATEGORIES,
+  buildReconnectReason,
+  QbRefreshError,
+  runProactiveRefreshForRealm,
+  startQbTokenHealthJob,
+  type QbRefreshFailureCategory,
+  type QbStorageAdapter,
+} from "./qb-token-utils";
 
 /// <reference path="./types/express.d.ts" />
 
@@ -547,127 +559,6 @@ setInterval(() => {
   }
 }, 60_000);
 
-// QuickBooks refresh failure categories
-type QbRefreshFailureCategory =
-  | 'transient'           // Network error or 5xx — safe to retry
-  | 'stale_refresh_token' // invalid_grant: refresh token is expired or already used
-  | 'revoked'             // access_denied / revoked authorization
-  | 'reconnect_required'; // Any other unrecoverable error
-
-/**
- * Classify a QuickBooks token refresh error into one of four categories.
- * The Intuit token endpoint returns JSON with an "error" field on failure.
- */
-function classifyQbRefreshError(errorText: string, httpStatus: number): QbRefreshFailureCategory {
-  let errorCode = '';
-  try {
-    const parsed = JSON.parse(errorText);
-    errorCode = (parsed.error || parsed.error_code || '').toLowerCase();
-  } catch {
-    errorCode = errorText.toLowerCase();
-  }
-
-  if (errorCode === 'invalid_grant' || errorCode === 'invalid_refresh_token') {
-    return 'stale_refresh_token';
-  }
-  if (errorCode === 'access_denied' || errorCode === 'authorization_revoked' || errorCode === 'revoked_token') {
-    return 'revoked';
-  }
-  if (httpStatus >= 500 || errorCode === 'server_error' || errorCode === 'temporarily_unavailable') {
-    return 'transient';
-  }
-  // 400/401 with unrecognized codes are treated as unrecoverable
-  if (httpStatus >= 400 && httpStatus < 500) {
-    return 'reconnect_required';
-  }
-  return 'transient';
-}
-
-// Per-realm refresh mutex — prevents concurrent token refreshes for the same QuickBooks realm
-// which would cause Intuit to reject the second attempt with invalid_grant.
-//
-// Each lock entry carries a monotonically increasing generation counter so that a
-// late-completing refresh from a timed-out operation cannot overwrite a newer entry.
-const QB_REFRESH_TIMEOUT_MS = 30_000; // 30 s max per token refresh attempt
-
-interface QbLockEntry {
-  promise: Promise<string>;
-  generation: number;
-  controller: AbortController;
-}
-
-const qbRefreshLock = new Map<string, QbLockEntry>();
-let qbLockGeneration = 0;
-
-/**
- * Acquire the per-realm refresh lock.
- *
- * - If no lock exists for the realm, acquires one and starts the refresh.
- * - If a refresh is already in flight, waits for it and reuses the result.
- * - On timeout (QB_REFRESH_TIMEOUT_MS):
- *   1. The in-flight request is aborted via AbortController.
- *   2. The lock entry is evicted (only if it still belongs to this generation)
- *      so future callers are not blocked indefinitely.
- *   3. The caller that timed out receives a timeout error.
- *
- * Generation fencing: a late-completing fetch from a timed-out attempt checks
- * its generation before evicting the lock, so it cannot accidentally remove a
- * newer entry that was registered after the timeout eviction.
- */
-async function withQbRefreshLock(
-  realmId: string,
-  doRefresh: (signal: AbortSignal) => Promise<string>
-): Promise<string> {
-  const existing = qbRefreshLock.get(realmId);
-  if (existing) {
-    const waitStart = Date.now();
-    console.log(`[QB refresh lock] realmId=${realmId} waitedOnLock=true gen=${existing.generation} waitStartedAt=${new Date(waitStart).toISOString()}`);
-    return Promise.race([
-      existing.promise.then((result) => {
-        console.log(`[QB refresh lock] realmId=${realmId} waitedOnLock=true lockWaitMs=${Date.now() - waitStart} outcome=resolved`);
-        return result;
-      }),
-      new Promise<string>((_, reject) =>
-        setTimeout(() => {
-          console.warn(`[QB refresh lock] realmId=${realmId} waitedOnLock=true lockWaitMs=${Date.now() - waitStart} outcome=timeout`);
-          reject(new Error(`QB refresh lock wait-timeout for realmId=${realmId}`));
-        }, QB_REFRESH_TIMEOUT_MS)
-      ),
-    ]);
-  }
-
-  const generation = ++qbLockGeneration;
-  const controller = new AbortController();
-
-  const underlyingPromise = doRefresh(controller.signal).finally(() => {
-    // Release lock only if this generation still owns it (not superseded by a newer entry)
-    const current = qbRefreshLock.get(realmId);
-    if (current && current.generation === generation) {
-      qbRefreshLock.delete(realmId);
-    }
-  });
-
-  const entry: QbLockEntry = { promise: underlyingPromise, generation, controller };
-  qbRefreshLock.set(realmId, entry);
-
-  // Give the caller a bounded wait.  On timeout: abort the request, evict the
-  // lock so future callers are not blocked, and reject with a descriptive error.
-  return Promise.race([
-    underlyingPromise,
-    new Promise<string>((_, reject) => {
-      setTimeout(() => {
-        controller.abort();
-        // Evict lock only if this generation still owns it
-        const current = qbRefreshLock.get(realmId);
-        if (current && current.generation === generation) {
-          qbRefreshLock.delete(realmId);
-          console.warn(`[QB refresh lock] realmId=${realmId} gen=${generation}: timed out — lock released`);
-        }
-        reject(new Error(`QB refresh lock timeout for realmId=${realmId}`));
-      }, QB_REFRESH_TIMEOUT_MS);
-    }),
-  ]);
-}
 
 import { db } from "./db";
 import { 
@@ -4834,16 +4725,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     res.sendFile('check-domain.html', { root: '.' });
   });
 
-  // Custom error class for classified QuickBooks refresh failures
-  class QbRefreshError extends Error {
-    category: QbRefreshFailureCategory;
-    constructor(message: string, category: QbRefreshFailureCategory) {
-      super(message);
-      this.name = 'QbRefreshError';
-      this.category = category;
-    }
-  }
-
   // Function to refresh QuickBooks token
   async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal, context?: { realmId?: string; calledFrom?: string }) {
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -4904,26 +4785,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     return tokenData;
   }
 
-  // How many ms before expiresAt we proactively refresh the access token
-  const QB_PROACTIVE_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
-
-  // Shared helper: build reconnect reason string from QbRefreshFailureCategory
-  function buildReconnectReason(category: QbRefreshFailureCategory): string {
-    const reasonMap: Record<QbRefreshFailureCategory, string> = {
-      stale_refresh_token: 'Refresh token expired (invalid_grant). Please reauthorize QuickBooks.',
-      revoked: 'QuickBooks authorization was revoked. Please reconnect.',
-      reconnect_required: 'QuickBooks token could not be refreshed. Please reauthorize.',
-      transient: ''
-    };
-    return reasonMap[category];
-  }
-
   // Shared helper: persist reconnect_required for unrecoverable QbRefreshError
   async function handleUnrecoverableRefreshError(err: unknown, realmId: string): Promise<boolean> {
     if (!(err instanceof QbRefreshError)) return false;
-    const unrecoverable = err.category === 'stale_refresh_token'
-      || err.category === 'revoked'
-      || err.category === 'reconnect_required';
+    const unrecoverable = UNRECOVERABLE_CATEGORIES.has(err.category);
     if (!unrecoverable) return false;
     const reason = buildReconnectReason(err.category);
     await storage.markQuickBooksReconnectRequired(realmId, reason).catch((e) => {
@@ -9087,125 +8952,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // QB7 — Background health-check / keep-alive job
+  // QB7 / T8 — Background health-check / keep-alive job
   //
-  // Runs once at startup and then every QB_HEALTH_CHECK_INTERVAL_MS thereafter.
-  // For each "connected" realm we check whether lastRefreshSuccess is older
-  // than QB_IDLE_THRESHOLD_DAYS.  If it is (or null), we proactively refresh
-  // through the existing per-realm mutex so that the refresh token never goes
-  // 100 days without activity, which would silently revoke it.
+  // Runs once at startup and then every 24 hours thereafter.
+  // Proactively refreshes any connected realm whose token is within the
+  // 5-minute expiry buffer or that is approaching the 100-day idle threshold.
+  // Uses runProactiveRefreshForRealm from qb-token-utils.ts (testable).
   // ─────────────────────────────────────────────────────────────────────────
 
-  const QB_HEALTH_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-  const QB_IDLE_THRESHOLD_DAYS = 90; // refresh any connection idle ≥ 90 days
+  // Storage adapter bridge for qb-token-utils (decouples logic from DatabaseStorage)
+  const qbStorageAdapter: QbStorageAdapter = {
+    getIntegration: (realmId) => storage.getQuickBooksIntegration(realmId),
+    saveIntegration: (data) => storage.saveQuickBooksIntegration(data),
+    markReconnectRequired: (realmId, reason) => storage.markQuickBooksReconnectRequired(realmId, reason),
+  };
 
-  async function runQbHealthCheckJob(): Promise<void> {
-    const jobStart = Date.now();
-    console.log(`[QB health-check] Job started at ${new Date(jobStart).toISOString()}`);
+  // Injected Intuit refresh function (uses real token endpoint)
+  const realRefreshFn = (refreshToken: string, signal: AbortSignal) =>
+    refreshQuickBooksToken(refreshToken, signal, { calledFrom: 'health-job' });
 
-    let integrations: Awaited<ReturnType<typeof storage.getAllActiveQuickBooksIntegrations>>;
-    try {
-      integrations = await storage.getAllActiveQuickBooksIntegrations();
-    } catch (err) {
-      console.error('[QB health-check] Failed to fetch active integrations:', err);
-      return;
-    }
-
-    console.log(`[QB health-check] Checking ${integrations.length} active connection(s)`);
-
-    const thresholdMs = QB_IDLE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-
-    let refreshed = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const integration of integrations) {
-      const { realmId, lastRefreshSuccess, companyId } = integration;
-
-      // Determine whether this connection is approaching the idle threshold
-      const lastSuccessMs = lastRefreshSuccess ? new Date(lastRefreshSuccess).getTime() : 0;
-      const idleMs = now - lastSuccessMs;
-
-      if (idleMs < thresholdMs) {
-        console.log(
-          `[QB health-check] realmId=${realmId} companyId=${companyId}: healthy (idle ${Math.round(idleMs / 86_400_000)}d < threshold ${QB_IDLE_THRESHOLD_DAYS}d) — skipping`
-        );
-        skipped++;
-        continue;
-      }
-
-      console.log(
-        `[QB health-check] realmId=${realmId} companyId=${companyId}: idle ${Math.round(idleMs / 86_400_000)}d ≥ threshold — attempting proactive refresh`
-      );
-
-      try {
-        await withQbRefreshLock(realmId, async (signal) => {
-          // Re-read inside the lock to pick up any concurrent rotation
-          const fresh = await storage.getQuickBooksIntegration(realmId);
-          if (!fresh) {
-            throw new Error(`[QB health-check] Integration for realmId=${realmId} disappeared before refresh`);
-          }
-          if (fresh.connectionStatus === 'reconnect_required') {
-            throw new QbRefreshError(
-              `Connection already marked as reconnect_required for realmId=${realmId}`,
-              'reconnect_required'
-            );
-          }
-
-          const newTokenData = await refreshQuickBooksToken(fresh.refreshToken, signal);
-          const expiresInSeconds =
-            newTokenData.expires_in && newTokenData.expires_in > 0 ? newTokenData.expires_in : 3600;
-
-          await storage.saveQuickBooksIntegration({
-            companyId: fresh.companyId,
-            accessToken: newTokenData.access_token,
-            refreshToken: newTokenData.refresh_token ?? fresh.refreshToken,
-            realmId,
-            expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
-            lastRefreshSuccess: new Date(),
-            connectionStatus: 'connected',
-          });
-
-          return newTokenData.access_token;
-        });
-
-        console.log(`[QB health-check] realmId=${realmId} companyId=${companyId}: proactive refresh succeeded`);
-        refreshed++;
-      } catch (err) {
-        const wasHandled = await handleUnrecoverableRefreshError(err, realmId);
-        if (wasHandled) {
-          console.warn(
-            `[QB health-check] realmId=${realmId} companyId=${companyId}: unrecoverable error — marked reconnect_required`
-          );
-        } else {
-          console.error(
-            `[QB health-check] realmId=${realmId} companyId=${companyId}: transient refresh failure — will retry next cycle`,
-            err instanceof Error ? err.message : err
-          );
-        }
-        failed++;
-      }
-    }
-
-    const elapsedMs = Date.now() - jobStart;
-    console.log(
-      `[QB health-check] Job complete in ${elapsedMs}ms — refreshed=${refreshed} skipped=${skipped} failed=${failed}`
-    );
-  }
-
-  // Run once shortly after startup, then on the daily interval
-  setTimeout(() => {
-    runQbHealthCheckJob().catch((err) =>
-      console.error('[QB health-check] Unhandled error in initial run:', err)
-    );
-  }, 30_000); // 30-second delay to let the server fully start
-
-  setInterval(() => {
-    runQbHealthCheckJob().catch((err) =>
-      console.error('[QB health-check] Unhandled error in scheduled run:', err)
-    );
-  }, QB_HEALTH_CHECK_INTERVAL_MS);
+  startQbTokenHealthJob(
+    () => storage.getAllActiveQuickBooksIntegrations(),
+    realRefreshFn,
+    qbStorageAdapter,
+    24 * 60 * 60 * 1000
+  );
 
   return httpServer;
 }
