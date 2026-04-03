@@ -1445,55 +1445,77 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async saveQuickBooksIntegration(data: { companyId: string; accessToken: string; refreshToken: string; realmId: string; expiresAt: Date }): Promise<void> {
+  async saveQuickBooksIntegration(data: {
+    companyId: string;
+    accessToken: string;
+    refreshToken: string;
+    realmId: string;
+    expiresAt: Date;
+    lastRefreshAttempt?: Date | null;
+    lastRefreshSuccess?: Date | null;
+    lastRefreshFailure?: Date | null;
+    connectionStatus?: string;
+    reconnectRequiredReason?: string | null;
+    tokenEnvironment?: string;
+  }): Promise<void> {
     try {
-      // Check if integration already exists
-      const existing = await db.select().from(quickbooksIntegration).limit(1);
-      
-      if (existing.length > 0) {
-        // Update existing
-        await db.update(quickbooksIntegration)
-          .set({
-            companyId: data.companyId,
-            accessToken: data.accessToken,
-            refreshToken: data.refreshToken,
-            realmId: data.realmId,
-            expiresAt: data.expiresAt,
-            updatedAt: new Date()
-          })
-          .where(eq(quickbooksIntegration.id, existing[0].id));
-      } else {
-        // Create new
-        await db.insert(quickbooksIntegration).values({
+      const tokenEnvironment = data.tokenEnvironment ?? (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox');
+      await db.insert(quickbooksIntegration).values({
+        companyId: data.companyId,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        realmId: data.realmId,
+        expiresAt: data.expiresAt,
+        lastRefreshAttempt: data.lastRefreshAttempt ?? null,
+        lastRefreshSuccess: data.lastRefreshSuccess ?? null,
+        lastRefreshFailure: data.lastRefreshFailure ?? null,
+        connectionStatus: data.connectionStatus ?? 'connected',
+        reconnectRequiredReason: data.reconnectRequiredReason ?? null,
+        tokenEnvironment,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: quickbooksIntegration.realmId,
+        set: {
           companyId: data.companyId,
           accessToken: data.accessToken,
           refreshToken: data.refreshToken,
-          realmId: data.realmId,
           expiresAt: data.expiresAt,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        });
-      }
+          lastRefreshAttempt: data.lastRefreshAttempt ?? null,
+          lastRefreshSuccess: data.lastRefreshSuccess ?? null,
+          lastRefreshFailure: data.lastRefreshFailure ?? null,
+          connectionStatus: data.connectionStatus ?? 'connected',
+          reconnectRequiredReason: data.reconnectRequiredReason ?? null,
+          tokenEnvironment,
+          updatedAt: new Date(),
+        },
+      });
     } catch (error) {
       console.error('Error saving QuickBooks integration:', error);
       throw error;
     }
   }
 
-  async getQuickBooksIntegration(companyId?: string | null): Promise<any | null> {
+  async getQuickBooksIntegration(realmId: string): Promise<(typeof quickbooksIntegration.$inferSelect) | null> {
     try {
-      if (companyId) {
-        // Try to find by company ID first
-        const byCompany = await db.select().from(quickbooksIntegration)
-          .where(eq(quickbooksIntegration.companyId, companyId))
-          .limit(1);
-        if (byCompany.length > 0) return byCompany[0];
-        // Fall back to first integration (handles legacy data where companyId was stored as QB realm ID)
-      }
-      const fallback = await db.select().from(quickbooksIntegration).limit(1);
-      return fallback.length > 0 ? fallback[0] : null;
+      const result = await db.select().from(quickbooksIntegration)
+        .where(eq(quickbooksIntegration.realmId, realmId))
+        .limit(1);
+      return result.length > 0 ? result[0] : null;
     } catch (error) {
       console.error('Error getting QuickBooks integration:', error);
+      return null;
+    }
+  }
+
+  async getQuickBooksIntegrationByCompanyId(companyId: string): Promise<(typeof quickbooksIntegration.$inferSelect) | null> {
+    try {
+      const result = await db.select().from(quickbooksIntegration)
+        .where(eq(quickbooksIntegration.companyId, companyId))
+        .limit(1);
+      return result.length > 0 ? result[0] : null;
+    } catch (error) {
+      console.error('Error getting QuickBooks integration by companyId:', error);
       return null;
     }
   }

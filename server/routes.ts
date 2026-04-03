@@ -2359,7 +2359,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Pre-flight: verify QuickBooks connection before doing anything
       // req.authenticatedUserCompanyId is set by requireAuthentication middleware from the x-user-company-id header
       const userCompanyId = req.authenticatedUserCompanyId ? req.authenticatedUserCompanyId.toString() : null;
-      const integration = await storage.getQuickBooksIntegration(userCompanyId);
+      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
         return res.status(400).json({
           message: "QuickBooks is not connected. Please connect QuickBooks before creating invoices.",
@@ -2655,7 +2656,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(invoiceData)
-        }, 'Monthly Invoice Creation');
+        }, 'Monthly Invoice Creation', integration.realmId);
 
         if (invoiceResponse.ok) {
           const invoiceResult = await invoiceResponse.json();
@@ -4683,7 +4684,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   }
 
   // Helper function to make QuickBooks API requests with intuit_tid capture and automatic token refresh
-  async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = ''): Promise<globalThis.Response> {
+  async function makeQuickBooksRequest(url: string, options: RequestInit = {}, operation: string = '', realmId?: string): Promise<globalThis.Response> {
     let response = await fetch(url, options);
     
     // Always capture intuit_tid from response headers
@@ -4698,7 +4699,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (response.status === 401) {
       console.log('QuickBooks token expired, attempting to refresh...');
       try {
-        const integration = await storage.getQuickBooksIntegration();
+        const integration = realmId ? await storage.getQuickBooksIntegration(realmId) : null;
         if (integration && integration.refreshToken) {
           const newTokenData = await refreshQuickBooksToken(integration.refreshToken);
           
@@ -4770,7 +4771,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const res = await makeQuickBooksRequest(
         `${apiBase}/v3/company/${realmId}/query?query=${itemQuery}`,
         { method: 'GET', headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } },
-        'QB Service Item Lookup'
+        'QB Service Item Lookup',
+        realmId
       );
       if (res.ok) {
         const data = await res.json();
@@ -4837,7 +4839,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           'Authorization': `Bearer ${tokenData.access_token}`,
           'Accept': 'application/json'
         }
-      }, 'Company Info');
+      }, 'Company Info', realmId);
       
       if (companyInfoResponse.ok) {
         const companyData = await companyInfoResponse.json();
@@ -5114,8 +5116,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.json([]);
       }
 
-      // Get actual QuickBooks integration data
-      const integration = await storage.getQuickBooksIntegration(userCompanyId);
+      // Get actual QuickBooks integration data - resolve realmId from companyId then fetch canonically
+      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       
       if (!integration || !integration.accessToken) {
         return res.json([]);
@@ -5131,7 +5134,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           'Authorization': `Bearer ${integration.accessToken}`,
           'Accept': 'application/json'
         }
-      }, 'Customers Query');
+      }, 'Customers Query', integration.realmId);
 
       if (!customersResponse.ok) {
         const errorText = await customersResponse.text();
@@ -5198,8 +5201,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
       const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       
-      // Get actual QuickBooks integration data
-      const integration = await storage.getQuickBooksIntegration(userCompanyId);
+      // Get actual QuickBooks integration data - resolve realmId from companyId then fetch canonically
+      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       console.log("QuickBooks integration data available:", !!integration);
       
       if (!integration || !integration.accessToken) {
@@ -5215,12 +5219,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ? 'https://quickbooks.api.intuit.com' 
         : 'https://sandbox-quickbooks.api.intuit.com';
       
-      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
+      const customersResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Customer WHERE Active = true`, {
         headers: {
           'Authorization': `Bearer ${integration.accessToken}`,
           'Accept': 'application/json'
         }
-      }, 'Customers Query');
+      }, 'Customers Query', integration.realmId);
 
       if (!customersResponse.ok) {
         const errorText = await customersResponse.text();
@@ -5318,8 +5322,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // QuickBooks Parts Sync - Only irrigation-related items
   app.post('/api/quickbooks/sync-parts', requireAuthentication, async (req, res) => {
     try {
-      
-      const integration = await storage.getQuickBooksIntegration();
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
         return res.status(400).json({ 
           success: false, 
@@ -5332,12 +5337,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ? 'https://quickbooks.api.intuit.com' 
         : 'https://sandbox-quickbooks.api.intuit.com';
       
-      const itemsResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId || integration.companyId}/query?query=SELECT * FROM Item WHERE Type = 'Inventory' AND Active = true`, {
+      const itemsResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/query?query=SELECT * FROM Item WHERE Type = 'Inventory' AND Active = true`, {
         headers: {
           'Authorization': `Bearer ${integration.accessToken}`,
           'Accept': 'application/json'
         }
-      }, 'Items Query');
+      }, 'Items Query', integration.realmId);
 
       if (!itemsResponse.ok) {
         const errorText = await itemsResponse.text();
@@ -5430,8 +5435,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Estimate not found" });
       }
       
-      // Get QuickBooks integration data
-      const integration = await storage.getQuickBooksIntegration();
+      // Get QuickBooks integration data - resolve realmId from companyId then fetch canonically
+      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
+      const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
         return res.status(400).json({ 
           success: false, 
@@ -5505,7 +5512,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(invoiceData)
-      }, 'Estimate Invoice Creation');
+      }, 'Estimate Invoice Creation', integration.realmId);
 
       if (invoiceResponse.ok) {
         const invoiceResult = await invoiceResponse.json();

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, decimal, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -403,9 +403,17 @@ export const quickbooksIntegration = pgTable("quickbooks_integration", {
   refreshToken: text("refresh_token").notNull(),
   realmId: text("realm_id").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastRefreshAttempt: timestamp("last_refresh_attempt", { withTimezone: true }),
+  lastRefreshSuccess: timestamp("last_refresh_success", { withTimezone: true }),
+  lastRefreshFailure: timestamp("last_refresh_failure", { withTimezone: true }),
+  connectionStatus: text("connection_status").notNull().default("connected"), // connected, disconnected, error, reconnect_required
+  reconnectRequiredReason: text("reconnect_required_reason"),
+  tokenEnvironment: text("token_environment").notNull().default("sandbox"), // sandbox, production
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  realmIdUniqueIdx: uniqueIndex("quickbooks_integration_realm_id_unique").on(table.realmId),
+}));
 
 export const quickbooksSync = pgTable("quickbooks_sync", {
   id: serial("id").primaryKey(),

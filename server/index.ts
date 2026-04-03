@@ -192,6 +192,37 @@ async function runStartupMigrations() {
     logger.error('Startup migration: customers.markup_percent column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // QB2: Add metadata columns and unique constraint on realm_id to quickbooks_integration
+  try {
+    // Add metadata columns if not present
+    await pool.query(`
+      ALTER TABLE quickbooks_integration
+        ADD COLUMN IF NOT EXISTS last_refresh_attempt TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS last_refresh_success TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS last_refresh_failure TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS connection_status TEXT NOT NULL DEFAULT 'connected',
+        ADD COLUMN IF NOT EXISTS reconnect_required_reason TEXT,
+        ADD COLUMN IF NOT EXISTS token_environment TEXT NOT NULL DEFAULT 'sandbox'
+    `);
+    // Deduplicate by realm_id before adding the unique constraint: keep most recently updated row per realm_id
+    await pool.query(`
+      DELETE FROM quickbooks_integration
+      WHERE id NOT IN (
+        SELECT DISTINCT ON (realm_id) id
+        FROM quickbooks_integration
+        ORDER BY realm_id, updated_at DESC NULLS LAST, id DESC
+      )
+    `);
+    // Create unique index on realm_id if it doesn't exist
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS quickbooks_integration_realm_id_unique
+        ON quickbooks_integration (realm_id)
+    `);
+    logger.info('Startup migration: ensured quickbooks_integration metadata columns and realm_id unique constraint exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: quickbooks_integration QB2 migration error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   const MIGRATION_KEY = 'billing-sheets-sync-rates-v1';
 
   try {
