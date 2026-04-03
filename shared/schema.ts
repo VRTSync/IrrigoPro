@@ -61,6 +61,7 @@ export const customers = pgTable("customers", {
   contractType: text("contract_type").default("standard"), // standard, premium, commercial, residential
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("45.00"),
   emergencyLaborRate: decimal("emergency_labor_rate", { precision: 10, scale: 2 }).default("125.00"),
+  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).default("15.00"), // Parts markup % (e.g. 15.00 = 15%)
   taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0.00"),
   discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }).default("0.00"),
   // Contract details
@@ -449,11 +450,17 @@ export const workOrders = pgTable("work_orders", {
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }), // Hours worked
   totalPartsCost: decimal("total_parts_cost", { precision: 10, scale: 2 }), // Cost of parts used
   // Financial snapshot fields - explicit pricing for billing
-  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }), // Rate used for this job
-  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }), // totalHours * laborRate
+  laborRate: decimal("labor_rate", { precision: 10, scale: 2 }), // Rate used for this job (legacy alias for appliedLaborRate)
+  laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }), // totalHours * appliedLaborRate
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }), // Sum of parts costs
+  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }), // Markup on parts
+  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }), // Tax on subtotal+markup
   estimatedTotal: decimal("estimated_total", { precision: 10, scale: 2 }), // Original estimate total for comparison
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
+  // Applied rate snapshot — locked at the time financial total is first calculated
+  appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }), // customer.laborRate at completion time
+  appliedMarkupRate: decimal("applied_markup_rate", { precision: 5, scale: 4 }), // markup fraction at completion time (e.g. 0.1500)
+  appliedTaxRate: decimal("applied_tax_rate", { precision: 5, scale: 4 }), // tax fraction at completion time (e.g. 0.0800)
   totalItems: integer("total_items").default(0),
   // Invoice linkage - prevents double billing
   invoiceId: integer("invoice_id").references(() => invoices.id),

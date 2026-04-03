@@ -169,6 +169,29 @@ async function runStartupMigrations() {
     logger.error('Startup migration: work_orders.branch_name column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // Add financial breakdown and applied-rate snapshot columns to work_orders if not present
+  try {
+    await pool.query(`
+      ALTER TABLE work_orders
+        ADD COLUMN IF NOT EXISTS markup_amount DECIMAL(10, 2),
+        ADD COLUMN IF NOT EXISTS tax_amount DECIMAL(10, 2),
+        ADD COLUMN IF NOT EXISTS applied_labor_rate DECIMAL(10, 2),
+        ADD COLUMN IF NOT EXISTS applied_markup_rate DECIMAL(5, 4),
+        ADD COLUMN IF NOT EXISTS applied_tax_rate DECIMAL(5, 4)
+    `);
+    logger.info('Startup migration: ensured work_orders financial snapshot columns exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: work_orders financial snapshot columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Add markup_percent column to customers if not present (default 15.00 = 15% parts markup)
+  try {
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS markup_percent DECIMAL(5, 2) DEFAULT 15.00`);
+    logger.info('Startup migration: ensured customers.markup_percent column exists', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: customers.markup_percent column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   const MIGRATION_KEY = 'billing-sheets-sync-rates-v1';
 
   try {

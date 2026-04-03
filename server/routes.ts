@@ -1831,16 +1831,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             !bs.invoiceId && (bs.status === 'completed' || bs.status === 'approved')
           );
           
+          // Use stored totalAmount as the authoritative total (historical backfill guardrail)
           const unbilledAmount = 
             unbilledWorkOrders.reduce((sum, wo) => {
-              const laborAmount = parseFloat(wo.totalHours || '0') * 45;
-              const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
-              return sum + laborAmount + partsAmount;
+              return sum + parseFloat(wo.totalAmount || '0');
             }, 0) +
             unbilledBillingSheets.reduce((sum, bs) => {
-              const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
-              const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-              return sum + laborAmount + partsAmount;
+              // Use stored totalAmount as the authoritative billing sheet total
+              return sum + parseFloat(bs.totalAmount || '0');
             }, 0);
 
           return {
@@ -1932,39 +1930,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allEstimates = await storage.getEstimates();
       const rawEstimates = allEstimates.filter(est => est.customerId === customerId);
 
-      // Transform work orders to match frontend expectations
-      // Use the same dynamic calculation logic as the invoice system
+      // Transform work orders to match frontend expectations.
+      // Use the stored financial snapshot as the source of truth.
+      // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
+      // fall back to totalAmount for the total but do not fabricate breakdown detail.
       const workOrders = rawWorkOrders.map(wo => {
-        const laborAmount = parseFloat(wo.totalHours || '0') * 45;
-        const partsAmount = parseFloat(wo.totalPartsCost || '0') || 0;
-        const dynamicTotalAmount = laborAmount + partsAmount;
+        const hasBreakdown = wo.laborSubtotal != null;
+        const laborCost = hasBreakdown ? parseFloat(wo.laborSubtotal || '0') : null;
+        const partsCost = hasBreakdown ? parseFloat(wo.partsSubtotal || '0') : null;
+        const storedTotal = parseFloat(wo.totalAmount || '0');
         
         return {
           ...wo,
-          laborCost: laborAmount,
-          partsCost: partsAmount,
-          totalAmount: dynamicTotalAmount.toString(), // Use dynamic calculation instead of stored value
+          // For pre-fix records without a stored breakdown, set component fields to 0.
+          // UI guards on hasFinancialBreakdown and uses totalAmount as authoritative total.
+          laborCost: laborCost !== null ? laborCost : 0,
+          partsCost: partsCost !== null ? partsCost : 0,
+          totalAmount: storedTotal.toString(),
+          hasFinancialBreakdown: hasBreakdown,
           assignedTo: wo.assignedTechnicianName || 'Unassigned',
           description: wo.description || wo.workSummary || '',
-          billedDate: null, // No billing tracking yet
+          billedDate: null,
           completedDate: wo.completedAt
         };
       });
 
       // Transform billing sheets to match frontend expectations
-      // Use the same dynamic calculation logic as the invoice system
       const billingSheets = rawBillingSheets.map(bs => {
         const laborAmount = parseFloat(bs.laborSubtotal || '0') || 0;
         const partsAmount = parseFloat(bs.partsSubtotal || '0') || 0;
-        const dynamicTotalAmount = laborAmount + partsAmount;
+        const storedTotal = parseFloat(bs.totalAmount || String(laborAmount + partsAmount));
         
         return {
           ...bs,
           laborCost: laborAmount,
           partsCost: partsAmount,
-          totalAmount: dynamicTotalAmount.toString(), // Use dynamic calculation instead of stored value
+          totalAmount: storedTotal.toString(),
           description: bs.workDescription || '',
-          billedDate: null, // No billing tracking yet
+          billedDate: null,
           completedDate: bs.workDate
         };
       });
@@ -2254,28 +2257,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No valid items selected for invoicing" });
       }
 
-      // Create preview invoice data (same calculations as actual invoice)
+      // Create preview invoice data using stored financial snapshots
       const currentDate = new Date();
       const invoiceNumber = `PREVIEW-${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}-${customerId.toString().padStart(4, '0')}`;
       
-      // Calculate totals
+      // Use stored totals from each work order as the source of truth.
+      // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
+      // use totalAmount for the total but show no breakdown detail.
       const laborSubtotal = 
-        selectedWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
-      const markupAmount = 0;
-      const taxAmount = 0;
-      const totalAmount = laborSubtotal + partsSubtotal;
+      const markupAmount = 
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.markupAmount || '0'), 0);
+      const taxAmount = 
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.taxAmount || '0'), 0);
+      
+      // Total is the sum of stored totalAmount per work order + stored totalAmount per billing sheet
+      const totalAmount = 
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
 
       // Create preview items
       const previewItems = [];
 
-      // Add work order items
+      // Add work order items — use stored financial breakdown
       for (const workOrder of selectedWorkOrders) {
+        const woLaborAmount = parseFloat(workOrder.laborSubtotal || '0');
+        const woPartsAmount = parseFloat(workOrder.partsSubtotal || '0');
+        const woMarkupAmount = parseFloat(workOrder.markupAmount || '0');
+        const woTaxAmount = parseFloat(workOrder.taxAmount || '0');
+        const woTotal = parseFloat(workOrder.totalAmount || '0');
+        const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '45');
         previewItems.push({
           sourceType: 'work_order',
           sourceId: workOrder.id,
@@ -2283,10 +2300,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           workDate: workOrder.completedAt || workOrder.createdAt,
           technicianName: workOrder.assignedTechnicianName || 'Unknown',
           laborHours: parseFloat(workOrder.totalHours || '0'),
-          laborRate: 45,
-          laborAmount: parseFloat(workOrder.totalHours || '0') * 45,
-          partsAmount: parseFloat(workOrder.totalPartsCost || '0'),
-          totalAmount: (parseFloat(workOrder.totalHours || '0') * 45) + parseFloat(workOrder.totalPartsCost || '0')
+          laborRate: appliedLaborRate,
+          laborAmount: woLaborAmount,
+          partsAmount: woPartsAmount,
+          markupAmount: woMarkupAmount,
+          taxAmount: woTaxAmount,
+          totalAmount: woTotal,
+          hasBreakdown: workOrder.laborSubtotal != null
         });
       }
 
@@ -2458,17 +2478,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         periodEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
       }
       
+      // Use stored financial snapshots as the source of truth.
+      // Historical backfill guardrail: if laborSubtotal is null (pre-fix record),
+      // laborSubtotal/partsSubtotal will aggregate as 0 but totalAmount is authoritative.
       const laborSubtotal = 
-        selectedWorkOrders.reduce((sum, wo) => sum + (parseFloat(wo.totalHours || '0') * 45), 0) +
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.laborSubtotal || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.laborSubtotal || '0'), 0);
       
       const partsSubtotal = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalPartsCost || '0'), 0) +
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
-      const markupAmount = 0;
-      const taxAmount = 0;
-      const totalAmount = laborSubtotal + partsSubtotal;
+      const markupAmount = 
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.markupAmount || '0'), 0);
+      const taxAmount = 
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.taxAmount || '0'), 0);
+      const totalAmount = 
+        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+        selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
 
       // Create the invoice record (not yet marking items as billed)
       let invoice = await storage.createInvoice({
@@ -2495,9 +2522,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create invoice items for work orders (without marking as billed yet)
       for (const workOrder of selectedWorkOrders) {
-        const woLaborAmount = parseFloat(workOrder.totalHours || '0') * 45;
-        const woPartsAmount = parseFloat(workOrder.totalPartsCost || '0');
-        const woTotalAmount = woLaborAmount + woPartsAmount;
+        const woLaborAmount = parseFloat(workOrder.laborSubtotal || '0');
+        const woPartsAmount = parseFloat(workOrder.partsSubtotal || '0');
+        const woTotalAmount = parseFloat(workOrder.totalAmount || '0');
+        const woAppliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '45');
         
         await storage.createInvoiceItem({
           invoiceId: invoice.id,
@@ -2507,7 +2535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Work Order ${workOrder.workOrderNumber} - ${workOrder.projectName}`,
           workDate: workOrder.completedAt || workOrder.createdAt,
           laborHours: (parseFloat(workOrder.totalHours || '0')).toString(),
-          laborRate: '45.00',
+          laborRate: woAppliedLaborRate.toFixed(2),
           laborTotal: woLaborAmount.toString(),
           quantity: '1',
           unitPrice: woTotalAmount.toString(),
@@ -2559,9 +2587,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const qbLineItems = [];
         
         for (const workOrder of selectedWorkOrders) {
-          const laborAmount = parseFloat(workOrder.totalHours || '0') * 45;
-          const partsAmount = parseFloat(workOrder.totalPartsCost || '0');
-          const totalLineAmount = laborAmount + partsAmount;
+          // Use the stored totalAmount as the authoritative QB line amount
+          const totalLineAmount = parseFloat(workOrder.totalAmount || '0');
+          const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '45');
+          const partsAmount = parseFloat(workOrder.partsSubtotal || workOrder.totalPartsCost || '0');
           
           if (totalLineAmount > 0) {
             qbLineItems.push({
@@ -2575,7 +2604,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: totalLineAmount,
                 Qty: 1
               },
-              Description: `WO-${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor @ $45/h, $${partsAmount.toFixed(2)} parts)`
+              Description: `WO-${workOrder.workOrderNumber} - ${workOrder.projectName} (${workOrder.totalHours}h labor @ $${appliedLaborRate.toFixed(2)}/h, $${partsAmount.toFixed(2)} parts)`
             });
           }
         }
@@ -6075,23 +6104,32 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const completedByUser = completedByUserId ? await storage.getUser(completedByUserId) : undefined;
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
 
-      // Calculate totals
-      const laborRate = 45; // Default labor rate per hour
-      const markupRate = 0.15; // 15% markup on parts
-      const taxRate = 0.08; // 8% tax
-      
+      // Merge creation photos with completion photos (don't overwrite)
+      const existingWorkOrder = await storage.getWorkOrder(workOrderId);
+
+      // Load customer to snapshot their labor rate and tax rate
+      const customerForRates = existingWorkOrder?.customerId
+        ? await storage.getCustomerById(existingWorkOrder.customerId)
+        : undefined;
+
+      // Snapshot the customer's configured rates at the time of completion.
+      // All three rates are read from the customer record (laborRate, markupPercent, taxPercent).
+      // Defaults: laborRate=45, markupPercent=15 (15%), taxPercent=0.
+      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '45');
+      const appliedMarkupRate = parseFloat(customerForRates?.markupPercent || '15') / 100;
+      const appliedTaxRate = parseFloat(customerForRates?.taxPercent || '0') / 100;
+
+      // Calculate totals using the snapshotted rates
       const laborHours = parseFloat(totalHours || '0');
       const partsCost = parseFloat(totalPartsCost || '0');
       
-      const laborSubtotal = laborHours * laborRate;
+      const laborSubtotal = laborHours * appliedLaborRate;
       const partsSubtotal = partsCost;
-      const markupAmount = partsSubtotal * markupRate;
+      const markupAmount = partsSubtotal * appliedMarkupRate;
       const subtotal = laborSubtotal + partsSubtotal + markupAmount;
-      const taxAmount = subtotal * taxRate;
+      const taxAmount = subtotal * appliedTaxRate;
       const totalAmount = subtotal + taxAmount;
 
-      // Merge creation photos with completion photos (don't overwrite)
-      const existingWorkOrder = await storage.getWorkOrder(workOrderId);
       const creationPhotos: string[] = existingWorkOrder?.photos || [];
       const completionPhotos: string[] = photos || [];
       const mergedPhotos = [...creationPhotos, ...completionPhotos];
@@ -6107,7 +6145,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalHours: laborHours.toString(),
         photos: mergedPhotos,
         totalPartsCost: partsCost.toString(),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        markupAmount: markupAmount.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
+        laborRate: appliedLaborRate.toFixed(2),
+        appliedLaborRate: appliedLaborRate.toFixed(2),
+        appliedMarkupRate: appliedMarkupRate.toFixed(4),
+        appliedTaxRate: appliedTaxRate.toFixed(4),
         ...(reqAiInputs ? { aiInputs: reqAiInputs } : {}),
         ...(aiShortDescription ? { aiShortDescription } : {}),
         ...(aiDetailedDescription ? { aiDetailedDescription } : {}),
@@ -6179,17 +6225,49 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const completedByUserId = req.authenticatedUserId;
       const completedByUser = completedByUserId ? await storage.getUser(completedByUserId) : undefined;
       const completedByUserName = completedByUser?.name || req.headers['x-user-name'];
-      
-      const workOrder = await storage.updateWorkOrder(id, { 
-        status: "completed", 
+
+      // Read existing work order to snapshot rates from customer
+      const existingWorkOrder = await storage.getWorkOrder(id);
+      if (!existingWorkOrder) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+
+      // Snapshot the customer's configured rates at the time of completion.
+      const customerForRates = existingWorkOrder.customerId
+        ? await storage.getCustomerById(existingWorkOrder.customerId)
+        : undefined;
+      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '45');
+      const appliedMarkupRate = parseFloat(customerForRates?.markupPercent || '15') / 100;
+      const appliedTaxRate = parseFloat(customerForRates?.taxPercent || '0') / 100;
+
+      // Calculate totals using the snapshotted rates
+      const laborHours = parseFloat(existingWorkOrder.totalHours || '0');
+      const partsCost = parseFloat(existingWorkOrder.totalPartsCost || '0');
+      const laborSubtotal = laborHours * appliedLaborRate;
+      const partsSubtotal = partsCost;
+      const markupAmount = partsSubtotal * appliedMarkupRate;
+      const subtotal = laborSubtotal + partsSubtotal + markupAmount;
+      const taxAmount = subtotal * appliedTaxRate;
+      const totalAmount = subtotal + taxAmount;
+
+      const workOrder = await storage.updateWorkOrder(id, {
+        status: "completed",
         completedAt: new Date(),
         completedByUserId: completedByUserId || undefined,
-        completedByUserName: completedByUserName as string
+        completedByUserName: completedByUserName as string,
+        laborSubtotal: laborSubtotal.toFixed(2),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        markupAmount: markupAmount.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        totalAmount: totalAmount.toFixed(2),
+        appliedLaborRate: appliedLaborRate.toFixed(2),
+        appliedMarkupRate: appliedMarkupRate.toFixed(4),
+        appliedTaxRate: appliedTaxRate.toFixed(4),
       });
       if (!workOrder) {
         return res.status(404).json({ message: "Work order not found" });
       }
-      
+
       // Notify managers about work order completion
       const managers = await storage.getUsers();
       const managerUsers = managers.filter(u => u.role === "irrigation_manager" || u.role === "admin");
@@ -6857,7 +6935,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Invalid work order ID" });
       }
       const { items, ...workOrderBody } = req.body;
-      const workOrderData = insertWorkOrderSchema.partial().parse(workOrderBody);
+      // Strip immutable financial snapshot fields so manager edits cannot alter
+      // the rates/breakdown that were locked in at completion time.
+      const {
+        appliedLaborRate: _aLR,
+        appliedMarkupRate: _aMR,
+        appliedTaxRate: _aTR,
+        laborSubtotal: _lS,
+        partsSubtotal: _pS,
+        markupAmount: _mA,
+        taxAmount: _tA,
+        totalAmount: _totA,
+        ...mutableWorkOrderBody
+      } = workOrderBody;
+      const workOrderData = insertWorkOrderSchema.partial().parse(mutableWorkOrderBody);
       let workOrder;
       if (Object.keys(workOrderData).length > 0) {
         workOrder = await storage.updateWorkOrder(id, workOrderData);
@@ -6894,6 +6985,38 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const computedPartsCost = itemsToInsert.reduce((sum: number, i: any) => sum + Number(i.totalPrice), 0);
         await storage.updateWorkOrder(id, { totalPartsCost: computedPartsCost.toFixed(2) });
         console.log(`[AUDIT] work_order_items_replaced workOrderId=${id} countBefore=${countBefore} countAfter=${items.length}`);
+      }
+
+      // Recompute financial totals if financial inputs were touched (totalHours, totalPartsCost, items)
+      const financialFieldsTouched = 'totalHours' in workOrderData || 'totalPartsCost' in workOrderData || (items !== undefined && Array.isArray(items));
+      if (financialFieldsTouched) {
+        const freshWo = await storage.getWorkOrder(id);
+        if (freshWo && freshWo.appliedLaborRate) {
+          // Use the work order's own snapshotted rates — never the live customer record.
+          // All three applied rates must have been set at completion time; if any is missing
+          // (pre-fix record), skip recompute to avoid fabricating rate data.
+          const snappedLaborRate = parseFloat(freshWo.appliedLaborRate);
+          const snappedMarkupRate = parseFloat(freshWo.appliedMarkupRate ?? '');
+          const snappedTaxRate = parseFloat(freshWo.appliedTaxRate ?? '');
+          if (isFinite(snappedMarkupRate) && isFinite(snappedTaxRate)) {
+            const hrs = parseFloat(freshWo.totalHours || '0');
+            const parts = parseFloat(freshWo.totalPartsCost || '0');
+            const recomputedLaborSubtotal = hrs * snappedLaborRate;
+            const recomputedPartsSubtotal = parts;
+            const recomputedMarkupAmount = recomputedPartsSubtotal * snappedMarkupRate;
+            const recomputedSubtotal = recomputedLaborSubtotal + recomputedPartsSubtotal + recomputedMarkupAmount;
+            const recomputedTaxAmount = recomputedSubtotal * snappedTaxRate;
+            const recomputedTotal = recomputedSubtotal + recomputedTaxAmount;
+            workOrder = await storage.updateWorkOrder(id, {
+              laborSubtotal: recomputedLaborSubtotal.toFixed(2),
+              partsSubtotal: recomputedPartsSubtotal.toFixed(2),
+              markupAmount: recomputedMarkupAmount.toFixed(2),
+              taxAmount: recomputedTaxAmount.toFixed(2),
+              totalAmount: recomputedTotal.toFixed(2),
+            }) || workOrder;
+          }
+          // else: pre-fix record without full rate snapshot — do not recompute to avoid fabricating rate data
+        }
       }
 
       // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
@@ -7006,6 +7129,36 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrderId
       });
       const item = await storage.addWorkOrderItem(itemData);
+
+      // Recompute financial totals using stored applied rates (if available).
+      // This ensures parts additions after completion keep the snapshot consistent.
+      const wo = await storage.getWorkOrder(workOrderId);
+      if (wo && wo.appliedLaborRate) {
+        const snappedLaborRate = parseFloat(wo.appliedLaborRate);
+        const snappedMarkupRate = parseFloat(wo.appliedMarkupRate ?? '');
+        const snappedTaxRate = parseFloat(wo.appliedTaxRate ?? '');
+        if (isFinite(snappedMarkupRate) && isFinite(snappedTaxRate)) {
+          // Recompute totalPartsCost from all items, then derive full breakdown
+          const allItems = await storage.getWorkOrderItems(workOrderId);
+          const newPartsCost = allItems.reduce((sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.unitPrice) || 0), 0);
+          const hrs = parseFloat(wo.totalHours || '0');
+          const recomputedLaborSubtotal = hrs * snappedLaborRate;
+          const recomputedPartsSubtotal = newPartsCost;
+          const recomputedMarkupAmount = recomputedPartsSubtotal * snappedMarkupRate;
+          const recomputedSubtotal = recomputedLaborSubtotal + recomputedPartsSubtotal + recomputedMarkupAmount;
+          const recomputedTaxAmount = recomputedSubtotal * snappedTaxRate;
+          const recomputedTotal = recomputedSubtotal + recomputedTaxAmount;
+          await storage.updateWorkOrder(workOrderId, {
+            totalPartsCost: newPartsCost.toFixed(2),
+            laborSubtotal: recomputedLaborSubtotal.toFixed(2),
+            partsSubtotal: recomputedPartsSubtotal.toFixed(2),
+            markupAmount: recomputedMarkupAmount.toFixed(2),
+            taxAmount: recomputedTaxAmount.toFixed(2),
+            totalAmount: recomputedTotal.toFixed(2),
+          });
+        }
+      }
+
       res.status(201).json(item);
     } catch (error) {
       if (error instanceof z.ZodError) {

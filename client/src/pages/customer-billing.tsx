@@ -47,6 +47,7 @@ interface BillingWorkOrder extends WorkOrder {
   description: string;
   billedDate: Date | null;
   completedDate: Date | null;
+  hasFinancialBreakdown: boolean;
 }
 
 interface BillingBillingSheet extends BillingSheet {
@@ -1541,8 +1542,17 @@ export default function CustomerBilling() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <div className="text-sm font-medium text-orange-700">
-                                    {formatCurrency(wo.laborCost + wo.partsCost)}
+                                  <div className="text-sm font-medium text-orange-700 text-right">
+                                    <div>{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
+                                    {wo.hasFinancialBreakdown ? (
+                                      <div className="text-xs text-gray-500 font-normal">
+                                        Labor: {formatCurrency(wo.laborCost)} | Parts: {formatCurrency(wo.partsCost)}
+                                        {parseFloat(wo.markupAmount || '0') > 0 && <span> | Markup: {formatCurrency(parseFloat(wo.markupAmount || '0'))}</span>}
+                                        {parseFloat(wo.taxAmount || '0') > 0 && <span> | Tax: {formatCurrency(parseFloat(wo.taxAmount || '0'))}</span>}
+                                      </div>
+                                    ) : (
+                                      <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
+                                    )}
                                   </div>
                                   <Button
                                     variant="ghost"
@@ -1690,8 +1700,17 @@ export default function CustomerBilling() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                <div className="text-sm font-medium">
-                                  {formatCurrency(wo.laborCost + wo.partsCost)}
+                                <div className="text-sm font-medium text-right">
+                                  <div>{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
+                                  {wo.hasFinancialBreakdown ? (
+                                    <div className="text-xs text-gray-500 font-normal">
+                                      Labor: {formatCurrency(wo.laborCost)} | Parts: {formatCurrency(wo.partsCost)}
+                                      {parseFloat(wo.markupAmount || '0') > 0 && <span> | Markup: {formatCurrency(parseFloat(wo.markupAmount || '0'))}</span>}
+                                      {parseFloat(wo.taxAmount || '0') > 0 && <span> | Tax: {formatCurrency(parseFloat(wo.taxAmount || '0'))}</span>}
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
+                                  )}
                                 </div>
                                 <Button
                                   variant="ghost"
@@ -2049,6 +2068,8 @@ export default function CustomerBilling() {
                         <th className="text-right p-3 font-medium">Labor Hours</th>
                         <th className="text-right p-3 font-medium">Labor</th>
                         <th className="text-right p-3 font-medium">Parts</th>
+                        <th className="text-right p-3 font-medium">Markup</th>
+                        <th className="text-right p-3 font-medium">Tax</th>
                         <th className="text-right p-3 font-medium">Total</th>
                       </tr>
                     </thead>
@@ -2061,8 +2082,10 @@ export default function CustomerBilling() {
                           </td>
                           <td className="p-3 text-right text-sm">{formatDate(item.workDate)}</td>
                           <td className="p-3 text-right">{item.laborHours || '0.00'}</td>
-                          <td className="p-3 text-right">{formatCurrency(item.laborAmount || 0)}</td>
-                          <td className="p-3 text-right">{formatCurrency(item.partsAmount || 0)}</td>
+                          <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.laborAmount || 0)}</td>
+                          <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.partsAmount || 0)}</td>
+                          <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.markupAmount || 0)}</td>
+                          <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.taxAmount || 0)}</td>
                           <td className="p-3 text-right font-medium">{formatCurrency(item.totalAmount || 0)}</td>
                         </tr>
                       ))}
@@ -2242,14 +2265,30 @@ export default function CustomerBilling() {
                             </div>
                             <div className="text-right">
                               <div className="font-medium text-lg">
-                                {formatCurrency(workOrder.laborCost + workOrder.partsCost)}
+                                {formatCurrency(parseFloat(workOrder.totalAmount || '0'))}
                               </div>
-                              <div className="text-xs text-gray-500">
-                                Labor: {formatCurrency(workOrder.laborCost)}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                Parts: {formatCurrency(workOrder.partsCost)}
-                              </div>
+                              {workOrder.hasFinancialBreakdown ? (
+                                <>
+                                  <div className="text-xs text-gray-500">
+                                    Labor: {formatCurrency(workOrder.laborCost)}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    Parts: {formatCurrency(workOrder.partsCost)}
+                                  </div>
+                                  {parseFloat(workOrder.markupAmount || '0') > 0 && (
+                                    <div className="text-xs text-gray-500">
+                                      Markup: {formatCurrency(parseFloat(workOrder.markupAmount || '0'))}
+                                    </div>
+                                  )}
+                                  {parseFloat(workOrder.taxAmount || '0') > 0 && (
+                                    <div className="text-xs text-gray-500">
+                                      Tax: {formatCurrency(parseFloat(workOrder.taxAmount || '0'))}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
+                              )}
                             </div>
                           </div>
                         </CardContent>
