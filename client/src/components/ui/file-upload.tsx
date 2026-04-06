@@ -5,6 +5,25 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Upload, X, Image, FileText, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { safeGet } from "@/utils/safeStorage";
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  try {
+    const saved = safeGet("user");
+    if (saved) {
+      const user = JSON.parse(saved);
+      if (user?.role) {
+        headers["x-user-role"] = user.role;
+        headers["x-user-id"] = user.id?.toString() || "";
+        headers["x-user-name"] = user.name || "";
+        headers["x-user-company-id"] = user.companyId?.toString() || "";
+      }
+    }
+  } catch {
+  }
+  return headers;
+}
 
 interface FileUploadProps {
   type: 'photo' | 'attachment';
@@ -42,7 +61,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
           // GCS-backed flow: request a signed PUT URL, then PUT directly to GCS
           const signUrlRes = await fetch(
             `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
-            { method: 'POST' }
+            { method: 'POST', headers: getAuthHeaders(), credentials: 'include' }
           );
           if (!signUrlRes.ok) {
             const err = await signUrlRes.json();
@@ -73,6 +92,8 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
           const response = await fetch(`/api/upload/${type}`, {
             method: 'POST',
             body: formData,
+            headers: getAuthHeaders(),
+            credentials: 'include',
           });
 
           if (!response.ok) {
