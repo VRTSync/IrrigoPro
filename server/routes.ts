@@ -218,6 +218,7 @@ const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
 
     next();
   } catch (error) {
+    console.error(error);
     return res.status(500).json({ message: "Authentication error" });
   }
 };
@@ -603,6 +604,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const companies = await storage.getCompanies();
       res.json(companies);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch companies" });
     }
   });
@@ -677,6 +679,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(company);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch company profile" });
     }
   });
@@ -703,6 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const company = await storage.createCompanyProfile(companyData);
       res.status(201).json(company);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid company data", errors: error.errors });
       }
@@ -725,6 +729,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const exists = await storage.checkCompanyProfileExists(companyId);
       res.json({ requiresSetup: !exists, companyId });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to check setup status" });
     }
   });
@@ -751,6 +756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedCompany = await storage.updateCompanyProfile(companyId, updates);
       res.json(updatedCompany);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid company data", errors: error.errors });
       }
@@ -776,6 +782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         url: uploadURL 
       });
     } catch (error) {
+      console.error(error);
       // Production error logging would go to monitoring service
       res.status(500).json({ message: "Failed to generate upload URL" });
     }
@@ -853,6 +860,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         logoUrl: publicUrl 
       });
     } catch (error) {
+      console.error(error);
       // Production error logging would go to monitoring service
       res.status(500).json({ message: "Failed to update company logo" });
     }
@@ -891,6 +899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       next();
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to check company setup status" });
     }
   };
@@ -953,6 +962,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activeUsers: users.filter(u => u.isActive).length,
       });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch system stats" });
     }
   });
@@ -965,6 +975,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const usersWithoutPasswords = users.map(({ password, ...user }) => user);
       res.json(usersWithoutPasswords);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch users" });
     }
   });
@@ -978,6 +989,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .map(({ password, ...user }) => user);
       res.json(assignableUsers);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch assignable users" });
     }
   });
@@ -991,6 +1003,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
@@ -1011,6 +1024,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
@@ -1134,6 +1148,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
@@ -1153,6 +1168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
@@ -1169,6 +1185,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ message: "User deleted successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete user" });
     }
   });
@@ -1239,6 +1256,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const usersWithoutPasswords = users.map(({ password, ...user }) => user);
       res.json(usersWithoutPasswords);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch company users" });
     }
   });
@@ -1290,6 +1308,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
@@ -1331,6 +1350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
@@ -1355,6 +1375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ message: "User deactivated successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to deactivate user" });
     }
   });
@@ -1407,6 +1428,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users: allUsers.map(u => ({ id: u.id, username: u.username, role: u.role, emailVerified: u.emailVerified }))
       });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ 
         message: "Database connection failed", 
         error: error instanceof Error ? error.message : String(error),
@@ -1460,6 +1482,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         newPassword: "admin123"
       });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Password reset failed", error: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -1493,6 +1516,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Login failed" });
     }
   });
@@ -1732,6 +1756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stats = await storage.getDashboardStats();
       res.json(stats);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch dashboard stats" });
     }
   });
@@ -1769,6 +1794,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(applyBillingNotesVisibility(req, customers));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch customers" });
     }
   });
@@ -2858,6 +2884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch customer" });
     }
   });
@@ -2896,6 +2923,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
       }
@@ -2918,6 +2946,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
       }
@@ -2945,6 +2974,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(customer);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid labor rate data", errors: error.errors });
       }
@@ -2961,6 +2991,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ message: "Customer deleted successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete customer" });
     }
   });
@@ -2972,6 +3003,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const estimates = await storage.getEstimatesByCustomer(customerId);
       res.json(estimates);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch customer estimates" });
     }
   });
@@ -2982,6 +3014,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const workOrders = await storage.getWorkOrdersByCustomer(customerId);
       res.json(workOrders);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch customer work orders" });
     }
   });
@@ -2992,6 +3025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const billingSheets = await storage.getBillingSheetsByCustomer(customerId);
       res.json(billingSheets);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch customer billing sheets" });
     }
   });
@@ -3080,6 +3114,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           imported++;
 
         } catch (error) {
+          console.error(error);
           errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : 'Invalid data'}`);
         }
       }
@@ -3092,6 +3127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to import CSV" });
     }
   });
@@ -3105,6 +3141,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const popularParts = await storage.getPopularParts(companyId, limit);
       res.json(popularParts);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch popular parts" });
     }
   });
@@ -3118,6 +3155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parts = await storage.searchParts(query);
       res.json(parts);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to search parts" });
     }
   });
@@ -3134,6 +3172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pendingParts = await storage.getPendingParts(companyId);
       res.json(pendingParts);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch pending parts" });
     }
   });
@@ -3153,6 +3192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(part);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch part" });
     }
   });
@@ -3672,6 +3712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const categories = await storage.getPartCategories(companyId);
       res.json(categories);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch part categories" });
     }
   });
@@ -3691,6 +3732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const category = await storage.createPartCategory({ companyId, name, markupPercent });
       res.json(category);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to create part category" });
     }
   });
@@ -3716,6 +3758,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!category) return res.status(404).json({ message: "Category not found" });
       res.json(category);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to update part category" });
     }
   });
@@ -3730,6 +3773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) return res.status(404).json({ message: "Category not found" });
       res.json({ message: "Category deleted" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete part category" });
     }
   });
@@ -3742,6 +3786,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const brands = await storage.getPartBrands(companyId);
       res.json(brands);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch part brands" });
     }
   });
@@ -3755,6 +3800,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const brand = await storage.createPartBrand({ companyId, name });
       res.json(brand);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to create part brand" });
     }
   });
@@ -3775,6 +3821,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!brand) return res.status(404).json({ message: "Brand not found" });
       res.json(brand);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to update part brand" });
     }
   });
@@ -3789,6 +3836,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) return res.status(404).json({ message: "Brand not found" });
       res.json({ message: "Brand deleted" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete part brand" });
     }
   });
@@ -3801,6 +3849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sizes = await storage.getPartSizes(companyId);
       res.json(sizes);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch part sizes" });
     }
   });
@@ -3814,6 +3863,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const size = await storage.createPartSize({ companyId, name });
       res.json(size);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to create part size" });
     }
   });
@@ -3834,6 +3884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!size) return res.status(404).json({ message: "Size not found" });
       res.json(size);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to update part size" });
     }
   });
@@ -3848,6 +3899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) return res.status(404).json({ message: "Size not found" });
       res.json({ message: "Size deleted" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete part size" });
     }
   });
@@ -3860,6 +3912,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const materials = await storage.getPartMaterials(companyId);
       res.json(materials);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch part materials" });
     }
   });
@@ -3873,6 +3926,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const material = await storage.createPartMaterial({ companyId, name });
       res.json(material);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to create part material" });
     }
   });
@@ -3893,6 +3947,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!material) return res.status(404).json({ message: "Material not found" });
       res.json(material);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to update part material" });
     }
   });
@@ -3907,6 +3962,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) return res.status(404).json({ message: "Material not found" });
       res.json({ message: "Material deleted" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete part material" });
     }
   });
@@ -3919,6 +3975,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fittingTypes = await storage.getPartFittingTypes(companyId);
       res.json(fittingTypes);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch part fitting types" });
     }
   });
@@ -3932,6 +3989,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fittingType = await storage.createPartFittingType({ companyId, name });
       res.json(fittingType);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to create part fitting type" });
     }
   });
@@ -3952,6 +4010,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!fittingType) return res.status(404).json({ message: "Fitting type not found" });
       res.json(fittingType);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to update part fitting type" });
     }
   });
@@ -3966,6 +4025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) return res.status(404).json({ message: "Fitting type not found" });
       res.json({ message: "Fitting type deleted" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete part fitting type" });
     }
   });
@@ -3976,6 +4036,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Strip pricing fields for field technicians (they see names/quantities only)
       res.json(applyPricingVisibility(req, parts));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch parts" });
     }
   });
@@ -3991,6 +4052,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.trackPartUsage(companyId, partId);
       res.json({ message: "Part usage tracked successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to track part usage" });
     }
   });
@@ -4021,6 +4083,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(updatedPart);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to approve part" });
     }
   });
@@ -4037,6 +4100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const reviews = await storage.getManualPartReviews(companyId);
       res.json(reviews);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch manual part reviews" });
     }
   });
@@ -4067,6 +4131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(updated);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to approve manual part review" });
     }
   });
@@ -4301,6 +4366,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.createPart(partData);
           partsAdded++;
         } catch (error) {
+          console.error(error);
           errors.push(`Row ${i + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
@@ -4326,6 +4392,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.syncPartsFromGoogleDocs(docUrl);
       res.json({ message: "Parts synced from Google Docs successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to sync parts from Google Docs" });
     }
   });
@@ -4338,6 +4405,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const estimates = await storage.getEstimates();
       res.json(estimates);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch estimates" });
     }
   });
@@ -4351,6 +4419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(estimate);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch estimate" });
     }
   });
@@ -4361,6 +4430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const zones = await storage.getEstimateZones(id);
       res.json(zones);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch estimate zones" });
     }
   });
@@ -4558,6 +4628,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // In a real implementation, you would integrate with an email service
       res.json({ message: "Estimate email sent successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to send estimate email" });
     }
   });
@@ -4568,6 +4639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const propertyZones = await storage.getPropertyZones();
       res.json(propertyZones);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch property zones" });
     }
   });
@@ -4581,6 +4653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(propertyZone);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch property zone" });
     }
   });
@@ -4591,6 +4664,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const propertyZone = await storage.createPropertyZone(propertyZoneData);
       res.status(201).json(propertyZone);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid property zone data", errors: error.errors });
       }
@@ -4607,6 +4681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.syncPropertyZonesFromGoogleSheets(sheetsUrl);
       res.json({ message: "Property zones synced from Google Sheets successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to sync property zones from Google Sheets" });
     }
   });
@@ -4617,6 +4692,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sessions = await storage.getFieldWorkSessions();
       res.json(sessions);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch field work sessions" });
     }
   });
@@ -4630,6 +4706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(session);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch field work session" });
     }
   });
@@ -4640,6 +4717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const session = await storage.createFieldWorkSession(sessionData);
       res.status(201).json(session);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid field work session data", errors: error.errors });
       }
@@ -4656,6 +4734,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(session);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to complete field work session" });
     }
   });
@@ -4667,6 +4746,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const item = await storage.addFieldWorkItem({ ...itemData, sessionId });
       res.status(201).json(item);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid field work item data", errors: error.errors });
       }
@@ -5849,6 +5929,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       res.json({ message: "Estimate approved successfully", estimate });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to approve estimate" });
     }
   });
@@ -5870,6 +5951,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       res.json({ message: "Estimate rejected successfully", estimate });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to reject estimate" });
     }
   });
@@ -5928,6 +6010,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrderNumber: workOrder?.workOrderNumber
       });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to approve estimate" });
     }
   });
@@ -5956,6 +6039,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         estimate: updatedEstimate
       });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to reject estimate" });
     }
   });
@@ -6292,6 +6376,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const status = await storage.getGoogleSheetsCustomerStatus();
       res.json(status);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to get Google Sheets status" });
     }
   });
@@ -6305,6 +6390,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       await storage.connectGoogleSheetsCustomers(sheetUrl);
       res.json({ message: "Connected to Google Sheets successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to connect to Google Sheets" });
     }
   });
@@ -6314,6 +6400,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const result = await storage.syncCustomersFromGoogleSheets("placeholder-url");
       res.json(result);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to sync customers from Google Sheets" });
     }
   });
@@ -6323,6 +6410,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       await storage.disconnectGoogleSheetsCustomers();
       res.json({ message: "Disconnected from Google Sheets successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to disconnect from Google Sheets" });
     }
   });
@@ -6333,6 +6421,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const status = await storage.getQuickBooksCustomerStatus();
       res.json(status);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to get QuickBooks status" });
     }
   });
@@ -6342,6 +6431,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const authData = await storage.getQuickBooksAuthUrl();
       res.json(authData);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to get QuickBooks auth URL" });
     }
   });
@@ -6353,6 +6443,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       await storage.connectQuickBooks("demo_access_token", "demo_refresh_token", "demo_realm_id", "Demo Company");
       res.json({ message: "Connected to QuickBooks successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to connect to QuickBooks" });
     }
   });
@@ -6362,6 +6453,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const result = await storage.syncQuickBooksCustomers();
       res.json(result);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: error instanceof Error ? error.message : "Failed to sync customers from QuickBooks" });
     }
   });
@@ -6376,6 +6468,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       await storage.disconnectQuickBooks(userCompanyId);
       res.json({ message: "Disconnected from QuickBooks successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to disconnect from QuickBooks" });
     }
   });
@@ -6805,6 +6898,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // This would need to be implemented in storage
       res.json({ message: "Invoice creation endpoint ready for implementation" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to create invoice from work order" });
     }
   });
@@ -6815,6 +6909,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // This would need to be implemented for QuickBooks sync
       res.json({ message: "QuickBooks sync endpoint ready for implementation" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to sync to QuickBooks" });
     }
   });
@@ -6835,6 +6930,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, billingSheets));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch billing sheets" });
     }
   });
@@ -6849,6 +6945,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, billingSheet));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch billing sheet" });
     }
   });
@@ -7123,6 +7220,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       res.json({ deleted: validIds.length });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to bulk delete billing sheets" });
     }
   });
@@ -7133,6 +7231,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       await storage.deleteBillingSheet(id);
       res.json({ message: "Billing sheet deleted successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete billing sheet" });
     }
   });
@@ -7247,6 +7346,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         message: "Invoice synced to QuickBooks successfully" 
       });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to sync invoice to QuickBooks" });
     }
   });
@@ -7435,6 +7535,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // In a real implementation, you would use a PDF generation library
       res.json({ message: "PDF generated successfully", downloadUrl: `/api/estimates/${id}/pdf/download` });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to generate PDF" });
     }
   });
@@ -7459,6 +7560,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, workOrders));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch work orders" });
     }
   });
@@ -7473,6 +7575,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, workOrder));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch work order" });
     }
   });
@@ -7535,6 +7638,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       res.status(201).json(workOrder);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
       }
@@ -7663,6 +7767,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       res.json(workOrder);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
       }
@@ -7700,6 +7805,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         : undefined;
       res.json({ deleted, skipped, skipMessage });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to bulk delete work orders" });
     }
   });
@@ -7723,6 +7829,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       res.json({ message: "Work order deleted successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to delete work order" });
     }
   });
@@ -7741,6 +7848,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, items));
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch work order items" });
     }
   });
@@ -7790,6 +7898,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       res.status(201).json(item);
     } catch (error) {
+      console.error(error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid work order item data", errors: error.errors });
       }
@@ -7846,6 +7955,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const items = await storage.getBillingSheetItems(billingSheetId);
       res.json(items);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch billing sheet items" });
     }
   });
@@ -7991,6 +8101,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=0`);
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to save billing sheet" });
     }
   });
@@ -8009,6 +8120,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       res.json(billingSheet);
     } catch (error) {
+      console.error(error);
       res.status(500).json({ message: "Failed to fetch billing sheet" });
     }
   });

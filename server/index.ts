@@ -223,6 +223,62 @@ async function runStartupMigrations() {
     logger.error('Startup migration: customers.markup_percent column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // Add approval_status and approved_at columns to parts table if not present
+  try {
+    await pool.query(`
+      ALTER TABLE parts
+        ADD COLUMN IF NOT EXISTS approval_status text NOT NULL DEFAULT 'approved',
+        ADD COLUMN IF NOT EXISTS approved_at timestamp
+    `);
+    logger.info('Startup migration: ensured parts.approval_status and parts.approved_at columns exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: parts approval columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Ensure manual_part_reviews table exists (created from schema drift)
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS manual_part_reviews (
+        id serial PRIMARY KEY,
+        billing_sheet_id integer REFERENCES billing_sheets(id) NOT NULL,
+        billing_sheet_item_id integer REFERENCES billing_sheet_items(id),
+        company_id integer REFERENCES companies(id) NOT NULL,
+        part_name text NOT NULL,
+        proposed_price numeric(10, 2) NOT NULL,
+        reviewed_price numeric(10, 2),
+        approval_status text NOT NULL DEFAULT 'pending',
+        approved_at timestamp,
+        created_at timestamp NOT NULL DEFAULT NOW()
+      )
+    `);
+    logger.info('Startup migration: ensured manual_part_reviews table exists', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: manual_part_reviews table error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Health assertion: verify critical parts columns exist and are readable; log explicit error if drift detected
+  try {
+    const driftCheck = await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'parts'
+        AND column_name IN ('approval_status', 'approved_at')
+    `);
+    const found = driftCheck.rows.map((r: { column_name: string }) => r.column_name);
+    const missing = ['approval_status', 'approved_at'].filter(c => !found.includes(c));
+    if (missing.length > 0) {
+      logger.error(
+        `STARTUP HEALTH CHECK FAILED: parts table is missing columns: ${missing.join(', ')}. The /api/parts endpoint will return 500 errors until these columns are added.`,
+        new Error(`Schema drift detected: missing columns ${missing.join(', ')}`),
+        'Server Startup'
+      );
+    } else {
+      logger.info('Startup health check: parts table schema OK (approval_status, approved_at present)', 'Server Startup');
+    }
+  } catch (err) {
+    logger.error('Startup health check: could not verify parts table schema (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   // QB2: Add metadata columns and unique constraint on realm_id to quickbooks_integration
   try {
     // Add metadata columns if not present
