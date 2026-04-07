@@ -936,6 +936,52 @@ async function runStartupMigrations() {
     console.error(`[Startup][${WO_STATUS_RENAME_KEY}] FATAL error:`, err);
     logger.error(`Startup migration '${WO_STATUS_RENAME_KEY}' error (non-fatal)`, err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
+
+  // One-time migration: promote stuck 'work_completed' work orders/billing sheets to 'pending_manager_review'
+  // so they surface in the billing dashboard unapproved totals.
+  // Note: targets 'work_completed' (not 'completed') because the rename migration above runs first.
+  const STUCK_COMPLETED_MIGRATION_KEY = 'promote-completed-to-pending-review-v1';
+  try {
+    const existingStuckRow = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [STUCK_COMPLETED_MIGRATION_KEY]
+    );
+    if (existingStuckRow.rows.length > 0 && existingStuckRow.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${STUCK_COMPLETED_MIGRATION_KEY}': already completed, skipping`, 'Server Startup');
+    } else {
+      const woResult = await pool.query(
+        `UPDATE work_orders
+         SET status = 'pending_manager_review'
+         WHERE status = 'work_completed' AND invoice_id IS NULL
+         RETURNING id`
+      );
+
+      const bsResult = await pool.query(
+        `UPDATE billing_sheets
+         SET status = 'pending_manager_review'
+         WHERE status IN ('completed', 'submitted') AND invoice_id IS NULL
+         RETURNING id`
+      );
+
+      logger.info(
+        `Startup migration '${STUCK_COMPLETED_MIGRATION_KEY}': promoted ${woResult.rowCount} work order(s) and ${bsResult.rowCount} billing sheet(s) to pending_manager_review`,
+        'Server Startup'
+      );
+
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ($1, 'completed', NOW())
+         ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+        [STUCK_COMPLETED_MIGRATION_KEY]
+      );
+    }
+  } catch (err) {
+    logger.error(
+      `Startup migration '${STUCK_COMPLETED_MIGRATION_KEY}' error (non-fatal)`,
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
 }
 
 (async () => {

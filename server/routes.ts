@@ -1895,12 +1895,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Approved total: approved_passed_to_billing with no invoiceId (same as unbilledAmount)
           const approvedTotal = unbilledAmount;
 
-          // Unapproved total: pending_manager_review with no invoiceId, within date range
+          // Unapproved total: work_completed OR pending_manager_review with no invoiceId (no date filter — these are current unbilled work)
           const unapprovedWorkOrders = workOrders.filter(wo =>
-            wo.status === 'pending_manager_review' && !wo.invoiceId && woInRange(wo)
+            (wo.status === 'pending_manager_review' || wo.status === 'work_completed') && !wo.invoiceId
           );
           const unapprovedBillingSheets = billingSheets.filter(bs =>
-            bs.status === 'pending_manager_review' && !bs.invoiceId && bsInRange(bs)
+            (bs.status === 'pending_manager_review' || bs.status === 'completed' || bs.status === 'submitted') && !bs.invoiceId
           );
           const unapprovedTotal =
             unapprovedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
