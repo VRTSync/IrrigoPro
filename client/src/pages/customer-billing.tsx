@@ -82,6 +82,9 @@ interface CustomerPreview {
   email: string;
   phone?: string;
   unbilledAmount: number;
+  approvedTotal: number;
+  unapprovedTotal: number;
+  combinedTotal: number;
   lastInvoiceDate?: string;
   totalWorkOrders: number;
   pendingWorkOrders: number;
@@ -424,7 +427,7 @@ export default function CustomerBilling() {
       if (statusFilter !== "all") {
         switch (statusFilter) {
           case "has_unbilled":
-            if (!preview.unbilledAmount || preview.unbilledAmount <= 0) return false;
+            if ((preview.combinedTotal || 0) <= 0) return false;
             break;
           case "no_activity":
             if (preview.totalWorkOrders > 0) return false;
@@ -503,14 +506,14 @@ export default function CustomerBilling() {
   const openBillingCustomers = filteredCustomers
     .filter(c => {
       const preview = getCustomerPreview(c);
-      return preview.unbilledAmount > 0;
+      return (preview.approvedTotal || 0) > 0 || (preview.unapprovedTotal || 0) > 0;
     })
-    .sort((a, b) => getCustomerPreview(b).unbilledAmount - getCustomerPreview(a).unbilledAmount);
+    .sort((a, b) => getCustomerPreview(b).combinedTotal - getCustomerPreview(a).combinedTotal);
 
   const otherCustomers = filteredCustomers
     .filter(c => {
       const preview = getCustomerPreview(c);
-      return preview.unbilledAmount <= 0;
+      return (preview.approvedTotal || 0) <= 0 && (preview.unapprovedTotal || 0) <= 0;
     })
     .sort((a, b) => (a.irrigoName || a.name).localeCompare(b.irrigoName || b.name));
 
@@ -575,15 +578,27 @@ export default function CustomerBilling() {
               {/* Summary Stats */}
               {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
                 <div className="mb-4">
-                  <div className="bg-orange-50 p-4 rounded-lg text-center">
-                    <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                    <div className="text-lg font-bold text-orange-800">
-                      {formatCurrency(
-                        customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
-                      )}
+                  <div className="bg-orange-50 p-3 rounded-lg">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-green-700 font-medium">Approved</span>
+                      <span className="text-xs font-bold text-green-800">
+                        {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.approvedTotal || 0), 0))}
+                      </span>
                     </div>
-                    <div className="text-xs text-orange-600 mt-1">
-                      {customerPreviews.filter(preview => (preview.unbilledAmount || 0) > 0).length} customers need billing
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-yellow-700 font-medium">Unapproved</span>
+                      <span className="text-xs font-bold text-yellow-800">
+                        {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.unapprovedTotal || 0), 0))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
+                      <span className="text-xs text-orange-700 font-semibold">Total</span>
+                      <span className="text-xs font-bold text-orange-800">
+                        {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.combinedTotal || 0), 0))}
+                      </span>
+                    </div>
+                    <div className="text-xs text-orange-600 mt-2 text-center">
+                      {customerPreviews.filter(p => (p.approvedTotal || 0) > 0).length} customers need billing
                     </div>
                   </div>
                 </div>
@@ -740,28 +755,40 @@ export default function CustomerBilling() {
                               className="p-4 cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
                               onClick={() => setSelectedCustomerId(customer.id)}
                             >
-                              <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center justify-between mb-1">
                                 <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
-                                {preview.billingPace >= 1.3 ? (
-                                  <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
-                                ) : preview.billingPace <= 0.7 ? (
-                                  <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
-                                ) : (
-                                  <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
-                                )}
+                                {(() => {
+                                  const approved = preview.approvedTotal || 0;
+                                  const unapproved = preview.unapprovedTotal || 0;
+                                  if (approved === 0 && unapproved === 0) {
+                                    return <Badge className="bg-gray-100 text-gray-600 text-xs">Up to Date</Badge>;
+                                  } else if (approved === 0 && unapproved > 0) {
+                                    return <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>;
+                                  } else if (approved > 0 && unapproved === 0) {
+                                    return <Badge className="bg-green-100 text-green-800 text-xs">Ready to Bill</Badge>;
+                                  } else {
+                                    return <Badge className="bg-orange-100 text-orange-800 text-xs">Mixed</Badge>;
+                                  }
+                                })()}
                               </div>
                               <div className="text-sm text-gray-600 mb-2">{customer.email}</div>
                               {customer.phone && (
-                                <div className="text-sm text-gray-600 mb-2">{customer.phone}</div>
+                                <div className="text-sm text-gray-600 mb-1">{customer.phone}</div>
                               )}
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm text-orange-700 font-medium">Unbilled Work:</span>
-                                <Badge className="bg-orange-100 text-orange-800">
-                                  {formatCurrency(preview.unbilledAmount)}
-                                </Badge>
+                              <div className="flex items-center justify-between text-xs mb-0.5">
+                                <span className="text-green-700">Approved:</span>
+                                <span className="font-medium text-green-800">{formatCurrency(preview.approvedTotal || 0)}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs mb-0.5">
+                                <span className="text-yellow-700">Unapproved:</span>
+                                <span className="font-medium text-yellow-800">{formatCurrency(preview.unapprovedTotal || 0)}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-1 mt-0.5">
+                                <span className="text-orange-700 font-medium">Total:</span>
+                                <span className="font-semibold text-orange-800">{formatCurrency(preview.combinedTotal || 0)}</span>
                               </div>
                               {customer.address && (
-                                <div className="text-xs text-gray-500 mt-2 truncate">{customer.address}</div>
+                                <div className="text-xs text-gray-500 mt-1 truncate">{customer.address}</div>
                               )}
                             </Card>
                           );
@@ -789,22 +816,28 @@ export default function CustomerBilling() {
                                 className="p-4 cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
                                 onClick={() => setSelectedCustomerId(customer.id)}
                               >
-                                <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center justify-between mb-1">
                                   <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
-                                  {preview.billingPace >= 1.3 ? (
-                                    <Badge className="bg-green-100 text-green-800 text-xs">ABOVE AVG</Badge>
-                                  ) : preview.billingPace <= 0.7 ? (
-                                    <Badge className="bg-red-100 text-red-800 text-xs">BELOW AVG</Badge>
-                                  ) : (
-                                    <Badge className="bg-blue-100 text-blue-800 text-xs">ON PACE</Badge>
-                                  )}
+                                  <Badge className="bg-gray-100 text-gray-600 text-xs">Up to Date</Badge>
                                 </div>
-                                <div className="text-sm text-gray-600 mb-2">{customer.email}</div>
+                                <div className="text-sm text-gray-600 mb-1">{customer.email}</div>
                                 {customer.phone && (
-                                  <div className="text-sm text-gray-600 mb-2">{customer.phone}</div>
+                                  <div className="text-sm text-gray-600 mb-1">{customer.phone}</div>
                                 )}
+                                <div className="flex items-center justify-between text-xs mb-0.5">
+                                  <span className="text-green-700">Approved:</span>
+                                  <span className="font-medium text-green-800">{formatCurrency(0)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs mb-0.5">
+                                  <span className="text-yellow-700">Unapproved:</span>
+                                  <span className="font-medium text-yellow-800">{formatCurrency(0)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-0.5 mt-0.5">
+                                  <span className="text-orange-700 font-medium">Total:</span>
+                                  <span className="font-semibold text-orange-800">{formatCurrency(0)}</span>
+                                </div>
                                 {customer.address && (
-                                  <div className="text-xs text-gray-500 mt-2 truncate">{customer.address}</div>
+                                  <div className="text-xs text-gray-500 mt-1 truncate">{customer.address}</div>
                                 )}
                               </Card>
                             );
@@ -846,11 +879,19 @@ export default function CustomerBilling() {
                   )}
                   {(() => {
                     const preview = getCustomerPreview(selectedCustomer);
-                    return preview.unbilledAmount > 0 ? (
-                      <div className="mt-2">
-                        <Badge className="bg-orange-100 text-orange-800">
-                          Unbilled: {formatCurrency(preview.unbilledAmount)}
-                        </Badge>
+                    const combined = (preview.combinedTotal || 0);
+                    return combined > 0 ? (
+                      <div className="mt-2 flex gap-2 flex-wrap">
+                        {(preview.approvedTotal || 0) > 0 && (
+                          <Badge className="bg-green-100 text-green-800 text-xs">
+                            Approved: {formatCurrency(preview.approvedTotal || 0)}
+                          </Badge>
+                        )}
+                        {(preview.unapprovedTotal || 0) > 0 && (
+                          <Badge className="bg-yellow-100 text-yellow-800 text-xs">
+                            Pending: {formatCurrency(preview.unapprovedTotal || 0)}
+                          </Badge>
+                        )}
                       </div>
                     ) : null;
                   })()}
@@ -1123,15 +1164,27 @@ export default function CustomerBilling() {
           {/* Summary Stats */}
           {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
             <div className="mb-4">
-              <div className="bg-orange-50 p-3 rounded-lg text-center">
-                <div className="text-xs text-orange-700 font-medium">Total Unbilled</div>
-                <div className="text-lg font-bold text-orange-800">
-                  {formatCurrency(
-                    customerPreviews.reduce((sum, preview) => sum + (preview.unbilledAmount || 0), 0)
-                  )}
+              <div className="bg-orange-50 p-3 rounded-lg">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-green-700 font-medium">Approved</span>
+                  <span className="text-xs font-bold text-green-800">
+                    {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.approvedTotal || 0), 0))}
+                  </span>
                 </div>
-                <div className="text-xs text-orange-600 mt-1">
-                  {customerPreviews.filter(preview => (preview.unbilledAmount || 0) > 0).length} customers need billing
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-yellow-700 font-medium">Unapproved</span>
+                  <span className="text-xs font-bold text-yellow-800">
+                    {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.unapprovedTotal || 0), 0))}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
+                  <span className="text-xs text-orange-700 font-semibold">Total</span>
+                  <span className="text-xs font-bold text-orange-800">
+                    {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.combinedTotal || 0), 0))}
+                  </span>
+                </div>
+                <div className="text-xs text-orange-600 mt-2 text-center">
+                  {customerPreviews.filter(p => (p.approvedTotal || 0) > 0).length} customers need billing
                 </div>
               </div>
             </div>
@@ -1289,21 +1342,33 @@ export default function CustomerBilling() {
                             selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
                           }`}
                         >
-                          <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center justify-between mb-1">
                             <div className="font-medium text-gray-900 truncate">{customer.irrigoName || customer.name}</div>
-                            <Badge className="bg-orange-100 text-orange-800 text-xs">NEEDS BILLING</Badge>
+                            {(() => {
+                              const approved = preview.approvedTotal || 0;
+                              const unapproved = preview.unapprovedTotal || 0;
+                              if (approved > 0 && unapproved > 0) {
+                                return <Badge className="bg-orange-100 text-orange-800 text-xs">Mixed</Badge>;
+                              } else if (approved > 0) {
+                                return <Badge className="bg-green-100 text-green-800 text-xs">Ready to Bill</Badge>;
+                              } else {
+                                return <Badge className="bg-yellow-100 text-yellow-800 text-xs">Pending Approval</Badge>;
+                              }
+                            })()}
                           </div>
-                          <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
-                          <div className="space-y-1">
+                          <div className="text-xs text-gray-600 mb-1 truncate">{customer.email}</div>
+                          <div className="space-y-0.5">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-500">This month:</span>
-                              <span className="text-xs font-medium">{formatCurrency(preview.currentMonthBilling)}</span>
+                              <span className="text-xs text-green-700">Approved:</span>
+                              <span className="text-xs font-medium text-green-800">{formatCurrency(preview.approvedTotal || 0)}</span>
                             </div>
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-orange-700 font-medium">Unbilled:</span>
-                              <Badge className="bg-orange-100 text-orange-800 text-xs">
-                                {formatCurrency(preview.unbilledAmount)}
-                              </Badge>
+                              <span className="text-xs text-yellow-700">Unapproved:</span>
+                              <span className="text-xs font-medium text-yellow-800">{formatCurrency(preview.unapprovedTotal || 0)}</span>
+                            </div>
+                            <div className="flex items-center justify-between border-t border-gray-100 pt-0.5">
+                              <span className="text-xs text-orange-700 font-medium">Total:</span>
+                              <span className="text-xs font-semibold text-orange-800">{formatCurrency(preview.combinedTotal || 0)}</span>
                             </div>
                             {preview.lastInvoiceDate && (
                               <div className="flex items-center justify-between">
@@ -1347,15 +1412,23 @@ export default function CustomerBilling() {
                               selectedCustomerId === customer.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
                             }`}
                           >
-                            <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center justify-between mb-1">
                               <div className="font-medium text-gray-900 truncate">{customer.irrigoName || customer.name}</div>
-                              <Badge className="bg-green-100 text-green-800 text-xs">UP TO DATE</Badge>
+                              <Badge className="bg-gray-100 text-gray-600 text-xs">Up to Date</Badge>
                             </div>
-                            <div className="text-xs text-gray-600 mb-2 truncate">{customer.email}</div>
-                            <div className="space-y-1">
+                            <div className="text-xs text-gray-600 mb-1 truncate">{customer.email}</div>
+                            <div className="space-y-0.5">
                               <div className="flex items-center justify-between">
-                                <span className="text-xs text-gray-500">This month:</span>
-                                <span className="text-xs font-medium">{formatCurrency(preview.currentMonthBilling)}</span>
+                                <span className="text-xs text-green-700">Approved:</span>
+                                <span className="text-xs font-medium text-green-800">{formatCurrency(0)}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-yellow-700">Unapproved:</span>
+                                <span className="text-xs font-medium text-yellow-800">{formatCurrency(0)}</span>
+                              </div>
+                              <div className="flex items-center justify-between border-t border-gray-100 pt-0.5">
+                                <span className="text-xs text-orange-700 font-medium">Total:</span>
+                                <span className="text-xs font-semibold text-orange-800">{formatCurrency(0)}</span>
                               </div>
                               {preview.lastInvoiceDate && (
                                 <div className="flex items-center justify-between">
@@ -1722,6 +1795,8 @@ export default function CustomerBilling() {
                                 </div>
                                 {wo.status === 'billed' || wo.invoiceId ? (
                                   <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
+                                ) : wo.status === 'pending_manager_review' ? (
+                                  <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
                                 ) : (
                                   <Button
                                     variant="ghost"
@@ -1733,7 +1808,7 @@ export default function CustomerBilling() {
                                     Edit
                                   </Button>
                                 )}
-                                {!(wo.status === 'billed' || wo.invoiceId) && (
+                                {!(wo.status === 'billed' || wo.invoiceId || wo.status === 'pending_manager_review') && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1801,6 +1876,8 @@ export default function CustomerBilling() {
                                 </div>
                                 {bs.status === 'billed' || bs.invoiceId ? (
                                   <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
+                                ) : bs.status === 'pending_manager_review' ? (
+                                  <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
                                 ) : (
                                   <Button
                                     variant="ghost"
@@ -1812,7 +1889,7 @@ export default function CustomerBilling() {
                                     Edit
                                   </Button>
                                 )}
-                                {!(bs.status === 'billed' || bs.invoiceId) && (
+                                {!(bs.status === 'billed' || bs.invoiceId || bs.status === 'pending_manager_review') && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1978,7 +2055,7 @@ export default function CustomerBilling() {
           onOpenChange={(open) => { setShowWorkOrderDetail(open); if (!open) setSelectedWorkOrder(null); }}
           showPricing={true}
           onEdit={
-            !(selectedWorkOrder.status === 'billed' || selectedWorkOrder.invoiceId)
+            !(selectedWorkOrder.status === 'billed' || selectedWorkOrder.invoiceId || selectedWorkOrder.status === 'pending_manager_review')
               ? () => { setShowWorkOrderDetail(false); setShowEditWorkOrder(true); }
               : undefined
           }
@@ -1995,7 +2072,7 @@ export default function CustomerBilling() {
           onOpenChange={(open) => { setShowBillingSheetDetail(open); if (!open) setSelectedBillingSheet(null); }}
           showPricing={true}
           onEdit={
-            !(selectedBillingSheet.status === 'billed' || selectedBillingSheet.invoiceId)
+            !(selectedBillingSheet.status === 'billed' || selectedBillingSheet.invoiceId || selectedBillingSheet.status === 'pending_manager_review')
               ? () => { setShowBillingSheetDetail(false); setShowEditBillingSheet(true); }
               : undefined
           }

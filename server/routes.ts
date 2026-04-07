@@ -1859,16 +1859,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const estimates = await storage.getEstimatesByCustomer(customer.id);
           const billingSheets = await storage.getBillingSheetsByCustomer(customer.id);
           
-          const completedWorkOrders = workOrders.filter(wo => wo.status === 'approved_passed_to_billing');
           const approvedEstimates = estimates.filter(est => est.status === 'approved');
-          const completedBillingSheets = billingSheets.filter(bs => bs.status === 'approved_passed_to_billing');
-          
+
+          // Helper: check if a work order falls within the selected date range
+          const woInRange = (wo: typeof workOrders[0]) => {
+            const d = wo.completedAt ? new Date(wo.completedAt) : (wo.createdAt ? new Date(wo.createdAt) : null);
+            if (!d) return true; // no date → always include
+            return d >= startDate && d <= endDate;
+          };
+          // Helper: check if a billing sheet falls within the selected date range
+          const bsInRange = (bs: typeof billingSheets[0]) => {
+            const d = bs.workDate ? new Date(bs.workDate) : (bs.createdAt ? new Date(bs.createdAt) : null);
+            if (!d) return true;
+            return d >= startDate && d <= endDate;
+          };
+
           // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
-          const unbilledWorkOrders = completedWorkOrders.filter(wo => 
-            !wo.invoiceId
+          const unbilledWorkOrders = workOrders.filter(wo =>
+            wo.status === 'approved_passed_to_billing' && !wo.invoiceId && woInRange(wo)
           );
-          const unbilledBillingSheets = completedBillingSheets.filter(bs => 
-            !bs.invoiceId
+          const unbilledBillingSheets = billingSheets.filter(bs =>
+            bs.status === 'approved_passed_to_billing' && !bs.invoiceId && bsInRange(bs)
           );
           
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
@@ -1881,12 +1892,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
               return sum + parseFloat(bs.totalAmount || '0');
             }, 0);
 
+          // Approved total: approved_passed_to_billing with no invoiceId (same as unbilledAmount)
+          const approvedTotal = unbilledAmount;
+
+          // Unapproved total: pending_manager_review with no invoiceId, within date range
+          const unapprovedWorkOrders = workOrders.filter(wo =>
+            wo.status === 'pending_manager_review' && !wo.invoiceId && woInRange(wo)
+          );
+          const unapprovedBillingSheets = billingSheets.filter(bs =>
+            bs.status === 'pending_manager_review' && !bs.invoiceId && bsInRange(bs)
+          );
+          const unapprovedTotal =
+            unapprovedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
+            unapprovedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+
+          const combinedTotal = approvedTotal + unapprovedTotal;
+
           return {
             id: customer.id,
             name: customer.name,
             email: customer.email,
             phone: customer.phone,
             unbilledAmount,
+            approvedTotal,
+            unapprovedTotal,
+            combinedTotal,
             currentMonthBilling: 0,
             monthlyAverage: 0,
             billingPace: 1,
@@ -1902,6 +1932,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             email: customer.email,
             phone: customer.phone,
             unbilledAmount: 0,
+            approvedTotal: 0,
+            unapprovedTotal: 0,
+            combinedTotal: 0,
             currentMonthBilling: 0,
             monthlyAverage: 0,
             billingPace: 1,
