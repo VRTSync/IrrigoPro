@@ -104,7 +104,7 @@ export default function Operations() {
         return "bg-green-100 text-green-800";
       case "rejected":
         return "bg-red-100 text-red-800";
-      case "completed":
+      case "work_completed":
         return "bg-blue-100 text-blue-800";
       case "in_progress":
         return "bg-orange-100 text-orange-800";

@@ -447,7 +447,7 @@ export const workOrders = pgTable("work_orders", {
   locationNotes: text("location_notes"), // Additional location details
   accessInstructions: text("access_instructions"), // How to access the property
   workType: text("work_type").notNull().default("estimate_based"), // estimate_based, direct_billing, maintenance
-  status: text("status").notNull().default("pending"), // pending, assigned, in_progress, completed, pending_manager_review, approved_passed_to_billing, cancelled, billed
+  status: text("status").notNull().default("pending"), // pending, assigned, in_progress, work_completed, pending_manager_review, approved_passed_to_billing, cancelled, billed
   priority: text("priority").notNull().default("medium"), // low, medium, high, urgent
   scheduledDate: timestamp("scheduled_date"),
   startedAt: timestamp("started_at"),
@@ -691,7 +691,7 @@ export const insertFieldWorkSessionSchema = createInsertSchema(fieldWorkSessions
 export const insertFieldWorkItemSchema = createInsertSchema(fieldWorkItems).omit({ id: true });
 export const insertQuickbooksIntegrationSchema = createInsertSchema(quickbooksIntegration).omit({ id: true });
 export const insertQuickbooksSyncSchema = createInsertSchema(quickbooksSync).omit({ id: true });
-export const workOrderStatusValues = ['pending', 'assigned', 'in_progress', 'completed', 'pending_manager_review', 'approved_passed_to_billing', 'cancelled', 'billed'] as const;
+export const workOrderStatusValues = ['pending', 'assigned', 'in_progress', 'work_completed', 'pending_manager_review', 'approved_passed_to_billing', 'cancelled', 'billed'] as const;
 export type WorkOrderStatus = typeof workOrderStatusValues[number];
 
 export const insertWorkOrderSchema = createInsertSchema(workOrders)

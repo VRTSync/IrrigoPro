@@ -1353,7 +1353,7 @@ export class DatabaseStorage implements IStorage {
     const workOrderStats = {
       pending: allWorkOrders.filter(wo => wo.status === "pending").length,
       inProgress: allWorkOrders.filter(wo => wo.status === "in_progress").length,
-      completed: allWorkOrders.filter(wo => wo.status === "completed").length,
+      completed: allWorkOrders.filter(wo => wo.status === "work_completed").length,
       total: allWorkOrders.length
     };
 
@@ -2169,7 +2169,7 @@ export class DatabaseStorage implements IStorage {
       .from(workOrders)
       .where(
         and(
-          eq(workOrders.status, "completed"),
+          eq(workOrders.status, "work_completed"),
           gte(workOrders.completedAt, periodStart),
           lte(workOrders.completedAt, periodEnd)
         )

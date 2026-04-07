@@ -176,7 +176,7 @@ export default function WorkOrders() {
     } else if (statusFilter === "billed") {
       matchesStatus = isBilled(workOrder);
     } else if (statusFilter === "not_yet_billed") {
-      matchesStatus = workOrder.status === 'completed' && !isBilled(workOrder);
+      matchesStatus = workOrder.status === 'work_completed' && !isBilled(workOrder);
     } else if (statusFilter === "assigned") {
       // "Pending" pill — matches both 'pending' and 'assigned' statuses
       matchesStatus = workOrder.status === 'pending' || workOrder.status === 'assigned';
@@ -205,7 +205,7 @@ export default function WorkOrders() {
         return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Pending</Badge>;
       case 'in_progress':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">In Progress</Badge>;
-      case 'completed':
+      case 'work_completed':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Completed</Badge>;
       case 'billed':
         return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>;
@@ -435,7 +435,7 @@ export default function WorkOrders() {
           />
           <MetricTile
             label="Completed"
-            value={getStatusCount('completed')}
+            value={getStatusCount('work_completed')}
             icon={CheckCircle}
             variant="success"
             testId="metric-completed"
@@ -485,8 +485,8 @@ export default function WorkOrders() {
               Active
             </Button>
             <Button 
-              variant={statusFilter === "completed" ? "default" : "outline"}
-              onClick={() => setStatusFilter("completed")}
+              variant={statusFilter === "work_completed" ? "default" : "outline"}
+              onClick={() => setStatusFilter("work_completed")}
               size="sm"
               className="flex-shrink-0"
               data-testid="filter-completed"
@@ -691,7 +691,7 @@ export default function WorkOrders() {
                                 )}
 
                                 {/* Completion Date */}
-                                {workOrder.status === 'completed' && workOrder.completedAt && (
+                                {workOrder.status === 'work_completed' && workOrder.completedAt && (
                                   <div className="flex items-center gap-2">
                                     <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
                                     <span className="text-green-700 text-sm font-medium">
@@ -729,7 +729,7 @@ export default function WorkOrders() {
                                   </Button>
                                   
                                   {/* Assignment dropdown for irrigation managers — hidden for billed */}
-                                  {currentUser?.role === 'irrigation_manager' && !isBilled(workOrder) && workOrder.status !== 'completed' && (
+                                  {currentUser?.role === 'irrigation_manager' && !isBilled(workOrder) && workOrder.status !== 'work_completed' && (
                                     <Select
                                       onValueChange={(techId: string) => {
                                         const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -868,7 +868,7 @@ export default function WorkOrders() {
           // List view (default) - with collapsible Active/Completed sections
           (() => {
             const activeStatuses = ['pending', 'assigned', 'in_progress'];
-            const completedStatuses = ['completed', 'cancelled'];
+            const completedStatuses = ['work_completed', 'cancelled'];
             const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status))
               .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
             // Completed but not billed
@@ -883,7 +883,7 @@ export default function WorkOrders() {
               <Card key={workOrder.id} className={`border-0 shadow-sm hover:shadow-md transition-all duration-200 ${
                 isBilled(workOrder)
                   ? 'bg-purple-50/60 border border-purple-200'
-                  : workOrder.status === 'completed' && currentUser?.role === 'field_tech' 
+                  : workOrder.status === 'work_completed' && currentUser?.role === 'field_tech' 
                     ? 'bg-green-50 border-l-4 border-l-green-500' 
                     : 'bg-white'
               }`}>
@@ -900,12 +900,12 @@ export default function WorkOrders() {
                           />
                         )}
                         <h3 className={`font-semibold text-base ${
-                          workOrder.status === 'completed' && currentUser?.role === 'field_tech'
+                          workOrder.status === 'work_completed' && currentUser?.role === 'field_tech'
                             ? 'text-green-800'
                             : 'text-gray-900'
                         }`}>
                           {workOrder.workOrderNumber}
-                          {workOrder.status === 'completed' && currentUser?.role === 'field_tech' && (
+                          {workOrder.status === 'work_completed' && currentUser?.role === 'field_tech' && (
                             <span className="ml-2 text-sm font-medium text-green-600">✓ COMPLETED</span>
                           )}
                         </h3>
@@ -990,7 +990,7 @@ export default function WorkOrders() {
                         )}
 
                         {/* Completion Date Indicator */}
-                        {workOrder.status === 'completed' && workOrder.completedAt && (
+                        {workOrder.status === 'work_completed' && workOrder.completedAt && (
                           <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-2">
                             <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
                             <div className="flex-1">
@@ -1024,13 +1024,13 @@ export default function WorkOrders() {
                                 setSelectedWorkOrder(workOrder);
                               }}
                               className={`w-full ${
-                                workOrder.status === 'completed'
+                                workOrder.status === 'work_completed'
                                   ? 'bg-green-700 hover:bg-green-800 text-white border border-green-600'
                                   : 'bg-green-600 hover:bg-green-700 text-white'
                               }`}
                             >
                               <Eye className="w-4 h-4 mr-1" />
-                              {workOrder.status === 'completed' ? 'View Completed' : 'View'}
+                              {workOrder.status === 'work_completed' ? 'View Completed' : 'View'}
                             </Button>
                           )}
                           
@@ -1057,7 +1057,7 @@ export default function WorkOrders() {
                           </Button>
                           
                           {/* Assignment dropdown for irrigation managers */}
-                          {!isBilled(workOrder) && currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
+                          {!isBilled(workOrder) && currentUser?.role === 'irrigation_manager' && workOrder.status !== 'work_completed' && (
                             <Select
                               onValueChange={(techId: string) => {
                                 const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -1161,7 +1161,7 @@ export default function WorkOrders() {
                 )}
 
                 {/* Completed (Not Yet Billed) Section — hidden when "Billed" filter active */}
-                {(statusFilter === "all" || statusFilter === "completed" || statusFilter === "not_yet_billed") && (
+                {(statusFilter === "all" || statusFilter === "work_completed" || statusFilter === "not_yet_billed") && (
                   <div>
                     <button
                       onClick={() => setCompletedExpanded(!completedExpanded)}

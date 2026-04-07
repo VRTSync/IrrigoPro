@@ -173,7 +173,7 @@ describe("Work order to billing sheet conversion", () => {
       projectName: "Parts Conversion Test",
       projectAddress: "123 Test Lane",
       workType: "direct_billing",
-      status: "completed",
+      status: "work_completed",
       priority: "medium",
       totalHours: "3",
       totalPartsCost: "112.50",

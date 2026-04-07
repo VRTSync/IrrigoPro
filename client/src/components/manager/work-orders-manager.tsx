@@ -99,7 +99,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
         return 'bg-blue-100 text-blue-800';
       case 'in_progress':
         return 'bg-blue-100 text-blue-800';
-      case 'completed':
+      case 'work_completed':
         return 'bg-green-100 text-green-800';
       case 'pending_manager_review':
         return 'bg-orange-100 text-orange-800';
@@ -139,13 +139,13 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
   const filteredWorkOrders = workOrders?.filter(wo => {
     if (statusFilter === "all") return true;
     if (statusFilter === "billed") return isBilled(wo);
-    if (statusFilter === "not_yet_billed") return wo.status === 'completed' && !isBilled(wo);
+    if (statusFilter === "not_yet_billed") return wo.status === 'work_completed' && !isBilled(wo);
     if (statusFilter === "assigned") return wo.status === 'pending' || wo.status === 'assigned';
     return wo.status === statusFilter;
   }) ?? [];
 
   const activeStatuses = ['pending', 'assigned', 'in_progress'];
-  const completedStatuses = ['completed', 'cancelled'];
+  const completedStatuses = ['work_completed', 'cancelled'];
   const pendingReviewOrders = filteredWorkOrders.filter(wo => wo.status === 'pending_manager_review');
   const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status));
   const notYetBilledWorkOrders = filteredWorkOrders.filter(wo =>
@@ -218,7 +218,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-lg font-semibold text-gray-900">
-                {workOrder.status === 'completed' || workOrder.status === 'pending_manager_review' || workOrder.status === 'approved_passed_to_billing' || isBilled(workOrder) ? 'Completed' : workOrder.priority.toUpperCase()}
+                {workOrder.status === 'work_completed' || workOrder.status === 'pending_manager_review' || workOrder.status === 'approved_passed_to_billing' || isBilled(workOrder) ? 'Completed' : workOrder.priority.toUpperCase()}
               </p>
               <p className="text-sm text-gray-500">Priority</p>
             </div>
@@ -354,7 +354,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
             { value: "all", label: "All" },
             { value: "assigned", label: "Pending" },
             { value: "in_progress", label: "Active" },
-            { value: "completed", label: "Completed" },
+            { value: "work_completed", label: "Completed" },
             { value: "not_yet_billed", label: "Not Yet Billed" },
             { value: "billed", label: "Billed" },
           ].map(({ value, label }) => (
@@ -424,7 +424,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
               )}
 
               {/* Completed (Not Yet Billed) Section */}
-              {(statusFilter === "all" || statusFilter === "completed" || statusFilter === "not_yet_billed") && (
+              {(statusFilter === "all" || statusFilter === "work_completed" || statusFilter === "not_yet_billed") && (
                 <div>
                   <button
                     onClick={() => setCompletedExpanded(!completedExpanded)}

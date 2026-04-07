@@ -83,7 +83,7 @@ export default function FieldTechDashboard() {
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
                   <span className="text-gray-600">Completed:</span>
-                  <span className="font-medium">{workOrders?.filter(wo => wo.status === 'completed').length || 0}</span>
+                  <span className="font-medium">{workOrders?.filter(wo => wo.status === 'work_completed').length || 0}</span>
                 </div>
                 {(workOrders?.filter(wo => wo.status === 'billed' || wo.invoiceId).length || 0) > 0 && (
                   <div className="flex justify-between text-xs sm:text-sm">

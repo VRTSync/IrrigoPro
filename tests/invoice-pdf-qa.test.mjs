@@ -87,7 +87,7 @@ function makeWorkOrder(overrides) {
     locationNotes: null,
     accessInstructions: null,
     workType: 'direct_billing',
-    status: 'completed',
+    status: 'work_completed',
     priority: 'medium',
     scheduledDate: null,
     startedAt: null,

@@ -902,6 +902,40 @@ async function runStartupMigrations() {
     console.error('[Startup][fix-total-mismatch-v2] FATAL error:', err);
     logger.error('Startup migration (fix-total-mismatch-v2) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
+
+  // Migration: rename work order status 'completed' -> 'work_completed'
+  const WO_STATUS_RENAME_KEY = 'work-order-status-completed-to-work_completed-v1';
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const renameRow = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [WO_STATUS_RENAME_KEY]
+    );
+    if (renameRow.rows.length > 0 && renameRow.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${WO_STATUS_RENAME_KEY}': already completed, skipping`, 'Server Startup');
+    } else {
+      const result = await pool.query(
+        `UPDATE work_orders SET status = 'work_completed' WHERE status = 'completed'`
+      );
+      const rowCount = result.rowCount ?? 0;
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ($1, 'completed', NOW())
+         ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+        [WO_STATUS_RENAME_KEY]
+      );
+      logger.info(`Startup migration '${WO_STATUS_RENAME_KEY}': updated ${rowCount} work order(s) from 'completed' to 'work_completed'`, 'Server Startup');
+    }
+  } catch (err) {
+    console.error(`[Startup][${WO_STATUS_RENAME_KEY}] FATAL error:`, err);
+    logger.error(`Startup migration '${WO_STATUS_RENAME_KEY}' error (non-fatal)`, err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
 }
 
 (async () => {

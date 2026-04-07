@@ -286,7 +286,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Pending</Badge>;
       case 'in_progress':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">In Progress</Badge>;
-      case 'completed':
+      case 'work_completed':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Completed</Badge>;
       case 'billed':
         return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>;
@@ -333,7 +333,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     // Start button moved to bottom section - not included here
     
     // Only show cancel button for non-field technicians on non-billed records
-    if (!isBilledWorkOrder && workOrder.status !== 'cancelled' && workOrder.status !== 'completed' && currentUser?.role !== 'field_tech') {
+    if (!isBilledWorkOrder && workOrder.status !== 'cancelled' && workOrder.status !== 'work_completed' && currentUser?.role !== 'field_tech') {
       buttons.push(
         <Button
           key="cancel"
@@ -363,7 +363,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         </DialogHeader>
 
         {/* Status Banner - Only for Completed */}
-        {workOrder.status === 'completed' && (
+        {workOrder.status === 'work_completed' && (
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
             <div className="flex items-center justify-center space-x-3">
               <CheckCircle className="w-8 h-8 flex-shrink-0" />
@@ -443,7 +443,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 )}
               </div>
               <div className="flex gap-2">
-                {canEditPhotos && workOrder.status !== 'completed' && workOrder.status !== 'cancelled' && !isBilledWorkOrder && (
+                {canEditPhotos && workOrder.status !== 'work_completed' && workOrder.status !== 'cancelled' && !isBilledWorkOrder && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -702,7 +702,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             </Card>
 
             {/* Reassignment Section - Show for managers only, not field technicians, not completed, and not billed */}
-            {!isBilledWorkOrder && fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'completed' && (() => {
+            {!isBilledWorkOrder && fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'work_completed' && (() => {
               const managers = fieldTechs.filter(u => u.role === 'irrigation_manager');
               const techs = fieldTechs.filter(u => u.role === 'field_tech');
               return (
@@ -880,7 +880,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             )}
 
             {/* Completion Details — only shown when WO is completed */}
-            {workOrder.status === 'completed' && (() => {
+            {workOrder.status === 'work_completed' && (() => {
               const showPricing = currentUser?.role !== 'field_tech';
               const items = (workOrderItems as any[]) || [];
               const completedItems = items.filter((item: any) => item.actualQuantityUsed != null || item.partPrice != null);

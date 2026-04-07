@@ -46,7 +46,7 @@ export default function ManagerDashboard() {
   const getWorkOrderStatus = (status: string) => {
     switch (status) {
       case 'in_progress': return 'active' as const;
-      case 'completed': return 'complete' as const;
+      case 'work_completed': return 'complete' as const;
       case 'assigned': return 'pending' as const;
       default: return 'pending' as const;
     }
@@ -314,7 +314,7 @@ export default function ManagerDashboard() {
                         <Badge 
                           variant={
                             workOrder.status === 'in_progress' ? 'info' : 
-                            workOrder.status === 'completed' ? 'success' : 
+                            workOrder.status === 'work_completed' ? 'success' : 
                             workOrder.status === 'assigned' ? 'warning' : 'secondary'
                           }
                         >
