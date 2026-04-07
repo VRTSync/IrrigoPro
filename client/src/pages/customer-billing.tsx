@@ -574,7 +574,8 @@ export default function CustomerBilling() {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-200">
+    <div className="flex flex-col lg:flex-row h-screen max-w-screen-2xl mx-auto bg-gray-50 shadow-xl">
       {/* Mobile: Two-Screen Navigation */}
       <div className="lg:hidden w-full h-full bg-white flex flex-col">
         {!selectedCustomerId ? (
@@ -1536,7 +1537,7 @@ export default function CustomerBilling() {
 
       {/* Right Content Area - Always full width on mobile, shared with desktop */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-2 lg:p-4">
+        <div className="p-2 lg:p-6">
           {selectedCustomerId ? (
             loadingCustomerData ? (
               <Card>
@@ -1545,9 +1546,9 @@ export default function CustomerBilling() {
                 </CardContent>
               </Card>
             ) : customerBillingData ? (
-              <div className="space-y-2 md:space-y-4">
+              <div className="space-y-2 md:space-y-6">
               {/* Customer Header - Mobile optimized */}
-              <Card>
+              <Card className="shadow-sm border border-gray-200">
                 <CardHeader className="pb-2 p-3 md:p-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div>
@@ -1578,7 +1579,7 @@ export default function CustomerBilling() {
               {/* Billing Summary Card - Mobile responsive */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-3">
                 {/* Unbilled Work Summary - Mobile optimized */}
-                <Card className="border-orange-200 bg-orange-50">
+                <Card className="border-orange-200 bg-orange-50 shadow-sm">
                   <CardHeader className="pb-2 p-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="flex items-center gap-1 text-orange-800 text-xs">
@@ -1612,7 +1613,7 @@ export default function CustomerBilling() {
                 </Card>
 
                 {/* Quick Stats - Mobile optimized */}
-                <Card>
+                <Card className="shadow-sm border border-gray-200">
                   <CardHeader className="pb-2 p-3">
                     <CardTitle className="text-xs text-gray-700">Total Work</CardTitle>
                   </CardHeader>
@@ -1642,6 +1643,7 @@ export default function CustomerBilling() {
               </div>
 
               {/* Work Orders and Billing Data Tabs - Mobile optimized */}
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-2 md:p-4">
               <Tabs defaultValue="unbilled" className="w-full">
                 <TabsList className="grid w-full grid-cols-5 h-8">
                   <TabsTrigger value="unbilled" className="text-xs px-2">
@@ -2237,6 +2239,7 @@ export default function CustomerBilling() {
                 </TabsContent>
               </Tabs>
               </div>
+              </div>
             ) : (
               <Card>
                 <CardContent className="p-8 text-center">
@@ -2748,6 +2751,7 @@ export default function CustomerBilling() {
           onOpenChange={setShowPdfModal}
         />
       )}
+    </div>
     </div>
   );
 }
