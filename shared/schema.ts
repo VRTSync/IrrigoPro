@@ -648,7 +648,7 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
+export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, markupPercent: true, taxPercent: true });
 export const insertPartSchema = createInsertSchema(parts).omit({ 
   id: true, 
   createdAt: true, 

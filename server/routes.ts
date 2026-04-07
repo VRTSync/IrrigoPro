@@ -3078,9 +3078,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 case 'laborrate':
                   customerData.laborRate = values[index];
                   break;
-                case 'taxpercent':
-                  customerData.taxPercent = values[index];
-                  break;
                 case 'discountpercent':
                   customerData.discountPercent = values[index];
                   break;
@@ -6520,23 +6517,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ? await storage.getCustomerById(existingWorkOrder.customerId)
         : undefined;
 
-      // Snapshot the customer's configured rates at the time of completion.
-      // All three rates are read from the customer record (laborRate, markupPercent, taxPercent).
-      // Defaults: laborRate=45, markupPercent=15 (15%), taxPercent=0.
+      // Snapshot the customer's configured labor rate at the time of completion.
       const appliedLaborRate = parseFloat(customerForRates?.laborRate || '45');
-      const appliedMarkupRate = parseFloat(customerForRates?.markupPercent || '15') / 100;
-      const appliedTaxRate = parseFloat(customerForRates?.taxPercent || '0') / 100;
+      const appliedMarkupRate = 0;
+      const appliedTaxRate = 0;
 
-      // Calculate totals using the snapshotted rates
+      // Calculate totals — no per-customer markup or tax applied
       const laborHours = parseFloat(totalHours || '0');
       const partsCost = parseFloat(totalPartsCost || '0');
       
       const laborSubtotal = laborHours * appliedLaborRate;
       const partsSubtotal = partsCost;
-      const markupAmount = partsSubtotal * appliedMarkupRate;
-      const subtotal = laborSubtotal + partsSubtotal + markupAmount;
-      const taxAmount = subtotal * appliedTaxRate;
-      const totalAmount = subtotal + taxAmount;
+      const markupAmount = 0;
+      const taxAmount = 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
 
       const creationPhotos: string[] = existingWorkOrder?.photos || [];
       const completionPhotos: string[] = photos || [];
@@ -6642,23 +6636,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Work order not found" });
       }
 
-      // Snapshot the customer's configured rates at the time of completion.
+      // Snapshot the customer's configured labor rate at the time of completion.
       const customerForRates = existingWorkOrder.customerId
         ? await storage.getCustomerById(existingWorkOrder.customerId)
         : undefined;
       const appliedLaborRate = parseFloat(customerForRates?.laborRate || '45');
-      const appliedMarkupRate = parseFloat(customerForRates?.markupPercent || '15') / 100;
-      const appliedTaxRate = parseFloat(customerForRates?.taxPercent || '0') / 100;
+      const appliedMarkupRate = 0;
+      const appliedTaxRate = 0;
 
-      // Calculate totals using the snapshotted rates
+      // Calculate totals — no per-customer markup or tax applied
       const laborHours = parseFloat(existingWorkOrder.totalHours || '0');
       const partsCost = parseFloat(existingWorkOrder.totalPartsCost || '0');
       const laborSubtotal = laborHours * appliedLaborRate;
       const partsSubtotal = partsCost;
-      const markupAmount = partsSubtotal * appliedMarkupRate;
-      const subtotal = laborSubtotal + partsSubtotal + markupAmount;
-      const taxAmount = subtotal * appliedTaxRate;
-      const totalAmount = subtotal + taxAmount;
+      const markupAmount = 0;
+      const taxAmount = 0;
+      const totalAmount = laborSubtotal + partsSubtotal;
 
       // Field completion routes into pending_manager_review for manager approval
       const workOrder = await storage.updateWorkOrder(id, {
@@ -6979,6 +6972,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         resolvedStatus = billingSheetData.status || 'draft';
       }
 
+      // Enforce zero markup/tax: totalAmount = laborSubtotal + partsSubtotal
+      const bsLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
+      const bsPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
+      const bsTotalAmount = bsLaborSubtotal + bsPartsSubtotal;
+
       // Clean the data - remove any fields that might interfere with timestamps
       const cleanData = {
         customerId: billingSheetData.customerId,
@@ -6992,11 +6990,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         status: resolvedStatus,
         totalHours: billingSheetData.totalHours || '0',
         laborRate: billingSheetData.laborRate || '45.00',
-        laborSubtotal: billingSheetData.laborSubtotal || '0',
-        partsSubtotal: billingSheetData.partsSubtotal || '0',
-        markupAmount: billingSheetData.markupAmount || '0',
-        taxAmount: billingSheetData.taxAmount || '0',
-        totalAmount: billingSheetData.totalAmount || '0',
+        laborSubtotal: bsLaborSubtotal.toFixed(2),
+        partsSubtotal: bsPartsSubtotal.toFixed(2),
+        markupAmount: '0.00',
+        taxAmount: '0.00',
+        totalAmount: bsTotalAmount.toFixed(2),
         photos: billingSheetData.photos || [],
         notes: billingSheetData.notes || '',
         branchName: billingSheetData.branchName || null,
@@ -7120,6 +7118,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Convert date string to Date object if present
       if (billingSheetData.workDate && typeof billingSheetData.workDate === 'string') {
         billingSheetData.workDate = new Date(billingSheetData.workDate + 'T00:00:00.000Z');
+      }
+
+      // Always enforce zero markup/tax on billing sheet updates
+      billingSheetData.markupAmount = '0.00';
+      billingSheetData.taxAmount = '0.00';
+      // Recalculate totalAmount whenever subtotals are provided
+      if (billingSheetData.laborSubtotal !== undefined || billingSheetData.partsSubtotal !== undefined) {
+        const patchLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
+        const patchPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
+        billingSheetData.totalAmount = (patchLaborSubtotal + patchPartsSubtotal).toFixed(2);
       }
       
       // Update the billing sheet

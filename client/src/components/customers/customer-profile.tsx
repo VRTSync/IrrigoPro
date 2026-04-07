@@ -248,10 +248,6 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                       {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(customer.emergencyLaborRate || 125))}/hr
                     </div>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-3 border">
-                    <div className="text-xs text-gray-500 font-medium mb-1">Tax</div>
-                    <div className="text-lg font-bold text-gray-900">{customer.taxPercent || '8.25'}%</div>
-                  </div>
                 </div>
               </CardContent>
             </Card>

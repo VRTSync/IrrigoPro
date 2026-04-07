@@ -25,7 +25,6 @@ const customerFormSchema = insertCustomerSchema.extend({
   contractType: z.enum(["standard", "premium", "commercial", "residential"]).default("standard"),
   laborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("45.00"),
   emergencyLaborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("125.00"),
-  taxPercent: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("0.00"),
   discountPercent: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("0.00"),
   paymentTerms: z.enum(["net_30", "net_15", "due_on_receipt"]).default("net_30"),
   contractStartDate: z.string().optional(),
@@ -66,7 +65,6 @@ function customerToFormValues(customer: Customer): CustomerFormData {
     contractType: toContractType(customer.contractType),
     laborRate: customer.laborRate || "45.00",
     emergencyLaborRate: customer.emergencyLaborRate || "125.00",
-    taxPercent: customer.taxPercent || "0.00",
     discountPercent: customer.discountPercent || "0.00",
     paymentTerms: toPaymentTerms(customer.paymentTerms),
     contractStartDate: customer.contractStartDate ? new Date(customer.contractStartDate).toISOString().split('T')[0] : "",
@@ -122,7 +120,6 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       contractType: "standard",
       laborRate: "45.00",
       emergencyLaborRate: "125.00",
-      taxPercent: "0.00",
       discountPercent: "0.00",
       paymentTerms: "net_30",
       contractStartDate: "",
@@ -491,25 +488,6 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="taxPercent"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tax Percentage</FormLabel>
-                        <FormControl>
-                          <div className="relative">
-                            <Percent className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                            <Input placeholder="8.25" {...field} className="pl-10" />
-                          </div>
-                        </FormControl>
-                        <FormDescription>
-                          Sales tax percentage
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                   <FormField
                     control={form.control}
                     name="discountPercent"

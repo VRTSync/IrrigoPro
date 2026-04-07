@@ -295,13 +295,11 @@ export function StandaloneBillingSheet({
 
   const partsSubtotal = Array.isArray(items) ? items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0) : 0;
   const laborSubtotal = totalHours * laborRate;
-  const markupPercent = 0;
-  const taxPercent = selectedCustomer?.taxPercent ? parseFloat(selectedCustomer.taxPercent) : 8.25;
   
-  const markupAmount = (partsSubtotal * markupPercent) / 100;
-  const subtotal = partsSubtotal + markupAmount + laborSubtotal;
-  const taxAmount = (subtotal * taxPercent) / 100;
-  const totalAmount = subtotal + taxAmount;
+  const markupAmount = 0;
+  const subtotal = partsSubtotal + laborSubtotal;
+  const taxAmount = 0;
+  const totalAmount = subtotal;
 
   const totals = {
     partsSubtotal,
@@ -682,26 +680,11 @@ export function StandaloneBillingSheet({
                           <span>{formatCurrency(totals.laborSubtotal)}</span>
                         </div>
                         {totals.partsSubtotal > 0 && (
-                          <>
-                            <div className="flex justify-between">
-                              <span>Parts Subtotal</span>
-                              <span>{formatCurrency(totals.partsSubtotal)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Markup ({markupPercent}%)</span>
-                              <span>{formatCurrency(totals.markupAmount)}</span>
-                            </div>
-                          </>
+                          <div className="flex justify-between">
+                            <span>Parts Subtotal</span>
+                            <span>{formatCurrency(totals.partsSubtotal)}</span>
+                          </div>
                         )}
-                        <Separator />
-                        <div className="flex justify-between">
-                          <span>Subtotal</span>
-                          <span>{formatCurrency(totals.subtotal)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Tax ({taxPercent}%)</span>
-                          <span>{formatCurrency(totals.taxAmount)}</span>
-                        </div>
                         <Separator />
                         <div className="flex justify-between font-bold text-lg">
                           <span>Total</span>
@@ -1392,26 +1375,11 @@ export function StandaloneBillingSheet({
                           <span>{formatCurrency(totals.laborSubtotal)}</span>
                         </div>
                         {totals.partsSubtotal > 0 && (
-                          <>
-                            <div className="flex justify-between">
-                              <span>Parts Subtotal</span>
-                              <span>{formatCurrency(totals.partsSubtotal)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Markup ({markupPercent}%)</span>
-                              <span>{formatCurrency(totals.markupAmount)}</span>
-                            </div>
-                          </>
+                          <div className="flex justify-between">
+                            <span>Parts Subtotal</span>
+                            <span>{formatCurrency(totals.partsSubtotal)}</span>
+                          </div>
                         )}
-                        <Separator />
-                        <div className="flex justify-between">
-                          <span>Subtotal</span>
-                          <span>{formatCurrency(totals.subtotal)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Tax ({taxPercent}%)</span>
-                          <span>{formatCurrency(totals.taxAmount)}</span>
-                        </div>
                         <Separator />
                         <div className="flex justify-between font-bold text-lg">
                           <span>Total</span>

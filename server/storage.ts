@@ -2019,21 +2019,13 @@ export class DatabaseStorage implements IStorage {
     let taxAmount = Number(sheetData.taxAmount || 0);
     let totalAmount = Number(sheetData.totalAmount || 0);
     
-    // If we have items, calculate the totals
+    // If we have items, calculate the totals — no per-customer markup or tax
     if (items && Array.isArray(items)) {
       partsSubtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
       laborSubtotal = Number(sheetData.totalHours || 0) * Number(sheetData.laborRate || 0);
-      
-      // Markup is handled at the parts library level, not per-customer
-      const markupPercent = 0;
-      markupAmount = partsSubtotal * (markupPercent / 100);
-      
-      // Calculate tax on subtotals + markup
-      const taxPercent = 8.25; // Default tax rate
-      taxAmount = (laborSubtotal + partsSubtotal + markupAmount) * (taxPercent / 100);
-      
-      // Total amount
-      totalAmount = laborSubtotal + partsSubtotal + markupAmount + taxAmount;
+      markupAmount = 0;
+      taxAmount = 0;
+      totalAmount = laborSubtotal + partsSubtotal;
     }
 
     const finalSheetData = {
@@ -2270,12 +2262,10 @@ export class DatabaseStorage implements IStorage {
       laborSubtotal += parseFloat(bs.laborSubtotal || "0");
     });
     
-    // Calculate markup and tax
-    const markupPercent = 0;
-    const taxPercent = parseFloat(customer.taxPercent || "8.25");
-    const markupAmount = partsSubtotal * (markupPercent / 100);
-    const taxAmount = (partsSubtotal + laborSubtotal + markupAmount) * (taxPercent / 100);
-    const totalAmount = partsSubtotal + laborSubtotal + markupAmount + taxAmount;
+    // No per-customer markup or tax applied
+    const markupAmount = 0;
+    const taxAmount = 0;
+    const totalAmount = partsSubtotal + laborSubtotal;
     
     // Generate invoice number
     const invoiceCount = await this.getInvoiceCount();

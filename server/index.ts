@@ -671,6 +671,93 @@ async function runStartupMigrations() {
   } catch (err) {
     logger.error('Startup migration (prune-empty-items) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
+
+  // Zero out markup/tax amounts on work orders and billing sheets that had non-zero values
+  // from per-customer markup/tax rates, and recalculate totalAmount = partsSubtotal + laborSubtotal.
+  // Then update invoice totals for invoices built from those corrected records.
+  try {
+    const toNum3 = (val: string | number | null | undefined): number => {
+      if (val === null || val === undefined) return 0;
+      const n = typeof val === 'string' ? parseFloat(val) : val;
+      return isNaN(n) ? 0 : n;
+    };
+
+    const correctedInvoiceIds = new Set<number>();
+    let woMarkupFixed = 0;
+    let bsMarkupFixed = 0;
+
+    const allWorkOrdersForMarkup = await db.select().from(workOrders);
+    for (const wo of allWorkOrdersForMarkup) {
+      const markupAmt = toNum3(wo.markupAmount);
+      const taxAmt = toNum3(wo.taxAmount);
+      if (markupAmt === 0 && taxAmt === 0) continue;
+
+      const correctTotal = toNum3(wo.partsSubtotal) + toNum3(wo.laborSubtotal);
+      await db.update(workOrders)
+        .set({
+          markupAmount: '0.00',
+          taxAmount: '0.00',
+          appliedMarkupRate: '0.0000',
+          appliedTaxRate: '0.0000',
+          totalAmount: correctTotal.toFixed(2),
+        })
+        .where(eq(workOrders.id, wo.id));
+      woMarkupFixed++;
+      if (wo.invoiceId) correctedInvoiceIds.add(wo.invoiceId);
+      logger.info(`Startup migration (zero-markup-tax): corrected work_order id=${wo.id} markupAmount=${markupAmt} taxAmount=${taxAmt} -> totalAmount=${correctTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    const allSheetsForMarkup = await db.select().from(billingSheets);
+    for (const sheet of allSheetsForMarkup) {
+      const markupAmt = toNum3(sheet.markupAmount);
+      const taxAmt = toNum3(sheet.taxAmount);
+      if (markupAmt === 0 && taxAmt === 0) continue;
+
+      const correctTotal = toNum3(sheet.partsSubtotal) + toNum3(sheet.laborSubtotal);
+      await db.update(billingSheets)
+        .set({
+          markupAmount: '0.00',
+          taxAmount: '0.00',
+          totalAmount: correctTotal.toFixed(2),
+        })
+        .where(eq(billingSheets.id, sheet.id));
+      bsMarkupFixed++;
+      if (sheet.invoiceId) correctedInvoiceIds.add(sheet.invoiceId);
+      logger.info(`Startup migration (zero-markup-tax): corrected billing_sheet id=${sheet.id} markupAmount=${markupAmt} taxAmount=${taxAmt} -> totalAmount=${correctTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    let invoiceMarkupFixed = 0;
+    for (const invoiceId of correctedInvoiceIds) {
+      const invoice = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+      if (!invoice[0]) continue;
+
+      const linkedWorkOrders = await db.select().from(workOrders).where(eq(workOrders.invoiceId, invoiceId));
+      const linkedBillingSheets = await db.select().from(billingSheets).where(eq(billingSheets.invoiceId, invoiceId));
+
+      let newTotal = 0;
+      for (const wo of linkedWorkOrders) {
+        newTotal += toNum3(wo.partsSubtotal) + toNum3(wo.laborSubtotal);
+      }
+      for (const bs of linkedBillingSheets) {
+        newTotal += toNum3(bs.partsSubtotal) + toNum3(bs.laborSubtotal);
+      }
+
+      await db.update(invoices)
+        .set({ totalAmount: newTotal.toFixed(2) })
+        .where(eq(invoices.id, invoiceId));
+      invoiceMarkupFixed++;
+      logger.info(`Startup migration (zero-markup-tax): recomputed invoice id=${invoiceId} totalAmount=${newTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    if (woMarkupFixed > 0 || bsMarkupFixed > 0 || invoiceMarkupFixed > 0) {
+      logger.info(
+        `Startup migration (zero-markup-tax): corrected ${woMarkupFixed} work order(s), ${bsMarkupFixed} billing sheet(s), ${invoiceMarkupFixed} invoice(s)`,
+        'Server Startup'
+      );
+    }
+  } catch (err) {
+    logger.error('Startup migration (zero-markup-tax) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
 }
 
 (async () => {

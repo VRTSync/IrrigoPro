@@ -106,9 +106,9 @@ export function CustomerCsvUpload() {
 
   const downloadTemplate = () => {
     const csvContent = [
-      'name,email,phone,address,contractType,laborRate,taxPercent,discountPercent,paymentTerms,notes',
-      'Johnson Family,johnson@example.com,(555) 123-4567,"123 Oak Street, Springfield, IL 62701",residential,42.00,8.25,0.00,net_30,"Preferred residential customer"',
-      'Office Complex Management,manager@officecomplex.com,(555) 234-5678,"456 Business Ave, Springfield, IL 62702",commercial,55.00,8.25,5.00,net_15,"Commercial contract with bulk pricing"'
+      'name,email,phone,address,contractType,laborRate,discountPercent,paymentTerms,notes',
+      'Johnson Family,johnson@example.com,(555) 123-4567,"123 Oak Street, Springfield, IL 62701",residential,42.00,0.00,net_30,"Preferred residential customer"',
+      'Office Complex Management,manager@officecomplex.com,(555) 234-5678,"456 Business Ave, Springfield, IL 62702",commercial,55.00,5.00,net_15,"Commercial contract with bulk pricing"'
     ].join('\n');
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -239,7 +239,7 @@ export function CustomerCsvUpload() {
           <div><strong>CSV Format Requirements:</strong></div>
           <ul className="text-xs space-y-1">
             <li>• Required fields: name, email</li>
-            <li>• Optional fields: phone, address, contractType, laborRate, taxPercent, discountPercent, paymentTerms, notes</li>
+            <li>• Optional fields: phone, address, contractType, laborRate, discountPercent, paymentTerms, notes</li>
             <li>• Contract types: standard, premium, commercial, residential</li>
             <li>• Payment terms: net_30, net_15, due_on_receipt</li>
             <li>• Rates should be in decimal format (e.g., 45.00)</li>

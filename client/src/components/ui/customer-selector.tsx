@@ -21,7 +21,6 @@ import type { Customer } from "@shared/schema";
 
 const newCustomerSchema = insertCustomerSchema.extend({
   laborRate: z.string().optional(),
-  taxPercent: z.string().optional(),
   discountPercent: z.string().optional(),
 });
 
@@ -76,7 +75,6 @@ export function CustomerSelector({
       address: "",
       contractType: "standard",
       laborRate: "45.00",
-      taxPercent: "8.25",
       discountPercent: "0.00",
       paymentTerms: "net_30",
       notes: "",
@@ -402,20 +400,6 @@ export function CustomerSelector({
                       <FormLabel>Labor Rate ($/hour)</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.01" placeholder="45.00" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="taxPercent"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tax Rate (%)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.01" placeholder="8.25" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
