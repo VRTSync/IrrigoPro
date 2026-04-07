@@ -764,7 +764,17 @@ async function runStartupMigrations() {
   // Phase C — Recompute ALL invoice totals from corrected line items.
   // This catches legacy records that the earlier zero-markup-tax migration missed because
   // their markup/tax was baked into totalAmount without being stored in the breakdown columns.
+  // Guarded by an idempotency key in app_settings so it only fully scans once per environment.
+  const TOTAL_MISMATCH_MIGRATION_KEY = 'fix-total-mismatch-v2';
   try {
+    const existingMigrationRow = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [TOTAL_MISMATCH_MIGRATION_KEY]
+    );
+    if (existingMigrationRow.rows.length > 0 && existingMigrationRow.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${TOTAL_MISMATCH_MIGRATION_KEY}': already completed, skipping`, 'Server Startup');
+    } else {
+
     const toNum5 = (val: string | number | null | undefined): number => {
       if (val === null || val === undefined) return 0;
       const n = typeof val === 'string' ? parseFloat(val) : val;
@@ -879,6 +889,15 @@ async function runStartupMigrations() {
     } else {
       logger.info('Startup migration (fix-total-mismatch-v2): all totals consistent, no corrections needed', 'Server Startup');
     }
+
+    // Persist completion flag so subsequent restarts skip the full-table scan
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ($1, 'completed', NOW())
+       ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+      [TOTAL_MISMATCH_MIGRATION_KEY]
+    );
+    } // end else (migration not yet completed)
   } catch (err) {
     console.error('[Startup][fix-total-mismatch-v2] FATAL error:', err);
     logger.error('Startup migration (fix-total-mismatch-v2) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
