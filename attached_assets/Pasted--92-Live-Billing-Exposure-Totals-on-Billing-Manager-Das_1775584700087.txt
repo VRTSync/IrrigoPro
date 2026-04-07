@@ -1,0 +1,145 @@
+#92 — Live Billing Exposure Totals on Billing Manager Dashboard
+What & Why
+
+The current Billing Manager dashboard only reflects billable (approved) work and does not provide visibility into unapproved tickets that are still in the irrigation manager review stage. This limits the ability to understand how the month is progressing in real time.
+
+We need to introduce a live billing exposure layer that shows both approved and unapproved financial totals without allowing premature billing or editing. This preserves the approval-gated workflow while giving the billing manager a complete, real-time financial picture of the current billing period.
+
+The system must clearly distinguish between:
+
+Approved (billable) work
+Unapproved (pending manager review) work
+Total combined exposure
+
+This is a visibility feature only, not a workflow bypass.
+
+Done looks like
+Company-level (top-left dashboard box)
+
+Displays three values:
+
+Approved:    $X,XXX.XX
+Unapproved:  $X,XXX.XX
+Total:       $X,XXX.XX
+Reflects all customers combined
+Updates live as tickets are created and approved
+Customer cards (left-side list)
+
+Each customer shows:
+
+This Month:
+
+Approved:    $X
+Unapproved:  $X
+Total:       $X
+
+Optional status indicator:
+
+Up to Date (no work)
+Pending Approval (only unapproved)
+Ready to Bill (only approved)
+Mixed (both present)
+Data rules
+Approved = tickets in Approved / Passed to Billing AND not yet billed
+Unapproved = tickets in Pending Manager Review
+Total = Approved + Unapproved
+Billed tickets are excluded entirely from these totals
+Workflow integrity preserved
+Billing manager cannot edit or bill unapproved tickets
+Unapproved tickets remain outside billing selection workflows
+This is strictly read-only visibility
+Out of scope
+Changing approval workflow (#91)
+Billing lock logic (#89)
+Financial calculation logic (#88)
+Adding edit access to unapproved tickets
+Changing invoice generation behavior
+Tasks
+1. Extend billing dashboard data model
+
+Update backend aggregation logic to compute:
+
+Per customer:
+
+approvedTotal
+unapprovedTotal
+combinedTotal
+
+Company-wide:
+
+totalApproved
+totalUnapproved
+totalCombined
+
+Use:
+
+work orders
+billing sheets
+
+Apply filters:
+
+current billing period only
+exclude records with invoiceId != null (already billed)
+2. Update company summary box (top-left)
+
+Replace current “Total Unbilled” display with:
+
+Approved
+Unapproved
+Total
+Ensure formatting is clean and aligned
+Values update dynamically
+3. Update customer card UI (left panel)
+
+Add 3-line breakdown under each customer:
+
+Approved:    $X
+Unapproved:  $X
+Total:       $X
+Keep compact (do not increase card height excessively)
+Maintain readability
+4. Add customer status indicator
+
+Based on values:
+
+Approved = 0, Unapproved = 0 → “Up to Date”
+Approved = 0, Unapproved > 0 → “Pending Approval”
+Approved > 0, Unapproved = 0 → “Ready to Bill”
+Approved > 0, Unapproved > 0 → “Mixed”
+
+Display as small badge on customer card
+
+5. Ensure strict filtering by ticket state
+
+Backend must correctly classify:
+
+Pending Manager Review → Unapproved
+Approved / Passed to Billing → Approved
+Billed → Excluded
+
+Apply consistently across:
+
+work orders
+billing sheets
+6. Maintain read-only integrity for unapproved tickets
+Do NOT expose edit actions
+Do NOT allow billing selection from unapproved totals
+If drill-down is added later, it must be read-only
+7. Performance consideration
+Aggregate efficiently (avoid N+1 queries)
+Prefer grouped queries per customer
+Cache or batch where appropriate if dataset grows
+Acceptance criteria
+Company dashboard shows accurate Approved / Unapproved / Total values
+Customer cards reflect correct breakdown per customer
+Totals update correctly as:
+tickets are created
+tickets are approved
+tickets are billed
+Billed tickets never appear in totals
+Billing manager cannot interact with unapproved tickets beyond visibility
+No impact to existing billing workflow or approval logic
+Dashboard gives a clear “live month” view without confusion
+One-line instruction for Replit
+
+Add a live billing exposure layer to the dashboard that shows approved, unapproved, and total financials per customer and company-wide, without allowing any billing or editing of unapproved tickets.
