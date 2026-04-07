@@ -136,7 +136,7 @@ export function StandaloneBillingSheet({
       technicianName: isFieldTech ? (currentUser?.name || currentUser?.username || "") : "",
       workDescription: "",
       totalHours: 1,
-      laborRate: 45,
+      laborRate: 0,
       notes: "",
       items: [],
     },
@@ -244,7 +244,7 @@ export function StandaloneBillingSheet({
         technicianName: draftData.technicianName || "",
         workDescription: draftData.workDescription || "",
         totalHours: draftData.totalHours || 1,
-        laborRate: draftData.laborRate || 45,
+        laborRate: draftData.laborRate || 0,
         notes: draftData.notes || "",
         items: Array.isArray(draftData.items) ? draftData.items.map((item: any) => ({
           ...item,
@@ -452,8 +452,6 @@ export function StandaloneBillingSheet({
         ? { status: 'submitted' as const }
         : {
             ...data,
-            // Ensure laborRate is set for field techs (use default if hidden)
-            laborRate: isFieldTech ? 45 : data.laborRate,
             laborSubtotal: totals.laborSubtotal,
             partsSubtotal: totals.partsSubtotal,
             markupAmount: totals.markupAmount,
@@ -720,7 +718,7 @@ export function StandaloneBillingSheet({
                                     field.onChange(customer.id);
                                     form.setValue("customerName", customer.name);
                                     setSelectedCustomer(customer);
-                                    form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
+                                    form.setValue("laborRate", parseFloat(customer.laborRate || "0"));
                                     form.setValue("branchName", "");
                                   }}
                                   placeholder="Select customer"
@@ -932,6 +930,19 @@ export function StandaloneBillingSheet({
                             )}
                           />
 
+                          <div>
+                            <p className="text-sm font-medium mb-2">Labor Rate</p>
+                            {selectedCustomer ? (
+                              <div className="flex items-center h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-700 text-sm">
+                                ${parseFloat(selectedCustomer.laborRate || "0").toFixed(2)}/hr
+                                <span className="ml-2 text-xs text-gray-500">(from customer record)</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-400 text-sm">
+                                Select a customer first
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                       </div>

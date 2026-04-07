@@ -116,6 +116,20 @@ export function CompletedWorkDetailModal({
   const userRole = savedUser ? JSON.parse(savedUser)?.role : "";
   const canSeePricing = showPricing !== undefined ? showPricing : userRole !== "field_tech";
 
+  const bs = type === "billing_sheet" ? (data as BillingSheet) : null;
+
+  // Fetch the customer to compare their current labor rate vs stored rate on billing sheet
+  const { data: customerForRateCheck } = useQuery({
+    queryKey: ["/api/customers", bs?.customerId],
+    queryFn: () => fetch(`/api/customers/${bs!.customerId}`).then((r) => r.json()),
+    enabled: open && type === "billing_sheet" && !!bs?.customerId && canSeePricing,
+  });
+
+  // Detect rate mismatch for billing sheets
+  const storedRate = bs ? parseFloat(bs.laborRate || '0') : null;
+  const currentCustomerRate = customerForRateCheck ? parseFloat(customerForRateCheck.laborRate || '0') : null;
+  const hasRateMismatch = canSeePricing && storedRate !== null && currentCustomerRate !== null && Math.abs(storedRate - currentCustomerRate) > 0.001;
+
   // Fetch items
   const itemsEndpoint =
     type === "work_order"
@@ -130,7 +144,6 @@ export function CompletedWorkDetailModal({
 
   const isWorkOrder = type === "work_order";
   const wo = isWorkOrder ? (data as WorkOrder) : null;
-  const bs = !isWorkOrder ? (data as BillingSheet) : null;
 
   const title = isWorkOrder
     ? `Work Order ${wo?.workOrderNumber ?? `#${id}`}`
@@ -255,6 +268,24 @@ export function CompletedWorkDetailModal({
               <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
                 <CheckCircle className="w-4 h-4 flex-shrink-0" />
                 <span className="font-medium">Awaiting irrigation manager review before passing to billing.</span>
+              </div>
+            )}
+
+            {/* Rate mismatch warning — flags when stored rate differs from customer's current rate */}
+            {hasRateMismatch && type === 'billing_sheet' && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-600 font-bold text-base leading-none mt-0.5">⚠</span>
+                  <div>
+                    <p className="font-semibold">Rate mismatch detected</p>
+                    <p className="mt-0.5">
+                      The rate on this sheet (${storedRate?.toFixed(2)}/hr) differs from the customer's current rate (${currentCustomerRate?.toFixed(2)}/hr).
+                      {(status === 'billed' || data.invoiceId)
+                        ? ' Already billed — review manually before reissuing.'
+                        : ' The server will use the customer\'s current rate for any new billing sheets.'}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
 

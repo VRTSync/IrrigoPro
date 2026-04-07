@@ -117,6 +117,11 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   });
   const customerBranches: string[] = (customer as any)?.branches || [];
 
+  // Detect rate mismatch: stored rate on this sheet vs customer's current rate
+  const storedLaborRate = parseFloat(billingSheet.laborRate || '0');
+  const currentCustomerLaborRate = customer ? parseFloat((customer as any).laborRate || '0') : null;
+  const hasRateMismatch = currentCustomerLaborRate !== null && Math.abs(storedLaborRate - currentCustomerLaborRate) > 0.001;
+
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [editablePhotos, setEditablePhotos] = useState<UploadedFile[]>([]);
 
@@ -316,6 +321,24 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
             {isReadOnly && (
               <div className="pointer-events-auto select-auto opacity-100">
                 <BilledIndicator invoiceId={billingSheet.invoiceId} />
+              </div>
+            )}
+
+            {/* Rate mismatch warning — flags stored rate vs customer's current rate */}
+            {hasRateMismatch && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-600 font-bold text-base leading-none mt-0.5">⚠</span>
+                  <div>
+                    <p className="font-semibold">Rate mismatch detected</p>
+                    <p className="mt-0.5">
+                      The rate on this sheet (${storedLaborRate.toFixed(2)}/hr) differs from the customer's current rate (${currentCustomerLaborRate?.toFixed(2)}/hr).
+                      {isReadOnly
+                        ? ' Already billed — review manually before reissuing.'
+                        : ' New billing sheets will use the customer\'s current rate automatically.'}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -2365,7 +2365,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const woMarkupAmount = parseFloat(workOrder.markupAmount || '0');
         const woTaxAmount = parseFloat(workOrder.taxAmount || '0');
         const woTotal = parseFloat(workOrder.totalAmount || '0');
-        const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '45');
+        const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '0');
         previewItems.push({
           sourceType: 'work_order',
           sourceId: workOrder.id,
@@ -2392,7 +2392,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           workDate: billingSheet.workDate,
           technicianName: billingSheet.technicianName,
           laborHours: parseFloat(billingSheet.totalHours || '0'),
-          laborRate: parseFloat(billingSheet.laborRate || '45'),
+          laborRate: parseFloat(billingSheet.laborRate || '0'),
           laborAmount: parseFloat(billingSheet.laborSubtotal || '0'),
           partsAmount: parseFloat(billingSheet.partsSubtotal || '0'),
           totalAmount: parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')
@@ -2658,7 +2658,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const woLaborAmount = parseFloat(workOrder.laborSubtotal || '0');
         const woPartsAmount = parseFloat(workOrder.partsSubtotal || '0');
         const woTotalAmount = parseFloat(workOrder.totalAmount || '0');
-        const woAppliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '45');
+        const woAppliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '0');
         
         await storage.createInvoiceItem({
           invoiceId: invoice.id,
@@ -2686,7 +2686,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Billing Sheet ${billingSheet.billingNumber} - ${billingSheet.workDescription}`,
           workDate: billingSheet.workDate,
           laborHours: (parseFloat(billingSheet.totalHours || '0')).toString(),
-          laborRate: (parseFloat(billingSheet.laborRate || '45')).toString(),
+          laborRate: (parseFloat(billingSheet.laborRate || '0')).toString(),
           laborTotal: (parseFloat(billingSheet.laborSubtotal || '0')).toString(),
           quantity: '1',
           unitPrice: (parseFloat(billingSheet.laborSubtotal || '0') + parseFloat(billingSheet.partsSubtotal || '0')).toString(),
@@ -2722,7 +2722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const workOrder of selectedWorkOrders) {
           // Use the stored totalAmount as the authoritative QB line amount
           const totalLineAmount = parseFloat(workOrder.totalAmount || '0');
-          const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '45');
+          const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '0');
           const partsAmount = parseFloat(workOrder.partsSubtotal || workOrder.totalPartsCost || '0');
           
           if (totalLineAmount > 0) {
@@ -2756,7 +2756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 UnitPrice: lineTotal,
                 Qty: 1
               },
-              Description: `BS-${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '45').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
+              Description: `BS-${billingSheet.billingNumber} - ${parseFloat(billingSheet.totalHours || '0')}h labor @ $${parseFloat(billingSheet.laborRate || '0').toFixed(2)}/h, $${parseFloat(billingSheet.partsSubtotal || '0').toFixed(2)} parts`
             });
           }
         }
@@ -6551,7 +6551,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         : undefined;
 
       // Snapshot the customer's configured labor rate at the time of completion.
-      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '45');
+      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
       const appliedMarkupRate = 0;
       const appliedTaxRate = 0;
 
@@ -6673,7 +6673,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const customerForRates = existingWorkOrder.customerId
         ? await storage.getCustomerById(existingWorkOrder.customerId)
         : undefined;
-      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '45');
+      const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
       const appliedMarkupRate = 0;
       const appliedTaxRate = 0;
 
@@ -7005,8 +7005,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         resolvedStatus = billingSheetData.status || 'draft';
       }
 
-      // Enforce zero markup/tax: totalAmount = laborSubtotal + partsSubtotal
-      const bsLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
+      // Always look up the customer's authoritative labor rate — ignore any client-supplied value.
+      // Fail fast if the customer does not exist or has no labor rate configured.
+      if (!billingSheetData.customerId) {
+        return res.status(400).json({ message: "Customer ID is required to determine the correct labor rate." });
+      }
+      const customerForRate = await storage.getCustomer(Number(billingSheetData.customerId));
+      if (!customerForRate) {
+        return res.status(400).json({ message: "Customer not found. Cannot determine labor rate." });
+      }
+      if (!customerForRate.laborRate || parseFloat(customerForRate.laborRate) <= 0) {
+        return res.status(400).json({ message: `Customer "${customerForRate.name}" does not have a labor rate configured. Please set a labor rate on the customer record before creating a billing sheet.` });
+      }
+      const bsAuthorizedLaborRate = parseFloat(customerForRate.laborRate);
+
+      // Recalculate totals using the authoritative rate from the customer record
+      const bsTotalHours = parseFloat(billingSheetData.totalHours || '0');
+      const bsLaborSubtotal = bsTotalHours * bsAuthorizedLaborRate;
       const bsPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
       const bsTotalAmount = bsLaborSubtotal + bsPartsSubtotal;
 
@@ -7022,7 +7037,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workDescription: billingSheetData.workDescription,
         status: resolvedStatus,
         totalHours: billingSheetData.totalHours || '0',
-        laborRate: billingSheetData.laborRate || '45.00',
+        laborRate: bsAuthorizedLaborRate.toFixed(2),
         laborSubtotal: bsLaborSubtotal.toFixed(2),
         partsSubtotal: bsPartsSubtotal.toFixed(2),
         markupAmount: '0.00',
@@ -8150,7 +8165,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const totalHoursVal = workOrder.totalHours ?? "0";
-      const laborRateVal = formLaborRate || "45.00";
+      // Always look up the customer's authoritative labor rate — fail fast if unavailable.
+      if (!workOrder.customerId) {
+        return res.status(400).json({ message: "Work order has no associated customer. Cannot determine labor rate." });
+      }
+      const woCustomerForRate = await storage.getCustomer(workOrder.customerId);
+      if (!woCustomerForRate) {
+        return res.status(400).json({ message: "Customer not found. Cannot determine labor rate." });
+      }
+      if (!woCustomerForRate.laborRate || parseFloat(woCustomerForRate.laborRate) <= 0) {
+        return res.status(400).json({ message: `Customer "${woCustomerForRate.name}" does not have a labor rate configured. Please set a labor rate on the customer record before converting to a billing sheet.` });
+      }
+      const laborRateVal = parseFloat(woCustomerForRate.laborRate).toFixed(2);
       const laborSubtotalVal = (parseFloat(String(totalHoursVal)) * parseFloat(String(laborRateVal))).toFixed(2);
       const partsSubtotalVal = parseFloat(String(totalPartsCost || "0")).toFixed(2);
       const taxAmount = ((parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal)) * 0.0825).toFixed(2);
@@ -9413,6 +9439,65 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     qbStorageAdapter,
     24 * 60 * 60 * 1000
   );
+
+  // One-time data fix: correct the 7 pending billing sheets with wrong labor rates.
+  // These were created with a hardcoded $45 default instead of the customer's actual rate.
+  // Uses the app_settings table as a completion marker so it only runs once.
+  (async () => {
+    const DATA_FIX_KEY = 'fix-pending-billing-sheet-labor-rates-v1';
+    try {
+      // Check if this fix has already run successfully
+      const existingMarker = await db.execute(
+        sql`SELECT value FROM app_settings WHERE key = ${DATA_FIX_KEY}`
+      );
+      if (existingMarker.rows.length > 0 && existingMarker.rows[0].value === 'completed') {
+        console.log(`[DATA FIX] '${DATA_FIX_KEY}': already completed, skipping`);
+        return;
+      }
+
+      const sheetsToFix = [
+        { billingNumber: 'BS-2026-0020', correctRate: '85.00', correctHours: '5', correctLaborSubtotal: '425.00' },
+        { billingNumber: 'BS-2026-0021', correctRate: '85.00', correctHours: '1', correctLaborSubtotal: '85.00' },
+        { billingNumber: 'BS-2026-0016', correctRate: '80.00', correctHours: '5', correctLaborSubtotal: '400.00' },
+        { billingNumber: 'BS-2026-0015', correctRate: '80.00', correctHours: '6', correctLaborSubtotal: '480.00' },
+        { billingNumber: 'BS-2026-0011', correctRate: '80.00', correctHours: '5', correctLaborSubtotal: '400.00' },
+        { billingNumber: 'BS-2026-0014', correctRate: '80.00', correctHours: '6', correctLaborSubtotal: '480.00' },
+        { billingNumber: 'BS-2026-0006', correctRate: '80.00', correctHours: '1', correctLaborSubtotal: '80.00' },
+      ];
+
+      let correctedCount = 0;
+      const allSheets = await storage.getAllBillingSheets();
+      for (const fix of sheetsToFix) {
+        const sheet = allSheets.find(s => s.billingNumber === fix.billingNumber);
+        if (!sheet) continue;
+        // Only fix sheets that are still pending manager review (not yet billed or approved)
+        if (sheet.status !== 'pending_manager_review' && sheet.status !== 'submitted') continue;
+        // Skip if the rate is already correct
+        if (parseFloat(sheet.laborRate || '0').toFixed(2) === fix.correctRate) continue;
+
+        const partsSubtotal = parseFloat(sheet.partsSubtotal || '0');
+        const laborSubtotal = parseFloat(fix.correctLaborSubtotal);
+        const totalAmount = (laborSubtotal + partsSubtotal).toFixed(2);
+
+        await storage.updateBillingSheet(sheet.id, {
+          laborRate: fix.correctRate,
+          laborSubtotal: fix.correctLaborSubtotal,
+          totalAmount,
+        });
+        console.log(`[DATA FIX] Corrected billing sheet ${fix.billingNumber}: laborRate=${fix.correctRate}, laborSubtotal=${fix.correctLaborSubtotal}, totalAmount=${totalAmount}`);
+        correctedCount++;
+      }
+
+      // Mark as completed so it does not re-run on subsequent startups
+      await db.execute(
+        sql`INSERT INTO app_settings (key, value, updated_at) VALUES (${DATA_FIX_KEY}, 'completed', NOW())
+            ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`
+      );
+      console.log(`[DATA FIX] '${DATA_FIX_KEY}': completed (${correctedCount} sheet(s) corrected)`);
+    } catch (err) {
+      console.error('[DATA FIX] Failed to run billing sheet labor rate correction:', err);
+    }
+  })();
 
   return httpServer;
 }
