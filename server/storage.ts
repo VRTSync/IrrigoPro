@@ -2839,10 +2839,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(manualPartReviews.id, id))
       .returning();
 
-    // If linked to a billing sheet item, update its unit price
+    // If linked to a billing sheet item, update its unit price and recalculate total price
     if (review.billingSheetItemId) {
+      const [linkedItem] = await db.select().from(billingSheetItems).where(eq(billingSheetItems.id, review.billingSheetItemId));
+      const qty = linkedItem ? parseFloat(linkedItem.quantity ?? '1') : 1;
+      const newTotal = (qty * parseFloat(reviewedPrice)).toFixed(2);
       await db.update(billingSheetItems)
-        .set({ unitPrice: reviewedPrice })
+        .set({ unitPrice: reviewedPrice, totalPrice: newTotal })
         .where(eq(billingSheetItems.id, review.billingSheetItemId));
     }
 
@@ -2882,9 +2885,17 @@ export class DatabaseStorage implements IStorage {
 
     if (uninvoicedBillingSheets.length > 0) {
       for (const bs of uninvoicedBillingSheets) {
-        await db.update(billingSheetItems)
-          .set({ unitPrice: price })
+        // Fetch the affected items so we can recalculate total_price per-item (quantity varies)
+        const affectedItems = await db.select()
+          .from(billingSheetItems)
           .where(and(eq(billingSheetItems.partId, id), eq(billingSheetItems.billingSheetId, bs.id)));
+        for (const item of affectedItems) {
+          const qty = parseFloat(item.quantity ?? '1');
+          const newTotal = (qty * parseFloat(price)).toFixed(2);
+          await db.update(billingSheetItems)
+            .set({ unitPrice: price, totalPrice: newTotal })
+            .where(eq(billingSheetItems.id, item.id));
+        }
       }
     }
 

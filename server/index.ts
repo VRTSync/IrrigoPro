@@ -5,7 +5,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 import { db, pool } from "./db";
 import { customers, parts, billingSheets, billingSheetItems, users, workOrders, workOrderItems, invoices } from "@shared/schema";
-import { ne, eq, inArray, or, and } from "drizzle-orm";
+import { ne, eq, inArray, or, and, isNull } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
 interface RateLimitOptions {
@@ -1015,6 +1015,129 @@ async function runStartupMigrations() {
   } catch (err) {
     logger.error(
       'Startup cleanup (stuck-ticket-sweep) error (non-fatal)',
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
+
+  // One-time data repair: fix billing sheet items with zero unit_price when the linked part
+  // has a real catalog price. After fixing items, recalculate parts_subtotal, tax_amount, and
+  // total_amount on affected uninvoiced billing sheets.
+  const ZERO_PRICE_REPAIR_KEY = 'fix-zero-price-billing-sheet-items-v1';
+  try {
+    const existingZeroPriceRow = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [ZERO_PRICE_REPAIR_KEY]
+    );
+    if (existingZeroPriceRow.rows.length > 0 && existingZeroPriceRow.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${ZERO_PRICE_REPAIR_KEY}': already completed, skipping`, 'Server Startup');
+    } else {
+      const toNumZP = (val: string | number | null | undefined): number => {
+        if (val === null || val === undefined) return 0;
+        const n = typeof val === 'string' ? parseFloat(val) : val;
+        return isNaN(n) ? 0 : n;
+      };
+
+      // Fetch all parts to build a price lookup map
+      const allPartsForRepair = await db.select().from(parts);
+      const partPriceRepairMap = new Map<number, number>();
+      for (const p of allPartsForRepair) {
+        const price = toNumZP(p.price);
+        if (price > 0) partPriceRepairMap.set(p.id, price);
+      }
+
+      // Find all uninvoiced billing sheet items with zero unit_price and a partId
+      const uninvoicedSheetIds = (await db.select({ id: billingSheets.id })
+        .from(billingSheets)
+        .where(isNull(billingSheets.invoiceId)))
+        .map(r => r.id);
+
+      let itemsFixed = 0;
+      const affectedSheetIds = new Set<number>();
+
+      if (uninvoicedSheetIds.length > 0) {
+        for (const sheetId of uninvoicedSheetIds) {
+          const sheetItems = await db.select().from(billingSheetItems)
+            .where(eq(billingSheetItems.billingSheetId, sheetId));
+
+          for (const item of sheetItems) {
+            if (item.partId === null || item.partId === undefined) continue;
+            if (toNumZP(item.unitPrice) !== 0) continue;
+
+            const catalogPrice = partPriceRepairMap.get(item.partId);
+            if (!catalogPrice) continue;
+
+            const qty = toNumZP(item.quantity) || 1;
+            const newTotal = (qty * catalogPrice).toFixed(2);
+            await db.update(billingSheetItems)
+              .set({ unitPrice: catalogPrice.toString(), totalPrice: newTotal })
+              .where(eq(billingSheetItems.id, item.id));
+
+            itemsFixed++;
+            affectedSheetIds.add(sheetId);
+            logger.info(`Startup migration '${ZERO_PRICE_REPAIR_KEY}': fixed billing_sheet_item id=${item.id} sheetId=${sheetId} partId=${item.partId} unitPrice=0->${catalogPrice} totalPrice->${newTotal}`, 'Server Startup');
+          }
+        }
+      }
+
+      // Recalculate parts_subtotal, tax_amount, and total_amount for affected sheets
+      let sheetsFixed = 0;
+      for (const sheetId of affectedSheetIds) {
+        const sheet = await db.select().from(billingSheets).where(eq(billingSheets.id, sheetId));
+        if (!sheet[0]) continue;
+
+        const updatedItems = await db.select().from(billingSheetItems)
+          .where(eq(billingSheetItems.billingSheetId, sheetId));
+
+        let newPartsSubtotal = 0;
+        for (const item of updatedItems) {
+          newPartsSubtotal += toNumZP(item.totalPrice);
+        }
+
+        const laborSubtotal = toNumZP(sheet[0].laborSubtotal);
+        const markupAmount = toNumZP(sheet[0].markupAmount);
+        // Billing sheets always carry zero tax (enforced by the PATCH handler).
+        // Recompute taxAmount as zero to correct any stale non-zero values.
+        const newTaxAmount = 0;
+        const newTotalAmount = newPartsSubtotal + laborSubtotal + markupAmount + newTaxAmount;
+
+        const prevPartsSubtotal = toNumZP(sheet[0].partsSubtotal);
+        const prevTaxAmount = toNumZP(sheet[0].taxAmount);
+        const prevTotalAmount = toNumZP(sheet[0].totalAmount);
+
+        await db.update(billingSheets)
+          .set({
+            partsSubtotal: newPartsSubtotal.toFixed(2),
+            taxAmount: newTaxAmount.toFixed(2),
+            totalAmount: newTotalAmount.toFixed(2),
+          })
+          .where(eq(billingSheets.id, sheetId));
+
+        sheetsFixed++;
+        logger.info(
+          `Startup migration '${ZERO_PRICE_REPAIR_KEY}': repaired billing_sheet id=${sheetId} billingNumber=${sheet[0].billingNumber} ` +
+          `partsSubtotal: ${prevPartsSubtotal.toFixed(2)}->${newPartsSubtotal.toFixed(2)} ` +
+          `taxAmount: ${prevTaxAmount.toFixed(2)}->${newTaxAmount.toFixed(2)} ` +
+          `totalAmount: ${prevTotalAmount.toFixed(2)}->${newTotalAmount.toFixed(2)}`,
+          'Server Startup'
+        );
+      }
+
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ($1, 'completed', NOW())
+         ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+        [ZERO_PRICE_REPAIR_KEY]
+      );
+
+      logger.info(
+        `Startup migration '${ZERO_PRICE_REPAIR_KEY}': fixed ${itemsFixed} billing sheet item(s) across ${sheetsFixed} sheet(s)`,
+        'Server Startup'
+      );
+    }
+  } catch (err) {
+    logger.error(
+      `Startup migration '${ZERO_PRICE_REPAIR_KEY}' error (non-fatal)`,
       err instanceof Error ? err : new Error(String(err)),
       'Server Startup'
     );

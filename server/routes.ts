@@ -8208,15 +8208,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         // Fall back to items already saved on the work order
         const workOrderItemsList = await storage.getWorkOrderItems(workOrderId);
         if (workOrderItemsList.length > 0) {
-          resolvedItems = workOrderItemsList.map((item) => ({
-            partId: item.partId || null,
-            partName: item.partName,
-            partDescription: null,
-            quantity: String(item.quantity),
-            unitPrice: item.partPrice,
-            totalPrice: item.totalPrice,
-            laborHours: item.laborHours,
-            notes: item.notes || null,
+          resolvedItems = await Promise.all(workOrderItemsList.map(async (item) => {
+            let unitPrice = parseFloat(item.partPrice ?? '0');
+            // If the work order item has a $0 price but a valid partId, look up the current catalog price
+            if (unitPrice === 0 && item.partId) {
+              const catalogPart = await storage.getPart(item.partId);
+              if (catalogPart && parseFloat(catalogPart.price) > 0) {
+                unitPrice = parseFloat(catalogPart.price);
+              }
+            }
+            const qty = parseFloat(String(item.quantity) ?? '0');
+            return {
+              partId: item.partId || null,
+              partName: item.partName,
+              partDescription: null,
+              quantity: String(item.quantity),
+              unitPrice: unitPrice.toString(),
+              totalPrice: (qty * unitPrice).toFixed(2),
+              laborHours: item.laborHours,
+              notes: item.notes || null,
+            };
           }));
         }
       }
