@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
 import { Link } from "wouter";
+import { BilledBadge } from "@/components/ui/billed-indicator";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 
 export default function FieldTechDashboard() {
@@ -84,6 +85,14 @@ export default function FieldTechDashboard() {
                   <span className="text-gray-600">Completed:</span>
                   <span className="font-medium">{workOrders?.filter(wo => wo.status === 'completed').length || 0}</span>
                 </div>
+                {(workOrders?.filter(wo => wo.status === 'billed' || wo.invoiceId).length || 0) > 0 && (
+                  <div className="flex justify-between text-xs sm:text-sm">
+                    <span className="text-purple-600 flex items-center gap-1">
+                      <BilledBadge />
+                    </span>
+                    <span className="font-medium text-purple-700">{workOrders?.filter(wo => wo.status === 'billed' || wo.invoiceId).length || 0}</span>
+                  </div>
+                )}
               </div>
               <Link href="/work-orders" className="block">
                 <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white">

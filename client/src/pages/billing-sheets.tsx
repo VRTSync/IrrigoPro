@@ -17,6 +17,7 @@ import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Se
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { BillingSheet } from "@shared/schema";
+import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
 export default function BillingSheets() {
   const [showBillingModal, setShowBillingModal] = useState(false);
@@ -27,6 +28,7 @@ export default function BillingSheets() {
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [activeExpanded, setActiveExpanded] = useState(true);
   const [completedExpanded, setCompletedExpanded] = useState(true);
+  const [billedExpandedBS, setBilledExpandedBS] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -80,15 +82,19 @@ export default function BillingSheets() {
   ) || [];
   const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
 
+  const isBilledSheet = (sheet: BillingSheet) => sheet.status === 'billed' || !!sheet.invoiceId;
+
   // Active: draft (user's own) + submitted + pending_manager_review
-  // Completed: approved_passed_to_billing + billed (and legacy 'approved')
+  // Completed: approved_passed_to_billing + approved (not billed)
+  // Billed: status === 'billed' or has invoiceId
   const activeSheets = billingSheets?.filter(sheet => {
     if (sheet.status === 'draft') return sheet.technicianId === currentUser?.id;
     return sheet.status === 'submitted' || sheet.status === 'pending_manager_review';
   }) || [];
   const completedSheets = billingSheets?.filter(sheet =>
-    sheet.status === 'approved_passed_to_billing' || sheet.status === 'approved' || sheet.status === 'billed'
+    (sheet.status === 'approved_passed_to_billing' || sheet.status === 'approved') && !isBilledSheet(sheet)
   ) || [];
+  const billedSheets = billingSheets?.filter(sheet => isBilledSheet(sheet)) || [];
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -136,6 +142,7 @@ export default function BillingSheets() {
   const filteredSubmitted = submittedSheets.filter(matchesSearch);
   const filteredActive = activeSheets.filter(matchesSearch);
   const filteredCompleted = completedSheets.filter(matchesSearch);
+  const filteredBilled = billedSheets.filter(matchesSearch);
 
 
 
@@ -366,7 +373,7 @@ export default function BillingSheets() {
             </Card>
           ))}
         </div>
-      ) : (filteredActive.length === 0 && filteredCompleted.length === 0) ? (
+      ) : (filteredActive.length === 0 && filteredCompleted.length === 0 && filteredBilled.length === 0) ? (
         <Card>
           <CardContent className="text-center py-12">
             <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -567,7 +574,7 @@ export default function BillingSheets() {
             )}
           </div>
 
-          {/* Completed Section (approved + billed) */}
+          {/* Completed Section (approved, not yet billed) */}
           <div>
             <button
               onClick={() => setCompletedExpanded(!completedExpanded)}
@@ -684,6 +691,106 @@ export default function BillingSheets() {
               </div>
             )}
           </div>
+
+          {/* Billed Section — collapsible, collapsed by default */}
+          {filteredBilled.length > 0 && (
+            <div>
+              <button
+                onClick={() => setBilledExpandedBS(!billedExpandedBS)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  {billedExpandedBS ? <ChevronDown className="w-5 h-5 text-purple-600" /> : <ChevronRight className="w-5 h-5 text-purple-600" />}
+                  <span className="text-base font-semibold text-purple-900">Billed</span>
+                  <Badge className="bg-purple-200 text-purple-900 hover:bg-purple-200">{filteredBilled.length}</Badge>
+                </div>
+              </button>
+
+              {billedExpandedBS && (
+                <div className="mt-3 space-y-4">
+                  {filteredBilled.map((sheet) => (
+                    <Card key={sheet.id} className="bg-purple-50/60 border border-purple-200 hover:shadow-md transition-shadow">
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 mb-3">
+                              <FileText className="w-5 h-5 text-purple-600 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
+                                <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
+                              </div>
+                              <BilledBadge />
+                            </div>
+
+                            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
+                              currentUser?.role === 'field_tech' ? 'lg:grid-cols-2' : 'lg:grid-cols-4'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-gray-900 truncate">{formatDate(sheet.workDate)}</p>
+                                  <p className="text-gray-500 text-xs">Work Date</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <User className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-gray-900 truncate">{sheet.technicianName}</p>
+                                  <p className="text-gray-500 text-xs">Technician</p>
+                                </div>
+                              </div>
+                              {currentUser?.role !== 'field_tech' && (
+                                <>
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 truncate">{sheet.totalHours} hours</p>
+                                      <p className="text-gray-500 text-xs">Total Time</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <DollarSign className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 font-semibold truncate">{formatCurrency(sheet.totalAmount)}</p>
+                                      <p className="text-gray-500 text-xs">Total Amount</p>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            <div className="mt-3 space-y-1">
+                              <p className="text-xs sm:text-sm text-gray-600">
+                                <strong>Work:</strong> <span className="break-words">{sheet.workDescription}</span>
+                              </p>
+                              {sheet.propertyAddress && (
+                                <p className="text-xs sm:text-sm text-gray-600">
+                                  <strong>Location:</strong> <span className="break-words">{sheet.propertyAddress}</span>
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="mt-3">
+                              <BilledIndicator compact invoiceId={sheet.invoiceId} />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
+                            <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
+                              <Eye className="w-3 h-3 mr-1" />View
+                            </Button>
+                            <div className="text-xs text-gray-500">
+                              Created: {formatDate(sheet.createdAt)}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 

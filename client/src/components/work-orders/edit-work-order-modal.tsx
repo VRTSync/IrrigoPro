@@ -27,6 +27,7 @@ import {
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
+import { BilledIndicator } from "@/components/ui/billed-indicator";
 
 const currency = (val: number | string | null | undefined) => {
   const n = typeof val === "string" ? parseFloat(val) : (val ?? 0);
@@ -83,6 +84,7 @@ interface EditWorkOrderModalProps {
 export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: EditWorkOrderModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const isReadOnly = workOrder.status === 'billed' || !!workOrder.invoiceId;
 
   const formatDateForInput = (date: string | Date | null | undefined): string => {
     if (!date) return "";
@@ -326,7 +328,14 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
           </DialogHeader>
 
           {/* Scrollable body */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          <div className={`flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 ${isReadOnly ? 'pointer-events-none select-none opacity-80' : ''}`}>
+
+            {/* Billed Guard — read-only notice */}
+            {isReadOnly && (
+              <div className="pointer-events-auto select-auto opacity-100">
+                <BilledIndicator invoiceId={workOrder.invoiceId} billedAt={workOrder.billedAt} />
+              </div>
+            )}
 
             {/* Location + Job Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -653,17 +662,19 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
               <div className="flex gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={onClose}>
                   <X className="w-4 h-4 mr-1.5" />
-                  Cancel
+                  {isReadOnly ? "Close" : "Cancel"}
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={updateWorkOrder.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {updateWorkOrder.isPending ? "Saving..." : "Save Changes"}
-                </Button>
+                {!isReadOnly && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={updateWorkOrder.isPending}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {updateWorkOrder.isPending ? "Saving..." : "Save Changes"}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

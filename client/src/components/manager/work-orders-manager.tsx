@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
+import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
 interface WorkOrdersManagerProps {
   onBack: () => void;
@@ -160,9 +161,9 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
 
   const renderWorkOrderCard = (workOrder: WorkOrder) => (
     <Card key={workOrder.id} className={`hover:shadow-md transition-shadow ${
+      isBilled(workOrder) ? 'bg-purple-50/60 border border-purple-200' :
       workOrder.status === 'pending_manager_review' ? 'border-orange-300 bg-orange-50/30' :
-      workOrder.status === 'approved_passed_to_billing' ? 'border-teal-200' :
-      isBilled(workOrder) ? 'opacity-80' : ''
+      workOrder.status === 'approved_passed_to_billing' ? 'border-teal-200' : ''
     }`}>
       <CardContent className="p-6">
         <div className="flex items-center justify-between">
@@ -173,7 +174,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                 {getStatusLabel(workOrder.status)}
               </Badge>
               {isBilled(workOrder) && workOrder.status !== 'billed' && (
-                <Badge className="bg-purple-100 text-purple-800">Billed</Badge>
+                <BilledBadge />
               )}
             </div>
             <p className="text-gray-600 mb-1">Customer: {workOrder.customerName}</p>
@@ -192,15 +193,10 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                 Assigned to: {workOrder.assignedTechnicianName}
               </p>
             )}
-            {isBilled(workOrder) && workOrder.billedAt && (
-              <p className="text-sm text-purple-700 mt-1 font-medium">
-                Billed on {new Date(workOrder.billedAt).toLocaleDateString()}
-              </p>
-            )}
             {isBilled(workOrder) && (
-              <p className="text-xs text-purple-700 mt-1 font-medium">
-                This record has been billed and cannot be edited.
-              </p>
+              <div className="mt-3">
+                <BilledIndicator compact invoiceId={workOrder.invoiceId} billedAt={workOrder.billedAt} />
+              </div>
             )}
             {/* Approval stamp display */}
             {(workOrder as any).approvedBy && (workOrder as any).approvedAt && (

@@ -43,6 +43,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import type { WorkOrder } from "@shared/schema";
+import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
 export default function WorkOrders() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -66,6 +67,7 @@ export default function WorkOrders() {
   const [completedExpanded, setCompletedExpanded] = useState(true);
   const [billedExpanded, setBilledExpanded] = useState(false);
   const [billedMonthsExpanded, setBilledMonthsExpanded] = useState<Record<string, boolean>>({});
+  const [billedCustomerExpanded, setBilledCustomerExpanded] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -618,8 +620,10 @@ export default function WorkOrders() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
+                    {/* Active (non-billed) work orders */}
                     <div className="space-y-1">
                       {customerWorkOrders
+                        .filter(wo => !isBilled(wo))
                         .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
                         .map((workOrder) => (
                           <div key={workOrder.id} className="p-4 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0">
@@ -724,8 +728,8 @@ export default function WorkOrders() {
                                     View
                                   </Button>
                                   
-                                  {/* Assignment dropdown for irrigation managers */}
-                                  {currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
+                                  {/* Assignment dropdown for irrigation managers — hidden for billed */}
+                                  {currentUser?.role === 'irrigation_manager' && !isBilled(workOrder) && workOrder.status !== 'completed' && (
                                     <Select
                                       onValueChange={(techId: string) => {
                                         const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -760,8 +764,8 @@ export default function WorkOrders() {
                                     </Select>
                                   )}
                                   
-                                  {/* Edit button for company admin and billing manager */}
-                                  {canEditDelete && (
+                                  {/* Edit button for company admin and billing manager — hidden for billed */}
+                                  {canEditDelete && !isBilled(workOrder) && (
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -773,8 +777,8 @@ export default function WorkOrders() {
                                     </Button>
                                   )}
                                   
-                                  {/* Delete button for company admin and billing manager */}
-                                  {canEditDelete && (
+                                  {/* Delete button for company admin and billing manager — hidden for billed */}
+                                  {canEditDelete && !isBilled(workOrder) && (
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -795,6 +799,67 @@ export default function WorkOrders() {
                           </div>
                         ))}
                     </div>
+                    {/* Billed work orders — collapsible section */}
+                    {customerWorkOrders.filter(wo => isBilled(wo)).length > 0 && (
+                      <div className="border-t border-purple-100">
+                        <button
+                          className="w-full flex items-center justify-between px-4 py-2.5 bg-purple-50 hover:bg-purple-100 transition-colors text-left"
+                          onClick={() => setBilledCustomerExpanded(prev => ({
+                            ...prev,
+                            [customerName]: !prev[customerName],
+                          }))}
+                        >
+                          <div className="flex items-center gap-2 text-sm font-medium text-purple-800">
+                            <ChevronDown className={`w-4 h-4 transition-transform ${billedCustomerExpanded[customerName] ? '' : '-rotate-90'}`} />
+                            Billed — {customerWorkOrders.filter(wo => isBilled(wo)).length} item{customerWorkOrders.filter(wo => isBilled(wo)).length !== 1 ? 's' : ''}
+                          </div>
+                        </button>
+                        {billedCustomerExpanded[customerName] && (
+                          <div className="space-y-1">
+                            {customerWorkOrders
+                              .filter(wo => isBilled(wo))
+                              .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
+                              .map((workOrder) => (
+                                <div key={workOrder.id} className="p-4 bg-purple-50/40 hover:bg-purple-50 transition-colors border-b border-purple-50 last:border-b-0">
+                                  <div className="flex flex-col h-full">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="font-semibold text-gray-900 text-base">{workOrder.workOrderNumber}</h4>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {getStatusBadge(workOrder.status)}
+                                        {workOrder.status !== 'billed' && getBilledBadge()}
+                                      </div>
+                                    </div>
+                                    <div className="flex-1 space-y-2 mb-4">
+                                      {workOrder.projectName && (
+                                        <div className="flex items-center gap-2">
+                                          <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                          <span className="text-gray-700 text-sm truncate">{workOrder.projectName}</span>
+                                        </div>
+                                      )}
+                                      <div className="mt-1">
+                                        <BilledIndicator compact invoiceId={workOrder.invoiceId} billedAt={workOrder.billedAt} />
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-end pt-3 border-t border-purple-100">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setSelectedWorkOrder(workOrder)}
+                                        className="text-xs px-3 py-1.5 bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                                      >
+                                        <Eye className="w-3 h-3 mr-1" />
+                                        View
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ))}
@@ -816,16 +881,18 @@ export default function WorkOrders() {
 
             const renderWorkOrderCard = (workOrder: WorkOrder) => (
               <Card key={workOrder.id} className={`border-0 shadow-sm hover:shadow-md transition-all duration-200 ${
-                workOrder.status === 'completed' && currentUser?.role === 'field_tech' 
-                  ? 'bg-green-50 border-l-4 border-l-green-500' 
-                  : 'bg-white'
+                isBilled(workOrder)
+                  ? 'bg-purple-50/60 border border-purple-200'
+                  : workOrder.status === 'completed' && currentUser?.role === 'field_tech' 
+                    ? 'bg-green-50 border-l-4 border-l-green-500' 
+                    : 'bg-white'
               }`}>
                 <CardContent className="p-4">
                   <div className="flex flex-col h-full">
                     {/* Header: Work Order # and Status */}
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        {canEditDelete && (
+                        {canEditDelete && !isBilled(workOrder) && (
                           <Checkbox
                             checked={selectedIds.has(workOrder.id)}
                             onCheckedChange={() => toggleSelect(workOrder.id)}
@@ -936,14 +1003,10 @@ export default function WorkOrders() {
 
                         {/* Billed Indicator */}
                         {isBilled(workOrder) && (
-                          <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg p-2">
-                            <CheckCircle className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                            <div className="flex-1">
-                              <p className="text-sm font-semibold text-purple-700">
-                                Billed{workOrder.billedAt ? ` on ${formatDate(workOrder.billedAt)}` : ''}
-                              </p>
-                            </div>
-                          </div>
+                          <BilledIndicator
+                            invoiceId={workOrder.invoiceId}
+                            billedAt={workOrder.billedAt}
+                          />
                         )}
                       </div>
                     </div>
@@ -994,7 +1057,7 @@ export default function WorkOrders() {
                           </Button>
                           
                           {/* Assignment dropdown for irrigation managers */}
-                          {currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
+                          {!isBilled(workOrder) && currentUser?.role === 'irrigation_manager' && workOrder.status !== 'completed' && (
                             <Select
                               onValueChange={(techId: string) => {
                                 const selectedTech = Array.isArray(fieldTechs) ? fieldTechs.find((tech: any) => tech.id.toString() === techId) : undefined;
@@ -1031,8 +1094,8 @@ export default function WorkOrders() {
                             </Select>
                           )}
                           
-                          {/* Edit button for company admin and billing manager */}
-                          {canEditDelete && (
+                          {/* Edit button for company admin and billing manager — hidden for billed */}
+                          {canEditDelete && !isBilled(workOrder) && (
                             <Button
                               size="sm"
                               onClick={(e) => {
@@ -1046,8 +1109,8 @@ export default function WorkOrders() {
                             </Button>
                           )}
                           
-                          {/* Delete button for company admin and billing manager */}
-                          {canEditDelete && (
+                          {/* Delete button for company admin and billing manager — hidden for billed */}
+                          {canEditDelete && !isBilled(workOrder) && (
                             <Button
                               size="sm"
                               onClick={(e) => {

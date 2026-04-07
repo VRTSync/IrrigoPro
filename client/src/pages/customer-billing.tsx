@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { EditWorkOrderModal } from "@/components/work-orders/edit-work-order-modal";
 import { EditBillingSheetModal } from "@/components/billing/edit-billing-sheet-modal";
+import { BilledBadge, BilledIndicator } from "@/components/ui/billed-indicator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { 
@@ -27,6 +28,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Filter,
   X,
   Edit,
@@ -128,6 +130,13 @@ export default function CustomerBilling() {
 
   // Delete confirmation state
   const [itemToDelete, setItemToDelete] = useState<{ type: "work_order" | "billing_sheet"; id: number; label: string } | null>(null);
+
+  // Collapsible billed sections in WO and BS tabs (collapsed by default)
+  const [billedWOExpanded, setBilledWOExpanded] = useState(false);
+  const [billedBSExpanded, setBilledBSExpanded] = useState(false);
+  // Mobile tab billed sections (collapsed by default)
+  const [mobileWOBilledExpanded, setMobileWOBilledExpanded] = useState(false);
+  const [mobileBSBilledExpanded, setMobileBSBilledExpanded] = useState(false);
 
   // Billing period state — default to first/last day of previous calendar month
   // Use local date formatting to avoid UTC offset shifting the day
@@ -1047,33 +1056,67 @@ export default function CustomerBilling() {
 
                     <TabsContent value="workorders" className="mt-3">
                       <div className="space-y-2">
-                        {customerBillingData.workOrders.length > 0 ? (
-                          customerBillingData.workOrders.map((workOrder) => (
+                        {customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).length > 0 ? (
+                          customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).map((workOrder) => (
                             <Card key={workOrder.id}>
                               <CardContent className="p-3">
                                 <div className="flex items-center justify-between mb-2">
                                   <div className="text-sm font-medium">#{workOrder.id}</div>
-                                  <Badge>{getStatusBadge(workOrder.status)}</Badge>
+                                  <div className="flex items-center gap-1">
+                                    {getStatusBadge(workOrder.status)}
+                                  </div>
                                 </div>
                                 <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
-                                <div className="text-xs text-gray-500 mb-2">
-                                  Assigned to: {workOrder.assignedTo}
-                                </div>
+                                <div className="text-xs text-gray-500 mb-2">Assigned to: {workOrder.assignedTo}</div>
                                 <div className="flex justify-between text-sm">
                                   <span>Total:</span>
                                   <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
                                 </div>
-                                {workOrder.completedAt && (
-                                  <div className="text-xs text-gray-500 mt-1">
-                                    Completed: {formatDate(workOrder.completedAt)}
-                                  </div>
-                                )}
                               </CardContent>
                             </Card>
                           ))
                         ) : (
-                          <div className="text-center py-6 text-gray-500 text-sm">
-                            No work orders found
+                          customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId).length === 0 && (
+                            <div className="text-center py-6 text-gray-500 text-sm">No work orders found</div>
+                          )
+                        )}
+                        {/* Billed work orders collapsible */}
+                        {customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId).length > 0 && (
+                          <div className="border border-purple-200 rounded-lg overflow-hidden">
+                            <button
+                              className="w-full flex items-center justify-between px-3 py-2.5 bg-purple-50 hover:bg-purple-100 transition-colors text-left"
+                              onClick={() => setMobileWOBilledExpanded(!mobileWOBilledExpanded)}
+                            >
+                              <span className="text-sm font-medium text-purple-800 flex items-center gap-2">
+                                <ChevronRight className={`w-4 h-4 transition-transform ${mobileWOBilledExpanded ? 'rotate-90' : ''}`} />
+                                Billed — {customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId).length} items
+                              </span>
+                            </button>
+                            {mobileWOBilledExpanded && (
+                              <div className="space-y-2 p-2 bg-purple-50/40">
+                                {customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId).map((workOrder) => (
+                                  <Card key={workOrder.id} className="bg-purple-50/60 border border-purple-200">
+                                    <CardContent className="p-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="text-sm font-medium">#{workOrder.id}</div>
+                                        <div className="flex items-center gap-1">
+                                          {getStatusBadge(workOrder.status)}
+                                          {workOrder.status !== 'billed' && <BilledBadge />}
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-gray-600 mb-2">{workOrder.description}</div>
+                                      <div className="flex justify-between text-sm">
+                                        <span>Total:</span>
+                                        <span className="font-medium">{formatCurrency(workOrder.laborCost + workOrder.partsCost)}</span>
+                                      </div>
+                                      <div className="mt-2">
+                                        <BilledIndicator compact invoiceId={workOrder.invoiceId} />
+                                      </div>
+                                    </CardContent>
+                                  </Card>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1081,30 +1124,66 @@ export default function CustomerBilling() {
 
                     <TabsContent value="billing" className="mt-3">
                       <div className="space-y-2">
-                        {customerBillingData.billingSheets.length > 0 ? (
-                          customerBillingData.billingSheets.map((billingSheet) => (
+                        {customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).length > 0 ? (
+                          customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).map((billingSheet) => (
                             <Card key={billingSheet.id}>
                               <CardContent className="p-3">
                                 <div className="flex items-center justify-between mb-2">
                                   <div className="text-sm font-medium">#{billingSheet.id}</div>
-                                  <Badge>{getStatusBadge(billingSheet.status)}</Badge>
+                                  <div className="flex items-center gap-1">
+                                    {getStatusBadge(billingSheet.status)}
+                                  </div>
                                 </div>
                                 <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
                                 <div className="flex justify-between text-sm">
                                   <span>Total:</span>
                                   <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
                                 </div>
-                                {billingSheet.workDate && (
-                                  <div className="text-xs text-gray-500 mt-1">
-                                    Work Date: {formatDate(billingSheet.workDate)}
-                                  </div>
-                                )}
                               </CardContent>
                             </Card>
                           ))
                         ) : (
-                          <div className="text-center py-6 text-gray-500 text-sm">
-                            No billing sheets found
+                          customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId).length === 0 && (
+                            <div className="text-center py-6 text-gray-500 text-sm">No billing sheets found</div>
+                          )
+                        )}
+                        {/* Billed billing sheets collapsible */}
+                        {customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId).length > 0 && (
+                          <div className="border border-purple-200 rounded-lg overflow-hidden">
+                            <button
+                              className="w-full flex items-center justify-between px-3 py-2.5 bg-purple-50 hover:bg-purple-100 transition-colors text-left"
+                              onClick={() => setMobileBSBilledExpanded(!mobileBSBilledExpanded)}
+                            >
+                              <span className="text-sm font-medium text-purple-800 flex items-center gap-2">
+                                <ChevronRight className={`w-4 h-4 transition-transform ${mobileBSBilledExpanded ? 'rotate-90' : ''}`} />
+                                Billed — {customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId).length} items
+                              </span>
+                            </button>
+                            {mobileBSBilledExpanded && (
+                              <div className="space-y-2 p-2 bg-purple-50/40">
+                                {customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId).map((billingSheet) => (
+                                  <Card key={billingSheet.id} className="bg-purple-50/60 border border-purple-200">
+                                    <CardContent className="p-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <div className="text-sm font-medium">#{billingSheet.id}</div>
+                                        <div className="flex items-center gap-1">
+                                          {getStatusBadge(billingSheet.status)}
+                                          {billingSheet.status !== 'billed' && <BilledBadge />}
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-gray-600 mb-2">{billingSheet.description}</div>
+                                      <div className="flex justify-between text-sm">
+                                        <span>Total:</span>
+                                        <span className="font-medium">{formatCurrency(billingSheet.laborCost + billingSheet.partsCost)}</span>
+                                      </div>
+                                      <div className="mt-2">
+                                        <BilledIndicator compact invoiceId={billingSheet.invoiceId} />
+                                      </div>
+                                    </CardContent>
+                                  </Card>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1686,10 +1765,10 @@ export default function CustomerBilling() {
                                       <Calendar className="w-3 h-3" />
                                       {formatDate(bs.workDate)}
                                     </div>
-                                    {(bs as any).branchName && (
+                                    {bs.branchName && (
                                       <div className="flex items-center gap-1">
                                         <span className="font-medium text-gray-700">Branch:</span>
-                                        {(bs as any).branchName}
+                                        {bs.branchName}
                                       </div>
                                     )}
                                   </div>
@@ -1746,58 +1825,58 @@ export default function CustomerBilling() {
                         </CardContent>
                       </Card>
                     ) : (
-                      customerBillingData.workOrders.map((wo) => (
-                        <Card key={wo.id}>
-                          <CardContent className="p-3">
-                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <FileText className="w-4 h-4 text-gray-400" />
-                                  <span className="font-medium text-sm">WO #{wo.id}</span>
-                                  {getStatusBadge(wo.status)}
+                      <>
+                        {/* Active (non-billed) work orders */}
+                        {customerBillingData.workOrders.filter(wo => !(wo.status === 'billed' || wo.invoiceId)).map((wo) => (
+                          <Card key={wo.id}>
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <FileText className="w-4 h-4 text-gray-400" />
+                                    <span className="font-medium text-sm">WO #{wo.id}</span>
+                                    {getStatusBadge(wo.status)}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">{wo.description}</div>
+                                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                    {wo.completedAt && (
+                                      <div className="flex items-center gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        Completed: {formatDate(wo.completedAt)}
+                                      </div>
+                                    )}
+                                    {wo.assignedTo && (
+                                      <div className="flex items-center gap-1">
+                                        <User className="w-3 h-3" />
+                                        {wo.assignedTo}
+                                      </div>
+                                    )}
+                                    {wo.branchName && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium text-gray-700">Branch:</span>
+                                        {wo.branchName}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-gray-600 mb-2">
-                                  {wo.description}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                                  {wo.completedAt && (
-                                    <div className="flex items-center gap-1">
-                                      <Calendar className="w-3 h-3" />
-                                      Completed: {formatDate(wo.completedAt)}
-                                    </div>
-                                  )}
-                                  {wo.assignedTo && (
-                                    <div className="flex items-center gap-1">
-                                      <User className="w-3 h-3" />
-                                      {wo.assignedTo}
-                                    </div>
-                                  )}
-                                  {(wo as any).branchName && (
-                                    <div className="flex items-center gap-1">
-                                      <span className="font-medium text-gray-700">Branch:</span>
-                                      {(wo as any).branchName}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="text-sm font-medium text-right">
-                                  <div>{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
-                                  {wo.hasFinancialBreakdown ? (
-                                    <div className="text-xs text-gray-500 font-normal">
-                                      Labor: {formatCurrency(wo.laborCost)} | Parts: {formatCurrency(wo.partsCost)}
-                                      {parseFloat(wo.markupAmount || '0') > 0 && <span> | Markup: {formatCurrency(parseFloat(wo.markupAmount || '0'))}</span>}
-                                      {parseFloat(wo.taxAmount || '0') > 0 && <span> | Tax: {formatCurrency(parseFloat(wo.taxAmount || '0'))}</span>}
-                                    </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium text-right">
+                                    <div>{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
+                                    {wo.hasFinancialBreakdown ? (
+                                      <div className="text-xs text-gray-500 font-normal">
+                                        Labor: {formatCurrency(wo.laborCost)} | Parts: {formatCurrency(wo.partsCost)}
+                                        {parseFloat(wo.markupAmount || '0') > 0 && <span> | Markup: {formatCurrency(parseFloat(wo.markupAmount || '0'))}</span>}
+                                        {parseFloat(wo.taxAmount || '0') > 0 && <span> | Tax: {formatCurrency(parseFloat(wo.taxAmount || '0'))}</span>}
+                                      </div>
+                                    ) : (
+                                      <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
+                                    )}
+                                  </div>
+                                  {wo.status === 'billed' || wo.invoiceId ? (
+                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
+                                  ) : wo.status === 'pending_manager_review' ? (
+                                    <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
                                   ) : (
-                                    <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
-                                  )}
-                                </div>
-                                {wo.status === 'billed' || wo.invoiceId ? (
-                                  <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
-                                ) : wo.status === 'pending_manager_review' ? (
-                                  <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
-                                ) : (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1807,31 +1886,99 @@ export default function CustomerBilling() {
                                     <Edit className="w-3 h-3 mr-1" />
                                     Edit
                                   </Button>
-                                )}
-                                {!(wo.status === 'billed' || wo.invoiceId || wo.status === 'pending_manager_review') && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
-                                    className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
-                                  >
-                                    <Trash2 className="w-3 h-3 mr-1" />
-                                    Delete
-                                  </Button>
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
-                                  className="h-6 px-2 text-xs"
-                                >
-                                  View
-                                </Button>
+                                  )}
+                                  {!(wo.status === 'billed' || wo.invoiceId || wo.status === 'pending_manager_review') && (
+                                    <>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setItemToDelete({ type: "work_order", id: wo.id, label: `Work Order #${wo.id}` })}
+                                        className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                      >
+                                        <Trash2 className="w-3 h-3 mr-1" />
+                                        Delete
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
+                                        className="h-6 px-2 text-xs"
+                                      >
+                                        View
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+
+                        {/* Billed Work Orders — collapsible, collapsed by default */}
+                        {(() => {
+                          const billedWOs = customerBillingData.workOrders.filter(wo => wo.status === 'billed' || wo.invoiceId);
+                          if (billedWOs.length === 0) return null;
+                          return (
+                            <div className="mt-2">
+                              <button
+                                onClick={() => setBilledWOExpanded(!billedWOExpanded)}
+                                className="w-full flex items-center justify-between px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  {billedWOExpanded ? <ChevronDown className="w-4 h-4 text-purple-600" /> : <ChevronRight className="w-4 h-4 text-purple-600" />}
+                                  <span className="text-sm font-semibold text-purple-900">Billed</span>
+                                  <Badge className="bg-purple-200 text-purple-900 hover:bg-purple-200 text-xs">{billedWOs.length}</Badge>
+                                </div>
+                              </button>
+                              {billedWOExpanded && (
+                                <div className="mt-2 space-y-2">
+                                  {billedWOs.map((wo) => (
+                                    <Card key={wo.id} className="bg-purple-50/60 border border-purple-200">
+                                      <CardContent className="p-3">
+                                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                          <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                              <FileText className="w-4 h-4 text-gray-400" />
+                                              <span className="font-medium text-sm">WO #{wo.id}</span>
+                                              {getStatusBadge(wo.status)}
+                                              {wo.status !== 'billed' && <BilledBadge />}
+                                            </div>
+                                            <div className="text-xs text-gray-600 mb-1">{wo.description}</div>
+                                            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                              {wo.completedAt && (
+                                                <div className="flex items-center gap-1">
+                                                  <Calendar className="w-3 h-3" />
+                                                  Completed: {formatDate(wo.completedAt)}
+                                                </div>
+                                              )}
+                                            </div>
+                                            <div className="mt-2">
+                                              <BilledIndicator compact invoiceId={wo.invoiceId} billedAt={wo.billedAt} />
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <div className="text-sm font-medium text-right">
+                                              <div>{formatCurrency(parseFloat(wo.totalAmount || '0'))}</div>
+                                            </div>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => { setSelectedWorkOrder(wo); setShowWorkOrderDetail(true); }}
+                                              className="h-6 px-2 text-xs"
+                                            >
+                                              View
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          </CardContent>
-                        </Card>
-                      ))
+                          );
+                        })()}
+                      </>
                     )}
                   </div>
                 </TabsContent>
@@ -1848,37 +1995,37 @@ export default function CustomerBilling() {
                         </CardContent>
                       </Card>
                     ) : (
-                      customerBillingData.billingSheets.map((bs) => (
-                        <Card key={bs.id}>
-                          <CardContent className="p-3">
-                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Receipt className="w-4 h-4 text-gray-400" />
-                                  <span className="font-medium text-sm">BS #{bs.id}</span>
-                                  {getStatusBadge(bs.status)}
+                      <>
+                        {/* Active (non-billed) billing sheets */}
+                        {customerBillingData.billingSheets.filter(bs => !(bs.status === 'billed' || bs.invoiceId)).map((bs) => (
+                          <Card key={bs.id}>
+                            <CardContent className="p-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Receipt className="w-4 h-4 text-gray-400" />
+                                    <span className="font-medium text-sm">BS #{bs.id}</span>
+                                    {getStatusBadge(bs.status)}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mb-2">{bs.description || 'Billing Sheet'}</div>
+                                  <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                                    {bs.workDate && (
+                                      <div className="flex items-center gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        Work Date: {formatDate(bs.workDate)}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-gray-600 mb-2">
-                                  {bs.description || 'Billing Sheet'}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-                                  {bs.workDate && (
-                                    <div className="flex items-center gap-1">
-                                      <Calendar className="w-3 h-3" />
-                                      Work Date: {formatDate(bs.workDate)}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="text-sm font-medium">
-                                  {formatCurrency(bs.laborCost + bs.partsCost)}
-                                </div>
-                                {bs.status === 'billed' || bs.invoiceId ? (
-                                  <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
-                                ) : bs.status === 'pending_manager_review' ? (
-                                  <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
-                                ) : (
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium">
+                                    {formatCurrency(bs.laborCost + bs.partsCost)}
+                                  </div>
+                                  {bs.status === 'billed' || bs.invoiceId ? (
+                                    <span className="h-6 px-2 text-xs text-purple-700 font-medium flex items-center">Billed — cannot be edited</span>
+                                  ) : bs.status === 'pending_manager_review' ? (
+                                    <span className="h-6 px-2 text-xs text-yellow-700 font-medium flex items-center">Pending approval — view only</span>
+                                  ) : (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1888,31 +2035,97 @@ export default function CustomerBilling() {
                                     <Edit className="w-3 h-3 mr-1" />
                                     Edit
                                   </Button>
-                                )}
-                                {!(bs.status === 'billed' || bs.invoiceId || bs.status === 'pending_manager_review') && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
-                                    className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
-                                  >
-                                    <Trash2 className="w-3 h-3 mr-1" />
-                                    Delete
-                                  </Button>
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
-                                  className="h-6 px-2 text-xs"
-                                >
-                                  View
-                                </Button>
+                                  )}
+                                  {!(bs.status === 'billed' || bs.invoiceId || bs.status === 'pending_manager_review') && (
+                                    <>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setItemToDelete({ type: "billing_sheet", id: bs.id, label: `Billing Sheet #${bs.id}` })}
+                                        className="h-6 px-2 text-xs hover:bg-red-50 text-red-600"
+                                      >
+                                        <Trash2 className="w-3 h-3 mr-1" />
+                                        Delete
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
+                                        className="h-6 px-2 text-xs"
+                                      >
+                                        View
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+
+                        {/* Billed Billing Sheets — collapsible, collapsed by default */}
+                        {(() => {
+                          const billedBSs = customerBillingData.billingSheets.filter(bs => bs.status === 'billed' || bs.invoiceId);
+                          if (billedBSs.length === 0) return null;
+                          return (
+                            <div className="mt-2">
+                              <button
+                                onClick={() => setBilledBSExpanded(!billedBSExpanded)}
+                                className="w-full flex items-center justify-between px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  {billedBSExpanded ? <ChevronDown className="w-4 h-4 text-purple-600" /> : <ChevronRight className="w-4 h-4 text-purple-600" />}
+                                  <span className="text-sm font-semibold text-purple-900">Billed</span>
+                                  <Badge className="bg-purple-200 text-purple-900 hover:bg-purple-200 text-xs">{billedBSs.length}</Badge>
+                                </div>
+                              </button>
+                              {billedBSExpanded && (
+                                <div className="mt-2 space-y-2">
+                                  {billedBSs.map((bs) => (
+                                    <Card key={bs.id} className="bg-purple-50/60 border border-purple-200">
+                                      <CardContent className="p-3">
+                                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                          <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                              <Receipt className="w-4 h-4 text-gray-400" />
+                                              <span className="font-medium text-sm">BS #{bs.id}</span>
+                                              {getStatusBadge(bs.status)}
+                                              {bs.status !== 'billed' && <BilledBadge />}
+                                            </div>
+                                            <div className="text-xs text-gray-600 mb-1">{bs.description || 'Billing Sheet'}</div>
+                                            {bs.workDate && (
+                                              <div className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                                                <Calendar className="w-3 h-3" />
+                                                Work Date: {formatDate(bs.workDate)}
+                                              </div>
+                                            )}
+                                            <div className="mt-2">
+                                              <BilledIndicator compact invoiceId={bs.invoiceId} />
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <div className="text-sm font-medium">
+                                              {formatCurrency(bs.laborCost + bs.partsCost)}
+                                            </div>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => { setSelectedBillingSheet(bs); setShowBillingSheetDetail(true); }}
+                                              className="h-6 px-2 text-xs"
+                                            >
+                                              View
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          </CardContent>
-                        </Card>
-                      ))
+                          );
+                        })()}
+                      </>
                     )}
                   </div>
                 </TabsContent>

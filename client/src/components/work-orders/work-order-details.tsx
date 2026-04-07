@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { WorkOrderCompletion } from "./work-order-completion";
 import { AssignmentConfirmationModal } from "./assignment-confirmation-modal";
 import { EditWorkOrderModal } from "./edit-work-order-modal";
+import { BilledIndicator } from "@/components/ui/billed-indicator";
 import { 
   FileText, 
   Calendar, 
@@ -331,8 +332,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     
     // Start button moved to bottom section - not included here
     
-    // Only show cancel button for non-field technicians
-    if (workOrder.status !== 'cancelled' && workOrder.status !== 'completed' && currentUser?.role !== 'field_tech') {
+    // Only show cancel button for non-field technicians on non-billed records
+    if (!isBilledWorkOrder && workOrder.status !== 'cancelled' && workOrder.status !== 'completed' && currentUser?.role !== 'field_tech') {
       buttons.push(
         <Button
           key="cancel"
@@ -397,7 +398,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   {!isEditingPriority ? (
                     <>
                       {getPriorityBadge(workOrder.priority, true)}
-                      {currentUser?.role !== 'field_tech' && (
+                      {currentUser?.role !== 'field_tech' && !isBilledWorkOrder && (
                         <Button 
                           variant="ghost" 
                           size="sm" 
@@ -442,7 +443,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 )}
               </div>
               <div className="flex gap-2">
-                {canEditPhotos && workOrder.status !== 'completed' && workOrder.status !== 'cancelled' && (
+                {canEditPhotos && workOrder.status !== 'completed' && workOrder.status !== 'cancelled' && !isBilledWorkOrder && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -456,6 +457,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 {getStatusActions()}
               </div>
             </div>
+
+            {/* Billed Banner */}
+            {isBilledWorkOrder && (
+              <BilledIndicator
+                invoiceId={workOrder.invoiceId}
+                billedAt={workOrder.billedAt}
+              />
+            )}
 
             {/* Main Content Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -692,8 +701,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
               </CardContent>
             </Card>
 
-            {/* Reassignment Section - Show for managers only, not field technicians, and not for completed work orders */}
-            {fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'completed' && (() => {
+            {/* Reassignment Section - Show for managers only, not field technicians, not completed, and not billed */}
+            {!isBilledWorkOrder && fieldTechs && fieldTechs.length > 0 && currentUser?.role !== 'field_tech' && workOrder.status !== 'completed' && (() => {
               const managers = fieldTechs.filter(u => u.role === 'irrigation_manager');
               const techs = fieldTechs.filter(u => u.role === 'field_tech');
               return (
@@ -772,7 +781,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                       <Camera className="w-5 h-5 text-blue-600" />
                       Photos {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 ? `(${workOrder.photos.length})` : ''}
                     </CardTitle>
-                    {canEditPhotos && (
+                    {canEditPhotos && !isBilledWorkOrder && (
                       <>
                         <Button
                           variant="outline"
@@ -816,7 +825,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                           >
                             <img src={resolvePhotoUrl(url)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                           </button>
-                          {canEditPhotos && (
+                          {canEditPhotos && !isBilledWorkOrder && (
                             <button
                               onClick={() => setPhotoToRemove(idx)}
                               disabled={updatePhotos.isPending}
@@ -1018,7 +1027,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
 
         {/* Action Buttons - Bottom Section */}
         {/* Start Work Order button - for pending/assigned work orders */}
-        {(workOrder.status === 'pending' || workOrder.status === 'assigned') && (
+        {!isBilledWorkOrder && (workOrder.status === 'pending' || workOrder.status === 'assigned') && (
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
               <Button
@@ -1041,7 +1050,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
           </div>
         )}
         
-        {workOrder.status === 'in_progress' && (
+        {!isBilledWorkOrder && workOrder.status === 'in_progress' && (
           <div className="border-t border-gray-200 p-4 sm:p-6 bg-gray-50">
             <div className="flex justify-center">
               <Button

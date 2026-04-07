@@ -18,8 +18,11 @@ import {
   DollarSign,
   Clock,
   Package,
-  Map
+  Map,
+  ChevronDown,
+  ChevronRight
 } from "lucide-react";
+import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
@@ -39,8 +42,13 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [workOrderModalOpen, setWorkOrderModalOpen] = useState(false);
   const [showSiteMaps, setShowSiteMaps] = useState(false);
+  const [billedWOExpanded, setBilledWOExpanded] = useState(false);
+  const [billedBSExpanded, setBilledBSExpanded] = useState(false);
 
   const [activeView, setActiveView] = useState<'estimates' | 'work-orders' | 'billing-sheets'>('estimates');
+
+  const isWOBilled = (wo: WorkOrder) => wo.status === 'billed' || !!wo.invoiceId;
+  const isBSBilled = (bs: BillingSheetWithItems) => bs.status === 'billed' || !!bs.invoiceId;
   const isAdmin = userRole === "company_admin" || userRole === "super_admin" || userRole === "billing_manager";
 
   // Fetch customer-related data
@@ -411,46 +419,92 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                     </CardContent>
                   </Card>
                 ) : (
-                  <div className="grid gap-4">
-                    {workOrders.map((workOrder) => (
-                      <Card key={workOrder.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600 bg-gradient-to-r from-green-50/30 to-transparent"
-                            onClick={() => {
-                              setSelectedWorkOrder(workOrder);
-                              setWorkOrderModalOpen(true);
-                            }}>
-                        <CardContent className="p-4 sm:p-6">
-                          <div className="space-y-4">
-                            {/* Header */}
-                            <div className="flex items-center gap-3">
-                              <div className="bg-green-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
-                                <Wrench className="w-5 h-5 text-white" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-900 text-lg group-hover:text-green-700 transition-colors">{workOrder.workOrderNumber}</h3>
-                                <p className="text-gray-600 font-medium text-sm">{workOrder.projectName}</p>
-                              </div>
-                              <div className="flex-shrink-0">
-                                {getStatusBadge(workOrder.status, 'workorder')}
-                              </div>
-                            </div>
-                            
-                            {/* Details */}
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 pt-2 border-t border-gray-100">
-                              <div className="flex items-center gap-2 text-gray-500 text-sm">
-                                <Calendar className="w-4 h-4 flex-shrink-0" />
-                                <span>Created {formatDate(workOrder.createdAt)}</span>
-                              </div>
-                              {workOrder.assignedTechnicianName && (
-                                <div className="flex items-center gap-2 text-gray-500 text-sm">
-                                  <User className="w-4 h-4 flex-shrink-0" />
-                                  <span className="font-medium">{workOrder.assignedTechnicianName}</span>
+                  <div className="space-y-4">
+                    {/* Active (non-billed) work orders */}
+                    <div className="grid gap-4">
+                      {workOrders.filter(wo => !isWOBilled(wo)).map((workOrder) => (
+                        <Card key={workOrder.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600 bg-gradient-to-r from-green-50/30 to-transparent"
+                              onClick={() => {
+                                setSelectedWorkOrder(workOrder);
+                                setWorkOrderModalOpen(true);
+                              }}>
+                          <CardContent className="p-4 sm:p-6">
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-3">
+                                <div className="bg-green-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                                  <Wrench className="w-5 h-5 text-white" />
                                 </div>
-                              )}
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-green-700 transition-colors">{workOrder.workOrderNumber}</h3>
+                                  <p className="text-gray-600 font-medium text-sm">{workOrder.projectName}</p>
+                                </div>
+                                <div className="flex-shrink-0">
+                                  {getStatusBadge(workOrder.status, 'workorder')}
+                                </div>
+                              </div>
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 pt-2 border-t border-gray-100">
+                                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                                  <Calendar className="w-4 h-4 flex-shrink-0" />
+                                  <span>Created {formatDate(workOrder.createdAt)}</span>
+                                </div>
+                                {workOrder.assignedTechnicianName && (
+                                  <div className="flex items-center gap-2 text-gray-500 text-sm">
+                                    <User className="w-4 h-4 flex-shrink-0" />
+                                    <span className="font-medium">{workOrder.assignedTechnicianName}</span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                    {/* Billed work orders — collapsible */}
+                    {workOrders.filter(wo => isWOBilled(wo)).length > 0 && (
+                      <div className="border border-purple-200 rounded-xl overflow-hidden">
+                        <button
+                          className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 hover:bg-purple-100 transition-colors text-left"
+                          onClick={() => setBilledWOExpanded(!billedWOExpanded)}
+                        >
+                          <div className="flex items-center gap-2 text-sm font-medium text-purple-800">
+                            {billedWOExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            Billed — {workOrders.filter(wo => isWOBilled(wo)).length} work order{workOrders.filter(wo => isWOBilled(wo)).length !== 1 ? 's' : ''}
                           </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                        </button>
+                        {billedWOExpanded && (
+                          <div className="grid gap-3 p-3 bg-purple-50/30">
+                            {workOrders.filter(wo => isWOBilled(wo)).map((workOrder) => (
+                              <Card key={workOrder.id} className="group cursor-pointer border-l-4 border-l-purple-400 bg-purple-50/60 border border-purple-200"
+                                    onClick={() => {
+                                      setSelectedWorkOrder(workOrder);
+                                      setWorkOrderModalOpen(true);
+                                    }}>
+                                <CardContent className="p-4 sm:p-6">
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="bg-purple-500 p-2.5 rounded-lg shadow-sm flex-shrink-0">
+                                        <Wrench className="w-5 h-5 text-white" />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <h3 className="font-bold text-gray-900 text-lg">{workOrder.workOrderNumber}</h3>
+                                        <p className="text-gray-600 font-medium text-sm">{workOrder.projectName}</p>
+                                      </div>
+                                      <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                                        {getStatusBadge(workOrder.status, 'workorder')}
+                                        {workOrder.status !== 'billed' && <BilledBadge />}
+                                      </div>
+                                    </div>
+                                    <div className="pt-2 border-t border-purple-100">
+                                      <BilledIndicator compact invoiceId={workOrder.invoiceId} billedAt={workOrder.billedAt} />
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -479,49 +533,87 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                     </CardContent>
                   </Card>
                 ) : (
-                  <div className="grid gap-4">
-                    {billingSheets.map((billingSheet) => (
-                      <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent">
-                        <CardContent className="p-4 sm:p-6">
-                          <div className="space-y-4">
-                            {/* Header */}
-                            <div className="flex items-center gap-3">
-                              <div className="bg-orange-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
-                                <Receipt className="w-5 h-5 text-white" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-900 text-lg group-hover:text-orange-700 transition-colors">{billingSheet.billingNumber}</h3>
-                                <p className="text-gray-600 font-medium text-sm">{billingSheet.notes || 'Billing sheet'}</p>
-                              </div>
-                              <div className="flex-shrink-0 text-right">
-                                <div className="mb-1">
-                                  {getStatusBadge('billed', 'billing')}
+                  <div className="space-y-4">
+                    {/* Active (non-billed) billing sheets */}
+                    <div className="grid gap-4">
+                      {billingSheets.filter(bs => !isBSBilled(bs)).map((billingSheet) => (
+                        <Card key={billingSheet.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600 bg-gradient-to-r from-orange-50/30 to-transparent">
+                          <CardContent className="p-4 sm:p-6">
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-3">
+                                <div className="bg-orange-500 p-2.5 rounded-lg shadow-sm group-hover:shadow-md transition-shadow flex-shrink-0">
+                                  <Receipt className="w-5 h-5 text-white" />
                                 </div>
-                                <div className="text-lg font-bold text-orange-600">
-                                  {formatCurrency(Number(billingSheet.totalAmount || 0))}
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="font-bold text-gray-900 text-lg group-hover:text-orange-700 transition-colors">{billingSheet.billingNumber}</h3>
+                                  <p className="text-gray-600 font-medium text-sm">{billingSheet.notes || 'Billing sheet'}</p>
+                                </div>
+                                <div className="flex-shrink-0 text-right">
+                                  <div className="mb-1">{getStatusBadge(billingSheet.status, 'billing')}</div>
+                                  <div className="text-lg font-bold text-orange-600">{formatCurrency(Number(billingSheet.totalAmount || 0))}</div>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-100">
+                                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                                  <Calendar className="w-4 h-4 flex-shrink-0" />
+                                  <span>Created {formatDate(billingSheet.createdAt)}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                                  <User className="w-4 h-4 flex-shrink-0" />
+                                  <span className="font-medium">{billingSheet.technicianName}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                                  <Package className="w-4 h-4 flex-shrink-0" />
+                                  <span>{billingSheet.items?.length || 0} items</span>
                                 </div>
                               </div>
                             </div>
-                            
-                            {/* Details */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-100">
-                              <div className="flex items-center gap-2 text-gray-500 text-sm">
-                                <Calendar className="w-4 h-4 flex-shrink-0" />
-                                <span>Created {formatDate(billingSheet.createdAt)}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-gray-500 text-sm">
-                                <User className="w-4 h-4 flex-shrink-0" />
-                                <span className="font-medium">{billingSheet.technicianName}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-gray-500 text-sm">
-                                <Package className="w-4 h-4 flex-shrink-0" />
-                                <span>{billingSheet.items?.length || 0} items</span>
-                              </div>
-                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                    {/* Billed billing sheets — collapsible */}
+                    {billingSheets.filter(bs => isBSBilled(bs)).length > 0 && (
+                      <div className="border border-purple-200 rounded-xl overflow-hidden">
+                        <button
+                          className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 hover:bg-purple-100 transition-colors text-left"
+                          onClick={() => setBilledBSExpanded(!billedBSExpanded)}
+                        >
+                          <div className="flex items-center gap-2 text-sm font-medium text-purple-800">
+                            {billedBSExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            Billed — {billingSheets.filter(bs => isBSBilled(bs)).length} billing sheet{billingSheets.filter(bs => isBSBilled(bs)).length !== 1 ? 's' : ''}
                           </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                        </button>
+                        {billedBSExpanded && (
+                          <div className="grid gap-3 p-3 bg-purple-50/30">
+                            {billingSheets.filter(bs => isBSBilled(bs)).map((billingSheet) => (
+                              <Card key={billingSheet.id} className="border-l-4 border-l-purple-400 bg-purple-50/60 border border-purple-200">
+                                <CardContent className="p-4 sm:p-6">
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="bg-purple-500 p-2.5 rounded-lg shadow-sm flex-shrink-0">
+                                        <Receipt className="w-5 h-5 text-white" />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <h3 className="font-bold text-gray-900 text-lg">{billingSheet.billingNumber}</h3>
+                                        <p className="text-gray-600 font-medium text-sm">{billingSheet.notes || 'Billing sheet'}</p>
+                                      </div>
+                                      <div className="flex-shrink-0 text-right">
+                                        <div className="mb-1"><BilledBadge /></div>
+                                        <div className="text-lg font-bold text-purple-700">{formatCurrency(Number(billingSheet.totalAmount || 0))}</div>
+                                      </div>
+                                    </div>
+                                    <div className="pt-2 border-t border-purple-100">
+                                      <BilledIndicator compact invoiceId={billingSheet.invoiceId} />
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </>
