@@ -121,7 +121,6 @@ export function CompletedWorkDetailModal({
   // Fetch the customer to compare their current labor rate vs stored rate on billing sheet
   const { data: customerForRateCheck } = useQuery({
     queryKey: ["/api/customers", bs?.customerId],
-    queryFn: () => fetch(`/api/customers/${bs!.customerId}`).then((r) => r.json()),
     enabled: open && type === "billing_sheet" && !!bs?.customerId && canSeePricing,
   });
 

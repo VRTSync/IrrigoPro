@@ -108,11 +108,6 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   // Fetch the customer to get its branches
   const { data: customer } = useQuery({
     queryKey: ["/api/customers", billingSheet.customerId],
-    queryFn: async () => {
-      const res = await fetch(`/api/customers/${billingSheet.customerId}`);
-      if (!res.ok) return null;
-      return res.json();
-    },
     enabled: open && !!billingSheet.customerId,
   });
   const customerBranches: string[] = (customer as any)?.branches || [];
