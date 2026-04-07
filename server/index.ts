@@ -982,6 +982,43 @@ async function runStartupMigrations() {
       'Server Startup'
     );
   }
+
+  // Continuous idempotent cleanup: re-runs on every startup to catch any newly stuck
+  // tickets that slipped through. Unlike the one-time v1 migration above (which is
+  // now locked), this runs every time and logs per-category counts so stuck states
+  // are never silently hidden.
+  //   - work_completed WOs without invoiceId → pending_manager_review
+  //   - billing sheets in 'completed' or legacy 'submitted' without invoiceId → pending_manager_review
+  try {
+    const woStuckResult = await pool.query(
+      `UPDATE work_orders
+       SET status = 'pending_manager_review'
+       WHERE status = 'work_completed' AND invoice_id IS NULL
+       RETURNING id`
+    );
+    const bsStuckResult = await pool.query(
+      `UPDATE billing_sheets
+       SET status = 'pending_manager_review'
+       WHERE status IN ('completed', 'submitted') AND invoice_id IS NULL
+       RETURNING id`
+    );
+    const woStuck = woStuckResult.rowCount ?? 0;
+    const bsStuck = bsStuckResult.rowCount ?? 0;
+    if (woStuck > 0 || bsStuck > 0) {
+      logger.info(
+        `Startup cleanup (stuck-ticket-sweep): promoted ${woStuck} work order(s) and ${bsStuck} billing sheet(s) from stuck states to pending_manager_review`,
+        'Server Startup'
+      );
+    } else {
+      logger.info('Startup cleanup (stuck-ticket-sweep): no stuck tickets found, all records consistent', 'Server Startup');
+    }
+  } catch (err) {
+    logger.error(
+      'Startup cleanup (stuck-ticket-sweep) error (non-fatal)',
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
 }
 
 (async () => {

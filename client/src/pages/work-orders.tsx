@@ -176,7 +176,9 @@ export default function WorkOrders() {
     } else if (statusFilter === "billed") {
       matchesStatus = isBilled(workOrder);
     } else if (statusFilter === "not_yet_billed") {
-      matchesStatus = workOrder.status === 'work_completed' && !isBilled(workOrder);
+      // Include all canonical post-completion states that are not yet invoiced
+      const postCompletionStatuses = ['work_completed', 'pending_manager_review', 'approved_passed_to_billing'];
+      matchesStatus = postCompletionStatuses.includes(workOrder.status) && !isBilled(workOrder);
     } else if (statusFilter === "assigned") {
       // "Pending" pill — matches both 'pending' and 'assigned' statuses
       matchesStatus = workOrder.status === 'pending' || workOrder.status === 'assigned';
@@ -868,10 +870,11 @@ export default function WorkOrders() {
           // List view (default) - with collapsible Active/Completed sections
           (() => {
             const activeStatuses = ['pending', 'assigned', 'in_progress'];
-            const completedStatuses = ['work_completed', 'cancelled'];
+            // Canonical completed statuses (excluding cancelled — that is separate)
+            const completedStatuses = ['work_completed', 'pending_manager_review', 'approved_passed_to_billing', 'billed'];
             const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status))
               .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-            // Completed but not billed
+            // Completed but not billed (covers work_completed, pending_manager_review, and approved_passed_to_billing)
             const notYetBilledWorkOrders = filteredWorkOrders.filter(wo => completedStatuses.includes(wo.status) && !isBilled(wo))
               .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
             // Billed work orders (completed + invoiced), sorted by billedAt descending
@@ -1160,7 +1163,7 @@ export default function WorkOrders() {
                   </div>
                 )}
 
-                {/* Completed (Not Yet Billed) Section — hidden when "Billed" filter active */}
+                {/* Completed / Awaiting Billing Section — hidden when "Billed" filter active */}
                 {(statusFilter === "all" || statusFilter === "work_completed" || statusFilter === "not_yet_billed") && (
                   <div>
                     <button
@@ -1169,7 +1172,7 @@ export default function WorkOrders() {
                     >
                       <div className="flex items-center gap-2">
                         {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
-                        <span className="text-base font-semibold text-gray-700">Completed</span>
+                        <span className="text-base font-semibold text-gray-700">Completed / Awaiting Billing</span>
                         <Badge variant="secondary">{completedWorkOrders.length}</Badge>
                       </div>
                     </button>

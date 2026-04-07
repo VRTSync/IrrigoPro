@@ -258,7 +258,12 @@ export interface IStorage {
       pending: number;
       inProgress: number;
       completed: number;
+      assigned: number;
+      pendingManagerReview: number;
       total: number;
+    };
+    billingSheetStats: {
+      pendingManagerReview: number;
     };
     recentWorkOrders: WorkOrder[];
   }>;
@@ -1316,7 +1321,12 @@ export class DatabaseStorage implements IStorage {
       pending: number;
       inProgress: number;
       completed: number;
+      assigned: number;
+      pendingManagerReview: number;
       total: number;
+    };
+    billingSheetStats: {
+      pendingManagerReview: number;
     };
     recentWorkOrders: WorkOrder[];
   }> {
@@ -1324,6 +1334,7 @@ export class DatabaseStorage implements IStorage {
     const allParts = await db.select().from(parts);
     const allEstimateItems = await db.select().from(estimateItems);
     const allWorkOrders = await db.select().from(workOrders);
+    const allBillingSheets = await db.select().from(billingSheets);
 
     const pendingEstimates = allEstimates.filter(e => e.status === "pending").length;
     
@@ -1354,7 +1365,16 @@ export class DatabaseStorage implements IStorage {
       pending: allWorkOrders.filter(wo => wo.status === "pending").length,
       inProgress: allWorkOrders.filter(wo => wo.status === "in_progress").length,
       completed: allWorkOrders.filter(wo => wo.status === "work_completed").length,
+      assigned: allWorkOrders.filter(wo => wo.status === "assigned").length,
+      pendingManagerReview: allWorkOrders.filter(wo => wo.status === "pending_manager_review" || wo.status === "work_completed").length,
       total: allWorkOrders.length
+    };
+
+    // Billing sheet stats
+    const billingSheetStats = {
+      pendingManagerReview: allBillingSheets.filter(bs =>
+        bs.status === "pending_manager_review" || bs.status === "submitted" || bs.status === "completed"
+      ).length,
     };
 
     // Calculate top parts usage
@@ -1380,6 +1400,7 @@ export class DatabaseStorage implements IStorage {
       recentEstimates,
       topParts,
       workOrderStats,
+      billingSheetStats,
       recentWorkOrders
     };
   }

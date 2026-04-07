@@ -82,8 +82,8 @@ export default function FieldTechDashboard() {
                   <span className="font-medium">{workOrders?.filter(wo => wo.status === 'in_progress').length || 0}</span>
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
-                  <span className="text-gray-600">Completed:</span>
-                  <span className="font-medium">{workOrders?.filter(wo => wo.status === 'work_completed').length || 0}</span>
+                  <span className="text-gray-600">Completed / In Review:</span>
+                  <span className="font-medium">{workOrders?.filter(wo => ['work_completed', 'pending_manager_review', 'approved_passed_to_billing'].includes(wo.status) && !wo.invoiceId).length || 0}</span>
                 </div>
                 {(workOrders?.filter(wo => wo.status === 'billed' || wo.invoiceId).length || 0) > 0 && (
                   <div className="flex justify-between text-xs sm:text-sm">

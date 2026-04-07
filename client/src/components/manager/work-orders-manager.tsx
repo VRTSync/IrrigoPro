@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink, ThumbsUp, RotateCcw, Clock, Shield, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink, ThumbsUp, RotateCcw, Clock, Shield, ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
@@ -21,7 +21,9 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [activeExpanded, setActiveExpanded] = useState(true);
-  const [completedExpanded, setCompletedExpanded] = useState(true);
+  const [awaitingApprovalExpanded, setAwaitingApprovalExpanded] = useState(true);
+  const [awaitingBillingExpanded, setAwaitingBillingExpanded] = useState(true);
+  const [cancelledExpanded, setCancelledExpanded] = useState(false);
   const [billedExpanded, setBilledExpanded] = useState(false);
   const [billedMonthsExpanded, setBilledMonthsExpanded] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
@@ -136,21 +138,31 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
     setShowDetailModal(true);
   };
 
+  // "not_yet_billed" filter covers all non-invoiced post-completion states to prevent
+  // tickets from disappearing between status transitions
+  const notYetBilledStatuses = ['work_completed', 'pending_manager_review', 'approved_passed_to_billing'];
+
   const filteredWorkOrders = workOrders?.filter(wo => {
     if (statusFilter === "all") return true;
     if (statusFilter === "billed") return isBilled(wo);
-    if (statusFilter === "not_yet_billed") return wo.status === 'work_completed' && !isBilled(wo);
+    if (statusFilter === "not_yet_billed") return notYetBilledStatuses.includes(wo.status) && !isBilled(wo);
     if (statusFilter === "assigned") return wo.status === 'pending' || wo.status === 'assigned';
     return wo.status === statusFilter;
   }) ?? [];
 
   const activeStatuses = ['pending', 'assigned', 'in_progress'];
-  const completedStatuses = ['work_completed', 'cancelled'];
-  const pendingReviewOrders = filteredWorkOrders.filter(wo => wo.status === 'pending_manager_review');
-  const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status));
-  const notYetBilledWorkOrders = filteredWorkOrders.filter(wo =>
-    (completedStatuses.includes(wo.status) || wo.status === 'approved_passed_to_billing') && !isBilled(wo)
+  // "Awaiting Approval" = work_completed + pending_manager_review (manager must act on both)
+  const awaitingApprovalOrders = filteredWorkOrders.filter(wo =>
+    wo.status === 'work_completed' || wo.status === 'pending_manager_review'
   );
+  // "Awaiting Billing" = approved_passed_to_billing (approved by manager, ready for invoice)
+  const awaitingBillingOrders = filteredWorkOrders.filter(wo =>
+    wo.status === 'approved_passed_to_billing' && !isBilled(wo)
+  );
+  const activeWorkOrders = filteredWorkOrders.filter(wo => activeStatuses.includes(wo.status));
+  const cancelledWorkOrders = filteredWorkOrders.filter(wo => wo.status === 'cancelled');
+  // Keep for potential filter-count reference; no longer rendered as a standalone top section
+  const pendingReviewOrders = filteredWorkOrders.filter(wo => wo.status === 'pending_manager_review');
   const billedWorkOrders = filteredWorkOrders.filter(wo => isBilled(wo))
     .sort((a, b) => new Date(b.billedAt || b.completedAt || 0).getTime() - new Date(a.billedAt || a.completedAt || 0).getTime());
 
@@ -388,20 +400,6 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
             </Card>
           ) : (
             <>
-              {/* Pending Manager Review section — always shown at top when present */}
-              {pendingReviewOrders.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-3 px-1">
-                    <Clock className="w-5 h-5 text-orange-600" />
-                    <h2 className="text-base font-semibold text-orange-800">Pending Manager Review</h2>
-                    <Badge className="bg-orange-100 text-orange-800">{pendingReviewOrders.length}</Badge>
-                  </div>
-                  <div className="space-y-4">
-                    {pendingReviewOrders.map(renderWorkOrderCard)}
-                  </div>
-                </div>
-              )}
-
               {/* Active Section */}
               {(statusFilter === "all" || statusFilter === "assigned" || statusFilter === "in_progress") && activeWorkOrders.length > 0 && (
                 <div>
@@ -423,26 +421,67 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
                 </div>
               )}
 
-              {/* Completed (Not Yet Billed) Section */}
-              {(statusFilter === "all" || statusFilter === "work_completed" || statusFilter === "not_yet_billed") && (
+              {/* Awaiting Manager Approval: work_completed + pending_manager_review */}
+              {(statusFilter === "all" || statusFilter === "work_completed" || statusFilter === "pending_manager_review" || statusFilter === "not_yet_billed") && awaitingApprovalOrders.length > 0 && (
                 <div>
                   <button
-                    onClick={() => setCompletedExpanded(!completedExpanded)}
-                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                    onClick={() => setAwaitingApprovalExpanded(!awaitingApprovalExpanded)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
                   >
                     <div className="flex items-center gap-2">
-                      {completedExpanded ? <ChevronDown className="w-5 h-5 text-gray-600" /> : <ChevronRight className="w-5 h-5 text-gray-600" />}
-                      <span className="text-base font-semibold text-gray-700">Completed</span>
-                      <Badge variant="secondary">{notYetBilledWorkOrders.length}</Badge>
+                      {awaitingApprovalExpanded ? <ChevronDown className="w-5 h-5 text-orange-700" /> : <ChevronRight className="w-5 h-5 text-orange-700" />}
+                      <Clock className="w-4 h-4 text-orange-600" />
+                      <span className="text-base font-semibold text-orange-900">Awaiting Manager Approval</span>
+                      <Badge className="bg-orange-200 text-orange-900 hover:bg-orange-200">{awaitingApprovalOrders.length}</Badge>
                     </div>
                   </button>
-                  {completedExpanded && (
+                  {awaitingApprovalExpanded && (
                     <div className="mt-3 space-y-4">
-                      {notYetBilledWorkOrders.length === 0 ? (
-                        <p className="text-center text-gray-500 py-6">No completed work orders</p>
-                      ) : (
-                        notYetBilledWorkOrders.map(renderWorkOrderCard)
-                      )}
+                      {awaitingApprovalOrders.map(renderWorkOrderCard)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Awaiting Billing: approved_passed_to_billing (not yet invoiced) */}
+              {(statusFilter === "all" || statusFilter === "approved_passed_to_billing" || statusFilter === "not_yet_billed") && awaitingBillingOrders.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setAwaitingBillingExpanded(!awaitingBillingExpanded)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {awaitingBillingExpanded ? <ChevronDown className="w-5 h-5 text-teal-700" /> : <ChevronRight className="w-5 h-5 text-teal-700" />}
+                      <CheckCircle className="w-4 h-4 text-teal-600" />
+                      <span className="text-base font-semibold text-teal-900">Approved — Awaiting Billing</span>
+                      <Badge className="bg-teal-200 text-teal-900 hover:bg-teal-200">{awaitingBillingOrders.length}</Badge>
+                    </div>
+                  </button>
+                  {awaitingBillingExpanded && (
+                    <div className="mt-3 space-y-4">
+                      {awaitingBillingOrders.map(renderWorkOrderCard)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Cancelled Section — clearly separate from completed work */}
+              {(statusFilter === "all" || statusFilter === "cancelled") && cancelledWorkOrders.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setCancelledExpanded(!cancelledExpanded)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {cancelledExpanded ? <ChevronDown className="w-5 h-5 text-red-600" /> : <ChevronRight className="w-5 h-5 text-red-600" />}
+                      <XCircle className="w-4 h-4 text-red-500" />
+                      <span className="text-base font-semibold text-red-800">Cancelled</span>
+                      <Badge className="bg-red-200 text-red-900 hover:bg-red-200">{cancelledWorkOrders.length}</Badge>
+                    </div>
+                  </button>
+                  {cancelledExpanded && (
+                    <div className="mt-3 space-y-4">
+                      {cancelledWorkOrders.map(renderWorkOrderCard)}
                     </div>
                   )}
                 </div>

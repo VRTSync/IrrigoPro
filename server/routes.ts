@@ -7671,6 +7671,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/work-orders", async (req, res) => {
     try {
       const { items, ...workOrderBody } = req.body;
+
+      // Lifecycle guard: force new work orders to the canonical start state.
+      // Callers cannot create a work order already in a downstream status.
+      const downstreamStatuses = [
+        'in_progress', 'work_completed', 'pending_manager_review',
+        'approved_passed_to_billing', 'billed', 'cancelled'
+      ];
+      if (workOrderBody.status && downstreamStatuses.includes(workOrderBody.status)) {
+        workOrderBody.status = 'pending';
+      }
+
       const workOrderData = insertWorkOrderSchema.parse(workOrderBody);
 
       // Branch enforcement: if the customer has branches configured, branchName is required
@@ -7756,6 +7767,56 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const { items, ...workOrderBody } = req.body;
+
+      // Canonical status transition guard.
+      // Defines the only valid next-states from each status; enforces lifecycle order
+      // and prevents skipping steps or bypassing dedicated endpoints.
+      if (workOrderBody.status !== undefined) {
+        const requestedStatus = workOrderBody.status as string;
+        const currentStatus = existingForLockCheck?.status ?? 'pending';
+
+        // 'work_completed' is a legacy terminal state — use /complete endpoint.
+        if (requestedStatus === 'work_completed') {
+          return res.status(400).json({
+            message: "Cannot set status to 'work_completed' directly. Use POST /api/work-orders/complete or POST /api/work-orders/:id/complete."
+          });
+        }
+
+        // Only the /approve endpoint may transition to approved_passed_to_billing.
+        if (requestedStatus === 'approved_passed_to_billing') {
+          return res.status(400).json({
+            message: "Cannot approve a work order via PATCH. Use the POST /api/work-orders/:id/approve endpoint."
+          });
+        }
+
+        // Only the invoicing flow may mark a work order as billed.
+        if (requestedStatus === 'billed') {
+          return res.status(400).json({
+            message: "Cannot set status to 'billed' directly. Billing status is set automatically when an invoice is created."
+          });
+        }
+
+        // Allowed next-state map for all lifecycle-transition writes via PATCH
+        const allowedTransitions: Record<string, string[]> = {
+          pending: ['assigned', 'in_progress', 'cancelled'],
+          assigned: ['pending', 'in_progress', 'cancelled'],
+          in_progress: ['assigned', 'pending', 'cancelled'],
+          pending_manager_review: ['in_progress', 'cancelled'], // manager can send back for rework
+          // Terminal / post-approval states cannot be changed via PATCH
+          work_completed: [],
+          approved_passed_to_billing: [],
+          billed: [],
+          cancelled: [],
+        };
+
+        const validNextStates = allowedTransitions[currentStatus] ?? [];
+        if (!validNextStates.includes(requestedStatus)) {
+          return res.status(400).json({
+            message: `Invalid status transition from '${currentStatus}' to '${requestedStatus}'. Valid transitions: [${validNextStates.join(', ') || 'none'}].`
+          });
+        }
+      }
+
       // Strip immutable financial snapshot fields so manager edits cannot alter
       // the rates/breakdown that were locked in at completion time.
       const {

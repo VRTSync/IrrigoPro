@@ -433,6 +433,45 @@ export const quickbooksSync = pgTable("quickbooks_sync", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+// =============================================================================
+// CANONICAL STATUS LIFECYCLE — Work Orders & Billing Sheets
+// =============================================================================
+//
+// WORK ORDER STATUS FLOW:
+//   pending
+//     └─► assigned          (manager assigns a technician)
+//           └─► in_progress (field tech starts the work order)
+//                 └─► pending_manager_review  (field tech submits completion)
+//                           └─► approved_passed_to_billing  (manager approves)
+//                                 └─► billed  (billing manager creates invoice)
+//   Any state ──────────────────────────────────────────────────────► cancelled
+//
+// Notes:
+//   - 'work_completed' is a LEGACY status. New completions go straight to
+//     'pending_manager_review'. Any record stuck in 'work_completed' without
+//     an invoiceId should be treated as 'pending_manager_review'.
+//   - The PATCH /api/work-orders/:id route blocks direct writes of status
+//     'work_completed' to prevent bypassing the completion flow; use the
+//     dedicated POST /api/work-orders/complete or
+//     POST /api/work-orders/:id/complete endpoints instead.
+//   - All roles use the same completion endpoint, which always sets
+//     'pending_manager_review'. A separate /approve step (irrigation_manager,
+//     company_admin, or super_admin only) transitions to 'approved_passed_to_billing'.
+//
+// BILLING SHEET STATUS FLOW:
+//   draft
+//     └─► submitted            (field tech submits for review)
+//           └─► pending_manager_review  (equivalent — some paths set this directly)
+//                 └─► approved_passed_to_billing  (manager approves)
+//                           └─► billed  (billing manager creates invoice)
+//   Any state ─────────────────────────────────────────────────────► (deleted)
+//
+// Notes:
+//   - 'completed' and 'approved' are LEGACY billing sheet statuses. Any record
+//     stuck in 'completed' without an invoiceId should be treated as
+//     'pending_manager_review'. 'approved' maps to 'approved_passed_to_billing'.
+// =============================================================================
+
 // Work Orders - created from approved estimates OR direct work orders
 export const workOrders = pgTable("work_orders", {
   id: serial("id").primaryKey(),

@@ -8,7 +8,7 @@ import { TaskCard, TaskCardSkeleton } from "@/components/ui/task-card";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
 import { ActionSheet, ActionSheetItem, ActionSheetSection } from "@/components/ui/action-sheet";
-import { FileText, Wrench, Receipt, Clock, CheckCircle, Plus, ChevronRight, ArrowRight } from "lucide-react";
+import { FileText, Wrench, Receipt, Clock, CheckCircle, Plus, ChevronRight, ArrowRight, Bell } from "lucide-react";
 import { useState } from "react";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
@@ -30,6 +30,9 @@ export default function ManagerDashboard() {
   const activeWorkOrders = (stats as any)?.workOrderStats?.inProgress || 0;
   const assignedWorkOrders = (stats as any)?.workOrderStats?.assigned || 0;
   const completedWorkOrders = (stats as any)?.workOrderStats?.completed || 0;
+  const pendingManagerReviewWO = (stats as any)?.workOrderStats?.pendingManagerReview || 0;
+  const pendingManagerReviewBS = (stats as any)?.billingSheetStats?.pendingManagerReview || 0;
+  const pendingManagerReview = pendingManagerReviewWO + pendingManagerReviewBS;
   const recentEstimates = (stats as any)?.recentEstimates?.slice(0, 3) || [];
   const recentWorkOrders = (stats as any)?.recentWorkOrders?.slice(0, 3) || [];
 
@@ -73,6 +76,7 @@ export default function ManagerDashboard() {
             <MetricTileSkeleton />
             <MetricTileSkeleton />
             <MetricTileSkeleton />
+            <MetricTileSkeleton />
           </MetricGrid>
         ) : (
           <MetricGrid>
@@ -99,6 +103,14 @@ export default function ManagerDashboard() {
               variant="default"
               onClick={() => setLocation("/work-orders")}
               testId="metric-assigned"
+            />
+            <MetricTile
+              label="Awaiting Review"
+              value={pendingManagerReview}
+              icon={Bell}
+              variant={pendingManagerReview > 0 ? "warning" : "default"}
+              onClick={() => setLocation("/work-orders")}
+              testId="metric-pending-review"
             />
             <MetricTile
               label="Completed"
