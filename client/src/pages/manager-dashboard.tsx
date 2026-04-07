@@ -92,10 +92,10 @@ export default function ManagerDashboard() {
   const isLoading = woLoading || bsLoading;
 
   const attentionWorkOrders = (workOrders as WorkOrder[]).filter((wo) =>
-    ATTENTION_STATUSES.includes(wo.status)
+    ATTENTION_STATUSES.includes(wo.status) && wo.status !== "billed" && wo.invoiceId == null
   );
   const attentionBillingSheets = (billingSheets as BillingSheet[]).filter((bs) =>
-    ATTENTION_STATUSES.includes(bs.status)
+    ATTENTION_STATUSES.includes(bs.status) && bs.status !== "billed" && bs.invoiceId == null
   );
   const openWorkOrders = (workOrders as WorkOrder[]).filter((wo) =>
     OPEN_STATUSES.includes(wo.status)
