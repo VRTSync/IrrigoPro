@@ -329,9 +329,7 @@ async function runStartupMigrations() {
     );
     if (existingRow.rows.length > 0 && existingRow.rows[0].value === 'completed') {
       logger.info(`Startup migration '${MIGRATION_KEY}': already completed, skipping`, 'Server Startup');
-      return;
-    }
-
+    } else {
     const allCustomers = await db.select().from(customers);
     const customerRateMap = new Map<number, string>();
     for (const c of allCustomers) {
@@ -446,6 +444,7 @@ async function runStartupMigrations() {
       'Server Startup'
     );
     console.log(`[Migration] ${MIGRATION_KEY}: ${sheetsUpdated} sheets updated, ${itemsUpdated} items updated`);
+    } // end else (migration not yet completed)
   } catch (err) {
     logger.error(
       `Startup migration '${MIGRATION_KEY}' error (non-fatal)`,
@@ -757,6 +756,132 @@ async function runStartupMigrations() {
     }
   } catch (err) {
     logger.error('Startup migration (zero-markup-tax) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
+  // Comprehensive total-mismatch repair (fix-total-mismatch-v2):
+  // Phase A — Fill in NULL subtotals by recomputing from items or preserving totalAmount.
+  // Phase B — Fix any remaining totalAmount != partsSubtotal + laborSubtotal (non-null subtotals).
+  // Phase C — Recompute ALL invoice totals from corrected line items.
+  // This catches legacy records that the earlier zero-markup-tax migration missed because
+  // their markup/tax was baked into totalAmount without being stored in the breakdown columns.
+  try {
+    const toNum5 = (val: string | number | null | undefined): number => {
+      if (val === null || val === undefined) return 0;
+      const n = typeof val === 'string' ? parseFloat(val) : val;
+      return isNaN(n) ? 0 : n;
+    };
+    const MISMATCH_TOL = 0.005;
+
+    let woNullFixed = 0;
+    let woTotalFixed = 0;
+    let bsTotalFixed = 0;
+
+    // Phase A: fill in NULL work order subtotals
+    const allWosV2 = await db.select().from(workOrders);
+    for (const wo of allWosV2) {
+      if (wo.partsSubtotal !== null && wo.laborSubtotal !== null) continue;
+
+      // Recompute subtotals from items
+      const items = await db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, wo.id));
+      const laborRateV = toNum5(wo.laborRate) || toNum5(wo.appliedLaborRate) || 45;
+      let computedParts = 0;
+      let computedLabor = 0;
+
+      if (items.length > 0) {
+        for (const item of items) {
+          computedParts += toNum5(item.partPrice) * toNum5(item.quantity);
+          computedLabor += toNum5(item.laborHours) * laborRateV;
+        }
+      } else {
+        // No items: preserve existing totalAmount as partsSubtotal, labor = 0
+        computedParts = toNum5(wo.totalAmount);
+        computedLabor = 0;
+      }
+
+      const newTotal = computedParts + computedLabor;
+      await db.update(workOrders)
+        .set({
+          partsSubtotal: computedParts.toFixed(2),
+          laborSubtotal: computedLabor.toFixed(2),
+          markupAmount: '0.00',
+          taxAmount: '0.00',
+          totalAmount: newTotal.toFixed(2),
+        })
+        .where(eq(workOrders.id, wo.id));
+      woNullFixed++;
+      logger.info(`Startup migration (fix-total-mismatch-v2): filled null subtotals work_order id=${wo.id} parts=${computedParts.toFixed(2)} labor=${computedLabor.toFixed(2)} total=${newTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    // Phase B: fix non-null subtotals where total != parts + labor
+    const allWosV2b = await db.select().from(workOrders);
+    for (const wo of allWosV2b) {
+      const correct = toNum5(wo.partsSubtotal) + toNum5(wo.laborSubtotal);
+      const stored = toNum5(wo.totalAmount);
+      if (Math.abs(correct - stored) <= MISMATCH_TOL) continue;
+
+      await db.update(workOrders)
+        .set({
+          markupAmount: '0.00',
+          taxAmount: '0.00',
+          appliedMarkupRate: '0.0000',
+          appliedTaxRate: '0.0000',
+          totalAmount: correct.toFixed(2),
+        })
+        .where(eq(workOrders.id, wo.id));
+      woTotalFixed++;
+      logger.info(`Startup migration (fix-total-mismatch-v2): corrected work_order id=${wo.id} stored=${stored.toFixed(2)} -> correct=${correct.toFixed(2)}`, 'Server Startup');
+    }
+
+    // Billing sheets: fix where total != parts + labor (both are notNull in BS schema)
+    const allBssV2 = await db.select().from(billingSheets);
+    for (const sheet of allBssV2) {
+      const correct = toNum5(sheet.partsSubtotal) + toNum5(sheet.laborSubtotal);
+      const stored = toNum5(sheet.totalAmount);
+      if (Math.abs(correct - stored) <= MISMATCH_TOL) continue;
+
+      await db.update(billingSheets)
+        .set({
+          markupAmount: '0.00',
+          taxAmount: '0.00',
+          totalAmount: correct.toFixed(2),
+        })
+        .where(eq(billingSheets.id, sheet.id));
+      bsTotalFixed++;
+      logger.info(`Startup migration (fix-total-mismatch-v2): corrected billing_sheet id=${sheet.id} stored=${stored.toFixed(2)} -> correct=${correct.toFixed(2)}`, 'Server Startup');
+    }
+
+    // Phase C: recompute ALL invoice totals from corrected line items
+    const allInvoicesV2 = await db.select().from(invoices);
+    let invoiceTotalFixed = 0;
+    for (const invoice of allInvoicesV2) {
+      const linkedWOs = await db.select().from(workOrders).where(eq(workOrders.invoiceId, invoice.id));
+      const linkedBSs = await db.select().from(billingSheets).where(eq(billingSheets.invoiceId, invoice.id));
+
+      let correctTotal = 0;
+      for (const wo of linkedWOs) correctTotal += toNum5(wo.totalAmount);
+      for (const bs of linkedBSs) correctTotal += toNum5(bs.totalAmount);
+
+      const storedTotal = toNum5(invoice.totalAmount);
+      if (Math.abs(correctTotal - storedTotal) <= MISMATCH_TOL) continue;
+
+      await db.update(invoices)
+        .set({ totalAmount: correctTotal.toFixed(2) })
+        .where(eq(invoices.id, invoice.id));
+      invoiceTotalFixed++;
+      logger.info(`Startup migration (fix-total-mismatch-v2): recomputed invoice id=${invoice.id} stored=${storedTotal.toFixed(2)} -> correct=${correctTotal.toFixed(2)}`, 'Server Startup');
+    }
+
+    if (woNullFixed > 0 || woTotalFixed > 0 || bsTotalFixed > 0 || invoiceTotalFixed > 0) {
+      logger.info(
+        `Startup migration (fix-total-mismatch-v2): null-subtotals=${woNullFixed} WO(s), mismatch WO(s)=${woTotalFixed}, mismatch BS(s)=${bsTotalFixed}, invoices=${invoiceTotalFixed}`,
+        'Server Startup'
+      );
+    } else {
+      logger.info('Startup migration (fix-total-mismatch-v2): all totals consistent, no corrections needed', 'Server Startup');
+    }
+  } catch (err) {
+    console.error('[Startup][fix-total-mismatch-v2] FATAL error:', err);
+    logger.error('Startup migration (fix-total-mismatch-v2) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 }
 
