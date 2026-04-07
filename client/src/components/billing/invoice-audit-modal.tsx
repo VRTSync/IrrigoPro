@@ -4,17 +4,13 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, AlertCircle, Inbox } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 
-const KANBAN_STAGES = [
-  { key: "pending", label: "Pending" },
-  { key: "assigned", label: "Assigned" },
-  { key: "in_progress", label: "In Progress" },
-  { key: "completed", label: "Completed" },
-  { key: "pending_manager_review", label: "Pending Manager Review" },
-  { key: "approved_passed_to_billing", label: "Approved / Passed to Billing" },
-  { key: "billed", label: "Billed" },
+const MILESTONE_STAGES = [
+  { key: "created", label: "Created" },
+  { key: "approved", label: "Approved" },
+  { key: "quickbooks", label: "Sent to QuickBooks" },
 ] as const;
 
-type StageKey = typeof KANBAN_STAGES[number]["key"];
+type MilestoneKey = typeof MILESTONE_STAGES[number]["key"];
 
 interface AuditItem {
   id: number;
@@ -28,6 +24,11 @@ interface AuditItem {
   partsTotal: number;
   ticketTotal: number;
   workDate: string;
+  createdAt: string | null;
+  approvedAt: string | null;
+  billedAt: string | null;
+  approvedLaborSnapshot: number | null;
+  approvedPartsSnapshot: number | null;
 }
 
 interface AuditResponse {
@@ -47,25 +48,49 @@ function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
-function normalizeStatus(status: string): StageKey {
-  const map: Record<string, StageKey> = {
-    draft: "pending",
-    submitted: "pending",
-    pending: "pending",
-    assigned: "assigned",
-    in_progress: "in_progress",
-    completed: "completed",
-    pending_manager_review: "pending_manager_review",
-    approved: "approved_passed_to_billing",
-    approved_passed_to_billing: "approved_passed_to_billing",
-    billed: "billed",
-  };
-  return map[status] ?? "billed";
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function TicketCard({ item }: { item: AuditItem }) {
+function TicketCard({ item, stage }: { item: AuditItem; stage: MilestoneKey }) {
   const isWorkOrder = item.sourceType === "work_order";
-  const refId = isWorkOrder ? `WO-${item.workOrderId ?? item.sourceId}` : `BS-${item.billingSheetId ?? item.sourceId}`;
+  const refId = isWorkOrder
+    ? `WO-${item.workOrderId ?? item.sourceId}`
+    : `BS-${item.billingSheetId ?? item.sourceId}`;
+
+  let dateLabel = "";
+  let dateValue: string | null = null;
+  let laborAmount: number | null = null;
+  let partsAmount: number | null = null;
+  let totalAmount: number | null = null;
+  let noSnapshot = false;
+
+  if (stage === "created") {
+    dateLabel = "Created";
+    dateValue = item.createdAt;
+    laborAmount = item.laborTotal;
+    partsAmount = item.partsTotal;
+    totalAmount = item.ticketTotal;
+  } else if (stage === "approved") {
+    dateLabel = "Approved";
+    dateValue = item.approvedAt;
+    if (item.approvedLaborSnapshot !== null || item.approvedPartsSnapshot !== null) {
+      laborAmount = item.approvedLaborSnapshot ?? 0;
+      partsAmount = item.approvedPartsSnapshot ?? 0;
+      totalAmount = (laborAmount) + (partsAmount);
+    } else {
+      noSnapshot = true;
+    }
+  } else if (stage === "quickbooks") {
+    dateLabel = "Billed";
+    dateValue = item.billedAt;
+    laborAmount = item.laborTotal;
+    partsAmount = item.partsTotal;
+    totalAmount = item.ticketTotal;
+  }
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm space-y-2">
@@ -82,22 +107,42 @@ function TicketCard({ item }: { item: AuditItem }) {
         </Badge>
       </div>
       <p className="text-sm text-gray-800 leading-snug line-clamp-3">{item.description}</p>
-      <div className="flex justify-between text-xs text-gray-500 pt-1 border-t border-gray-100">
-        <span>Labor: {formatCurrency(item.laborTotal)}</span>
-        <span>Parts: {formatCurrency(item.partsTotal)}</span>
+      <div className="text-xs text-gray-400 flex items-center gap-1">
+        <span className="font-medium text-gray-500">{dateLabel}:</span>
+        <span>{formatDate(dateValue)}</span>
       </div>
-      <div className="text-right text-sm font-semibold text-gray-900">
-        {formatCurrency(item.ticketTotal)}
-      </div>
+      {noSnapshot ? (
+        <div className="text-xs text-amber-600 italic pt-1 border-t border-gray-100">
+          No snapshot
+        </div>
+      ) : (
+        <>
+          <div className="flex justify-between text-xs text-gray-500 pt-1 border-t border-gray-100">
+            <span>Labor: {formatCurrency(laborAmount ?? 0)}</span>
+            <span>Parts: {formatCurrency(partsAmount ?? 0)}</span>
+          </div>
+          <div className="text-right text-sm font-semibold text-gray-900">
+            {formatCurrency(totalAmount ?? 0)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function KanbanColumn({ stage, items }: { stage: typeof KANBAN_STAGES[number]; items: AuditItem[] }) {
-  const columnTotal = items.reduce((sum, item) => sum + item.ticketTotal, 0);
+function MilestoneColumn({ stage, items }: { stage: typeof MILESTONE_STAGES[number]; items: AuditItem[] }) {
+  const columnTotal = items.reduce((sum, item) => {
+    if (stage.key === "approved") {
+      if (item.approvedLaborSnapshot !== null || item.approvedPartsSnapshot !== null) {
+        return sum + (item.approvedLaborSnapshot ?? 0) + (item.approvedPartsSnapshot ?? 0);
+      }
+      return sum;
+    }
+    return sum + item.ticketTotal;
+  }, 0);
 
   return (
-    <div className="flex-shrink-0 w-64 flex flex-col bg-gray-50 rounded-lg border border-gray-200">
+    <div className="flex-shrink-0 w-72 flex flex-col bg-gray-50 rounded-lg border border-gray-200">
       <div className="px-3 py-2 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-semibold text-gray-700 leading-tight">{stage.label}</h4>
@@ -107,11 +152,13 @@ function KanbanColumn({ stage, items }: { stage: typeof KANBAN_STAGES[number]; i
           <p className="text-xs text-gray-500 mt-0.5">{formatCurrency(columnTotal)}</p>
         )}
       </div>
-      <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-96">
+      <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[28rem]">
         {items.length === 0 ? (
           <p className="text-xs text-gray-400 text-center py-4 italic">No tickets</p>
         ) : (
-          items.map((item) => <TicketCard key={item.id} item={item} />)
+          items.map((item) => (
+            <TicketCard key={item.id} item={item} stage={stage.key} />
+          ))
         )}
       </div>
     </div>
@@ -131,24 +178,8 @@ export function InvoiceAuditModal({
     enabled: open && !!invoiceId,
   });
 
-  const columnMap: Record<StageKey, AuditItem[]> = {
-    pending: [],
-    assigned: [],
-    in_progress: [],
-    completed: [],
-    pending_manager_review: [],
-    approved_passed_to_billing: [],
-    billed: [],
-  };
-
-  if (data?.items) {
-    for (const item of data.items) {
-      const stageKey = normalizeStatus(item.status);
-      columnMap[stageKey].push(item);
-    }
-  }
-
   const totalItems = data?.items?.length ?? 0;
+  const items = data?.items ?? [];
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
@@ -186,8 +217,8 @@ export function InvoiceAuditModal({
         {!isLoading && !error && totalItems > 0 && (
           <div className="overflow-x-auto pb-2">
             <div className="flex gap-3" style={{ minWidth: "max-content" }}>
-              {KANBAN_STAGES.map((stage) => (
-                <KanbanColumn key={stage.key} stage={stage} items={columnMap[stage.key]} />
+              {MILESTONE_STAGES.map((stage) => (
+                <MilestoneColumn key={stage.key} stage={stage} items={items} />
               ))}
             </div>
           </div>

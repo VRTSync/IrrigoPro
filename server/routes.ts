@@ -7279,12 +7279,36 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           let partsTotal = ticketTotal - laborTotal;
           if (partsTotal < 0) partsTotal = 0;
 
+          let createdAt: string | null = null;
+          let approvedAt: string | null = null;
+          let billedAt: string | null = null;
+          let approvedLaborSnapshot: number | null = null;
+          let approvedPartsSnapshot: number | null = null;
+
           if (item.sourceType === "work_order" && item.workOrderId) {
             const wo = await storage.getWorkOrder(item.workOrderId);
             if (wo) {
               status = wo.status || "billed";
               description = wo.projectName || item.description;
               workDate = wo.completedAt || wo.updatedAt || item.workDate;
+              createdAt = wo.createdAt ? wo.createdAt.toISOString() : null;
+              approvedAt = wo.approvedAt ? wo.approvedAt.toISOString() : null;
+              billedAt = wo.billedAt ? wo.billedAt.toISOString() : null;
+              // Parse approval snapshots
+              if (wo.approvedLaborSnapshot) {
+                try {
+                  const snap = JSON.parse(wo.approvedLaborSnapshot);
+                  const parsed = typeof snap === "number" ? snap : parseFloat(snap?.laborSubtotal ?? snap?.total ?? "");
+                  approvedLaborSnapshot = isNaN(parsed) ? null : parsed;
+                } catch { approvedLaborSnapshot = null; }
+              }
+              if (wo.approvedPartsSnapshot) {
+                try {
+                  const snap = JSON.parse(wo.approvedPartsSnapshot);
+                  const parsed = typeof snap === "number" ? snap : parseFloat(snap?.partsSubtotal ?? snap?.total ?? "");
+                  approvedPartsSnapshot = isNaN(parsed) ? null : parsed;
+                } catch { approvedPartsSnapshot = null; }
+              }
               // Use authoritative source totals when available
               const woTotal = parseFloat(wo.totalAmount || "0");
               const woLabor = parseFloat(wo.laborSubtotal || "0");
@@ -7300,6 +7324,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               status = bs.status || "billed";
               description = bs.workDescription || item.description;
               workDate = bs.workDate || item.workDate;
+              createdAt = bs.createdAt ? bs.createdAt.toISOString() : null;
+              approvedAt = bs.approvedAt ? bs.approvedAt.toISOString() : null;
+              billedAt = bs.billedAt ? bs.billedAt.toISOString() : null;
+              // Parse approval snapshots
+              if (bs.approvedLaborSnapshot) {
+                try {
+                  const snap = JSON.parse(bs.approvedLaborSnapshot);
+                  const parsed = typeof snap === "number" ? snap : parseFloat(snap?.laborSubtotal ?? snap?.total ?? "");
+                  approvedLaborSnapshot = isNaN(parsed) ? null : parsed;
+                } catch { approvedLaborSnapshot = null; }
+              }
+              if (bs.approvedPartsSnapshot) {
+                try {
+                  const snap = JSON.parse(bs.approvedPartsSnapshot);
+                  const parsed = typeof snap === "number" ? snap : parseFloat(snap?.partsSubtotal ?? snap?.total ?? "");
+                  approvedPartsSnapshot = isNaN(parsed) ? null : parsed;
+                } catch { approvedPartsSnapshot = null; }
+              }
               // Use authoritative source totals when available
               const bsLabor = parseFloat(bs.laborSubtotal || "0");
               const bsParts = parseFloat(bs.partsSubtotal || "0");
@@ -7324,6 +7366,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             partsTotal,
             ticketTotal,
             workDate,
+            createdAt,
+            approvedAt,
+            billedAt,
+            approvedLaborSnapshot,
+            approvedPartsSnapshot,
           };
         })
       );
