@@ -1046,14 +1046,14 @@ export default function WorkOrders() {
                         </>
                       ) : (
                         // Manager/Admin View - View button and Assignment dropdown
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedWorkOrder(workOrder);
                             }}
-                            className="bg-green-600 hover:bg-green-700 text-white"
+                            className="bg-green-600 hover:bg-green-700 text-white flex-1 sm:flex-none"
                           >
                             <Eye className="w-4 h-4 mr-1" />
                             View
@@ -1079,7 +1079,7 @@ export default function WorkOrders() {
                                 }
                               }}
                             >
-                              <SelectTrigger className="w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
+                              <SelectTrigger className="flex-1 sm:flex-none sm:w-32 h-8 text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 focus:bg-blue-100">
                                 <SelectValue placeholder="Assign" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1105,7 +1105,7 @@ export default function WorkOrders() {
                                 e.stopPropagation();
                                 setEditingWorkOrder(workOrder);
                               }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                              className="bg-blue-600 hover:bg-blue-700 text-white flex-1 sm:flex-none"
                             >
                               <Edit className="w-4 h-4 mr-1" />
                               Edit
@@ -1122,7 +1122,7 @@ export default function WorkOrders() {
                                   deleteWorkOrder.mutate(workOrder.id);
                                 }
                               }}
-                              className="bg-red-600 hover:bg-red-700 text-white"
+                              className="bg-red-600 hover:bg-red-700 text-white flex-1 sm:flex-none"
                             >
                               <Trash2 className="w-4 h-4 mr-1" />
                               Delete

@@ -204,7 +204,7 @@ export default function ManagerDashboard() {
               {attentionWorkOrders.map((wo) => (
                 <div
                   key={`wo-${wo.id}`}
-                  className="flex items-center justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:border-amber-200 hover:bg-amber-50/30 transition-colors"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:border-amber-200 hover:bg-amber-50/30 transition-colors"
                   data-testid={`attention-wo-${wo.id}`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -225,12 +225,12 @@ export default function ManagerDashboard() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2">
                     <p className="text-xs text-slate-400 hidden sm:block">{fmtDate(wo.scheduledDate || wo.createdAt)}</p>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                      className="border-amber-300 text-amber-700 hover:bg-amber-50 flex-1 sm:flex-none"
                       onClick={() => setReviewWorkOrder(wo)}
                       data-testid={`review-wo-${wo.id}`}
                     >
@@ -243,7 +243,7 @@ export default function ManagerDashboard() {
               {attentionBillingSheets.map((bs) => (
                 <div
                   key={`bs-${bs.id}`}
-                  className="flex items-center justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:border-amber-200 hover:bg-amber-50/30 transition-colors"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:border-amber-200 hover:bg-amber-50/30 transition-colors"
                   data-testid={`attention-bs-${bs.id}`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -264,12 +264,12 @@ export default function ManagerDashboard() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2">
                     <p className="text-xs text-slate-400 hidden sm:block">{fmtDate(bs.workDate)}</p>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                      className="border-amber-300 text-amber-700 hover:bg-amber-50 flex-1 sm:flex-none"
                       onClick={() => setReviewBillingSheet(bs)}
                       data-testid={`review-bs-${bs.id}`}
                     >
@@ -316,7 +316,7 @@ export default function ManagerDashboard() {
               {openWorkOrders.map((wo) => (
                 <div
                   key={`open-wo-${wo.id}`}
-                  className="flex items-center justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
                   onClick={() => setLocation("/work-orders")}
                   data-testid={`open-wo-${wo.id}`}
                 >
@@ -338,7 +338,7 @@ export default function ManagerDashboard() {
                       )}
                     </div>
                   </div>
-                  <div className="shrink-0">
+                  <div className="hidden sm:block shrink-0">
                     <p className="text-xs text-slate-400">{fmtDate(wo.scheduledDate || wo.createdAt)}</p>
                   </div>
                 </div>
@@ -371,7 +371,7 @@ export default function ManagerDashboard() {
               {billingReadyWorkOrders.map((wo) => (
                 <div
                   key={`billing-wo-${wo.id}`}
-                  className="flex items-center justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
                   data-testid={`billing-wo-${wo.id}`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -387,7 +387,7 @@ export default function ManagerDashboard() {
                       <p className="text-xs text-slate-500 truncate">{wo.customerName}</p>
                     </div>
                   </div>
-                  <div className="shrink-0">
+                  <div className="hidden sm:block shrink-0">
                     <p className="text-xs text-slate-400">{fmtDate(wo.approvedAt || wo.updatedAt)}</p>
                   </div>
                 </div>
@@ -396,7 +396,7 @@ export default function ManagerDashboard() {
               {billingReadyBillingSheets.map((bs) => (
                 <div
                   key={`billing-bs-${bs.id}`}
-                  className="flex items-center justify-between gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
                   data-testid={`billing-bs-${bs.id}`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -412,7 +412,7 @@ export default function ManagerDashboard() {
                       <p className="text-xs text-slate-500 truncate">{bs.customerName}</p>
                     </div>
                   </div>
-                  <div className="shrink-0">
+                  <div className="hidden sm:block shrink-0">
                     <p className="text-xs text-slate-400">{fmtDate(bs.approvedAt || bs.updatedAt)}</p>
                   </div>
                 </div>

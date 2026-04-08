@@ -400,21 +400,21 @@ export default function BillingSheets() {
                       <CardContent className="p-4 sm:p-6">
                         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-3 mb-3">
+                            <div className="flex flex-wrap items-start gap-2 mb-3">
                               {canEditDelete && (
                                 <Checkbox
                                   checked={selectedIds.has(sheet.id)}
                                   onCheckedChange={() => toggleSelect(sheet.id)}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="flex-shrink-0"
+                                  className="flex-shrink-0 mt-0.5"
                                 />
                               )}
-                              <FileText className={`w-5 h-5 flex-shrink-0 ${sheet.status === 'draft' ? 'text-orange-600' : 'text-blue-600'}`} />
+                              <FileText className={`w-5 h-5 flex-shrink-0 mt-0.5 ${sheet.status === 'draft' ? 'text-orange-600' : 'text-blue-600'}`} />
                               <div className="min-w-0 flex-1">
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
                               </div>
-                              {getStatusBadge(sheet.status)}
+                              <div className="flex-shrink-0">{getStatusBadge(sheet.status)}</div>
                             </div>
 
                             <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
@@ -466,60 +466,58 @@ export default function BillingSheets() {
                             </div>
                           </div>
 
-                          <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
-                            <div className="flex flex-col sm:items-end gap-2">
-                              {/* Continue Draft button for field techs and irrigation managers */}
-                              {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
-                                <Button size="sm" onClick={() => setEditingDraft(sheet)} className="bg-orange-600 hover:bg-orange-700 text-white px-3">
-                                  <FileText className="w-3 h-3 mr-1" />Continue Draft
+                          <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto sm:items-end">
+                            {/* Continue Draft button for field techs and irrigation managers */}
+                            {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                              <Button size="sm" onClick={() => setEditingDraft(sheet)} className="bg-orange-600 hover:bg-orange-700 text-white w-full sm:w-auto">
+                                <FileText className="w-3 h-3 mr-1" />Continue Draft
+                              </Button>
+                            )}
+                            {/* Submit for approval button for field techs and irrigation managers */}
+                            {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
+                              <Button size="sm" onClick={() => submitForApproval.mutate(sheet.id)} disabled={submitForApproval.isPending} className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto">
+                                <Send className="w-3 h-3 mr-1" />Submit for Approval
+                              </Button>
+                            )}
+                            {/* View button for submitted/review sheets */}
+                            {sheet.status !== 'draft' && (
+                              <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
+                                <Eye className="w-3 h-3 mr-1" />View
+                              </Button>
+                            )}
+                            {/* Manager approval gate: Approve or Return for Correction */}
+                            {(currentUser?.role === 'irrigation_manager' || currentUser?.role === 'company_admin') && sheet.status === 'pending_manager_review' && (
+                              <div className="flex flex-col gap-2 w-full sm:w-auto">
+                                <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white w-full sm:w-auto">
+                                  <Check className="w-3 h-3 mr-1" />Approve / Pass to Billing
                                 </Button>
-                              )}
-                              {/* Submit for approval button for field techs and irrigation managers */}
-                              {(currentUser?.role === 'field_tech' || currentUser?.role === 'irrigation_manager') && sheet.status === 'draft' && sheet.technicianId === currentUser.id && (
-                                <Button size="sm" onClick={() => submitForApproval.mutate(sheet.id)} disabled={submitForApproval.isPending} className="bg-blue-600 hover:bg-blue-700 text-white px-3">
-                                  <Send className="w-3 h-3 mr-1" />Submit for Approval
+                                <Button size="sm" variant="outline" onClick={() => returnForCorrection.mutate(sheet.id)} disabled={returnForCorrection.isPending} className="border-orange-300 text-orange-700 hover:bg-orange-50 w-full sm:w-auto">
+                                  <X className="w-3 h-3 mr-1" />Return for Correction
                                 </Button>
-                              )}
-                              {/* View button for submitted/review sheets */}
-                              {sheet.status !== 'draft' && (
-                                <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
-                                  <Eye className="w-3 h-3 mr-1" />View
+                              </div>
+                            )}
+                            {/* Old submitted review for billing managers */}
+                            {currentUser?.role === 'billing_manager' && sheet.status === 'submitted' && (
+                              <div className="flex flex-col gap-2 w-full sm:w-auto">
+                                <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white w-full sm:w-auto">
+                                  <Check className="w-3 h-3 mr-1" />Approve
                                 </Button>
-                              )}
-                              {/* Manager approval gate: Approve or Return for Correction */}
-                              {(currentUser?.role === 'irrigation_manager' || currentUser?.role === 'company_admin') && sheet.status === 'pending_manager_review' && (
-                                <div className="flex gap-2">
-                                  <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white px-3">
-                                    <Check className="w-3 h-3 mr-1" />Approve / Pass to Billing
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => returnForCorrection.mutate(sheet.id)} disabled={returnForCorrection.isPending} className="border-orange-300 text-orange-700 hover:bg-orange-50 px-3">
-                                    <X className="w-3 h-3 mr-1" />Return for Correction
-                                  </Button>
-                                </div>
-                              )}
-                              {/* Old submitted review for billing managers */}
-                              {currentUser?.role === 'billing_manager' && sheet.status === 'submitted' && (
-                                <div className="flex gap-2">
-                                  <Button size="sm" onClick={() => approveBillingSheet.mutate(sheet.id)} disabled={approveBillingSheet.isPending} className="bg-teal-600 hover:bg-teal-700 text-white px-3">
-                                    <Check className="w-3 h-3 mr-1" />Approve
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => returnForCorrection.mutate(sheet.id)} disabled={returnForCorrection.isPending} className="border-orange-300 text-orange-700 hover:bg-orange-50 px-3">
-                                    <X className="w-3 h-3 mr-1" />Return
-                                  </Button>
-                                </div>
-                              )}
-                              {/* Edit and Delete buttons for admins */}
-                              {canEditDelete && (
-                                <div className="flex gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 px-3">
-                                    <Edit className="w-3 h-3 mr-1" />Edit
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 px-3">
-                                    <Trash2 className="w-3 h-3 mr-1" />Delete
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
+                                <Button size="sm" variant="outline" onClick={() => returnForCorrection.mutate(sheet.id)} disabled={returnForCorrection.isPending} className="border-orange-300 text-orange-700 hover:bg-orange-50 w-full sm:w-auto">
+                                  <X className="w-3 h-3 mr-1" />Return
+                                </Button>
+                              </div>
+                            )}
+                            {/* Edit and Delete buttons for admins */}
+                            {canEditDelete && (
+                              <div className="flex gap-2 w-full sm:w-auto">
+                                <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
+                                  <Edit className="w-3 h-3 mr-1" />Edit
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
+                                  <Trash2 className="w-3 h-3 mr-1" />Delete
+                                </Button>
+                              </div>
+                            )}
                             <div className="text-xs text-gray-500">
                               {sheet.status === 'draft' ? `Last saved: ${formatDate(sheet.updatedAt)}` : `Created: ${formatDate(sheet.createdAt)}`}
                             </div>
@@ -556,21 +554,21 @@ export default function BillingSheets() {
                       <CardContent className="p-4 sm:p-6">
                         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-3 mb-3">
+                            <div className="flex flex-wrap items-start gap-2 mb-3">
                               {canEditDelete && (
                                 <Checkbox
                                   checked={selectedIds.has(sheet.id)}
                                   onCheckedChange={() => toggleSelect(sheet.id)}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="flex-shrink-0"
+                                  className="flex-shrink-0 mt-0.5"
                                 />
                               )}
-                              <FileText className="w-5 h-5 text-green-600 flex-shrink-0" />
+                              <FileText className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
                               <div className="min-w-0 flex-1">
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
                               </div>
-                              {getStatusBadge(sheet.status)}
+                              <div className="flex-shrink-0">{getStatusBadge(sheet.status)}</div>
                             </div>
 
                             <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
@@ -622,22 +620,20 @@ export default function BillingSheets() {
                             </div>
                           </div>
 
-                          <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
-                            <div className="flex flex-col sm:items-end gap-2">
-                              <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
-                                <Eye className="w-3 h-3 mr-1" />View
-                              </Button>
-                              {canEditDelete && (
-                                <div className="flex gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 px-3">
-                                    <Edit className="w-3 h-3 mr-1" />Edit
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 px-3">
-                                    <Trash2 className="w-3 h-3 mr-1" />Delete
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
+                          <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto sm:items-end">
+                            <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
+                              <Eye className="w-3 h-3 mr-1" />View
+                            </Button>
+                            {canEditDelete && (
+                              <div className="flex gap-2 w-full sm:w-auto">
+                                <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
+                                  <Edit className="w-3 h-3 mr-1" />Edit
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
+                                  <Trash2 className="w-3 h-3 mr-1" />Delete
+                                </Button>
+                              </div>
+                            )}
                             <div className="text-xs text-gray-500">
                               Created: {formatDate(sheet.createdAt)}
                             </div>
@@ -672,13 +668,13 @@ export default function BillingSheets() {
                       <CardContent className="p-4 sm:p-6">
                         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-3 mb-3">
-                              <FileText className="w-5 h-5 text-purple-600 flex-shrink-0" />
+                            <div className="flex flex-wrap items-start gap-2 mb-3">
+                              <FileText className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
                               <div className="min-w-0 flex-1">
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
                               </div>
-                              <BilledBadge />
+                              <div className="flex-shrink-0"><BilledBadge /></div>
                             </div>
 
                             <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
@@ -734,8 +730,8 @@ export default function BillingSheets() {
                             </div>
                           </div>
 
-                          <div className="flex flex-col sm:items-end gap-2 sm:gap-3 flex-shrink-0">
-                            <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="px-3">
+                          <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto sm:items-end">
+                            <Button size="sm" variant="outline" onClick={() => setViewingSheet(sheet)} className="w-full sm:w-auto">
                               <Eye className="w-3 h-3 mr-1" />View
                             </Button>
                             <div className="text-xs text-gray-500">

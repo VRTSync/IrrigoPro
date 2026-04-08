@@ -177,10 +177,10 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
       workOrder.status === 'pending_manager_review' ? 'border-orange-300 bg-orange-50/30' :
       workOrder.status === 'approved_passed_to_billing' ? 'border-teal-200' : ''
     }`}>
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
+      <CardContent className="p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <h3 className="text-lg font-semibold">Work Order #{workOrder.id}</h3>
               <Badge className={getStatusColor(workOrder.status)}>
                 {getStatusLabel(workOrder.status)}
@@ -227,83 +227,82 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
             )}
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-lg font-semibold text-gray-900">
+          <div className="flex flex-col gap-2 flex-shrink-0 w-full sm:w-auto">
+            <div className="hidden sm:block text-right mb-1">
+              <p className="text-sm font-semibold text-gray-900">
                 {workOrder.status === 'work_completed' || workOrder.status === 'pending_manager_review' || workOrder.status === 'approved_passed_to_billing' || isBilled(workOrder) ? 'Completed' : workOrder.priority.toUpperCase()}
               </p>
-              <p className="text-sm text-gray-500">Priority</p>
+              <p className="text-xs text-gray-500">Priority</p>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleViewDetails(workOrder)}
-              >
-                <Eye className="w-4 h-4 mr-2" />
-                View Details
-              </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleViewDetails(workOrder)}
+              className="w-full sm:w-auto"
+            >
+              <Eye className="w-4 h-4 mr-2" />
+              View Details
+            </Button>
 
-              {!isBilled(workOrder) && workOrder.status === 'pending' && (
-                <Select onValueChange={(techId) => {
-                  assignTechnician.mutate({
-                    workOrderId: workOrder.id,
-                    technicianId: parseInt(techId)
-                  });
-                }}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Assign Tech" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="3">Field Tech</SelectItem>
-                    <SelectItem value="4">Tech 2</SelectItem>
-                    <SelectItem value="5">Tech 3</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
+            {!isBilled(workOrder) && workOrder.status === 'pending' && (
+              <Select onValueChange={(techId) => {
+                assignTechnician.mutate({
+                  workOrderId: workOrder.id,
+                  technicianId: parseInt(techId)
+                });
+              }}>
+                <SelectTrigger className="w-full sm:w-40">
+                  <SelectValue placeholder="Assign Tech" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="3">Field Tech</SelectItem>
+                  <SelectItem value="4">Tech 2</SelectItem>
+                  <SelectItem value="5">Tech 3</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
 
-              {/* Manager approval actions for pending_manager_review */}
-              {workOrder.status === 'pending_manager_review' && (
-                <div className="flex flex-col gap-2">
-                  <Button
-                    size="sm"
-                    className="bg-teal-600 hover:bg-teal-700 text-white"
-                    onClick={() => approveWorkOrder.mutate(workOrder.id)}
-                    disabled={approveWorkOrder.isPending}
-                  >
-                    <ThumbsUp className="w-3 h-3 mr-1" />
-                    Approve / Pass to Billing
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="border-orange-300 text-orange-700 hover:bg-orange-50"
-                    onClick={() => returnForCorrection.mutate(workOrder.id)}
-                    disabled={returnForCorrection.isPending}
-                  >
-                    <RotateCcw className="w-3 h-3 mr-1" />
-                    Return for Correction
-                  </Button>
-                </div>
-              )}
-
-              {!isBilled(workOrder) && workOrder.status === 'in_progress' && (
+            {/* Manager approval actions for pending_manager_review */}
+            {workOrder.status === 'pending_manager_review' && (
+              <div className="flex flex-col gap-2">
                 <Button
                   size="sm"
-                  className="bg-green-600 hover:bg-green-700"
-                  onClick={() => {
-                    toast({
-                      title: "Work Order Completed",
-                      description: `Work Order #${workOrder.id} marked as completed`,
-                    });
-                  }}
+                  className="bg-teal-600 hover:bg-teal-700 text-white w-full sm:w-auto"
+                  onClick={() => approveWorkOrder.mutate(workOrder.id)}
+                  disabled={approveWorkOrder.isPending}
                 >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Mark Complete
+                  <ThumbsUp className="w-3 h-3 mr-1" />
+                  Approve / Pass to Billing
                 </Button>
-              )}
-            </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-orange-300 text-orange-700 hover:bg-orange-50 w-full sm:w-auto"
+                  onClick={() => returnForCorrection.mutate(workOrder.id)}
+                  disabled={returnForCorrection.isPending}
+                >
+                  <RotateCcw className="w-3 h-3 mr-1" />
+                  Return for Correction
+                </Button>
+              </div>
+            )}
+
+            {!isBilled(workOrder) && workOrder.status === 'in_progress' && (
+              <Button
+                size="sm"
+                className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+                onClick={() => {
+                  toast({
+                    title: "Work Order Completed",
+                    description: `Work Order #${workOrder.id} marked as completed`,
+                  });
+                }}
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Mark Complete
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
