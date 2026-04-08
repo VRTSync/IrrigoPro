@@ -89,19 +89,7 @@ export function InvoicePdfPreviewModal({
   // Send email mutation
   const sendEmailMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/invoices/${invoiceId}/pdf/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Failed to send email");
-      }
-      
-      return response.json();
+      return apiRequest(`/api/invoices/${invoiceId}/pdf/send`, 'POST');
     },
     onSuccess: () => {
       toast({

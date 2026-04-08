@@ -149,15 +149,7 @@ export default function BillingSheets() {
   // Delete billing sheet mutation
   const deleteBillingSheet = useMutation({
     mutationFn: async (billingSheetId: number) => {
-      const response = await fetch(`/api/billing-sheets/${billingSheetId}`, {
-        method: 'DELETE',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': currentUser?.role 
-        }
-      });
-      if (!response.ok) throw new Error('Failed to delete billing sheet');
-      return response.json();
+      return apiRequest(`/api/billing-sheets/${billingSheetId}`, 'DELETE');
     },
     onSuccess: () => {
       toast({
@@ -178,16 +170,7 @@ export default function BillingSheets() {
   // Bulk delete billing sheets mutation
   const bulkDeleteBillingSheets = useMutation({
     mutationFn: async (ids: number[]) => {
-      const response = await fetch('/api/billing-sheets/bulk', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': currentUser?.role,
-        },
-        body: JSON.stringify({ ids }),
-      });
-      if (!response.ok) throw new Error('Failed to bulk delete billing sheets');
-      return response.json();
+      return apiRequest('/api/billing-sheets/bulk', 'DELETE', { ids });
     },
     onSuccess: (data: any) => {
       toast({
@@ -214,16 +197,7 @@ export default function BillingSheets() {
   // Manager: Approve billing sheet (pending_manager_review -> approved_passed_to_billing)
   const approveBillingSheet = useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`/api/billing-sheets/${id}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to approve billing sheet');
-      }
-      return response.json();
+      return apiRequest(`/api/billing-sheets/${id}/approve`, 'POST', {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
@@ -244,16 +218,7 @@ export default function BillingSheets() {
   // Manager: Return billing sheet for correction (pending_manager_review -> draft)
   const returnForCorrection = useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`/api/billing-sheets/${id}/return-for-correction`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to return billing sheet for correction');
-      }
-      return response.json();
+      return apiRequest(`/api/billing-sheets/${id}/return-for-correction`, 'POST', {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });
@@ -274,13 +239,7 @@ export default function BillingSheets() {
   // Submit billing sheet for manager review (field techs only)
   const submitForApproval = useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`/api/billing-sheets/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'submitted' })
-      });
-      if (!response.ok) throw new Error('Failed to submit billing sheet for approval');
-      return response.json();
+      return apiRequest(`/api/billing-sheets/${id}`, 'PATCH', { status: 'submitted' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/billing-sheets'] });

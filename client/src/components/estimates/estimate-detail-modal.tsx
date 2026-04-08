@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail } from "lucide-react";
 import type { Estimate } from "@shared/schema";
 
@@ -32,13 +32,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   const approveEstimateMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/estimates/${estimateId}/approve`, {
-        method: 'PATCH',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to approve estimate');
-      }
-      return response.json();
+      return apiRequest(`/api/estimates/${estimateId}/approve`, 'PATCH');
     },
     onSuccess: () => {
       toast({
@@ -59,13 +53,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   const sendApprovalEmailMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/estimates/${estimateId}/send-approval-email`, {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to send approval email');
-      }
-      return response.json();
+      return apiRequest(`/api/estimates/${estimateId}/send-approval-email`, 'POST');
     },
     onSuccess: () => {
       toast({
@@ -86,13 +74,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   const rejectEstimateMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/estimates/${estimateId}/reject`, {
-        method: 'PATCH',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to reject estimate');
-      }
-      return response.json();
+      return apiRequest(`/api/estimates/${estimateId}/reject`, 'PATCH');
     },
     onSuccess: () => {
       toast({
@@ -113,13 +95,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
   const convertToWorkOrderMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/estimates/${estimateId}/convert-to-work-order`, {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to convert estimate to work order');
-      }
-      return response.json();
+      return apiRequest(`/api/estimates/${estimateId}/convert-to-work-order`, 'POST');
     },
     onSuccess: () => {
       toast({

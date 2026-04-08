@@ -140,11 +140,6 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
 
   const { data: existingItems } = useQuery<BillingSheetItem[]>({
     queryKey: ["/api/billing-sheets", billingSheet.id, "items"],
-    queryFn: async () => {
-      const res = await fetch(`/api/billing-sheets/${billingSheet.id}/items`);
-      if (!res.ok) throw new Error("Failed to fetch items");
-      return res.json();
-    },
     enabled: open && !partsLoaded,
   });
 

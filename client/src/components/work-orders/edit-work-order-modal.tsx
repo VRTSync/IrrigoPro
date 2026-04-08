@@ -143,11 +143,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
 
   const { data: existingItems } = useQuery<WorkOrderItem[]>({
     queryKey: ["/api/work-orders", workOrder.id, "items"],
-    queryFn: async () => {
-      const res = await fetch(`/api/work-orders/${workOrder.id}/items`);
-      if (!res.ok) throw new Error("Failed to fetch items");
-      return res.json();
-    },
     enabled: open && !partsLoaded,
   });
 
