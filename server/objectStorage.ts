@@ -1,6 +1,7 @@
 import { Storage, File } from "@google-cloud/storage";
 import { Response } from "express";
 import { randomUUID } from "crypto";
+import sharp from "sharp";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -92,12 +93,38 @@ export class ObjectStorageService {
     try {
       // Get file metadata
       const [metadata] = await file.getMetadata();
-      
+      const contentType = (metadata.contentType || "application/octet-stream").toLowerCase();
+
+      // Convert HEIC/HEIF images to JPEG for broad browser compatibility
+      const isHeic = contentType === "image/heic" || contentType === "image/heif";
+      if (isHeic) {
+        res.set({
+          "Content-Type": "image/jpeg",
+          "Cache-Control": `private, max-age=${cacheTtlSec}`,
+        });
+        const readStream = file.createReadStream();
+        const converter = sharp().toFormat("jpeg");
+        readStream.on("error", (err) => {
+          console.error("Stream error during HEIC conversion:", err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: "Error streaming file" });
+          }
+        });
+        converter.on("error", (err) => {
+          console.error("Sharp conversion error:", err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: "Error converting image" });
+          }
+        });
+        readStream.pipe(converter).pipe(res);
+        return;
+      }
+
       // Set appropriate headers
       res.set({
-        "Content-Type": metadata.contentType || "application/octet-stream",
+        "Content-Type": contentType,
         "Content-Length": metadata.size,
-        "Cache-Control": `public, max-age=${cacheTtlSec}`,
+        "Cache-Control": `private, max-age=${cacheTtlSec}`,
       });
 
       // Stream the file to the response

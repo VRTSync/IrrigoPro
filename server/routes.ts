@@ -8276,7 +8276,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalAmount,
         status: resolvedStatus,
         notes: additionalNotes || technicianNotes || "",
-        photos: [],
+        photos: [arrivalPhoto, finishedPhoto].filter((p): p is string => typeof p === 'string' && p.trim().length > 0),
         workDate: new Date(),
         aiInputs: reqAiInputs || null,
         aiShortDescription: aiShortDescription || null,

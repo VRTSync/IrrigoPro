@@ -67,6 +67,8 @@ interface BillingSheetProps {
 export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<string>(workOrder.branchName || "");
+  const [arrivalPhotoUploading, setArrivalPhotoUploading] = useState(false);
+  const [finishedPhotoUploading, setFinishedPhotoUploading] = useState(false);
   const arrivalPhotoRef = useRef<HTMLInputElement>(null);
   const finishedPhotoRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -364,23 +366,54 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             <FormLabel className="font-semibold">Arrival Picture</FormLabel>
                             <FormControl>
                               <div 
-                                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors min-h-[80px] flex flex-col items-center justify-center"
-                                onClick={() => arrivalPhotoRef.current?.click()}
+                                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors min-h-[80px] flex flex-col items-center justify-center ${arrivalPhotoUploading ? 'border-blue-300 bg-blue-50' : field.value ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}
+                                onClick={() => !arrivalPhotoUploading && arrivalPhotoRef.current?.click()}
                               >
-                                <Camera className="w-8 h-8 text-gray-400 mb-2" />
-                                <p className="text-sm text-gray-500">
-                                  {field.value ? field.value : "Tap to take or upload photo"}
-                                </p>
+                                {arrivalPhotoUploading ? (
+                                  <>
+                                    <Upload className="w-8 h-8 text-blue-400 mb-2 animate-pulse" />
+                                    <p className="text-sm text-blue-500">Uploading...</p>
+                                  </>
+                                ) : field.value ? (
+                                  <>
+                                    <Camera className="w-8 h-8 text-green-500 mb-2" />
+                                    <p className="text-sm text-green-600 font-medium">Photo uploaded</p>
+                                    <p className="text-xs text-gray-400 mt-1">Tap to replace</p>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Camera className="w-8 h-8 text-gray-400 mb-2" />
+                                    <p className="text-sm text-gray-500">Tap to take or upload photo</p>
+                                  </>
+                                )}
                                 <input 
                                   ref={arrivalPhotoRef}
                                   type="file" 
                                   accept="image/*"
                                   capture="environment"
                                   className="hidden"
-                                  onChange={(e) => {
+                                  onChange={async (e) => {
                                     const file = e.target.files?.[0];
-                                    if (file) {
-                                      field.onChange(file.name);
+                                    if (!file) return;
+                                    setArrivalPhotoUploading(true);
+                                    try {
+                                      const signUrlRes = await fetch(
+                                        `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
+                                        { method: 'POST', credentials: 'include' }
+                                      );
+                                      if (!signUrlRes.ok) throw new Error('Failed to get upload URL');
+                                      const { signedUrl, url: canonicalUrl } = await signUrlRes.json();
+                                      const putRes = await fetch(signedUrl, {
+                                        method: 'PUT',
+                                        body: file,
+                                        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                                      });
+                                      if (!putRes.ok) throw new Error('Failed to upload photo');
+                                      field.onChange(canonicalUrl);
+                                    } catch (err: unknown) {
+                                      toast({ title: 'Upload failed', description: err instanceof Error ? err.message : 'Could not upload arrival photo', variant: 'destructive' });
+                                    } finally {
+                                      setArrivalPhotoUploading(false);
                                     }
                                   }}
                                 />
@@ -401,23 +434,54 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                             <FormLabel className="font-semibold">Finished Photo</FormLabel>
                             <FormControl>
                               <div 
-                                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors min-h-[80px] flex flex-col items-center justify-center"
-                                onClick={() => finishedPhotoRef.current?.click()}
+                                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors min-h-[80px] flex flex-col items-center justify-center ${finishedPhotoUploading ? 'border-blue-300 bg-blue-50' : field.value ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}
+                                onClick={() => !finishedPhotoUploading && finishedPhotoRef.current?.click()}
                               >
-                                <Camera className="w-8 h-8 text-gray-400 mb-2" />
-                                <p className="text-sm text-gray-500">
-                                  {field.value ? field.value : "Tap to take or upload photo"}
-                                </p>
+                                {finishedPhotoUploading ? (
+                                  <>
+                                    <Upload className="w-8 h-8 text-blue-400 mb-2 animate-pulse" />
+                                    <p className="text-sm text-blue-500">Uploading...</p>
+                                  </>
+                                ) : field.value ? (
+                                  <>
+                                    <Camera className="w-8 h-8 text-green-500 mb-2" />
+                                    <p className="text-sm text-green-600 font-medium">Photo uploaded</p>
+                                    <p className="text-xs text-gray-400 mt-1">Tap to replace</p>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Camera className="w-8 h-8 text-gray-400 mb-2" />
+                                    <p className="text-sm text-gray-500">Tap to take or upload photo</p>
+                                  </>
+                                )}
                                 <input 
                                   ref={finishedPhotoRef}
                                   type="file" 
                                   accept="image/*"
                                   capture="environment"
                                   className="hidden"
-                                  onChange={(e) => {
+                                  onChange={async (e) => {
                                     const file = e.target.files?.[0];
-                                    if (file) {
-                                      field.onChange(file.name);
+                                    if (!file) return;
+                                    setFinishedPhotoUploading(true);
+                                    try {
+                                      const signUrlRes = await fetch(
+                                        `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
+                                        { method: 'POST', credentials: 'include' }
+                                      );
+                                      if (!signUrlRes.ok) throw new Error('Failed to get upload URL');
+                                      const { signedUrl, url: canonicalUrl } = await signUrlRes.json();
+                                      const putRes = await fetch(signedUrl, {
+                                        method: 'PUT',
+                                        body: file,
+                                        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                                      });
+                                      if (!putRes.ok) throw new Error('Failed to upload photo');
+                                      field.onChange(canonicalUrl);
+                                    } catch (err: unknown) {
+                                      toast({ title: 'Upload failed', description: err instanceof Error ? err.message : 'Could not upload finished photo', variant: 'destructive' });
+                                    } finally {
+                                      setFinishedPhotoUploading(false);
                                     }
                                   }}
                                 />
