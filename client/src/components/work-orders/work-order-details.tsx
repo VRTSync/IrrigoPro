@@ -443,7 +443,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 )}
               </div>
               <div className="flex gap-2">
-                {canEditPhotos && workOrder.status !== 'work_completed' && workOrder.status !== 'cancelled' && !isBilledWorkOrder && (
+                {canEditPhotos && workOrder.status !== 'cancelled' && !isBilledWorkOrder && (
                   <Button
                     variant="outline"
                     size="sm"

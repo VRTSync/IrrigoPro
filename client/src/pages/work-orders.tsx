@@ -766,7 +766,7 @@ export default function WorkOrders() {
                                     </Select>
                                   )}
                                   
-                                  {/* Edit button for company admin and billing manager — hidden for billed */}
+                                  {/* Edit button for company admin, billing manager, and irrigation manager — hidden for billed */}
                                   {canEditDelete && !isBilled(workOrder) && (
                                     <Button
                                       variant="outline"
@@ -1097,7 +1097,7 @@ export default function WorkOrders() {
                             </Select>
                           )}
                           
-                          {/* Edit button for company admin and billing manager — hidden for billed */}
+                          {/* Edit button for company admin, billing manager, and irrigation manager — hidden for billed */}
                           {canEditDelete && !isBilled(workOrder) && (
                             <Button
                               size="sm"

@@ -447,9 +447,23 @@ export function StandaloneBillingSheet({
 
       // Field techs submitting a draft must send only { status: 'submitted' }
       // (the server enforces this restriction for security).
-      // All other cases (new sheet POST or manager PATCH) send the full payload.
+      // When updating an existing sheet (manager edit), preserve the existing status so we
+      // don't accidentally change pending_manager_review → approved on a simple data edit.
+      // All other cases (new sheet POST) assign the appropriate status for the role.
       const submissionData = (isUpdating && isFieldTech)
         ? { status: 'submitted' as const }
+        : isUpdating
+        ? {
+            ...data,
+            laborSubtotal: totals.laborSubtotal,
+            partsSubtotal: totals.partsSubtotal,
+            markupAmount: totals.markupAmount,
+            taxAmount: totals.taxAmount,
+            totalAmount: totals.totalAmount,
+            technicianId: currentUser?.id,
+            // Preserve the current status when editing an existing sheet
+            status: draftData.status,
+          }
         : {
             ...data,
             laborSubtotal: totals.laborSubtotal,
