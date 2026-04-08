@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
 import { format } from "date-fns";
+import { PhotoImage } from "@/components/ui/photo-image";
 
 interface CompletedWorkDetailModalProps {
   type: "work_order" | "billing_sheet";
@@ -173,28 +174,21 @@ export function CompletedWorkDetailModal({
   const approvedAt = (data as any)?.approvedAt;
   const approvedTotal = (data as any)?.approvedTotal;
 
-  const resolvePhotoUrl = (url: string): string => {
-    if (!url) return url;
-    if (url.startsWith('http') || url.startsWith('/api/')) return url;
-    if (url.startsWith('/uploads/')) return `/api/photos/${url.replace('/uploads/', '')}`;
-    return `/api/photos/${url}`;
-  };
-
   const openLightbox = (url: string, index: number) => {
-    setLightboxPhoto(resolvePhotoUrl(url));
+    setLightboxPhoto(url);
     setLightboxIndex(index);
   };
 
   const prevPhoto = () => {
     const newIdx = (lightboxIndex - 1 + photos.length) % photos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(resolvePhotoUrl(photos[newIdx]));
+    setLightboxPhoto(photos[newIdx]);
   };
 
   const nextPhoto = () => {
     const newIdx = (lightboxIndex + 1) % photos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(resolvePhotoUrl(photos[newIdx]));
+    setLightboxPhoto(photos[newIdx]);
   };
 
   // Compute totals from items if financial fields missing
@@ -474,8 +468,8 @@ export function CompletedWorkDetailModal({
                       onClick={() => openLightbox(url, idx)}
                       className="aspect-square rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-blue-400"
                     >
-                      <img
-                        src={resolvePhotoUrl(url)}
+                      <PhotoImage
+                        photoUrl={url}
                         alt={`Photo ${idx + 1}`}
                         className="w-full h-full object-cover"
                       />
@@ -609,11 +603,10 @@ export function CompletedWorkDetailModal({
                 </button>
               </>
             )}
-            <img
-              src={lightboxPhoto}
+            <PhotoImage
+              photoUrl={lightboxPhoto}
               alt="Full size photo"
               className="max-w-full max-h-full object-contain"
-              style={{ maxHeight: "90vh" }}
             />
             {photos.length > 1 && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 text-sm">

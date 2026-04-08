@@ -28,6 +28,7 @@ import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-part
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
 import { BilledIndicator } from "@/components/ui/billed-indicator";
+import { PhotoImage } from "@/components/ui/photo-image";
 
 const currency = (val: number | string | null | undefined) => {
   const n = typeof val === "string" ? parseFloat(val) : (val ?? 0);
@@ -261,26 +262,19 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
     updateWorkOrder.mutate();
   };
 
-  const resolvePhotoUrl = (url: string): string => {
-    if (!url) return url;
-    if (url.startsWith('http') || url.startsWith('/api/')) return url;
-    if (url.startsWith('/uploads/')) return `/api/photos/${url.replace('/uploads/', '')}`;
-    return `/api/photos/${url}`;
-  };
-
   const openLightbox = (url: string, index: number) => {
-    setLightboxPhoto(resolvePhotoUrl(url));
+    setLightboxPhoto(url);
     setLightboxIndex(index);
   };
   const prevPhoto = () => {
     const newIdx = (lightboxIndex - 1 + photos.length) % photos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(resolvePhotoUrl(photos[newIdx]));
+    setLightboxPhoto(photos[newIdx]);
   };
   const nextPhoto = () => {
     const newIdx = (lightboxIndex + 1) % photos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(resolvePhotoUrl(photos[newIdx]));
+    setLightboxPhoto(photos[newIdx]);
   };
 
   return (
@@ -549,7 +543,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                       onClick={() => openLightbox(url, idx)}
                       className="aspect-square rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all"
                     >
-                      <img src={resolvePhotoUrl(url)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                     </button>
                   ))}
                 </div>
@@ -711,7 +705,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                 </button>
               </>
             )}
-            <img src={lightboxPhoto} alt="Full size" className="max-w-full max-h-full object-contain" />
+            <PhotoImage photoUrl={lightboxPhoto} alt="Full size" className="max-w-full max-h-full object-contain" />
           </DialogContent>
         </Dialog>
       )}

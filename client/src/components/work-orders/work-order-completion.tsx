@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { FileUpload } from "@/components/ui/file-upload";
+import { PhotoImage } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -467,22 +468,23 @@ export function WorkOrderCompletion({
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 min-w-0">
-                    {photos.map((photo, index) => {
-                      const displayUrl = photo.url.startsWith('http') || photo.url.startsWith('/api/')
-                        ? photo.url
-                        : photo.url.startsWith('/uploads/')
-                          ? `/api/photos/${photo.url.replace('/uploads/', '')}`
-                          : `/api/photos/${photo.url}`;
-                      return (
-                        <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                          <img 
-                            src={displayUrl} 
+                    {photos.map((photo, index) => (
+                      <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                        {photo.previewUrl ? (
+                          <img
+                            src={photo.previewUrl}
                             alt={`Completion photo ${index + 1}`}
                             className="w-full h-full object-cover"
                           />
-                        </div>
-                      );
-                    })}
+                        ) : (
+                          <PhotoImage
+                            photoUrl={photo.url}
+                            alt={`Completion photo ${index + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

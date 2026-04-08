@@ -8337,6 +8337,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Returns a short-lived signed GET URL for a photo stored in GCS.
+  // For legacy /uploads/ paths, returns an /api/photos/... URL since those are served from disk.
+  app.get("/api/photos/:photoId(*)/signed-url", requireAuthentication, async (req, res) => {
+    const photoId = req.params.photoId;
+    try {
+      // Legacy uploads served directly from disk — return the proxy URL
+      if (photoId.startsWith("uploads/") || photoId.startsWith("/uploads/")) {
+        const safeName = photoId.replace(/^\/?uploads\//, "");
+        return res.json({ url: `/api/photos/${safeName}` });
+      }
+
+      const photoService = new ObjectStorageService();
+      const signedUrl = await photoService.getPhotoDownloadURL(photoId, 900);
+      if (signedUrl) {
+        return res.json({ url: signedUrl });
+      }
+
+      // Fall back to the proxy route (e.g. for disk-backed files)
+      return res.json({ url: `/api/photos/${photoId}` });
+    } catch (error) {
+      console.error(`[PHOTO-SIGNED-URL] Error generating signed URL for ${photoId}:`, error);
+      return res.status(500).json({ error: "Failed to generate signed URL" });
+    }
+  });
+
   // Authenticated photo-serving route — streams photos from object storage
   // Legacy fallback: if photoId starts with a local filename pattern, serve from disk
   app.get("/api/photos/:photoId(*)", requireAuthentication, async (req, res) => {

@@ -48,6 +48,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@shared/schema";
+import { PhotoImage } from "@/components/ui/photo-image";
 
 interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
@@ -262,13 +263,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       setIsUploadingPhoto(false);
       if (photoInputRef.current) photoInputRef.current.value = '';
     }
-  };
-
-  const resolvePhotoUrl = (url: string): string => {
-    if (!url) return url;
-    if (url.startsWith('http') || url.startsWith('/api/')) return url;
-    if (url.startsWith('/uploads/')) return `/api/photos/${url.replace('/uploads/', '')}`;
-    return `/api/photos/${url}`;
   };
 
   const handleConfirmRemovePhoto = () => {
@@ -820,10 +814,10 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                       {(workOrder.photos as string[]).map((url: string, idx: number) => (
                         <div key={idx} className="relative group">
                           <button
-                            onClick={() => setLightboxPhoto(resolvePhotoUrl(url))}
+                            onClick={() => setLightboxPhoto(url)}
                             className="aspect-square w-full rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
-                            <img src={resolvePhotoUrl(url)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                            <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
                           </button>
                           {canEditPhotos && !isBilledWorkOrder && (
                             <button
@@ -1018,7 +1012,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             {lightboxPhoto && (
               <Dialog open={!!lightboxPhoto} onOpenChange={() => setLightboxPhoto(null)}>
                 <DialogContent className="max-w-3xl p-2 bg-black border-0">
-                  <img src={lightboxPhoto} alt="Full size" className="w-full h-auto max-h-[85vh] object-contain rounded" />
+                  <PhotoImage photoUrl={lightboxPhoto} alt="Full size" className="w-full h-auto max-h-[85vh] object-contain rounded" />
                 </DialogContent>
               </Dialog>
             )}

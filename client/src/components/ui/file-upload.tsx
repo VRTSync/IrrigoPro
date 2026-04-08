@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Upload, X, Image, FileText, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
+import { PhotoImage } from "@/components/ui/photo-image";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -38,6 +39,7 @@ export interface UploadedFile {
   url: string;
   fileName: string;
   originalName: string;
+  previewUrl?: string;
 }
 
 export function FileUpload({ type, label, accept, multiple = true, files = [], onFilesChange }: FileUploadProps) {
@@ -58,12 +60,16 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
         const file = selectedFiles[i];
 
         if (type === 'photo') {
+          // Create a blob URL immediately for instant preview
+          const previewUrl = URL.createObjectURL(file);
+
           // GCS-backed flow: request a signed PUT URL, then PUT directly to GCS
           const signUrlRes = await fetch(
             `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
             { method: 'POST', headers: getAuthHeaders(), credentials: 'include' }
           );
           if (!signUrlRes.ok) {
+            URL.revokeObjectURL(previewUrl);
             const err = await signUrlRes.json();
             throw new Error(err.message || `Failed to get upload URL for ${file.name}`);
           }
@@ -76,6 +82,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
             headers: { 'Content-Type': file.type || 'application/octet-stream' },
           });
           if (!putRes.ok) {
+            URL.revokeObjectURL(previewUrl);
             throw new Error(`Failed to upload ${file.name} to storage`);
           }
 
@@ -83,6 +90,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
             url: canonicalUrl,
             fileName: canonicalUrl,
             originalName: originalName || file.name,
+            previewUrl,
           });
         } else {
           // Attachment: use existing multipart upload route
@@ -128,27 +136,17 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
 
   const removeFile = (index: number) => {
     const fileArray = Array.isArray(files) ? files : [];
+    const fileToRemove = fileArray[index];
+    if (fileToRemove?.previewUrl) {
+      URL.revokeObjectURL(fileToRemove.previewUrl);
+    }
     const updatedFiles = fileArray.filter((_, i) => i !== index);
     onFilesChange(updatedFiles);
   };
 
-  // Resolve a stored photo path to a displayable URL
-  const resolvePhotoUrl = (url: string): string => {
-    if (!url) return url;
-    // Already a full URL (https://) or already a /api/ route
-    if (url.startsWith('http') || url.startsWith('/api/')) return url;
-    // Legacy /uploads/ path
-    if (url.startsWith('/uploads/')) {
-      const fileName = url.replace('/uploads/', '');
-      return `/api/photos/${fileName}`;
-    }
-    // Canonical GCS path (e.g. "photos/<uuid>")
-    return `/api/photos/${url}`;
-  };
-
   const openFile = (file: UploadedFile) => {
     if (type === 'photo') {
-      setLightboxUrl(resolvePhotoUrl(file.url));
+      setLightboxUrl(file.previewUrl || file.url);
       setLightboxName(file.originalName);
     } else {
       window.open(file.url, '_blank');
@@ -224,11 +222,19 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
                 </div>
                 {type === 'photo' && (
                   <div className="mt-2 cursor-pointer" onClick={() => openFile(file)}>
-                    <img
-                      src={resolvePhotoUrl(file.url)}
-                      alt={file.originalName}
-                      className="w-full h-24 object-cover rounded border"
-                    />
+                    {file.previewUrl ? (
+                      <img
+                        src={file.previewUrl}
+                        alt={file.originalName}
+                        className="w-full h-24 object-cover rounded border"
+                      />
+                    ) : (
+                      <PhotoImage
+                        photoUrl={file.url}
+                        alt={file.originalName}
+                        className="w-full h-24 object-cover rounded border"
+                      />
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -254,11 +260,19 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
           </DialogHeader>
           {lightboxUrl && (
             <div className="flex items-center justify-center">
-              <img
-                src={lightboxUrl}
-                alt={lightboxName}
-                className="max-w-full max-h-[75vh] object-contain rounded"
-              />
+              {lightboxUrl.startsWith('blob:') ? (
+                <img
+                  src={lightboxUrl}
+                  alt={lightboxName}
+                  className="max-w-full max-h-[75vh] object-contain rounded"
+                />
+              ) : (
+                <PhotoImage
+                  photoUrl={lightboxUrl}
+                  alt={lightboxName}
+                  className="max-w-full max-h-[75vh] object-contain rounded"
+                />
+              )}
             </div>
           )}
         </DialogContent>

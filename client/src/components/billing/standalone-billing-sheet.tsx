@@ -38,6 +38,7 @@ import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-butt
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
+import { PhotoImage } from "@/components/ui/photo-image";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -656,22 +657,23 @@ export function StandaloneBillingSheet({
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {uploadedPhotos.map((photo, index) => {
-                            const displayUrl = photo.url.startsWith('http') || photo.url.startsWith('/api/')
-                              ? photo.url
-                              : photo.url.startsWith('/uploads/')
-                                ? `/api/photos/${photo.url.replace('/uploads/', '')}`
-                                : `/api/photos/${photo.url}`;
-                            return (
-                              <div key={index} className="relative aspect-square">
-                                <img 
-                                  src={displayUrl} 
+                          {uploadedPhotos.map((photo, index) => (
+                            <div key={index} className="relative aspect-square">
+                              {photo.previewUrl ? (
+                                <img
+                                  src={photo.previewUrl}
                                   alt={`Photo ${index + 1}`}
                                   className="w-full h-full object-cover rounded-lg border"
                                 />
-                              </div>
-                            );
-                          })}
+                              ) : (
+                                <PhotoImage
+                                  photoUrl={photo.url}
+                                  alt={`Photo ${index + 1}`}
+                                  className="w-full h-full object-cover rounded-lg border"
+                                />
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </CardContent>
                     </Card>

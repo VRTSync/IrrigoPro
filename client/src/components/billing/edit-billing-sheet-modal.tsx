@@ -30,6 +30,7 @@ import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-part
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { BillingSheet, BillingSheetItem } from "@shared/schema";
 import { BilledIndicator } from "@/components/ui/billed-indicator";
+import { PhotoImage } from "@/components/ui/photo-image";
 
 const currency = (val: number | string | null | undefined) => {
   const n = typeof val === "string" ? parseFloat(val) : (val ?? 0);
@@ -126,17 +127,6 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   };
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
-
-  // Resolve a stored photo path to a displayable URL
-  const resolvePhotoUrl = (url: string): string => {
-    if (!url) return url;
-    if (url.startsWith('http') || url.startsWith('/api/')) return url;
-    if (url.startsWith('/uploads/')) {
-      const fileName = url.replace('/uploads/', '');
-      return `/api/photos/${fileName}`;
-    }
-    return `/api/photos/${url}`;
-  };
 
   const { data: existingItems } = useQuery<BillingSheetItem[]>({
     queryKey: ["/api/billing-sheets", billingSheet.id, "items"],
@@ -257,12 +247,12 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   const prevPhoto = () => {
     const newIdx = (lightboxIndex - 1 + editablePhotos.length) % editablePhotos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(resolvePhotoUrl(editablePhotos[newIdx].url));
+    setLightboxPhoto(editablePhotos[newIdx].url);
   };
   const nextPhoto = () => {
     const newIdx = (lightboxIndex + 1) % editablePhotos.length;
     setLightboxIndex(newIdx);
-    setLightboxPhoto(resolvePhotoUrl(editablePhotos[newIdx].url));
+    setLightboxPhoto(editablePhotos[newIdx].url);
   };
 
   return (
@@ -485,11 +475,11 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                       <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-100">
                         <button
                           type="button"
-                          onClick={() => openLightbox(resolvePhotoUrl(photo.url), idx)}
+                          onClick={() => openLightbox(photo.url, idx)}
                           className="w-full h-full"
                         >
-                          <img
-                            src={resolvePhotoUrl(photo.url)}
+                          <PhotoImage
+                            photoUrl={photo.url}
                             alt={`Photo ${idx + 1}`}
                             className="w-full h-full object-cover"
                           />
@@ -638,7 +628,7 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                 </button>
               </>
             )}
-            <img src={lightboxPhoto} alt="Full size" className="max-w-full max-h-full object-contain" />
+            <PhotoImage photoUrl={lightboxPhoto} alt="Full size" className="max-w-full max-h-full object-contain" />
           </DialogContent>
         </Dialog>
       )}
