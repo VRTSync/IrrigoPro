@@ -8323,7 +8323,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         branchName: effectiveBranchName,
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
-      console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=0`);
+      console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=${resolvedItems.length}`);
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       console.error(error);

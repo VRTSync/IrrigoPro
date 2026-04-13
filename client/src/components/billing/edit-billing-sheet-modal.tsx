@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-parts-modal";
@@ -452,6 +453,14 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                 )}
                 {parts.length === 0 && (
                   <p className="text-sm text-gray-400 italic">No parts added.</p>
+                )}
+                {parts.some(p => Number(p.unitPrice) === 0) && (
+                  <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" />
+                    <span>
+                      One or more parts have a <strong>$0.00 unit price</strong>. Please set the correct price before submitting this billing sheet.
+                    </span>
+                  </div>
                 )}
                 <Button
                   type="button"
