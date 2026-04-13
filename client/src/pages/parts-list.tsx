@@ -22,6 +22,7 @@ import {
 import type { Part } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { PartFormDialog } from "@/components/parts/part-form-dialog";
 
 type SortColumn = "name" | "sku" | "category" | "size" | "material";
 type SortDirection = "asc" | "desc";
@@ -32,6 +33,8 @@ export default function PartsList() {
   const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [editingPart, setEditingPart] = useState<Part | undefined>(undefined);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -39,10 +42,8 @@ export default function PartsList() {
     queryKey: ["/api/parts"],
   });
 
-  // Get unique categories for filter
   const categories = Array.from(new Set(parts?.map(part => part.category).filter(Boolean))) || [];
 
-  // Filter parts based on search and category
   const filteredParts = parts?.filter(part => {
     const words = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
     const matchesSearch = words.length === 0 || words.every(word =>
@@ -50,13 +51,10 @@ export default function PartsList() {
       part.description?.toLowerCase().includes(word) ||
       part.sku.toLowerCase().includes(word)
     );
-    
     const matchesCategory = selectedCategory === "all" || part.category === selectedCategory;
-    
     return matchesSearch && matchesCategory;
   });
 
-  // Sort parts based on sortColumn and sortDirection
   const sortedParts = filteredParts ? [...filteredParts].sort((a, b) => {
     if (!sortColumn) return 0;
     const aVal = (a[sortColumn] ?? "").toLowerCase();
@@ -102,8 +100,6 @@ export default function PartsList() {
     }
   });
 
-
-
   const getCategoryColor = (category: string) => {
     const colors: Record<string, string> = {
       'Sprinklers': 'bg-blue-100 text-blue-800 border-blue-200',
@@ -121,8 +117,26 @@ export default function PartsList() {
     return colors[category] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
+  const handleEditPart = (part: Part) => {
+    setEditingPart(part);
+  };
+
+  const handleDialogClose = (open: boolean) => {
+    if (!open) {
+      setShowAddDialog(false);
+      setEditingPart(undefined);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Part Form Dialog */}
+      <PartFormDialog
+        part={editingPart}
+        open={showAddDialog || editingPart !== undefined}
+        onOpenChange={handleDialogClose}
+      />
+
       {/* Header */}
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
@@ -133,7 +147,10 @@ export default function PartsList() {
             </p>
           </div>
           <div className="mt-4 sm:mt-0">
-            <Button className="bg-primary text-white hover:bg-blue-700">
+            <Button
+              className="bg-primary text-white hover:bg-blue-700"
+              onClick={() => setShowAddDialog(true)}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Add New Part
             </Button>
@@ -155,7 +172,7 @@ export default function PartsList() {
               </div>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -184,7 +201,7 @@ export default function PartsList() {
               className="pl-10"
             />
           </div>
-          
+
           <div className="flex gap-2">
             <Button
               variant={selectedCategory === "all" ? "default" : "outline"}
@@ -260,12 +277,15 @@ export default function PartsList() {
               {searchQuery || selectedCategory !== "all" ? "No parts found" : "No parts in catalog"}
             </h3>
             <p className="text-gray-600 mb-4">
-              {searchQuery || selectedCategory !== "all" 
-                ? "Try adjusting your search or filter criteria." 
+              {searchQuery || selectedCategory !== "all"
+                ? "Try adjusting your search or filter criteria."
                 : "Get started by adding your first part to the catalog."
               }
             </p>
-            <Button className="bg-primary text-white hover:bg-blue-700">
+            <Button
+              className="bg-primary text-white hover:bg-blue-700"
+              onClick={() => setShowAddDialog(true)}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Add New Part
             </Button>
@@ -281,12 +301,17 @@ export default function PartsList() {
                     <Package className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-gray-600 hover:text-gray-900"
+                      onClick={() => handleEditPart(part)}
+                    >
                       <Edit className="w-4 h-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="text-red-600 hover:text-red-900"
                       onClick={() => deletePart.mutate(part.id)}
                       disabled={deletePart.isPending}
@@ -295,7 +320,7 @@ export default function PartsList() {
                     </Button>
                   </div>
                 </div>
-                
+
                 <div className="mb-3">
                   <h3 className="font-semibold text-gray-900 mb-1 line-clamp-2">
                     {part.name}
@@ -327,7 +352,7 @@ export default function PartsList() {
                     )}
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-between pt-3 border-t border-gray-100">
                   <div className="text-sm text-gray-600">
                     Part Number: <span className="font-medium text-gray-900">{part.sku}</span>
@@ -433,12 +458,17 @@ export default function PartsList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end space-x-2">
-                        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-gray-600 hover:text-gray-900"
+                          onClick={() => handleEditPart(part)}
+                        >
                           <Edit className="w-4 h-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           className="text-red-600 hover:text-red-900"
                           onClick={() => deletePart.mutate(part.id)}
                           disabled={deletePart.isPending}
