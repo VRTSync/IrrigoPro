@@ -330,6 +330,7 @@ export interface IStorage {
   updateBillingSheetItem(itemId: number, item: Partial<InsertBillingSheetItem>): Promise<BillingSheetItem | undefined>;
   deleteBillingSheetItem(itemId: number): Promise<boolean>;
   replaceBillingSheetItemsInTransaction(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<BillingSheetItem[]>;
+  replaceBillingSheetItemsAndResync(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<{ items: BillingSheetItem[]; partsSubtotal: string; totalAmount: string }>;
 
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
@@ -378,6 +379,89 @@ export class DatabaseStorage implements IStorage {
   constructor() {
     // Database initialization - schema is managed by Drizzle
     this.initializeUsers();
+    this.repairDivergedBillingSheets();
+  }
+
+  // Startup migration (BS-2026-0023): repair uninvoiced billing sheets where partsSubtotal
+  // does not match the sum of their billing_sheet_items.totalPrice rows.
+  // Uses app_settings as a one-time-run marker so it only performs a full scan once.
+  // After initial repair the migration logs a completion marker; subsequent boots skip it.
+  private async repairDivergedBillingSheets(): Promise<void> {
+    const MIGRATION_KEY = 'repair-diverged-billing-sheets-v1';
+    try {
+      // Ensure app_settings exists before querying it (it may not yet exist if storage
+      // is instantiated before server/index.ts runs its own CREATE TABLE IF NOT EXISTS)
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      // Check if this migration has already run successfully
+      const existingMarker = await db.execute(
+        sql`SELECT value FROM app_settings WHERE key = ${MIGRATION_KEY}`
+      );
+      if (existingMarker.rows.length > 0 && existingMarker.rows[0].value === 'completed') {
+        console.log(`[MIGRATION] '${MIGRATION_KEY}': already completed, skipping`);
+        return;
+      }
+
+      // Fetch all uninvoiced billing sheets (invoiceId is null and status != 'billed')
+      const uninvoicedSheets = await db
+        .select()
+        .from(billingSheets)
+        .where(and(isNull(billingSheets.invoiceId), sql`${billingSheets.status} != 'billed'`));
+
+      let repairedCount = 0;
+      for (const sheet of uninvoicedSheets) {
+        const items = await db
+          .select()
+          .from(billingSheetItems)
+          .where(eq(billingSheetItems.billingSheetId, sheet.id));
+
+        // Sum the stored totalPrice column (not recomputing from qty * price) as required by spec
+        const truePartsTotal = items.reduce(
+          (sum, item) => sum + parseFloat(String(item.totalPrice || 0)),
+          0
+        );
+        const recordedPartsTotal = parseFloat(String(sheet.partsSubtotal || 0));
+
+        if (Math.abs(truePartsTotal - recordedPartsTotal) > 0.01) {
+          const laborSubtotal = parseFloat(String(sheet.laborSubtotal || 0));
+          const newTotalAmount = laborSubtotal + truePartsTotal;
+          await db
+            .update(billingSheets)
+            .set({
+              partsSubtotal: truePartsTotal.toFixed(2),
+              totalAmount: newTotalAmount.toFixed(2),
+            })
+            .where(eq(billingSheets.id, sheet.id));
+
+          console.log(
+            `[MIGRATION] repaired billing sheet ${sheet.billingNumber} (id=${sheet.id}): ` +
+            `partsSubtotal ${recordedPartsTotal.toFixed(2)} → ${truePartsTotal.toFixed(2)}, ` +
+            `totalAmount ${parseFloat(String(sheet.totalAmount || 0)).toFixed(2)} → ${newTotalAmount.toFixed(2)}`
+          );
+          repairedCount++;
+        }
+      }
+
+      if (repairedCount > 0) {
+        console.log(`[MIGRATION] '${MIGRATION_KEY}': repaired ${repairedCount} billing sheet(s).`);
+      } else {
+        console.log(`[MIGRATION] '${MIGRATION_KEY}': no diverged billing sheets found.`);
+      }
+
+      // Mark this migration as completed so it is skipped on future boots
+      await db.execute(
+        sql`INSERT INTO app_settings (key, value) VALUES (${MIGRATION_KEY}, 'completed')
+            ON CONFLICT (key) DO UPDATE SET value = 'completed'`
+      );
+    } catch (err) {
+      console.error(`[MIGRATION] '${MIGRATION_KEY}' failed:`, err);
+    }
   }
 
   // Company methods
@@ -2075,15 +2159,40 @@ export class DatabaseStorage implements IStorage {
     
     const [newSheet] = await db.insert(billingSheets).values([toDrizzleInsert<DrizzleBillingSheetInsert>(insertData)]).returning();
     
-    // If items are provided, insert them
+    // If items are provided, insert them and then re-derive partsSubtotal from the persisted rows
     if (items && Array.isArray(items)) {
-      for (const item of items) {
-        await db.insert(billingSheetItems).values({
+      let insertedItems: typeof billingSheetItems.$inferSelect[] = [];
+      if (items.length > 0) {
+        const values = items.map(item => ({
           ...item,
           billingSheetId: newSheet.id,
-          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString()
-        });
+          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+        }));
+        insertedItems = await db.insert(billingSheetItems).values(values).returning();
       }
+
+      // Derive partsSubtotal from what was actually written — not from request data
+      const truePartsSubtotal = insertedItems.reduce(
+        (sum, row) => sum + parseFloat(String(row.totalPrice || 0)),
+        0
+      );
+      const trueLaborSubtotal = parseFloat(String(newSheet.laborSubtotal || 0));
+      const trueTotalAmount = trueLaborSubtotal + truePartsSubtotal;
+
+      const [correctedSheet] = await db
+        .update(billingSheets)
+        .set({
+          partsSubtotal: truePartsSubtotal.toFixed(2),
+          totalAmount: trueTotalAmount.toFixed(2),
+        })
+        .where(eq(billingSheets.id, newSheet.id))
+        .returning();
+
+      console.log(
+        `[AUDIT] billing_sheet_created_partsSubtotal_verified billingSheetId=${newSheet.id} ` +
+        `partsSubtotal=${truePartsSubtotal.toFixed(2)} totalAmount=${trueTotalAmount.toFixed(2)}`
+      );
+      return correctedSheet;
     }
     
     return newSheet;
@@ -2143,6 +2252,55 @@ export class DatabaseStorage implements IStorage {
       }));
       const inserted = await tx.insert(billingSheetItems).values(values).returning();
       return inserted;
+    });
+  }
+
+  // Atomically replaces billing sheet items AND resyncs partsSubtotal/totalAmount on the sheet record
+  // within a single DB transaction — preventing any window where items and subtotals are out of sync.
+  async replaceBillingSheetItemsAndResync(
+    billingSheetId: number,
+    items: InsertBillingSheetItem[]
+  ): Promise<{ items: BillingSheetItem[]; partsSubtotal: string; totalAmount: string }> {
+    return await db.transaction(async (tx) => {
+      await tx.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
+
+      let inserted: typeof billingSheetItems.$inferSelect[] = [];
+      if (items.length > 0) {
+        const values = items.map(item => ({
+          ...item,
+          billingSheetId,
+          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
+        }));
+        inserted = await tx.insert(billingSheetItems).values(values).returning();
+      }
+
+      // Derive partsSubtotal from the rows that were just persisted
+      const truePartsSubtotal = inserted.reduce(
+        (sum, row) => sum + parseFloat(String(row.totalPrice || 0)),
+        0
+      );
+
+      // Read the current laborSubtotal from the sheet inside the same transaction
+      const [currentSheet] = await tx
+        .select({ laborSubtotal: billingSheets.laborSubtotal })
+        .from(billingSheets)
+        .where(eq(billingSheets.id, billingSheetId));
+      const laborSubtotal = parseFloat(String(currentSheet?.laborSubtotal || 0));
+      const trueTotalAmount = laborSubtotal + truePartsSubtotal;
+
+      await tx
+        .update(billingSheets)
+        .set({
+          partsSubtotal: truePartsSubtotal.toFixed(2),
+          totalAmount: trueTotalAmount.toFixed(2),
+        })
+        .where(eq(billingSheets.id, billingSheetId));
+
+      return {
+        items: inserted,
+        partsSubtotal: truePartsSubtotal.toFixed(2),
+        totalAmount: trueTotalAmount.toFixed(2),
+      };
     });
   }
 

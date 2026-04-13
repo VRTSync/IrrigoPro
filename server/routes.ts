@@ -7022,7 +7022,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Recalculate totals using the authoritative rate from the customer record
       const bsTotalHours = parseFloat(billingSheetData.totalHours || '0');
       const bsLaborSubtotal = bsTotalHours * bsAuthorizedLaborRate;
-      const bsPartsSubtotal = parseFloat(billingSheetData.partsSubtotal || '0');
+      // Always derive partsSubtotal from the items the server will write — discard any client-supplied value
+      const clientItems: Array<{ quantity: number | string; unitPrice: number | string; [key: string]: unknown }> =
+        Array.isArray(billingSheetData.items) ? billingSheetData.items : [];
+      const bsPartsSubtotal = clientItems.reduce(
+        (sum, item) => sum + parseFloat(String(item.quantity || 0)) * parseFloat(String(item.unitPrice || 0)),
+        0
+      );
       const bsTotalAmount = bsLaborSubtotal + bsPartsSubtotal;
 
       // Clean the data - remove any fields that might interfere with timestamps
@@ -7184,7 +7190,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(404).json({ message: "Billing sheet not found" });
       }
       
-      // Handle items if provided (delete-and-recreate wrapped in a transaction)
+      // Handle items if provided — atomically replace items AND resync partsSubtotal/totalAmount in one transaction
       if (items && Array.isArray(items)) {
         const countBefore = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
         const itemsToInsert = items.map((item: any) => ({
@@ -7198,8 +7204,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           totalPrice: (item.quantity * item.unitPrice).toString(),
           notes: item.notes || "",
         }));
-        await storage.replaceBillingSheetItemsInTransaction(id, itemsToInsert);
+        const resyncResult = await storage.replaceBillingSheetItemsAndResync(id, itemsToInsert);
+        billingSheetData.partsSubtotal = resyncResult.partsSubtotal;
+        billingSheetData.totalAmount = resyncResult.totalAmount;
+        // Overwrite billingSheet reference so res.json() returns post-resync values
+        Object.assign(billingSheet, { partsSubtotal: resyncResult.partsSubtotal, totalAmount: resyncResult.totalAmount });
         console.log(`[AUDIT] billing_sheet_items_replaced billingSheetId=${id} countBefore=${countBefore} countAfter=${items.length}`);
+        console.log(`[AUDIT] billing_sheet_partsSubtotal_recomputed billingSheetId=${id} partsSubtotal=${resyncResult.partsSubtotal} totalAmount=${resyncResult.totalAmount}`);
       }
 
       // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
@@ -7209,6 +7220,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const currentItems = currentSheet?.items ?? [];
         if (partsSubtotal > 0 && currentItems.length === 0) {
           return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+        }
+        // Inverse check: items have prices summing to > 0 but partsSubtotal is 0 (or diverged by >1%)
+        const itemsTotal = currentItems.reduce(
+          (sum: number, item: { totalPrice?: string | null }) => sum + parseFloat(String(item.totalPrice || 0)),
+          0
+        );
+        if (itemsTotal > 0 && partsSubtotal === 0) {
+          return res.status(400).json({ message: "Parts line item total does not match partsSubtotal — resubmit after saving to sync" });
+        }
+        if (itemsTotal > 0 && partsSubtotal > 0) {
+          const divergencePct = Math.abs(itemsTotal - partsSubtotal) / itemsTotal;
+          if (divergencePct > 0.01) {
+            return res.status(400).json({ message: "Parts line item total does not match partsSubtotal — resubmit after saving to sync" });
+          }
         }
         console.log(`[AUDIT] billing_sheet_status_change billingSheetId=${id} status=${billingSheetData.status} itemCount=${currentItems.length}`);
 
