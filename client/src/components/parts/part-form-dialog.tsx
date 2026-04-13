@@ -453,7 +453,7 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
                   <FormItem>
                     <FormLabel>Cost ($)</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="any" min="0" value={field.value || ""} />
+                      <Input {...field} type="number" step="any" min="0" max="99999999.99" value={field.value || ""} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -467,7 +467,7 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
                   <FormItem>
                     <FormLabel>Price ($) *</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="any" min="0" />
+                      <Input {...field} type="number" step="any" min="0" max="99999999.99" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

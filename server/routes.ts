@@ -3236,10 +3236,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rawData = req.body;
+
+      const MAX_DECIMAL = 99999999.99;
+      if (rawData.price !== undefined) {
+        const priceNum = Number(rawData.price);
+        if (!Number.isFinite(priceNum) || priceNum < 0 || priceNum > MAX_DECIMAL) {
+          return res.status(400).json({ message: "Price must be between 0 and 99,999,999.99" });
+        }
+      }
+      if (rawData.cost !== undefined && rawData.cost !== "" && rawData.cost !== null) {
+        const costNum = Number(rawData.cost);
+        if (!Number.isFinite(costNum) || costNum < 0 || costNum > MAX_DECIMAL) {
+          return res.status(400).json({ message: "Cost must be between 0 and 99,999,999.99" });
+        }
+      }
+
       const processedData = {
         ...rawData,
-        price: rawData.price !== undefined ? Number(rawData.price).toFixed(2) : undefined,
-        cost: rawData.cost !== undefined && rawData.cost !== "" ? Number(rawData.cost).toFixed(2) : undefined,
         companyId: req.authenticatedUserCompanyId || rawData.companyId,
       };
 
@@ -3247,6 +3260,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...processedData,
         approvalStatus: 'pending',
       });
+
       const part = await storage.createPart(partData);
 
       // Notify billing managers for the part's company that a new part is pending approval
@@ -3273,10 +3287,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(201).json(part);
     } catch (error) {
-      console.error("Error creating part:", error instanceof Error ? error.message : error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid part data", errors: error.errors });
       }
+      console.error("Error creating part:", error instanceof Error ? error.message : error, { price: req.body?.price, cost: req.body?.cost });
       res.status(500).json({ message: "Failed to create part" });
     }
   });

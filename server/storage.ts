@@ -872,7 +872,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPart(part: InsertPart): Promise<Part> {
-    const [newPart] = await db.insert(parts).values(toDrizzleInsert<DrizzlePartInsert>(part)).returning();
+    const serialized: DrizzlePartInsert = {
+      ...toDrizzleInsert<DrizzlePartInsert>(part),
+      price: Number(part.price).toFixed(2),
+      cost: part.cost != null ? Number(part.cost).toFixed(2) : null,
+    };
+    const [newPart] = await db.insert(parts).values(serialized).returning();
     return newPart;
   }
 
