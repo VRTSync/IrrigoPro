@@ -1158,59 +1158,74 @@ async function runStartupMigrations() {
     if (existingAlignRow.rows.length > 0 && existingAlignRow.rows[0].value === 'completed') {
       logger.info(`Startup migration '${AI_LOGS_ALIGN_KEY}': already completed, skipping`, 'Server Startup');
     } else {
-      // Step 1: Add new columns (IF NOT EXISTS — safe on fresh DBs where schema is already correct)
-      await pool.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS entity_type text`);
-      await pool.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS entity_id integer`);
-      await pool.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS raw_output text`);
-      await pool.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS template_version text`);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      // Step 2: Backfill new columns from old columns — only if old columns exist (fresh DB won't have them)
-      await pool.query(`
-        DO $$
-        BEGIN
-          IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'ai_generation_logs' AND column_name = 'source_type'
-          ) THEN
-            UPDATE ai_generation_logs SET
-              entity_type      = COALESCE(entity_type, source_type, 'unknown'),
-              entity_id        = COALESCE(entity_id, source_id),
-              raw_output       = COALESCE(raw_output, short_description, detailed_description, ''),
-              template_version = COALESCE(template_version, 'v1');
-          END IF;
-        END $$
-      `);
+        // Step 1: Add new columns (IF NOT EXISTS — safe on fresh DBs where schema is already correct)
+        await client.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS entity_type text`);
+        await client.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS entity_id integer`);
+        await client.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS raw_output text`);
+        await client.query(`ALTER TABLE ai_generation_logs ADD COLUMN IF NOT EXISTS template_version text`);
 
-      // Step 3: Ensure NOT NULL defaults before enforcing constraints
-      await pool.query(`UPDATE ai_generation_logs SET entity_type = 'unknown' WHERE entity_type IS NULL`);
-      await pool.query(`UPDATE ai_generation_logs SET raw_output = '' WHERE raw_output IS NULL`);
-      await pool.query(`UPDATE ai_generation_logs SET template_version = 'v1' WHERE template_version IS NULL`);
-      await pool.query(`UPDATE ai_generation_logs SET inputs = '' WHERE inputs IS NULL`);
-      await pool.query(`ALTER TABLE ai_generation_logs ALTER COLUMN entity_type SET NOT NULL`);
-      await pool.query(`ALTER TABLE ai_generation_logs ALTER COLUMN raw_output SET NOT NULL`);
-      await pool.query(`ALTER TABLE ai_generation_logs ALTER COLUMN template_version SET NOT NULL`);
-      await pool.query(`ALTER TABLE ai_generation_logs ALTER COLUMN inputs SET NOT NULL`);
+        // Step 2: Backfill new columns from old columns — only if old columns exist (fresh DB won't have them)
+        await client.query(`
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'ai_generation_logs' AND column_name = 'source_type'
+            ) THEN
+              UPDATE ai_generation_logs SET
+                entity_type      = COALESCE(entity_type, source_type, 'unknown'),
+                entity_id        = COALESCE(entity_id, source_id),
+                raw_output       = COALESCE(raw_output, short_description, detailed_description, ''),
+                template_version = COALESCE(template_version, 'v1');
+            END IF;
+          END $$
+        `);
 
-      // Step 4: Drop old columns (IF EXISTS — safe on fresh DBs that never had them)
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS company_id`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS source_type`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS source_id`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS short_description`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS detailed_description`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS status`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS error_message`);
-      await pool.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS model`);
+        // Step 3: Ensure NOT NULL defaults before enforcing constraints
+        await client.query(`UPDATE ai_generation_logs SET entity_type = 'unknown' WHERE entity_type IS NULL`);
+        await client.query(`UPDATE ai_generation_logs SET raw_output = '' WHERE raw_output IS NULL`);
+        await client.query(`UPDATE ai_generation_logs SET template_version = 'v1' WHERE template_version IS NULL`);
+        await client.query(`UPDATE ai_generation_logs SET inputs = '' WHERE inputs IS NULL`);
+        await client.query(`ALTER TABLE ai_generation_logs ALTER COLUMN entity_type SET NOT NULL`);
+        await client.query(`ALTER TABLE ai_generation_logs ALTER COLUMN raw_output SET NOT NULL`);
+        await client.query(`ALTER TABLE ai_generation_logs ALTER COLUMN template_version SET NOT NULL`);
+        await client.query(`ALTER TABLE ai_generation_logs ALTER COLUMN inputs SET NOT NULL`);
 
-      await pool.query(
-        `INSERT INTO app_settings (key, value, updated_at)
-         VALUES ($1, 'completed', NOW())
-         ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
-        [AI_LOGS_ALIGN_KEY]
-      );
-      logger.info(
-        `Startup migration '${AI_LOGS_ALIGN_KEY}': aligned ai_generation_logs columns to match current schema`,
-        'Server Startup'
-      );
+        // Set column default to match Drizzle schema (.default('v1')) so db:push sees no diff
+        await client.query(`ALTER TABLE ai_generation_logs ALTER COLUMN template_version SET DEFAULT 'v1'`);
+
+        // Step 4: Drop old columns (IF EXISTS — safe on fresh DBs that never had them)
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS company_id`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS source_type`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS source_id`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS short_description`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS detailed_description`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS status`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS error_message`);
+        await client.query(`ALTER TABLE ai_generation_logs DROP COLUMN IF EXISTS model`);
+
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at)
+           VALUES ($1, 'completed', NOW())
+           ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+          [AI_LOGS_ALIGN_KEY]
+        );
+
+        await client.query('COMMIT');
+        logger.info(
+          `Startup migration '${AI_LOGS_ALIGN_KEY}': aligned ai_generation_logs columns to match current schema`,
+          'Server Startup'
+        );
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
     }
   } catch (err) {
     logger.error(
