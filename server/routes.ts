@@ -2596,8 +2596,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let periodStart: Date;
       let periodEnd: Date;
       if (periodStartInput && periodEndInput) {
-        const parsedStart = new Date(periodStartInput);
-        const parsedEnd = new Date(periodEndInput);
+        const parseLocalDate = (dateStr: string): Date => {
+          const parts = dateStr.split("-");
+          if (parts.length !== 3) return new Date(NaN);
+          const year = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10);
+          const day = parseInt(parts[2], 10);
+          return new Date(year, month - 1, day);
+        };
+        const parsedStart = parseLocalDate(periodStartInput);
+        const parsedEnd = parseLocalDate(periodEndInput);
         if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
           return res.status(400).json({ message: "Invalid periodStart or periodEnd date value." });
         }
@@ -2605,10 +2613,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "periodStart must not be after periodEnd." });
         }
         periodStart = parsedStart;
-        periodEnd = parsedEnd;
+        periodEnd = new Date(parsedEnd.getFullYear(), parsedEnd.getMonth(), parsedEnd.getDate(), 23, 59, 59);
       } else {
         periodStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-        periodEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+        periodEnd = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
       }
       
       // Use stored financial snapshots as the source of truth.
