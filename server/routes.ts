@@ -7172,10 +7172,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
         return res.status(409).json({ message: "This record has been billed and cannot be edited." });
       }
-      // Lock after manager approval — only admins can proceed
+      // Lock after manager approval — only admins and billing managers can proceed
       const patchUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
       if (existingBsForLockCheck?.status === 'approved_passed_to_billing' &&
-          patchUserRole !== 'company_admin' && patchUserRole !== 'super_admin') {
+          patchUserRole !== 'company_admin' && patchUserRole !== 'super_admin' && patchUserRole !== 'billing_manager') {
         return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
 
@@ -7813,10 +7813,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
         return res.status(409).json({ message: "This record has been billed and cannot be edited." });
       }
-      // Lock after manager approval — only admins can proceed
+      // Lock after manager approval — only admins and billing managers can proceed
       const woUpdateUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
       if (existingForLockCheck?.status === 'approved_passed_to_billing' &&
-          woUpdateUserRole !== 'company_admin' && woUpdateUserRole !== 'super_admin') {
+          woUpdateUserRole !== 'company_admin' && woUpdateUserRole !== 'super_admin' && woUpdateUserRole !== 'billing_manager') {
         return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
 
