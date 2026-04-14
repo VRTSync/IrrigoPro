@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState, useEffect } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import type { Part, ManualPartReview } from "@shared/schema";
 
@@ -206,6 +206,7 @@ export default function Navigation() {
             ]
           },
           { path: "/", label: "Home", icon: Home, isCenter: true },
+          { path: "/invoices", label: "Invoices", icon: Receipt },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
           { 
@@ -515,7 +516,7 @@ export default function Navigation() {
                     }
                   }
                 } else if (userRole === 'billing_manager') {
-                  // For billing managers mobile: Work Orders, Billing Dashboard, Billing Command Center, Customers
+                  // For billing managers mobile: Work Orders, Billing Dashboard, Billing Command Center, Invoices
                   const woItem = otherItems.find(item => item.label === 'Work Orders');
                   if (woItem) expandedItems.push(woItem);
                   const billingItem = otherItems.find(item => item.label === 'Billing' && item.isDropdown);
@@ -525,8 +526,8 @@ export default function Navigation() {
                     const ccLink = billingItem.dropdownItems.find((d: NavDropdownItem) => d.label === 'Command Center');
                     if (ccLink) expandedItems.push(ccLink);
                   }
-                  const custItem = otherItems.find(item => item.label === 'Customers');
-                  if (custItem) expandedItems.push(custItem);
+                  const invoicesItem = otherItems.find(item => item.label === 'Invoices');
+                  if (invoicesItem) expandedItems.push(invoicesItem);
                 } else {
                   // For other roles, use the standard expansion
                   otherItems.forEach(item => {

@@ -1,0 +1,415 @@
+import { useState, useMemo } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Search,
+  Calendar,
+  FileText,
+  CheckCircle2,
+  RefreshCw,
+  Loader2,
+  AlertCircle,
+  ChevronLeft,
+  DollarSign,
+  ClipboardList,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
+import { InvoiceAuditModal } from "@/components/billing/invoice-audit-modal";
+
+interface Invoice {
+  id: number;
+  invoiceNumber: string;
+  customerId: number;
+  customerName: string;
+  customerEmail: string;
+  totalAmount: string;
+  periodStart: string;
+  periodEnd: string;
+  invoiceMonth: number;
+  invoiceYear: number;
+  status: string;
+  createdAt: string;
+  quickbooksInvoiceId?: string;
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+function generateMonthOptions() {
+  const months = [];
+  const currentDate = new Date();
+  for (let i = 0; i < 24; i++) {
+    const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const label = `${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
+    months.push({ value, label });
+  }
+  return months;
+}
+
+function formatCurrency(amount: string | number) {
+  const num = typeof amount === "string" ? parseFloat(amount) : amount;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(num);
+}
+
+function formatDate(date: string) {
+  return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function getStatusBadge(status: string) {
+  switch (status.toLowerCase()) {
+    case "generated":
+      return <Badge className="bg-blue-100 text-blue-800">Generated</Badge>;
+    case "sent":
+      return <Badge className="bg-green-100 text-green-800">Sent</Badge>;
+    case "paid":
+      return <Badge className="bg-emerald-100 text-emerald-800">Paid</Badge>;
+    case "overdue":
+      return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
+    default:
+      return <Badge className="bg-gray-100 text-gray-800">{status}</Badge>;
+  }
+}
+
+function groupByBillingPeriod(invoices: Invoice[]) {
+  const groups: Record<string, Invoice[]> = {};
+  for (const invoice of invoices) {
+    const key = `${invoice.invoiceYear}-${String(invoice.invoiceMonth).padStart(2, "0")}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(invoice);
+  }
+  const sorted = Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
+  return sorted.map(([key, items]) => {
+    const [year, month] = key.split("-");
+    return {
+      key,
+      label: `${MONTH_NAMES[parseInt(month) - 1]} ${year}`,
+      invoices: items,
+    };
+  });
+}
+
+export default function InvoicesPage() {
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [monthFilter, setMonthFilter] = useState("all");
+  const [pdfModal, setPdfModal] = useState<{ id: number; number: string; email: string } | null>(null);
+  const [auditInvoice, setAuditInvoice] = useState<{ id: number; label: string; total: string } | null>(null);
+
+  const { data: invoices = [], isLoading, error } = useQuery<Invoice[]>({
+    queryKey: ["/api/invoices"],
+    queryFn: async () => {
+      const res = await fetch("/api/invoices?limit=500");
+      if (!res.ok) throw new Error("Failed to fetch invoices");
+      return res.json();
+    },
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: (invoiceId: number) => apiRequest(`/api/invoices/${invoiceId}/sync-quickbooks`, "POST"),
+    onSuccess: () => {
+      toast({ title: "Invoice synced to QuickBooks successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "QuickBooks sync failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const filteredInvoices = useMemo(() => {
+    let result = [...invoices];
+
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      result = result.filter(
+        (inv) =>
+          inv.customerName.toLowerCase().includes(q) ||
+          inv.invoiceNumber.toLowerCase().includes(q)
+      );
+    }
+
+    if (monthFilter !== "all") {
+      const [filterYear, filterMonth] = monthFilter.split("-").map(Number);
+      result = result.filter(
+        (inv) => inv.invoiceYear === filterYear && inv.invoiceMonth === filterMonth
+      );
+    }
+
+    return result;
+  }, [invoices, searchTerm, monthFilter]);
+
+  const groups = useMemo(() => groupByBillingPeriod(filteredInvoices), [filteredInvoices]);
+
+  const totalBilled = filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.totalAmount), 0);
+
+  const monthOptions = generateMonthOptions();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-64 p-8">
+        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+        <span className="ml-2 text-gray-600">Loading invoices...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardContent className="p-8 text-center">
+            <AlertCircle className="w-8 h-8 mx-auto mb-2 text-red-600" />
+            <p className="text-gray-600">Failed to load invoices. Please try again.</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-6xl mx-auto p-4 lg:p-6">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-1">
+            <Link href="/">
+              <Button variant="ghost" size="sm" className="text-gray-500 hover:text-gray-700 p-1 h-auto">
+                <ChevronLeft className="w-4 h-4 mr-1" />
+                Dashboard
+              </Button>
+            </Link>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <FileText className="w-6 h-6 text-blue-600" />
+                Monthly Invoices
+              </h1>
+              <p className="text-sm text-gray-500 mt-0.5">All invoices sent across all customers</p>
+            </div>
+            {filteredInvoices.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-right">
+                <div className="text-xs text-blue-600 font-medium">Total Billed</div>
+                <div className="text-lg font-bold text-blue-800">{formatCurrency(totalBilled)}</div>
+                <div className="text-xs text-blue-500">{filteredInvoices.length} invoice{filteredInvoices.length !== 1 ? "s" : ""}</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              placeholder="Search by customer name or invoice number..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Select value={monthFilter} onValueChange={setMonthFilter}>
+            <SelectTrigger className="w-full sm:w-52">
+              <Calendar className="w-4 h-4 mr-2 text-gray-400" />
+              <SelectValue placeholder="All months" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Months</SelectItem>
+              {monthOptions.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Empty state */}
+        {groups.length === 0 && (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p className="font-medium text-gray-500">No invoices found</p>
+              <p className="text-sm text-gray-400 mt-1">
+                {searchTerm || monthFilter !== "all"
+                  ? "Try adjusting your filters."
+                  : "Invoices will appear here once they are generated."}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Grouped invoice list */}
+        <div className="space-y-8">
+          {groups.map((group) => {
+            const groupTotal = group.invoices.reduce((s, inv) => s + parseFloat(inv.totalAmount), 0);
+            return (
+              <div key={group.key}>
+                {/* Month Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-blue-600" />
+                    <h2 className="text-base font-semibold text-gray-800">{group.label}</h2>
+                    <Badge variant="secondary" className="text-xs">
+                      {group.invoices.length} invoice{group.invoices.length !== 1 ? "s" : ""}
+                    </Badge>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700">{formatCurrency(groupTotal)}</span>
+                </div>
+
+                {/* Invoice Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {group.invoices.map((invoice) => (
+                    <Card
+                      key={invoice.id}
+                      className="border border-gray-200 hover:shadow-md transition-shadow cursor-pointer"
+                      onClick={() =>
+                        setPdfModal({
+                          id: invoice.id,
+                          number: invoice.invoiceNumber,
+                          email: invoice.customerEmail,
+                        })
+                      }
+                    >
+                      <CardContent className="p-5">
+                        {/* Card Header */}
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-gray-900 truncate">{invoice.customerName}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">#{invoice.invoiceNumber}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 ml-2 flex-shrink-0">
+                            {getStatusBadge(invoice.status)}
+                            {invoice.quickbooksInvoiceId && (
+                              <Badge className="bg-purple-100 text-purple-800 text-xs">
+                                <CheckCircle2 className="w-3 h-3 mr-1" />
+                                QB Synced
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Details */}
+                        <div className="space-y-1.5 text-sm mb-4">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500">Amount</span>
+                            <span className="font-bold text-gray-900 text-base">
+                              {formatCurrency(invoice.totalAmount)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500">Period</span>
+                            <span className="text-xs text-gray-600">
+                              {formatDate(invoice.periodStart)} – {formatDate(invoice.periodEnd)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500">QuickBooks</span>
+                            {invoice.quickbooksInvoiceId ? (
+                              <span className="flex items-center gap-1 text-xs text-emerald-600">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Synced
+                              </span>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-auto py-0.5 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                disabled={syncMutation.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  syncMutation.mutate(invoice.id);
+                                }}
+                              >
+                                {syncMutation.isPending && syncMutation.variables === invoice.id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                    Syncing...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="w-3 h-3 mr-1" />
+                                    Sync to QB
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 text-xs"
+                            onClick={() =>
+                              setAuditInvoice({
+                                id: invoice.id,
+                                label: `${group.label} · #${invoice.invoiceNumber}`,
+                                total: formatCurrency(invoice.totalAmount),
+                              })
+                            }
+                          >
+                            <ClipboardList className="w-3.5 h-3.5 mr-1" />
+                            Audit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 text-xs"
+                            onClick={() =>
+                              setPdfModal({
+                                id: invoice.id,
+                                number: invoice.invoiceNumber,
+                                email: invoice.customerEmail,
+                              })
+                            }
+                          >
+                            <FileText className="w-3.5 h-3.5 mr-1" />
+                            View PDF
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* PDF Preview Modal */}
+      {pdfModal && (
+        <InvoicePdfPreviewModal
+          invoiceId={pdfModal.id}
+          invoiceNumber={pdfModal.number}
+          customerEmail={pdfModal.email}
+          open={!!pdfModal}
+          onOpenChange={(open) => { if (!open) setPdfModal(null); }}
+        />
+      )}
+
+      {/* Audit Modal */}
+      {auditInvoice && (
+        <InvoiceAuditModal
+          open={!!auditInvoice}
+          onClose={() => setAuditInvoice(null)}
+          invoiceId={auditInvoice.id}
+          invoiceLabel={auditInvoice.label}
+          invoiceTotal={auditInvoice.total}
+        />
+      )}
+    </div>
+  );
+}

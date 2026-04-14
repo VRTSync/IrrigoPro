@@ -40,6 +40,7 @@ import EstimateApproval from "@/pages/estimate-approval";
 import PartsSettings from "@/pages/parts-settings";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
 import BillingDashboard from "@/pages/billing-dashboard";
+import InvoicesPage from "@/pages/invoices";
 
 import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
@@ -221,6 +222,7 @@ function Router() {
                 <Route path="/parts-settings" component={PartsSettings} />
                 <Route path="/parts-pending-approval" component={PartsPendingApproval} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
+                <Route path="/invoices" component={InvoicesPage} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
