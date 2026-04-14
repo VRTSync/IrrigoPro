@@ -6719,6 +6719,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         markupAmount: markupAmount.toFixed(2),
         taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
+        laborRate: appliedLaborRate.toFixed(2),
         appliedLaborRate: appliedLaborRate.toFixed(2),
         appliedMarkupRate: appliedMarkupRate.toFixed(4),
         appliedTaxRate: appliedTaxRate.toFixed(4),

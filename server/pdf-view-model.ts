@@ -194,8 +194,20 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
   };
 
   const workOrderRows: PdfWorkOrderRow[] = (rawWorkOrders ?? []).map(({ workOrder, items }) => {
-    const woLaborRate = safeNum(workOrder.laborRate, defaultLaborRate);
     const totalHours = safeNum(workOrder.totalHours);
+    const storedLaborSubtotal = safeNum(workOrder.laborSubtotal);
+    const storedAppliedRate = safeNum(workOrder.appliedLaborRate);
+    const storedLaborRate = safeNum(workOrder.laborRate);
+    // Derive the displayed rate so it is always mathematically consistent with the stored dollar amount:
+    // 1. Use the explicit appliedLaborRate snapshot if available.
+    // 2. Derive from laborSubtotal / totalHours when both are stored and non-zero.
+    // 3. Fall back to the legacy laborRate field.
+    // 4. Last resort: the customer's current rate (passed in as defaultLaborRate).
+    const woLaborRate =
+      storedAppliedRate > 0 ? storedAppliedRate :
+      (storedLaborSubtotal > 0 && totalHours > 0) ? storedLaborSubtotal / totalHours :
+      storedLaborRate > 0 ? storedLaborRate :
+      defaultLaborRate;
 
     const itemRows: PdfWorkOrderItemRow[] = (items ?? []).map(item => {
       const unitPrice = safeNum(item.partPrice);
@@ -244,8 +256,17 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
   });
 
   const billingSheetRows: PdfBillingSheetRow[] = (rawBillingSheets ?? []).map(({ billingSheet, items }) => {
-    const bsLaborRate = safeNum(billingSheet.laborRate, defaultLaborRate);
     const totalHours = safeNum(billingSheet.totalHours);
+    const bsStoredLaborSubtotal = safeNum(billingSheet.laborSubtotal);
+    const bsStoredLaborRate = safeNum(billingSheet.laborRate);
+    // Prefer math-derived rate for maximum consistency with stored dollar amounts:
+    // 1. Derive from laborSubtotal / totalHours when both are non-zero (always consistent with displayed subtotal).
+    // 2. Fall back to stored laborRate field.
+    // 3. Last resort: customer's current rate (passed in as defaultLaborRate).
+    const bsLaborRate =
+      (bsStoredLaborSubtotal > 0 && totalHours > 0) ? bsStoredLaborSubtotal / totalHours :
+      bsStoredLaborRate > 0 ? bsStoredLaborRate :
+      defaultLaborRate;
 
     const itemRows: PdfBillingSheetItemRow[] = (items ?? []).map(item => {
       const unitPrice = safeNum(item.unitPrice);
