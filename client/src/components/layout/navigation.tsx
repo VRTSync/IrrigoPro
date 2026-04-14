@@ -133,6 +133,16 @@ export default function Navigation() {
           },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { 
+            path: "/billing", 
+            label: "Billing", 
+            icon: DollarSign, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/billing/dashboard", label: "Dashboard", icon: Home },
+              { path: "/billing/command-center", label: "Command Center", icon: ClipboardList },
+            ]
+          },
+          { 
             path: "/admin", 
             label: "Admin", 
             icon: Settings, 
@@ -185,8 +195,17 @@ export default function Navigation() {
       case "billing_manager":
         return [
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
-          { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
-          { path: "/", label: "Dashboard", icon: Home, isCenter: true },
+          { 
+            path: "/billing", 
+            label: "Billing", 
+            icon: DollarSign, 
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/billing/dashboard", label: "Dashboard", icon: Home },
+              { path: "/billing/command-center", label: "Command Center", icon: ClipboardList },
+            ]
+          },
+          { path: "/", label: "Home", icon: Home, isCenter: true },
           { path: "/customers", label: "Customers", icon: Users },
           { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
           { 
@@ -460,28 +479,25 @@ export default function Navigation() {
                 
                 // For company admin, prioritize essential functions for mobile
                 if (userRole === 'company_admin') {
-                  // First, add non-dropdown items
+                  // First, add non-dropdown items (Operations)
                   otherItems.filter(item => !item.isDropdown).forEach(item => {
                     expandedItems.push(item);
                   });
                   
-                  // Then add Team (most important admin function)
-                  const adminItem = otherItems.find(item => item.label === 'Admin');
-                  if (adminItem?.dropdownItems) {
-                    const teamItem = adminItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Team');
-                    if (teamItem) {
-                      expandedItems.push(teamItem);
-                    }
-                  }
-                  
                   // Add direct Customers link
                   const customersItem = otherItems.find(item => item.label === 'Customers' && item.isDropdown);
                   if (customersItem?.dropdownItems) {
-                    // Add direct customers link instead of Maps
                     const customersLink = customersItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Customers');
-                    if (customersLink) {
-                      expandedItems.push(customersLink);
-                    }
+                    if (customersLink) expandedItems.push(customersLink);
+                  }
+                  
+                  // Add both Billing links (Dashboard + Command Center) for company_admin mobile
+                  const billingDropdown = otherItems.find(item => item.label === 'Billing' && item.isDropdown);
+                  if (billingDropdown?.dropdownItems) {
+                    const dashLink = billingDropdown.dropdownItems.find((d: NavDropdownItem) => d.label === 'Dashboard');
+                    const ccLink = billingDropdown.dropdownItems.find((d: NavDropdownItem) => d.label === 'Command Center');
+                    if (dashLink && expandedItems.length < 4) expandedItems.push(dashLink);
+                    if (ccLink && expandedItems.length < 4) expandedItems.push(ccLink);
                   }
                 } else if (userRole === 'irrigation_manager') {
                   // For irrigation managers, prioritize key operational areas for mobile
@@ -499,19 +515,18 @@ export default function Navigation() {
                     }
                   }
                 } else if (userRole === 'billing_manager') {
-                  // For billing managers, prioritize: Work Orders, Billing, Customers, QuickBooks
-                  // Parts Settings is accessible via desktop nav and Parts Catalog is available via direct /parts link
-                  const priority = ['Work Orders', 'Billing', 'Customers', 'QuickBooks'];
-                  priority.forEach(label => {
-                    const found = otherItems.find(item => item.label === label && !item.isDropdown);
-                    if (found) expandedItems.push(found);
-                  });
-                  // Add Parts Catalog as the last mobile slot
-                  const partsItem = otherItems.find(item => item.label === 'Parts' && item.isDropdown);
-                  if (partsItem?.dropdownItems) {
-                    const partsLink = partsItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Parts Catalog');
-                    if (partsLink && expandedItems.length < 4) expandedItems.push(partsLink);
+                  // For billing managers mobile: Work Orders, Billing Dashboard, Billing Command Center, Customers
+                  const woItem = otherItems.find(item => item.label === 'Work Orders');
+                  if (woItem) expandedItems.push(woItem);
+                  const billingItem = otherItems.find(item => item.label === 'Billing' && item.isDropdown);
+                  if (billingItem?.dropdownItems) {
+                    const dashLink = billingItem.dropdownItems.find((d: NavDropdownItem) => d.label === 'Dashboard');
+                    if (dashLink) expandedItems.push(dashLink);
+                    const ccLink = billingItem.dropdownItems.find((d: NavDropdownItem) => d.label === 'Command Center');
+                    if (ccLink) expandedItems.push(ccLink);
                   }
+                  const custItem = otherItems.find(item => item.label === 'Customers');
+                  if (custItem) expandedItems.push(custItem);
                 } else {
                   // For other roles, use the standard expansion
                   otherItems.forEach(item => {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { safeSet } from "@/utils/safeStorage";
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import Navigation from "@/components/layout/navigation";
 import AdminDashboard from "@/pages/admin-dashboard";
@@ -14,6 +14,7 @@ import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
 import CustomerProfile from "@/pages/customer-profile";
 import CustomerBilling from "@/pages/customer-billing";
+import BillingDashboard from "@/pages/billing-dashboard";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import PartsSettings from "@/pages/parts-settings";
@@ -31,6 +32,12 @@ import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import OnboardingFlow from "@/components/onboarding/onboarding-flow";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
+
+function RedirectToCommandCenter() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/billing/command-center"); }, [navigate]);
+  return null;
+}
 
 interface User {
   id: number;
@@ -125,7 +132,10 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/customers/:id/profile" component={CustomerProfile} />
           <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
           <Route path="/site-maps" component={SiteMapsPage} />
-          <Route path="/customer-billing" component={CustomerBilling} />
+          <Route path="/billing" component={BillingDashboard} />
+          <Route path="/billing/dashboard" component={BillingDashboard} />
+          <Route path="/billing/command-center" component={CustomerBilling} />
+          <Route path="/customer-billing" component={RedirectToCommandCenter} />
           <Route path="/field-tech" component={FieldTech} />
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/user-profile" component={UserProfile} />

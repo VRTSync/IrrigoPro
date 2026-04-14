@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { useState, useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { safeGet, safeRemove } from "@/utils/safeStorage";
@@ -39,6 +39,7 @@ import CustomerProfile from "@/pages/customer-profile";
 import EstimateApproval from "@/pages/estimate-approval";
 import PartsSettings from "@/pages/parts-settings";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
+import BillingDashboard from "@/pages/billing-dashboard";
 
 import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
@@ -47,6 +48,12 @@ import { NotificationPermissionBanner } from "@/components/notifications/notific
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 
+
+function RedirectToCommandCenter() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/billing/command-center"); }, [navigate]);
+  return null;
+}
 
 interface User {
   id: number;
@@ -201,8 +208,11 @@ function Router() {
             <Navigation />
             <div className="px-4 flex-1">
               <Switch>
-                <Route path="/" component={CustomerBilling} />
-                <Route path="/billing" component={CustomerBilling} />
+                <Route path="/" component={BillingDashboard} />
+                <Route path="/billing" component={BillingDashboard} />
+                <Route path="/billing/dashboard" component={BillingDashboard} />
+                <Route path="/billing/command-center" component={CustomerBilling} />
+                <Route path="/customer-billing" component={RedirectToCommandCenter} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/work-orders" component={WorkOrders} />
@@ -211,7 +221,6 @@ function Router() {
                 <Route path="/parts-settings" component={PartsSettings} />
                 <Route path="/parts-pending-approval" component={PartsPendingApproval} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
-                <Route path="/customer-billing" component={CustomerBilling} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
