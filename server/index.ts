@@ -1309,18 +1309,15 @@ async function runStartupMigrations() {
           if (row.invoice_id) affectedInvoiceIds.add(row.invoice_id);
         }
 
-        // Recalculate total_amount for each invoice that had a corrected work order
+        // Recalculate total_amount for each invoice that had a corrected work order.
+        // Use independent subqueries (not a cross-join) to avoid cartesian multiplication
+        // when an invoice has multiple work orders AND multiple billing sheets.
         let invoicesFixed = 0;
         for (const invoiceId of affectedInvoiceIds) {
           const totalsResult = await client.query(`
             SELECT
-              COALESCE(SUM(wo.total_amount::numeric), 0) AS wo_total,
-              COALESCE(SUM(bs.total_amount::numeric), 0) AS bs_total
-            FROM invoices i
-            LEFT JOIN work_orders wo ON wo.invoice_id = i.id
-            LEFT JOIN billing_sheets bs ON bs.invoice_id = i.id
-            WHERE i.id = $1
-            GROUP BY i.id
+              COALESCE((SELECT SUM(total_amount::numeric) FROM work_orders   WHERE invoice_id = $1), 0) AS wo_total,
+              COALESCE((SELECT SUM(total_amount::numeric) FROM billing_sheets WHERE invoice_id = $1), 0) AS bs_total
           `, [invoiceId]);
 
           if (totalsResult.rows.length > 0) {
