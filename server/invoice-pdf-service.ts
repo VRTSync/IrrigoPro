@@ -299,7 +299,7 @@ export class InvoicePdfService {
         }
       }
 
-      const laborRate = customer.laborRate || '45.00';
+      const laborRate = customer.laborRate || '0';
 
       let logoDataUri: string | null = null;
       if (company.logo) {

@@ -1234,6 +1234,140 @@ async function runStartupMigrations() {
       'Server Startup'
     );
   }
+
+  // One-time data repair: backfill applied_labor_rate from the customer's current laborRate
+  // for any work order where it was never stored (NULL/zero) but a labor_subtotal exists.
+  // These records were completed before the applied_labor_rate field was consistently written,
+  // so the stored labor_subtotal reflects an old default rate ($45/hr) instead of the
+  // customer's actual configured rate. This corrects the stored dollar amounts so the PDF
+  // view model can simply display the applied_labor_rate without math tricks.
+  const LABOR_RATE_FIX_KEY = 'fix-labor-rate-from-customer-v1';
+  try {
+    const existingLaborRow = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [LABOR_RATE_FIX_KEY]
+    );
+    if (existingLaborRow.rows.length > 0 && existingLaborRow.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${LABOR_RATE_FIX_KEY}': already completed, skipping`, 'Server Startup');
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Find all work orders missing applied_labor_rate but having a non-zero labor_subtotal
+        const candidates = await client.query(`
+          SELECT wo.id, wo.total_hours, wo.labor_subtotal, wo.parts_subtotal,
+                 wo.markup_amount, wo.tax_amount, wo.total_amount, wo.invoice_id,
+                 c.labor_rate as customer_labor_rate
+          FROM work_orders wo
+          JOIN customers c ON wo.customer_id = c.id
+          WHERE (wo.applied_labor_rate IS NULL OR wo.applied_labor_rate::numeric = 0)
+            AND wo.labor_subtotal IS NOT NULL
+            AND wo.labor_subtotal::numeric > 0
+            AND c.labor_rate IS NOT NULL
+            AND c.labor_rate::numeric > 0
+        `);
+
+        let woFixed = 0;
+        const affectedInvoiceIds = new Set<number>();
+
+        for (const row of candidates.rows) {
+          const totalHours = parseFloat(row.total_hours ?? '0');
+          const customerRate = parseFloat(row.customer_labor_rate ?? '0');
+          const partsSubtotal = parseFloat(row.parts_subtotal ?? '0');
+          const markupAmount = parseFloat(row.markup_amount ?? '0');
+          const taxAmount = parseFloat(row.tax_amount ?? '0');
+
+          if (totalHours <= 0 || customerRate <= 0) continue;
+
+          const newLaborSubtotal = totalHours * customerRate;
+          const newTotalAmount = newLaborSubtotal + partsSubtotal + markupAmount + taxAmount;
+
+          await client.query(`
+            UPDATE work_orders
+            SET applied_labor_rate = $1,
+                labor_rate         = $1,
+                labor_subtotal     = $2,
+                total_amount       = $3
+            WHERE id = $4
+          `, [
+            customerRate.toFixed(2),
+            newLaborSubtotal.toFixed(2),
+            newTotalAmount.toFixed(2),
+            row.id,
+          ]);
+
+          logger.info(
+            `Startup migration '${LABOR_RATE_FIX_KEY}': fixed work_order id=${row.id} ` +
+            `applied_labor_rate=${customerRate.toFixed(2)} ` +
+            `labor_subtotal=${parseFloat(row.labor_subtotal).toFixed(2)}->${newLaborSubtotal.toFixed(2)} ` +
+            `total_amount=${parseFloat(row.total_amount).toFixed(2)}->${newTotalAmount.toFixed(2)}`,
+            'Server Startup'
+          );
+
+          woFixed++;
+          if (row.invoice_id) affectedInvoiceIds.add(row.invoice_id);
+        }
+
+        // Recalculate total_amount for each invoice that had a corrected work order
+        let invoicesFixed = 0;
+        for (const invoiceId of affectedInvoiceIds) {
+          const totalsResult = await client.query(`
+            SELECT
+              COALESCE(SUM(wo.total_amount::numeric), 0) AS wo_total,
+              COALESCE(SUM(bs.total_amount::numeric), 0) AS bs_total
+            FROM invoices i
+            LEFT JOIN work_orders wo ON wo.invoice_id = i.id
+            LEFT JOIN billing_sheets bs ON bs.invoice_id = i.id
+            WHERE i.id = $1
+            GROUP BY i.id
+          `, [invoiceId]);
+
+          if (totalsResult.rows.length > 0) {
+            const newInvoiceTotal = (
+              parseFloat(totalsResult.rows[0].wo_total) +
+              parseFloat(totalsResult.rows[0].bs_total)
+            ).toFixed(2);
+
+            await client.query(
+              `UPDATE invoices SET total_amount = $1 WHERE id = $2`,
+              [newInvoiceTotal, invoiceId]
+            );
+
+            logger.info(
+              `Startup migration '${LABOR_RATE_FIX_KEY}': recalculated invoice id=${invoiceId} total_amount=${newInvoiceTotal}`,
+              'Server Startup'
+            );
+            invoicesFixed++;
+          }
+        }
+
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at)
+           VALUES ($1, 'completed', NOW())
+           ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+          [LABOR_RATE_FIX_KEY]
+        );
+
+        await client.query('COMMIT');
+        logger.info(
+          `Startup migration '${LABOR_RATE_FIX_KEY}': corrected ${woFixed} work order(s), ${invoicesFixed} invoice(s)`,
+          'Server Startup'
+        );
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
+    }
+  } catch (err) {
+    logger.error(
+      `Startup migration '${LABOR_RATE_FIX_KEY}' error (non-fatal)`,
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
 }
 
 (async () => {

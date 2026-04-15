@@ -198,14 +198,11 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     const storedLaborSubtotal = safeNum(workOrder.laborSubtotal);
     const storedAppliedRate = safeNum(workOrder.appliedLaborRate);
     const storedLaborRate = safeNum(workOrder.laborRate);
-    // Derive the displayed rate so it is always mathematically consistent with the stored dollar amount:
-    // 1. Use the explicit appliedLaborRate snapshot if available.
-    // 2. Derive from laborSubtotal / totalHours when both are stored and non-zero.
-    // 3. Fall back to the legacy laborRate field.
-    // 4. Last resort: the customer's current rate (passed in as defaultLaborRate).
+    // Rate priority: appliedLaborRate snapshot → legacy laborRate field → customer's current rate.
+    // Math-derivation (laborSubtotal / totalHours) is intentionally excluded: it would lock in
+    // stale/incorrect rates from before applied_labor_rate was consistently stored.
     const woLaborRate =
       storedAppliedRate > 0 ? storedAppliedRate :
-      (storedLaborSubtotal > 0 && totalHours > 0) ? storedLaborSubtotal / totalHours :
       storedLaborRate > 0 ? storedLaborRate :
       defaultLaborRate;
 
@@ -259,12 +256,9 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     const totalHours = safeNum(billingSheet.totalHours);
     const bsStoredLaborSubtotal = safeNum(billingSheet.laborSubtotal);
     const bsStoredLaborRate = safeNum(billingSheet.laborRate);
-    // Prefer math-derived rate for maximum consistency with stored dollar amounts:
-    // 1. Derive from laborSubtotal / totalHours when both are non-zero (always consistent with displayed subtotal).
-    // 2. Fall back to stored laborRate field.
-    // 3. Last resort: customer's current rate (passed in as defaultLaborRate).
+    // Rate priority: stored laborRate field → customer's current rate.
+    // Math-derivation is excluded for the same reason as work orders.
     const bsLaborRate =
-      (bsStoredLaborSubtotal > 0 && totalHours > 0) ? bsStoredLaborSubtotal / totalHours :
       bsStoredLaborRate > 0 ? bsStoredLaborRate :
       defaultLaborRate;
 
