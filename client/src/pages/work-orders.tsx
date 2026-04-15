@@ -17,6 +17,7 @@ import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
+import { EditWorkOrderModal } from "@/components/work-orders/edit-work-order-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
 import { 
@@ -1269,19 +1270,27 @@ export default function WorkOrders() {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Work Order Form Dialog */}
-        {(showWorkOrderForm || editingWorkOrder) && (
+        {/* Work Order Form Dialog — new work orders only */}
+        {showWorkOrderForm && (
           <WorkOrderForm 
-            onClose={() => {
-              setShowWorkOrderForm(false);
-              setEditingWorkOrder(null);
-            }} 
+            onClose={() => setShowWorkOrderForm(false)} 
             onSuccess={() => {
               setShowWorkOrderForm(false);
+              queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
+            }}
+          />
+        )}
+
+        {/* Edit Work Order Modal — pre-filled editing of an existing work order */}
+        {editingWorkOrder && (
+          <EditWorkOrderModal
+            workOrder={editingWorkOrder}
+            open={!!editingWorkOrder}
+            onClose={() => setEditingWorkOrder(null)}
+            onSuccess={() => {
               setEditingWorkOrder(null);
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
-            editingWorkOrder={editingWorkOrder}
           />
         )}
 
