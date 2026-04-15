@@ -1278,7 +1278,10 @@ async function runStartupMigrations() {
           const markupAmount = parseFloat(row.markup_amount ?? '0');
           const taxAmount = parseFloat(row.tax_amount ?? '0');
 
-          if (totalHours <= 0 || customerRate <= 0) continue;
+          if (totalHours <= 0 || customerRate <= 0) {
+            log(`[MIGRATION] fix-labor-rate-from-customer-v1: skipping work_order id=${row.id} — totalHours=${totalHours} customerRate=${customerRate} (cannot recalculate)`, 'Server Startup');
+            continue;
+          }
 
           const newLaborSubtotal = totalHours * customerRate;
           const newTotalAmount = newLaborSubtotal + partsSubtotal + markupAmount + taxAmount;

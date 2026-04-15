@@ -172,7 +172,7 @@ function safePhotos(value: string[] | null | undefined): string[] {
 export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelResult {
   const { invoice, company, workOrders: rawWorkOrders, billingSheets: rawBillingSheets, laborRate: passedLaborRate } = data;
 
-  const defaultLaborRate = safeNum(passedLaborRate, 45);
+  const defaultLaborRate = safeNum(passedLaborRate, 0);
 
   const companyHeader: PdfCompanyHeader = {
     name: safeStr(company.name, 'Company'),
