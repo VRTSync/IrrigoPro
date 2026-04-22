@@ -26,8 +26,61 @@ import {
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import imageCompression from "browser-image-compression";
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  try {
+    const saved = safeGet("user");
+    if (saved) {
+      const user = JSON.parse(saved);
+      if (user?.role) {
+        headers["x-user-role"] = user.role;
+        headers["x-user-id"] = user.id?.toString() || "";
+        headers["x-user-name"] = user.name || "";
+        headers["x-user-company-id"] = user.companyId?.toString() || "";
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return headers;
+}
+
+async function preparePhotoForUpload(file: File): Promise<File> {
+  let working: File = file;
+  const lowerName = file.name.toLowerCase();
+  const looksHeic = file.type === "image/heic" || file.type === "image/heif"
+    || lowerName.endsWith(".heic") || lowerName.endsWith(".heif");
+
+  if (looksHeic) {
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      const blob = Array.isArray(converted) ? converted[0] : converted;
+      working = new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+    } catch (err) {
+      console.warn("[detail-modal] HEIC conversion failed, falling back to original bytes", err);
+    }
+  }
+
+  try {
+    const compressed = await imageCompression(working, {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 2048,
+      useWebWorker: true,
+      initialQuality: 0.85,
+      fileType: working.type === "image/png" ? "image/jpeg" : undefined,
+    });
+    if (compressed instanceof File) return compressed;
+    return new File([compressed], working.name, { type: compressed.type || working.type });
+  } catch (err) {
+    console.warn("[detail-modal] image compression failed, uploading original bytes", err);
+    return working;
+  }
+}
 
 interface CompletedWorkDetailModalProps {
   type: "work_order" | "billing_sheet";
@@ -200,7 +253,12 @@ export function CompletedWorkDetailModal({
 
   const updatePhotos = useMutation({
     mutationFn: async (nextPhotos: string[]) => {
-      await apiRequest(`/api/billing-sheets/${id}`, "PATCH", { photos: nextPhotos });
+      try {
+        await apiRequest(`/api/billing-sheets/${id}`, "PATCH", { photos: nextPhotos });
+      } catch (err) {
+        const detail = parseApiError(err, err instanceof Error ? err.message : "save failed");
+        throw new Error(`Save to sheet failed: ${detail}`);
+      }
       return nextPhotos;
     },
     onSuccess: (nextPhotos) => {
@@ -209,7 +267,7 @@ export function CompletedWorkDetailModal({
     },
     onError: (error: any) => {
       toast({
-        title: "Error",
+        title: "Couldn't save photos to sheet",
         description: error?.message || "Failed to update photos",
         variant: "destructive",
       });
@@ -219,29 +277,128 @@ export function CompletedWorkDetailModal({
   const handlePhotoUpload = async (selectedFiles: FileList | null) => {
     if (!selectedFiles?.length) return;
     setIsUploadingPhoto(true);
+    const partialWarnings: string[] = [];
     try {
       const newUrls: string[] = [];
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
-        const signUrlRes = await fetch(
-          `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
-          { method: 'POST' }
-        );
-        if (!signUrlRes.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
-        const { signedUrl, url: canonicalUrl } = await signUrlRes.json();
-        const putRes = await fetch(signedUrl, {
-          method: 'PUT',
-          body: file,
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        });
-        if (!putRes.ok) throw new Error(`Failed to upload ${file.name} to storage`);
+
+        // 1. Ask the server for signed PUT URLs (display + preserved original).
+        let signedUrl: string;
+        let originalSignedUrl: string | undefined;
+        let canonicalUrl: string;
+        try {
+          const signUrlRes = await fetch(
+            `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
+            { method: 'POST', headers: getAuthHeaders(), credentials: 'include' }
+          );
+          if (!signUrlRes.ok) {
+            const body = await signUrlRes.text();
+            throw new Error(`${signUrlRes.status}: ${body || signUrlRes.statusText}`);
+          }
+          const json = await signUrlRes.json();
+          signedUrl = json.signedUrl;
+          originalSignedUrl = json.originalSignedUrl;
+          canonicalUrl = json.url;
+        } catch (err: any) {
+          throw new Error(`Get upload URL failed for ${file.name}: ${err?.message || err}`);
+        }
+
+        // 2. Prepare display bytes (HEIC → JPEG, downscale + compress for slow LTE).
+        const prepared = await preparePhotoForUpload(file);
+
+        // 3. Dual-upload: original bytes preserved untouched, display bytes for variants.
+        let displayPut: Response;
+        let originalPut: Response;
+        try {
+          [originalPut, displayPut] = await Promise.all([
+            originalSignedUrl
+              ? fetch(originalSignedUrl, {
+                  method: 'PUT',
+                  body: file,
+                  headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                })
+              : Promise.resolve({ ok: true } as Response),
+            fetch(signedUrl, {
+              method: 'PUT',
+              body: prepared,
+              headers: { 'Content-Type': prepared.type || 'application/octet-stream' },
+            }),
+          ]);
+        } catch (err: any) {
+          throw new Error(`Upload to storage failed for ${file.name}: ${err?.message || err}`);
+        }
+        if (!displayPut.ok) {
+          const body = await displayPut.text().catch(() => '');
+          throw new Error(`Upload to storage failed for ${file.name} (${displayPut.status}${body ? `: ${body.slice(0, 120)}` : ''})`);
+        }
+        if (!originalPut.ok) {
+          // Display variants will still generate, but the preserved
+          // untouched bytes were not saved — surface this so the user
+          // knows EXIF/GPS may be missing on this photo's original.
+          const body = await originalPut.text().catch(() => '');
+          console.warn(`[detail-modal] preserved-original PUT failed for ${file.name}`, originalPut.status, body);
+          partialWarnings.push(
+            `Original bytes for ${file.name} weren't preserved (${originalPut.status}). Thumbnails will still appear.`
+          );
+        }
+
+        // 4. Ask the server to generate thumb/medium variants. Variant
+        //    work runs in the background server-side, so a 2xx here just
+        //    means the request was accepted. A non-2xx is non-fatal (the
+        //    base path still serves) but worth surfacing so users know
+        //    thumbnails may be delayed.
+        try {
+          const finalizeRes = await fetch('/api/upload/photo/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            credentials: 'include',
+            body: JSON.stringify({ photoId: canonicalUrl }),
+          });
+          if (!finalizeRes.ok) {
+            const body = await finalizeRes.text().catch(() => '');
+            console.warn(`[detail-modal] finalize failed for ${file.name}`, finalizeRes.status, body);
+            partialWarnings.push(
+              `Finalize failed for ${file.name} (${finalizeRes.status}${body ? `: ${body.slice(0, 80)}` : ''}). Thumbnails may be delayed.`
+            );
+          }
+        } catch (err: any) {
+          console.warn('[detail-modal] finalize call failed', err);
+          partialWarnings.push(
+            `Finalize request for ${file.name} couldn't be sent: ${err?.message || err}. Thumbnails may be delayed.`
+          );
+        }
+
         newUrls.push(canonicalUrl);
       }
-      const existing: string[] = Array.isArray(bs?.photos) ? (bs!.photos as string[]) : [];
-      updatePhotos.mutate([...existing, ...newUrls]);
-      toast({ title: "Photos Added", description: `${newUrls.length} photo${newUrls.length > 1 ? 's' : ''} uploaded successfully` });
+
+      // 5. Save to the sheet. Use localPhotos (current modal state) — not
+      //    bs?.photos (server snapshot) — so rapid successive uploads
+      //    don't drop just-added photos.
+      const existing: string[] = Array.isArray(localPhotos) ? localPhotos : [];
+      try {
+        await updatePhotos.mutateAsync([...existing, ...newUrls]);
+        if (partialWarnings.length > 0) {
+          toast({
+            title: "Photos saved with warnings",
+            description: partialWarnings.join(" "),
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Photos Added",
+            description: `${newUrls.length} photo${newUrls.length > 1 ? 's' : ''} uploaded successfully`,
+          });
+        }
+      } catch {
+        // updatePhotos.onError already toasted with a specific message.
+      }
     } catch (error: any) {
-      toast({ title: "Upload Failed", description: error?.message || "Failed to upload photos", variant: "destructive" });
+      toast({
+        title: "Upload Failed",
+        description: error?.message || "Failed to upload photos",
+        variant: "destructive",
+      });
     } finally {
       setIsUploadingPhoto(false);
       if (photoInputRef.current) photoInputRef.current.value = '';
@@ -250,7 +407,7 @@ export function CompletedWorkDetailModal({
 
   const handleConfirmRemovePhoto = () => {
     if (photoToRemove === null) return;
-    const existing: string[] = Array.isArray(bs?.photos) ? (bs!.photos as string[]) : [];
+    const existing: string[] = Array.isArray(localPhotos) ? localPhotos : [];
     const updated = existing.filter((_, i) => i !== photoToRemove);
     updatePhotos.mutate(updated);
     setPhotoToRemove(null);
