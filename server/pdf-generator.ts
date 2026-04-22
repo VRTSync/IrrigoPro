@@ -5,6 +5,7 @@ import { join, basename } from 'path';
 import type { PdfViewModel, PdfBrandColors } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
 import { ObjectStorageService } from './objectStorage';
+import { mediumPath } from './photo-pipeline';
 import {
   FAILED_PHOTO_SENTINEL,
   fetchLogoAsBase64,
@@ -63,8 +64,13 @@ async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<st
       gcsKey = gcsKey.replace('/api/photos/', '');
     }
 
-    // Try GCS object storage
-    const file = await _objectStorageService.searchPhotoObject(gcsKey);
+    // Prefer the medium variant (~1200px JPEG) so the embedded image is
+    // small enough to keep monthly report PDFs under email attachment
+    // limits. Fall back to the base path for legacy photos that have not
+    // been backfilled yet.
+    const mediumKey = mediumPath(gcsKey);
+    let file = await _objectStorageService.searchPhotoObject(mediumKey);
+    if (!file) file = await _objectStorageService.searchPhotoObject(gcsKey);
     if (!file) return FAILED_PHOTO_SENTINEL;
 
     // Download as buffer

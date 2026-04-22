@@ -28,7 +28,7 @@ import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-part
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { WorkOrder, WorkOrderItem, User as UserType } from "@shared/schema";
 import { BilledIndicator } from "@/components/ui/billed-indicator";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 
 const currency = (val: number | string | null | undefined) => {
   const n = typeof val === "string" ? parseFloat(val) : (val ?? 0);
@@ -137,6 +137,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const photos: string[] = workOrder.photos ?? [];
+  const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(photos, "thumb");
 
   const { data: fieldTechs } = useQuery<UserType[]>({
     queryKey: ["/api/users/field-techs"],
@@ -543,7 +544,7 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
                       onClick={() => openLightbox(url, idx)}
                       className="aspect-square rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all"
                     >
-                      <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" variant="thumb" batchManaged signedUrlOverride={getPhotoSignedUrl(url)} />
                     </button>
                   ))}
                 </div>

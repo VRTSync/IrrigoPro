@@ -28,7 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { FileUpload } from "@/components/ui/file-upload";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -87,6 +87,8 @@ export function WorkOrderCompletion({
 }: WorkOrderCompletionProps) {
   const [usedParts, setUsedParts] = useState<UsedPart[]>([]);
   const [photos, setPhotos] = useState<CompletionUploadedFile[]>([]);
+  const photoUrls = photos.map(p => p.url);
+  const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(photoUrls, "thumb");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
@@ -480,6 +482,9 @@ export function WorkOrderCompletion({
                           <PhotoImage
                             photoUrl={photo.url}
                             alt={`Completion photo ${index + 1}`}
+                            variant="thumb"
+                            batchManaged
+                            signedUrlOverride={getPhotoSignedUrl(photo.url)}
                             className="w-full h-full object-cover"
                           />
                         )}

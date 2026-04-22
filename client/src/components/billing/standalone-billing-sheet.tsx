@@ -38,7 +38,7 @@ import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-butt
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -99,6 +99,8 @@ export function StandaloneBillingSheet({
   const [showPartsModal, setShowPartsModal] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedFile[]>([]);
+  const uploadedPhotoUrls = uploadedPhotos.map(p => p.url);
+  const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(uploadedPhotoUrls, "thumb");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const [isFrequentPartsExpanded, setIsFrequentPartsExpanded] = useState(true);
@@ -671,6 +673,9 @@ export function StandaloneBillingSheet({
                                 <PhotoImage
                                   photoUrl={photo.url}
                                   alt={`Photo ${index + 1}`}
+                                  variant="thumb"
+                                  batchManaged
+                                  signedUrlOverride={getPhotoSignedUrl(photo.url)}
                                   className="w-full h-full object-cover rounded-lg border"
                                 />
                               )}

@@ -2,6 +2,19 @@ import { Storage, File } from "@google-cloud/storage";
 import { Response } from "express";
 import { randomUUID } from "crypto";
 import sharp from "sharp";
+import {
+  PHOTO_VARIANTS,
+  type PhotoVariant,
+  variantPath,
+  thumbPath,
+  mediumPath,
+  originalPath,
+  heicCachePath,
+  generateDisplayVariants,
+  convertHeicToJpeg,
+  readFileToBuffer,
+  VARIANT_CACHE_TTL_SECONDS,
+} from "./photo-pipeline";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -56,136 +69,323 @@ export class ObjectStorageService {
 
   // Search for a public object from the search paths.
   async searchPublicObject(filePath: string): Promise<File | null> {
-    console.log(`[OBJECT-STORAGE] Searching for file: ${filePath}`);
-    console.log(`[OBJECT-STORAGE] Search paths:`, this.getPublicObjectSearchPaths());
-    
     for (const searchPath of this.getPublicObjectSearchPaths()) {
       const fullPath = `${searchPath}/${filePath}`;
-      console.log(`[OBJECT-STORAGE] Trying full path: ${fullPath}`);
-
       try {
-        // Full path format: /<bucket_name>/<object_name>
         const { bucketName, objectName } = parseObjectPath(fullPath);
-        console.log(`[OBJECT-STORAGE] Parsed - Bucket: ${bucketName}, Object: ${objectName}`);
-        
         const bucket = objectStorageClient.bucket(bucketName);
         const file = bucket.file(objectName);
-
-        // Check if file exists
         const [exists] = await file.exists();
-        console.log(`[OBJECT-STORAGE] File exists: ${exists}`);
-        
-        if (exists) {
-          console.log(`[OBJECT-STORAGE] Found file at: ${fullPath}`);
-          return file;
-        }
+        if (exists) return file;
       } catch (error) {
         console.error(`[OBJECT-STORAGE] Error checking path ${fullPath}:`, error);
       }
     }
-
-    console.log(`[OBJECT-STORAGE] File not found: ${filePath}`);
     return null;
   }
 
-  // Downloads an object to the response.
-  async downloadObject(file: File, res: Response, cacheTtlSec: number = 3600) {
+  // Downloads an object to the response. Optionally streams as a long-cache
+  // public-display variant when `displayVariant` is true.
+  async downloadObject(
+    file: File,
+    res: Response,
+    cacheTtlSec: number = 3600,
+    options: { displayVariant?: boolean } = {}
+  ) {
     try {
-      // Get file metadata
       const [metadata] = await file.getMetadata();
       const contentType = (metadata.contentType || "application/octet-stream").toLowerCase();
 
-      // Convert HEIC/HEIF images to JPEG for broad browser compatibility
+      // Convert HEIC/HEIF images to JPEG with a write-through cache so the
+      // conversion only happens once. The first request converts and writes
+      // the JPEG to a companion path; subsequent requests serve the cached
+      // copy directly.
       const isHeic = contentType === "image/heic" || contentType === "image/heif";
       if (isHeic) {
-        res.set({
-          "Content-Type": "image/jpeg",
-          "Cache-Control": `private, max-age=${cacheTtlSec}`,
-        });
-        const readStream = file.createReadStream();
-        const converter = sharp().toFormat("jpeg");
-        readStream.on("error", (err) => {
-          console.error("Stream error during HEIC conversion:", err);
-          if (!res.headersSent) {
-            res.status(500).json({ error: "Error streaming file" });
-          }
-        });
-        converter.on("error", (err) => {
-          console.error("Sharp conversion error:", err);
+        // HEIC bytes can be served as a public, long-cached display variant
+        // (galleries) OR as a private, authenticated original — pick the
+        // matching cache-control so we never leak originals through a CDN.
+        const heicCacheControl = options.displayVariant
+          ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
+          : `private, max-age=${cacheTtlSec}`;
+        const heicCacheKey = heicCachePath(file.name);
+        const cached = await this.searchPublicObject(heicCacheKey);
+        if (cached) {
+          const [cachedMeta] = await cached.getMetadata();
+          res.set({
+            "Content-Type": "image/jpeg",
+            "Content-Length": cachedMeta.size,
+            "Cache-Control": heicCacheControl,
+          });
+          cached.createReadStream().pipe(res);
+          return;
+        }
+
+        // No cached jpeg yet — convert, cache, then serve.
+        const buf = await readFileToBuffer(file);
+        let jpeg: Buffer;
+        try {
+          jpeg = await convertHeicToJpeg(buf);
+        } catch (err) {
+          console.error("[OBJECT-STORAGE] HEIC conversion failed:", err);
           if (!res.headersSent) {
             res.status(500).json({ error: "Error converting image" });
           }
+          return;
+        }
+
+        // Best-effort cache write — failures must not block the response.
+        this.writeBufferToFirstSearchPath(heicCacheKey, jpeg, "image/jpeg").catch((e) =>
+          console.warn("[OBJECT-STORAGE] HEIC cache write failed:", e)
+        );
+
+        res.set({
+          "Content-Type": "image/jpeg",
+          "Content-Length": jpeg.length,
+          "Cache-Control": heicCacheControl,
         });
-        readStream.pipe(converter).pipe(res);
+        res.end(jpeg);
         return;
       }
 
-      // Set appropriate headers
+      const cacheControl = options.displayVariant
+        ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
+        : `private, max-age=${cacheTtlSec}`;
+
       res.set({
         "Content-Type": contentType,
         "Content-Length": metadata.size,
-        "Cache-Control": `private, max-age=${cacheTtlSec}`,
+        "Cache-Control": cacheControl,
       });
 
-      // Stream the file to the response
       const stream = file.createReadStream();
-
       stream.on("error", (err) => {
         console.error("Stream error:", err);
-        if (!res.headersSent) {
-          res.status(500).json({ error: "Error streaming file" });
-        }
+        if (!res.headersSent) res.status(500).json({ error: "Error streaming file" });
       });
-
       stream.pipe(res);
     } catch (error) {
       console.error("Error downloading file:", error);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Error downloading file" });
-      }
+      if (!res.headersSent) res.status(500).json({ error: "Error downloading file" });
     }
   }
 
-  // Gets the signed upload URL for a photo.
-  async getPhotoUploadURL(): Promise<{ signedUrl: string; photoId: string }> {
+  // Gets the signed upload URLs for a photo. Returns BOTH a signed URL for
+  // the (possibly client-prepared) display source under `photos/<uuid>` AND
+  // a signed URL for the truly untouched original camera bytes under
+  // `originals/<uuid>` so the preserved original is never re-encoded by the
+  // client compression / HEIC pipeline.
+  async getPhotoUploadURL(): Promise<{
+    signedUrl: string;
+    originalSignedUrl: string;
+    photoId: string;
+    originalKey: string;
+  }> {
     const publicSearchPaths = this.getPublicObjectSearchPaths();
     if (publicSearchPaths.length === 0) {
       throw new Error("No public search paths configured");
     }
 
     const photoId = `photos/${randomUUID()}`;
-    const fullPath = `${publicSearchPaths[0]}/${photoId}`;
-    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const originalKey = originalPath(photoId);
+    const baseDir = publicSearchPaths[0];
+    const displayParts = parseObjectPath(`${baseDir}/${photoId}`);
+    const originalParts = parseObjectPath(`${baseDir}/${originalKey}`);
 
-    const signedUrl = await signObjectURL({
-      bucketName,
-      objectName,
-      method: "PUT",
-      ttlSec: 900, // 15 minutes
-    });
+    const [signedUrl, originalSignedUrl] = await Promise.all([
+      signObjectURL({ bucketName: displayParts.bucketName, objectName: displayParts.objectName, method: "PUT", ttlSec: 900 }),
+      signObjectURL({ bucketName: originalParts.bucketName, objectName: originalParts.objectName, method: "PUT", ttlSec: 900 }),
+    ]);
 
-    return { signedUrl, photoId };
+    return { signedUrl, originalSignedUrl, photoId, originalKey };
   }
 
-  // Search for a photo in object storage by photoId (e.g. "photos/<uuid>").
+  // Search for a photo (or one of its variants) in object storage.
   async searchPhotoObject(photoId: string): Promise<File | null> {
     return this.searchPublicObject(photoId);
   }
 
-  // Returns a short-lived signed GET URL for downloading a photo from object storage.
-  async getPhotoDownloadURL(photoId: string, ttlSec = 900): Promise<string | null> {
+  // Resolve to a specific variant File. For display variants (thumb/medium)
+  // we fall back to the base photoId so legacy photos still render before
+  // backfill. For `original` we are STRICT: the caller asked for the
+  // untouched preserved bytes — we must never return compressed display
+  // bytes in their place. Returns null if the preserved original is missing.
+  async findVariant(baseId: string, variant: PhotoVariant): Promise<File | null> {
+    const target = variantPath(baseId, variant);
+    const direct = await this.searchPublicObject(target);
+    if (direct) return direct;
+    if (variant === "original") return null;
+    return this.searchPublicObject(baseId);
+  }
+
+  // Returns a short-lived signed GET URL for downloading a photo (or variant).
+  // When `PHOTO_CDN_BASE_URL` is configured AND the requested variant is a
+  // display variant (thumb/medium), returns an unsigned CDN URL instead so
+  // the variant can be served from the edge cache. Originals are always
+  // signed/private regardless.
+  async getPhotoDownloadURL(photoId: string, ttlSec = 900, variant?: PhotoVariant): Promise<string | null> {
+    const targetKey = variant ? variantPath(photoId, variant) : photoId;
+
+    const cdnBase = (process.env.PHOTO_CDN_BASE_URL || "").replace(/\/+$/, "");
+    if (cdnBase && (variant === "thumb" || variant === "medium")) {
+      // CDN front: rely on the cache to back-fill from object storage. We
+      // still verify the variant exists so we can fall back to the base path
+      // for legacy photos that have not been backfilled yet.
+      const exists = await this.searchPublicObject(targetKey);
+      if (exists) return `${cdnBase}/${targetKey}`;
+      const baseExists = await this.searchPublicObject(photoId);
+      if (baseExists) return `${cdnBase}/${photoId}`;
+      return null;
+    }
+
     const publicSearchPaths = this.getPublicObjectSearchPaths();
     for (const basePath of publicSearchPaths) {
-      const fullPath = `${basePath}/${photoId}`;
+      const fullPath = `${basePath}/${targetKey}`;
       const { bucketName, objectName } = parseObjectPath(fullPath);
       try {
-        const url = await signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
-        return url;
+        const bucket = objectStorageClient.bucket(bucketName);
+        const [exists] = await bucket.file(objectName).exists();
+        if (!exists) continue;
+        return await signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
       } catch {
-        // object may not exist under this path; try next
+        // try next
       }
     }
+    if (variant && variant !== "original") {
+      // Variant not present — try base path so legacy photos still resolve.
+      return this.getPhotoDownloadURL(photoId, ttlSec);
+    }
     return null;
+  }
+
+  // Batch resolve signed download URLs for many photoIds in a single call.
+  // Returns a map of photoId → url|null in the original order.
+  async batchSignDownloadURLs(
+    photoIds: string[],
+    variant: PhotoVariant = "medium",
+    ttlSec = 900,
+  ): Promise<Array<{ photoId: string; url: string | null }>> {
+    return Promise.all(
+      photoIds.map(async (photoId) => {
+        try {
+          const url = await this.getPhotoDownloadURL(photoId, ttlSec, variant);
+          return { photoId, url };
+        } catch (err) {
+          console.warn(`[OBJECT-STORAGE] batch sign failed for ${photoId}:`, err);
+          return { photoId, url: null };
+        }
+      }),
+    );
+  }
+
+  // Write a buffer to a specific object key under the first configured
+  // search path. Used by HEIC cache + variant generation + backfill.
+  // Defaults to long-cache public/immutable headers for display variants.
+  // Pass `cacheControl: "private, no-store"` for originals to keep them
+  // private and uncached at the edge.
+  async writeBufferToFirstSearchPath(
+    objectKey: string,
+    buf: Buffer,
+    contentType: string,
+    cacheControl?: string,
+  ): Promise<void> {
+    const publicSearchPaths = this.getPublicObjectSearchPaths();
+    if (publicSearchPaths.length === 0) throw new Error("No public search paths configured");
+    const fullPath = `${publicSearchPaths[0]}/${objectKey}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const bucket = objectStorageClient.bucket(bucketName);
+    await bucket.file(objectName).save(buf, {
+      contentType,
+      resumable: false,
+      metadata: {
+        cacheControl: cacheControl ?? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`,
+      },
+    });
+  }
+
+  // Generate the thumb + medium variants for a photo and preserve the
+  // untouched bytes under the originals/ prefix. Idempotent: skips work
+  // when targets already exist.
+  async ensurePhotoVariants(
+    baseId: string,
+    opts: { allowOriginalBackfillFromBase?: boolean } = {},
+  ): Promise<{
+    thumb: boolean;
+    medium: boolean;
+    original: boolean;
+    skipped?: boolean;
+    error?: string;
+  }> {
+    const result = { thumb: false, medium: false, original: false } as {
+      thumb: boolean; medium: boolean; original: boolean; skipped?: boolean; error?: string;
+    };
+
+    const sourceFile = await this.searchPublicObject(baseId);
+    if (!sourceFile) {
+      result.error = "source not found";
+      return result;
+    }
+
+    const [thumbExists, mediumExists, originalExists] = await Promise.all([
+      this.searchPublicObject(thumbPath(baseId)).then((f) => !!f),
+      this.searchPublicObject(mediumPath(baseId)).then((f) => !!f),
+      this.searchPublicObject(originalPath(baseId)).then((f) => !!f),
+    ]);
+
+    if (thumbExists && mediumExists && originalExists) {
+      result.skipped = true;
+      result.thumb = result.medium = result.original = true;
+      return result;
+    }
+
+    const sourceBuf = await readFileToBuffer(sourceFile);
+    const [meta] = await sourceFile.getMetadata();
+    const sourceContentType = (meta.contentType || "image/jpeg").toLowerCase();
+
+    // For HEIC/HEIF sources, decode to JPEG before resizing.
+    let workingBuf = sourceBuf;
+    if (sourceContentType === "image/heic" || sourceContentType === "image/heif") {
+      try { workingBuf = await convertHeicToJpeg(sourceBuf); }
+      catch (err) {
+        result.error = `HEIC decode failed: ${(err as Error).message}`;
+        return result;
+      }
+    }
+
+    if (originalExists) {
+      result.original = true;
+    } else if (opts.allowOriginalBackfillFromBase) {
+      // Legacy/backfill only: copy the base object into originals/. In the
+      // dual-upload finalize flow we never substitute compressed display bytes
+      // for a missing original — the client PUTs raw bytes directly.
+      try {
+        await this.writeBufferToFirstSearchPath(
+          originalPath(baseId),
+          sourceBuf,
+          sourceContentType,
+          "private, max-age=0, no-cache",
+        );
+        result.original = true;
+      } catch (err) {
+        console.warn(`[OBJECT-STORAGE] failed to preserve original for ${baseId}:`, err);
+      }
+    } else {
+      console.warn(`[OBJECT-STORAGE] original missing for ${baseId} after finalize — client original PUT may have failed`);
+    }
+
+    try {
+      const { thumb, medium } = await generateDisplayVariants(workingBuf);
+      const writes: Promise<void>[] = [];
+      if (!thumbExists) writes.push(this.writeBufferToFirstSearchPath(thumbPath(baseId), thumb, "image/jpeg").then(() => { result.thumb = true; }));
+      else result.thumb = true;
+      if (!mediumExists) writes.push(this.writeBufferToFirstSearchPath(mediumPath(baseId), medium, "image/jpeg").then(() => { result.medium = true; }));
+      else result.medium = true;
+      await Promise.all(writes);
+    } catch (err) {
+      result.error = `variant generation failed: ${(err as Error).message}`;
+    }
+
+    return result;
   }
 
   // Gets the upload URL for a company logo.
@@ -195,69 +395,37 @@ export class ObjectStorageService {
       throw new Error("No public search paths configured");
     }
 
-    // Use the first public search path for company logos
     const logoId = randomUUID();
     const fullPath = `${publicSearchPaths[0]}/company-logos/${logoId}`;
-
     const { bucketName, objectName } = parseObjectPath(fullPath);
 
-    // Sign URL for PUT method with TTL
     return signObjectURL({
       bucketName,
       objectName,
       method: "PUT",
-      ttlSec: 900, // 15 minutes
+      ttlSec: 900,
     });
   }
 
-  // Gets the public URL for a company logo
   getCompanyLogoPublicURL(logoPath: string): string {
-    if (logoPath.startsWith('http')) {
-      return logoPath; // Already a full URL
-    }
-
-    if (logoPath.startsWith('/api/')) {
-      return logoPath; // Already a relative app route
-    }
-    
-    // Use the actual serving route which streams from object storage
+    if (logoPath.startsWith('http')) return logoPath;
+    if (logoPath.startsWith('/api/')) return logoPath;
     return `/api/company-logo/${logoPath}`;
   }
 
-  // Normalizes a logo upload URL to a storable path
   normalizeLogoPath(uploadUrl: string): string {
-    if (!uploadUrl.startsWith("https://storage.googleapis.com/")) {
-      return uploadUrl;
-    }
-
-    // Extract the file name from the upload URL
+    if (!uploadUrl.startsWith("https://storage.googleapis.com/")) return uploadUrl;
     const url = new URL(uploadUrl);
     const pathParts = url.pathname.split('/');
-    const fileName = pathParts[pathParts.length - 1];
-    
-    return fileName;
+    return pathParts[pathParts.length - 1];
   }
 }
 
-function parseObjectPath(path: string): {
-  bucketName: string;
-  objectName: string;
-} {
-  if (!path.startsWith("/")) {
-    path = `/${path}`;
-  }
+function parseObjectPath(path: string): { bucketName: string; objectName: string } {
+  if (!path.startsWith("/")) path = `/${path}`;
   const pathParts = path.split("/");
-  if (pathParts.length < 3) {
-    throw new Error("Invalid path: must contain at least a bucket name");
-  }
-
-  const bucketName = pathParts[1];
-  const objectName = pathParts.slice(2).join("/");
-
-  return {
-    bucketName,
-    objectName,
-  };
+  if (pathParts.length < 3) throw new Error("Invalid path: must contain at least a bucket name");
+  return { bucketName: pathParts[1], objectName: pathParts.slice(2).join("/") };
 }
 
 async function signObjectURL({
@@ -281,9 +449,7 @@ async function signObjectURL({
     `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     }
   );
@@ -293,7 +459,6 @@ async function signObjectURL({
         `make sure you're running on Replit`
     );
   }
-
   const { signed_url: signedURL } = await response.json();
   return signedURL;
 }

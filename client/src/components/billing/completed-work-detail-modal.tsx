@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
 import { format } from "date-fns";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -183,6 +183,7 @@ export function CompletedWorkDetailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(sourcePhotos), id, open]);
   const photos = localPhotos;
+  const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(photos, "thumb");
 
   // Photo edit access (billing sheet only — work orders use their own detail view)
   const isBilledOrInvoiced = bs?.status === 'billed' || !!bs?.invoiceId;
@@ -596,6 +597,9 @@ export function CompletedWorkDetailModal({
                           <PhotoImage
                             photoUrl={url}
                             alt={`Photo ${idx + 1}`}
+                            variant="thumb"
+                            batchManaged
+                            signedUrlOverride={getPhotoSignedUrl(url)}
                             className="w-full h-full object-cover"
                           />
                         </button>

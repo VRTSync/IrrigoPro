@@ -31,7 +31,7 @@ import { EditPartsModal, type EditPartRow } from "@/components/billing/edit-part
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
 import type { BillingSheet, BillingSheetItem } from "@shared/schema";
 import { BilledIndicator } from "@/components/ui/billed-indicator";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 
 const currency = (val: number | string | null | undefined) => {
   const n = typeof val === "string" ? parseFloat(val) : (val ?? 0);
@@ -121,6 +121,8 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
 
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [editablePhotos, setEditablePhotos] = useState<UploadedFile[]>([]);
+  const editablePhotoUrls = editablePhotos.map(p => p.url);
+  const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(editablePhotoUrls, "thumb");
 
   const handleClose = () => {
     setAiSuggestion(null);
@@ -490,6 +492,9 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
                           <PhotoImage
                             photoUrl={photo.url}
                             alt={`Photo ${idx + 1}`}
+                            variant="thumb"
+                            batchManaged
+                            signedUrlOverride={getPhotoSignedUrl(photo.url)}
                             className="w-full h-full object-cover"
                           />
                         </button>

@@ -8770,11 +8770,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // File upload routes for photos and attachments
-  // Returns a signed GCS PUT URL and canonical photo path; client PUTs directly to GCS
+  // ── Photo pipeline ────────────────────────────────────────────────────
+  // Variants: thumb (~400px), medium (~1200px), original (preserved).
+  // Stored DB photoId is the canonical baseId (e.g. "photos/<uuid>").
+
+  // Returns a signed GCS PUT URL and canonical photo path; client PUTs directly to GCS.
   app.post("/api/upload/photo", requireAuthentication, async (req, res) => {
     try {
-      // Validate that the intended file is an image (based on file extension in originalName)
       const originalName = (req.query.originalName as string) || "photo";
       const ext = originalName.split('.').pop()?.toLowerCase() || '';
       const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'tiff', 'tif', 'avif'];
@@ -8783,11 +8785,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const photoService = new ObjectStorageService();
-      const { signedUrl, photoId } = await photoService.getPhotoUploadURL();
+      const { signedUrl, originalSignedUrl, photoId, originalKey } = await photoService.getPhotoUploadURL();
       res.json({
         signedUrl,
-        url: photoId,          // canonical path stored in DB (e.g. "photos/<uuid>")
+        originalSignedUrl,
+        url: photoId,
         fileName: photoId,
+        originalKey,
         originalName,
       });
     } catch (error) {
@@ -8796,42 +8800,112 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // Returns a short-lived signed GET URL for a photo stored in GCS.
-  // For legacy /uploads/ paths, returns an /api/photos/... URL since those are served from disk.
+  // Called by the client after a successful PUT to GCS. Generates display
+  // variants (thumb + medium) and copies the untouched bytes to originals/.
+  // Errors are logged but never fail the request — the next-best variant
+  // (or the base path) will still serve in galleries.
+  app.post("/api/upload/photo/finalize", requireAuthentication, async (req, res) => {
+    try {
+      const photoId = (req.body?.photoId as string)?.trim();
+      if (!photoId || !photoId.startsWith("photos/")) {
+        return res.status(400).json({ message: "Invalid photoId" });
+      }
+      const photoService = new ObjectStorageService();
+      // Run variant generation in the background — don't block the upload UX.
+      photoService.ensurePhotoVariants(photoId)
+        .then((r) => {
+          if (r.error) console.warn(`[PHOTO-FINALIZE] ${photoId} partial:`, r);
+        })
+        .catch((e) => console.error(`[PHOTO-FINALIZE] ${photoId} failed:`, e));
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Photo finalize error:", error);
+      res.status(500).json({ message: "Failed to finalize photo" });
+    }
+  });
+
+  // Batch signed-URL endpoint. Accepts { photoIds: string[], variant?: "thumb"|"medium"|"original" }
+  // Returns a parallel array { results: [{ photoId, url }] } so a gallery
+  // with N photos costs one round-trip instead of N.
+  app.post("/api/photos/signed-urls", requireAuthentication, async (req, res) => {
+    try {
+      const { photoIds, variant } = req.body || {};
+      if (!Array.isArray(photoIds)) {
+        return res.status(400).json({ message: "photoIds must be an array" });
+      }
+      if (photoIds.length > 200) {
+        return res.status(400).json({ message: "Too many photoIds (max 200)" });
+      }
+      const requested = (variant === "thumb" || variant === "medium" || variant === "original")
+        ? variant : "medium";
+      const photoService = new ObjectStorageService();
+
+      const results = await Promise.all(photoIds.map(async (raw: string) => {
+        const photoId = String(raw || "");
+        if (!photoId) return { photoId, url: null };
+
+        // Legacy /uploads paths: try object-storage first (post-backfill
+        // they live there), then fall through to the proxy which still has
+        // the on-disk fallback for un-backfilled installs. We KEEP the
+        // `uploads/` prefix on the proxy URL so a future cleanup of the
+        // disk fallback does not break historical photo URLs.
+        if (photoId.startsWith("uploads/") || photoId.startsWith("/uploads/")) {
+          const normalized = photoId.replace(/^\//, "");
+          const signed = await photoService.getPhotoDownloadURL(normalized, 900, requested);
+          if (signed) return { photoId, url: signed };
+          return { photoId, url: `/api/photos/${normalized}?variant=${requested}` };
+        }
+
+        const signed = await photoService.getPhotoDownloadURL(photoId, 900, requested);
+        if (signed) return { photoId, url: signed };
+        return { photoId, url: `/api/photos/${photoId}?variant=${requested}` };
+      }));
+
+      res.json({ variant: requested, results });
+    } catch (error) {
+      console.error("[PHOTO-BATCH-SIGN] error:", error);
+      res.status(500).json({ message: "Failed to batch sign URLs" });
+    }
+  });
+
+  // Single signed-URL endpoint (kept for compatibility). `?variant=` selects
+  // a specific variant; defaults to medium.
   app.get("/api/photos/:photoId(*)/signed-url", requireAuthentication, async (req, res) => {
     const photoId = req.params.photoId;
+    const variantQ = String(req.query.variant || "medium");
+    const variant = (variantQ === "thumb" || variantQ === "medium" || variantQ === "original")
+      ? variantQ : "medium";
     try {
-      // Legacy uploads served directly from disk — return the proxy URL
-      if (photoId.startsWith("uploads/") || photoId.startsWith("/uploads/")) {
-        const safeName = photoId.replace(/^\/?uploads\//, "");
-        return res.json({ url: `/api/photos/${safeName}` });
-      }
-
       const photoService = new ObjectStorageService();
-      const signedUrl = await photoService.getPhotoDownloadURL(photoId, 900);
-      if (signedUrl) {
-        return res.json({ url: signedUrl });
-      }
+      const normalized = photoId.startsWith("/") ? photoId.slice(1) : photoId;
+      const signedUrl = await photoService.getPhotoDownloadURL(normalized, 900, variant);
+      if (signedUrl) return res.json({ url: signedUrl });
 
-      // Fall back to the proxy route (e.g. for disk-backed files)
-      return res.json({ url: `/api/photos/${photoId}` });
+      return res.json({ url: `/api/photos/${normalized}?variant=${variant}` });
     } catch (error) {
       console.error(`[PHOTO-SIGNED-URL] Error generating signed URL for ${photoId}:`, error);
       return res.status(500).json({ error: "Failed to generate signed URL" });
     }
   });
 
-  // Authenticated photo-serving route — streams photos from object storage
-  // Legacy fallback: if photoId starts with a local filename pattern, serve from disk
+  // Authenticated photo-serving route — supports `?variant=` for display
+  // variants. Display variants get long-lived public cache headers
+  // (content-addressed by an unguessable UUID, so safe to cache).
   app.get("/api/photos/:photoId(*)", requireAuthentication, async (req, res) => {
     const photoId = req.params.photoId;
+    const variantQ = String(req.query.variant || "");
+    const variant = (variantQ === "thumb" || variantQ === "medium" || variantQ === "original")
+      ? variantQ : null;
     try {
       const photoService = new ObjectStorageService();
 
-      // Try GCS first
-      const file = await photoService.searchPhotoObject(photoId);
+      const file = variant
+        ? await photoService.findVariant(photoId, variant)
+        : await photoService.searchPhotoObject(photoId);
+
       if (file) {
-        return photoService.downloadObject(file, res);
+        const isDisplay = variant === "thumb" || variant === "medium";
+        return photoService.downloadObject(file, res, 3600, { displayVariant: isDisplay });
       }
 
       // Legacy fallback: serve from local ./uploads directory

@@ -48,7 +48,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@shared/schema";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 
 interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
@@ -73,6 +73,8 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const photoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const woPhotoList: string[] = Array.isArray(workOrder.photos) ? (workOrder.photos as string[]) : [];
+  const { getUrl: getWoPhotoUrl } = usePhotoSignedUrls(woPhotoList, "thumb");
 
   // Get current user from localStorage
   useEffect(() => {
@@ -814,15 +816,17 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 ? (
+                  {woPhotoList.length === 0 ? (
+                    <p className="text-sm text-gray-500 text-center py-4">No photos yet. Click "Add Photos" to upload.</p>
+                  ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {(workOrder.photos as string[]).map((url: string, idx: number) => (
+                      {woPhotoList.map((url: string, idx: number) => (
                         <div key={idx} className="relative group">
                           <button
                             onClick={() => setLightboxPhoto(url)}
                             className="aspect-square w-full rounded-lg overflow-hidden border border-gray-200 hover:border-blue-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
-                            <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                            <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" variant="thumb" batchManaged signedUrlOverride={getWoPhotoUrl(url)} />
                           </button>
                           {canEditPhotos && !isBilledWorkOrder && (
                             <button
@@ -837,8 +841,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-sm text-gray-500 text-center py-4">No photos yet. Click "Add Photos" to upload.</p>
                   )}
                 </CardContent>
               </Card>

@@ -6,7 +6,46 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Upload, X, Image, FileText, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
-import { PhotoImage } from "@/components/ui/photo-image";
+import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
+import imageCompression from "browser-image-compression";
+
+// Best-effort client-side photo prep: HEIC → JPEG, then downscale & re-encode
+// to keep uploads small enough to succeed on weak LTE. Falls back to the
+// original file bytes if anything goes wrong.
+async function preparePhotoForUpload(file: File): Promise<File> {
+  let working: File = file;
+  const lowerName = file.name.toLowerCase();
+  const looksHeic = file.type === "image/heic" || file.type === "image/heif"
+    || lowerName.endsWith(".heic") || lowerName.endsWith(".heif");
+
+  if (looksHeic) {
+    try {
+      // heic2any is browser-only and has a heavy WASM payload — load it lazily.
+      const heic2any = (await import("heic2any")).default;
+      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      const blob = Array.isArray(converted) ? converted[0] : converted;
+      working = new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+    } catch (err) {
+      console.warn("[file-upload] HEIC conversion failed, falling back to original bytes", err);
+      // Fall through with the original file — the server will still handle HEIC.
+    }
+  }
+
+  try {
+    const compressed = await imageCompression(working, {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 2048,
+      useWebWorker: true,
+      initialQuality: 0.85,
+      fileType: working.type === "image/png" ? "image/jpeg" : undefined,
+    });
+    if (compressed instanceof File) return compressed;
+    return new File([compressed], working.name, { type: compressed.type || working.type });
+  } catch (err) {
+    console.warn("[file-upload] image compression failed, uploading original bytes", err);
+    return working;
+  }
+}
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -48,6 +87,10 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
   const [lightboxName, setLightboxName] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const photoUrls = type === 'photo' && Array.isArray(files)
+    ? files.filter(f => !f.previewUrl).map(f => f.url)
+    : [];
+  const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(photoUrls, "thumb");
 
   const handleFileSelect = async (selectedFiles: FileList | null) => {
     if (!selectedFiles?.length) return;
@@ -60,10 +103,9 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
         const file = selectedFiles[i];
 
         if (type === 'photo') {
-          // Create a blob URL immediately for instant preview
+          // Instant local preview from the original picked file.
           const previewUrl = URL.createObjectURL(file);
 
-          // GCS-backed flow: request a signed PUT URL, then PUT directly to GCS
           const signUrlRes = await fetch(
             `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
             { method: 'POST', headers: getAuthHeaders(), credentials: 'include' }
@@ -73,18 +115,48 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
             const err = await signUrlRes.json();
             throw new Error(err.message || `Failed to get upload URL for ${file.name}`);
           }
-          const { signedUrl, url: canonicalUrl, originalName } = await signUrlRes.json();
+          const { signedUrl, originalSignedUrl, url: canonicalUrl, originalName } = await signUrlRes.json();
 
-          // PUT the file directly to GCS
-          const putRes = await fetch(signedUrl, {
-            method: 'PUT',
-            body: file,
-            headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          });
-          if (!putRes.ok) {
+          // Dual-upload: untouched original bytes go to `originals/` so the
+          // preserved copy is exactly what the camera produced (EXIF/GPS
+          // intact, no re-encode). The display source is the compressed +
+          // HEIC-converted variant — used only for fast transfer and
+          // server-side thumb/medium generation.
+          const prepared = await preparePhotoForUpload(file);
+
+          const [originalPut, displayPut] = await Promise.all([
+            originalSignedUrl
+              ? fetch(originalSignedUrl, {
+                  method: 'PUT',
+                  body: file,
+                  headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                })
+              : Promise.resolve({ ok: true } as Response),
+            fetch(signedUrl, {
+              method: 'PUT',
+              body: prepared,
+              headers: { 'Content-Type': prepared.type || 'application/octet-stream' },
+            }),
+          ]);
+          if (!displayPut.ok) {
             URL.revokeObjectURL(previewUrl);
             throw new Error(`Failed to upload ${file.name} to storage`);
           }
+          if (!originalPut.ok) {
+            // Non-fatal: display variants will still be generated. Log so
+            // ops can spot photos missing their preserved original.
+            console.warn(`[file-upload] preserved-original PUT failed for ${file.name}`);
+          }
+
+          // Fire-and-forget: ask the server to generate display variants.
+          // Variant generation runs in the background on the server too —
+          // we never block the UX.
+          fetch('/api/upload/photo/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            credentials: 'include',
+            body: JSON.stringify({ photoId: canonicalUrl }),
+          }).catch((e) => console.warn('[file-upload] finalize call failed', e));
 
           uploadedFiles.push({
             url: canonicalUrl,
@@ -232,6 +304,9 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
                       <PhotoImage
                         photoUrl={file.url}
                         alt={file.originalName}
+                        variant="thumb"
+                        batchManaged
+                        signedUrlOverride={getPhotoSignedUrl(file.url)}
                         className="w-full h-24 object-cover rounded border"
                       />
                     )}
