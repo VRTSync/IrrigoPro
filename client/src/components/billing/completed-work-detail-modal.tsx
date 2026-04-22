@@ -173,7 +173,16 @@ export function CompletedWorkDetailModal({
   const laborSubtotal = canSeePricing ? (isWorkOrder ? wo?.laborSubtotal : bs?.laborSubtotal) : null;
   const partsSubtotal = canSeePricing ? (isWorkOrder ? wo?.partsSubtotal : bs?.partsSubtotal) : null;
   const totalAmount = canSeePricing ? (isWorkOrder ? wo?.totalAmount : bs?.totalAmount) : null;
-  const photos: string[] = (isWorkOrder ? wo?.photos : bs?.photos) ?? [];
+  const sourcePhotos: string[] = (isWorkOrder ? wo?.photos : bs?.photos) ?? [];
+
+  // Local photos state mirrors the source but allows optimistic updates so the
+  // open modal reflects add/remove immediately, before the parent refetches.
+  const [localPhotos, setLocalPhotos] = useState<string[]>(sourcePhotos);
+  useEffect(() => {
+    setLocalPhotos(sourcePhotos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(sourcePhotos), id, open]);
+  const photos = localPhotos;
 
   // Photo edit access (billing sheet only — work orders use their own detail view)
   const isBilledOrInvoiced = bs?.status === 'billed' || !!bs?.invoiceId;
@@ -190,9 +199,11 @@ export function CompletedWorkDetailModal({
 
   const updatePhotos = useMutation({
     mutationFn: async (nextPhotos: string[]) => {
-      return apiRequest(`/api/billing-sheets/${id}`, "PATCH", { photos: nextPhotos });
+      await apiRequest(`/api/billing-sheets/${id}`, "PATCH", { photos: nextPhotos });
+      return nextPhotos;
     },
-    onSuccess: () => {
+    onSuccess: (nextPhotos) => {
+      setLocalPhotos(nextPhotos);
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
     },
     onError: (error: any) => {
