@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry. The business vision is to provide a complete, integrated platform for managing irrigation businesses, offering a significant market advantage through efficiency and streamlined operations.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -57,7 +57,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **User Management**: Company administrators manage users within their company.
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins.
-- **Photo Pipeline**: Photos are stored in object storage with three derived variants per source image: thumbnail (~400px JPEG), medium (~1200px JPEG), and original untouched bytes. Client-side compression and HEIC conversion are handled before upload. Variant routing allows fetching specific sizes, and a server-side proxy handles HEIC to JPEG conversion. Original photos are retained for 18 months, while display variants are immutable.
+- **Photo Pipeline**: Photos are stored in object storage with three derived variants per source image: thumbnail (~400px JPEG), medium (~1200px JPEG), and original untouched bytes. Client-side compression and HEIC conversion are handled before upload. Variant routing allows fetching specific sizes, and a server-side proxy handles HEIC to JPEG conversion.
 
 ## External Dependencies
 
