@@ -462,6 +462,7 @@ export function StandaloneBillingSheet({
             taxAmount: totals.taxAmount,
             totalAmount: totals.totalAmount,
             technicianId: currentUser?.id,
+            photos: uploadedPhotos.map(p => p.url),
             // Preserve the current status when editing an existing sheet
             status: draftData.status,
           }
@@ -473,6 +474,7 @@ export function StandaloneBillingSheet({
             taxAmount: totals.taxAmount,
             totalAmount: totals.totalAmount,
             technicianId: currentUser?.id,
+            photos: uploadedPhotos.map(p => p.url),
             status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft',
           };
 

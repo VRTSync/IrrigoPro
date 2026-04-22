@@ -1,7 +1,7 @@
 import { safeGet } from "@/utils/safeStorage";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useState, useRef, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -20,10 +20,14 @@ import {
   ChevronRight,
   Hash,
   Edit,
+  Plus,
+  Upload,
 } from "lucide-react";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
 import { format } from "date-fns";
 import { PhotoImage } from "@/components/ui/photo-image";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface CompletedWorkDetailModalProps {
   type: "work_order" | "billing_sheet";
@@ -111,10 +115,17 @@ export function CompletedWorkDetailModal({
 }: CompletedWorkDetailModalProps) {
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Determine pricing visibility
   const savedUser = safeGet("user");
-  const userRole = savedUser ? JSON.parse(savedUser)?.role : "";
+  const parsedUser = savedUser ? (() => { try { return JSON.parse(savedUser); } catch { return null; } })() : null;
+  const userRole = parsedUser?.role ?? "";
+  const userId = parsedUser?.id;
   const canSeePricing = showPricing !== undefined ? showPricing : userRole !== "field_tech";
 
   const bs = type === "billing_sheet" ? (data as BillingSheet) : null;
@@ -163,6 +174,76 @@ export function CompletedWorkDetailModal({
   const partsSubtotal = canSeePricing ? (isWorkOrder ? wo?.partsSubtotal : bs?.partsSubtotal) : null;
   const totalAmount = canSeePricing ? (isWorkOrder ? wo?.totalAmount : bs?.totalAmount) : null;
   const photos: string[] = (isWorkOrder ? wo?.photos : bs?.photos) ?? [];
+
+  // Photo edit access (billing sheet only — work orders use their own detail view)
+  const isBilledOrInvoiced = bs?.status === 'billed' || !!bs?.invoiceId;
+  const canEditPhotos =
+    type === 'billing_sheet' &&
+    !isBilledOrInvoiced &&
+    (
+      userRole === 'company_admin' ||
+      userRole === 'super_admin' ||
+      userRole === 'irrigation_manager' ||
+      userRole === 'billing_manager' ||
+      (userRole === 'field_tech' && bs?.technicianId === userId)
+    );
+
+  const updatePhotos = useMutation({
+    mutationFn: async (nextPhotos: string[]) => {
+      return apiRequest(`/api/billing-sheets/${id}`, "PATCH", { photos: nextPhotos });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to update photos",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handlePhotoUpload = async (selectedFiles: FileList | null) => {
+    if (!selectedFiles?.length) return;
+    setIsUploadingPhoto(true);
+    try {
+      const newUrls: string[] = [];
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        const signUrlRes = await fetch(
+          `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
+          { method: 'POST' }
+        );
+        if (!signUrlRes.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
+        const { signedUrl, url: canonicalUrl } = await signUrlRes.json();
+        const putRes = await fetch(signedUrl, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        });
+        if (!putRes.ok) throw new Error(`Failed to upload ${file.name} to storage`);
+        newUrls.push(canonicalUrl);
+      }
+      const existing: string[] = Array.isArray(bs?.photos) ? (bs!.photos as string[]) : [];
+      updatePhotos.mutate([...existing, ...newUrls]);
+      toast({ title: "Photos Added", description: `${newUrls.length} photo${newUrls.length > 1 ? 's' : ''} uploaded successfully` });
+    } catch (error: any) {
+      toast({ title: "Upload Failed", description: error?.message || "Failed to upload photos", variant: "destructive" });
+    } finally {
+      setIsUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
+  const handleConfirmRemovePhoto = () => {
+    if (photoToRemove === null) return;
+    const existing: string[] = Array.isArray(bs?.photos) ? (bs!.photos as string[]) : [];
+    const updated = existing.filter((_, i) => i !== photoToRemove);
+    updatePhotos.mutate(updated);
+    setPhotoToRemove(null);
+    toast({ title: "Photo Removed", description: "Photo has been removed from this billing sheet" });
+  };
   const notes = isWorkOrder ? wo?.notes : bs?.notes;
   const workSummary = isWorkOrder ? wo?.workSummary : null;
   const customerNotes = isWorkOrder ? wo?.customerNotes : null;
@@ -456,26 +537,74 @@ export function CompletedWorkDetailModal({
             )}
 
             {/* Photos */}
-            {photos.length > 0 && (
+            {(photos.length > 0 || canEditPhotos) && (
               <SectionCard
                 title={`Photos (${photos.length})`}
                 icon={<Camera className="w-4 h-4" />}
               >
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {photos.map((url, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => openLightbox(url, idx)}
-                      className="aspect-square rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-blue-400"
+                {canEditPhotos && (
+                  <div className="flex justify-end mb-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => photoInputRef.current?.click()}
+                      disabled={isUploadingPhoto || updatePhotos.isPending}
+                      className="flex items-center gap-1.5"
+                      data-testid="button-add-photos"
                     >
-                      <PhotoImage
-                        photoUrl={url}
-                        alt={`Photo ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                    </button>
-                  ))}
-                </div>
+                      {isUploadingPhoto ? (
+                        <>
+                          <Upload className="w-4 h-4 animate-pulse" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          Add Photos
+                        </>
+                      )}
+                    </Button>
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      multiple
+                      onChange={(e) => handlePhotoUpload(e.target.files)}
+                      className="hidden"
+                    />
+                  </div>
+                )}
+                {photos.length > 0 ? (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {photos.map((url, idx) => (
+                      <div key={idx} className="relative group">
+                        <button
+                          onClick={() => openLightbox(url, idx)}
+                          className="aspect-square w-full rounded-lg overflow-hidden border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        >
+                          <PhotoImage
+                            photoUrl={url}
+                            alt={`Photo ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                        {canEditPhotos && (
+                          <button
+                            onClick={() => setPhotoToRemove(idx)}
+                            disabled={updatePhotos.isPending}
+                            className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                            title="Remove photo"
+                            data-testid={`button-remove-photo-${idx}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 text-center py-4">No photos yet. Click "Add Photos" to upload.</p>
+                )}
               </SectionCard>
             )}
 
@@ -616,6 +745,29 @@ export function CompletedWorkDetailModal({
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Photo remove confirmation */}
+      <Dialog open={photoToRemove !== null} onOpenChange={() => setPhotoToRemove(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remove this photo?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">
+            This photo will be removed from this billing sheet. This cannot be undone.
+          </p>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setPhotoToRemove(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmRemovePhoto}
+              disabled={updatePhotos.isPending}
+              data-testid="button-confirm-remove-photo"
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

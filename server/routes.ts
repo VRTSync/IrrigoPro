@@ -286,6 +286,21 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
         console.error('Error checking work order assignment:', error);
       }
     }
+
+    // Field techs may also patch ONLY the photos array on a work order assigned to them
+    const updateKeys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
+    const isPhotosOnlyEdit = updateKeys.length === 1 && updateKeys[0] === 'photos' && Array.isArray(updateData.photos);
+    if (isPhotosOnlyEdit) {
+      try {
+        const workOrder = await storage.getWorkOrder(workOrderId);
+        const userIdNum = parseInt(userId as string);
+        if (workOrder && workOrder.assignedTechnicianId === userIdNum && workOrder.status !== 'cancelled' && workOrder.status !== 'billed' && !workOrder.invoiceId) {
+          return next();
+        }
+      } catch (error) {
+        console.error('Error checking work order photo edit access:', error);
+      }
+    }
   }
   
   return res.status(403).json({ 
@@ -304,14 +319,16 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
     return next();
   }
 
-  // Field techs can only submit their own billing sheet for manager review
+  // Field techs can only submit their own billing sheet for manager review,
+  // OR add/remove photos on their own billing sheet (photos-only PATCH).
   if (userRole === 'field_tech') {
-    // Payload must be exactly { status: 'submitted' } or { status: 'pending_manager_review' }
     const keys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
     const isSubmit = keys.length === 1 && (updateData.status === 'submitted' || updateData.status === 'pending_manager_review');
-    if (!isSubmit) {
+    const isPhotosOnlyEdit = keys.length === 1 && keys[0] === 'photos' && Array.isArray(updateData.photos);
+
+    if (!isSubmit && !isPhotosOnlyEdit) {
       return res.status(403).json({
-        message: "Access denied. Field technicians can only submit billing sheets for approval."
+        message: "Access denied. Field technicians can only submit billing sheets for approval or update photos on their own sheets."
       });
     }
 
@@ -325,6 +342,12 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
       const userIdNum = parseInt(userId as string);
 
       if (billingSheet && billingSheet.technicianId === userIdNum) {
+        // For photos-only edits, also block once the sheet is billed/invoiced
+        if (isPhotosOnlyEdit && (billingSheet.status === 'billed' || billingSheet.invoiceId)) {
+          return res.status(403).json({
+            message: "Cannot modify photos on a billing sheet that has already been billed."
+          });
+        }
         return next();
       }
     } catch (error) {
@@ -332,7 +355,7 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
     }
 
     return res.status(403).json({
-      message: "Access denied. Field technicians can only submit their own billing sheets for approval."
+      message: "Access denied. Field technicians can only act on their own billing sheets."
     });
   }
 

@@ -212,7 +212,12 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     },
   });
 
-  const canEditPhotos = currentUser?.role === 'company_admin' || currentUser?.role === 'super_admin' || currentUser?.role === 'irrigation_manager';
+  const canEditPhotos =
+    currentUser?.role === 'company_admin' ||
+    currentUser?.role === 'super_admin' ||
+    currentUser?.role === 'irrigation_manager' ||
+    currentUser?.role === 'billing_manager' ||
+    (currentUser?.role === 'field_tech' && workOrder.assignedTechnicianId === currentUser?.id);
 
   const updatePhotos = useMutation({
     mutationFn: async (photos: string[]) => {
