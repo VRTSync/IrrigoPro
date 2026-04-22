@@ -271,6 +271,10 @@ export const missingPhotosNotifications = pgTable("missing_photos_notifications"
   sheetCount: integer("sheet_count").notNull().default(0),
   sheetIds: integer("sheet_ids").array().default([]),
   sentByUserId: integer("sent_by_user_id").references(() => users.id),
+  lastSentEmailAt: timestamp("last_sent_email_at"),
+  lastSentSmsAt: timestamp("last_sent_sms_at"),
+  lastEmailSheetCount: integer("last_email_sheet_count"),
+  lastSmsSheetCount: integer("last_sms_sheet_count"),
 });
 
 // Part assemblies - pre-configured bundles of parts for common repairs

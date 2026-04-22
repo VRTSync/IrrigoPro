@@ -6,6 +6,7 @@ import type { InsertInvoice } from "@shared/schema";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "./email-service";
+import { SmsService } from "./sms-service";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "./ai-prompt-templates";
@@ -7089,12 +7090,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         if (s.technicianId != null) visibleTechIds.add(s.technicianId);
       }
       const notifyRows = await storage.getMissingPhotosNotifications();
-      const notifications: Record<string, { lastSentAt: string; sheetCount: number }> = {};
+      const notifications: Record<string, {
+        lastSentAt: string;
+        sheetCount: number;
+        lastEmailAt: string | null;
+        lastSmsAt: string | null;
+        emailSheetCount: number | null;
+        smsSheetCount: number | null;
+      }> = {};
       for (const n of notifyRows) {
         if (n.technicianId != null && visibleTechIds.has(n.technicianId)) {
           notifications[String(n.technicianId)] = {
             lastSentAt: new Date(n.lastSentAt).toISOString(),
             sheetCount: n.sheetCount,
+            lastEmailAt: n.lastSentEmailAt ? new Date(n.lastSentEmailAt).toISOString() : null,
+            lastSmsAt: n.lastSentSmsAt ? new Date(n.lastSentSmsAt).toISOString() : null,
+            emailSheetCount: n.lastEmailSheetCount ?? null,
+            smsSheetCount: n.lastSmsSheetCount ?? null,
           };
         }
       }
@@ -7125,6 +7137,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const force = req.body?.force === true;
+      const channelInput = (req.body?.channel as string | undefined)?.toLowerCase();
+      const channelChoice: 'email' | 'sms' | 'both' =
+        channelInput === 'sms' || channelInput === 'both' ? channelInput : 'email';
+      const channels: Array<'email' | 'sms'> =
+        channelChoice === 'both' ? ['email', 'sms'] : [channelChoice];
+      const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
       // Tenant scoping: non-super_admin requesters may only notify technicians
       // belonging to their own company. Without this guard, a manager from one
@@ -7177,45 +7195,37 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const existingRows = await storage.getMissingPhotosNotifications();
-      const lastSentByTech = new Map<number, Date>();
+      const lastByTech = new Map<number, { email: Date | null; sms: Date | null }>();
       for (const n of existingRows) {
-        if (n.technicianId != null) lastSentByTech.set(n.technicianId, new Date(n.lastSentAt));
+        if (n.technicianId != null) {
+          lastByTech.set(n.technicianId, {
+            email: n.lastSentEmailAt ? new Date(n.lastSentEmailAt) : null,
+            sms: n.lastSentSmsAt ? new Date(n.lastSentSmsAt) : null,
+          });
+        }
       }
+
+      type ChannelOutcome =
+        | { channel: 'email' | 'sms'; status: 'sent'; lastSentAt: string }
+        | { channel: 'email' | 'sms'; status: 'skipped_already_notified'; lastSentAt: string }
+        | { channel: 'email' | 'sms'; status: 'skipped_no_contact' }
+        | { channel: 'email' | 'sms'; status: 'failed'; error?: string };
 
       const results: Array<{
         technicianId: number;
         technicianName: string;
-        status: 'sent' | 'skipped_already_notified' | 'skipped_no_email' | 'failed' | 'skipped_no_user';
         sheetCount: number;
-        lastSentAt?: string;
-        error?: string;
+        skippedNoUser?: boolean;
+        channels: ChannelOutcome[];
       }> = [];
+
+      const now = Date.now();
 
       for (const [techId, sheets] of Array.from(byTech.entries())) {
         const technicianName = sheets[0].technicianName || `User #${techId}`;
-
         const tech = await storage.getUser(techId);
         if (!tech) {
-          results.push({ technicianId: techId, technicianName, status: 'skipped_no_user', sheetCount: sheets.length });
-          continue;
-        }
-
-        // True one-shot idempotency: if we've ever sent to this technician,
-        // skip unless the manager explicitly requested a re-send via `force`.
-        const lastSent = lastSentByTech.get(techId);
-        if (!force && lastSent) {
-          results.push({
-            technicianId: techId,
-            technicianName: tech.name || technicianName,
-            status: 'skipped_already_notified',
-            sheetCount: sheets.length,
-            lastSentAt: lastSent.toISOString(),
-          });
-          continue;
-        }
-
-        if (!tech.email) {
-          results.push({ technicianId: techId, technicianName: tech.name || technicianName, status: 'skipped_no_email', sheetCount: sheets.length });
+          results.push({ technicianId: techId, technicianName, sheetCount: sheets.length, skippedNoUser: true, channels: [] });
           continue;
         }
 
@@ -7227,53 +7237,101 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           } catch {}
         }
 
-        const sendResult = await EmailService.sendMissingPhotosTechnicianEmail({
-          to: tech.email,
-          technicianName: tech.name || technicianName,
-          companyName,
-          sheets: sheets.map((s: MissingSheet) => ({
-            id: s.id,
-            billingNumber: s.billingNumber,
-            customerName: s.customerName,
-            branchName: s.branchName,
-            propertyAddress: s.propertyAddress,
-            workDate: s.workDate,
-          })),
-        });
+        const channelOutcomes: ChannelOutcome[] = [];
+        const last = lastByTech.get(techId) ?? { email: null, sms: null };
 
-        if (!sendResult.success) {
-          results.push({
-            technicianId: techId,
-            technicianName: tech.name || technicianName,
-            status: 'failed',
-            sheetCount: sheets.length,
-            error: sendResult.error,
-          });
-          continue;
+        for (const channel of channels) {
+          const lastForChannel = channel === 'email' ? last.email : last.sms;
+          if (!force && lastForChannel && now - lastForChannel.getTime() < RECENT_WINDOW_MS) {
+            channelOutcomes.push({
+              channel,
+              status: 'skipped_already_notified',
+              lastSentAt: lastForChannel.toISOString(),
+            });
+            continue;
+          }
+
+          if (channel === 'email') {
+            if (!tech.email) {
+              channelOutcomes.push({ channel, status: 'skipped_no_contact' });
+              continue;
+            }
+            const sendResult = await EmailService.sendMissingPhotosTechnicianEmail({
+              to: tech.email,
+              technicianName: tech.name || technicianName,
+              companyName,
+              sheets: sheets.map((s: MissingSheet) => ({
+                id: s.id,
+                billingNumber: s.billingNumber,
+                customerName: s.customerName,
+                branchName: s.branchName,
+                propertyAddress: s.propertyAddress,
+                workDate: s.workDate,
+              })),
+            });
+            if (!sendResult.success) {
+              channelOutcomes.push({ channel, status: 'failed', error: sendResult.error });
+              continue;
+            }
+            const saved = await storage.upsertMissingPhotosNotification(
+              techId,
+              sheets.map((s: MissingSheet) => s.id),
+              req.authenticatedUserId ?? null,
+              'email',
+            );
+            channelOutcomes.push({
+              channel,
+              status: 'sent',
+              lastSentAt: new Date(saved.lastSentEmailAt ?? saved.lastSentAt).toISOString(),
+            });
+          } else {
+            if (!tech.phone) {
+              channelOutcomes.push({ channel, status: 'skipped_no_contact' });
+              continue;
+            }
+            const sendResult = await SmsService.sendMissingPhotosTechnicianSms({
+              to: tech.phone,
+              technicianName: tech.name || technicianName,
+              companyName,
+              sheets: sheets.map((s: MissingSheet) => ({ id: s.id, billingNumber: s.billingNumber })),
+            });
+            if (!sendResult.success) {
+              channelOutcomes.push({ channel, status: 'failed', error: sendResult.error });
+              continue;
+            }
+            const saved = await storage.upsertMissingPhotosNotification(
+              techId,
+              sheets.map((s: MissingSheet) => s.id),
+              req.authenticatedUserId ?? null,
+              'sms',
+            );
+            channelOutcomes.push({
+              channel,
+              status: 'sent',
+              lastSentAt: new Date(saved.lastSentSmsAt ?? saved.lastSentAt).toISOString(),
+            });
+          }
         }
 
-        const saved = await storage.upsertMissingPhotosNotification(
-          techId,
-          sheets.map((s: MissingSheet) => s.id),
-          req.authenticatedUserId ?? null,
-        );
         results.push({
           technicianId: techId,
           technicianName: tech.name || technicianName,
-          status: 'sent',
           sheetCount: sheets.length,
-          lastSentAt: new Date(saved.lastSentAt).toISOString(),
+          channels: channelOutcomes,
         });
       }
 
+      const flatOutcomes = results.flatMap(r => r.channels);
       const summary = {
-        sent: results.filter(r => r.status === 'sent').length,
-        skippedAlreadyNotified: results.filter(r => r.status === 'skipped_already_notified').length,
-        skippedNoEmail: results.filter(r => r.status === 'skipped_no_email' || r.status === 'skipped_no_user').length,
-        failed: results.filter(r => r.status === 'failed').length,
+        sent: flatOutcomes.filter(c => c.status === 'sent').length,
+        skippedAlreadyNotified: flatOutcomes.filter(c => c.status === 'skipped_already_notified').length,
+        skippedNoEmail: flatOutcomes.filter(c => c.channel === 'email' && c.status === 'skipped_no_contact').length
+          + results.filter(r => r.skippedNoUser).length,
+        skippedNoPhone: flatOutcomes.filter(c => c.channel === 'sms' && c.status === 'skipped_no_contact').length,
+        failed: flatOutcomes.filter(c => c.status === 'failed').length,
       };
 
-      res.json({ summary, results });
+      res.json({ summary, results, channel: channelChoice });
     } catch (error) {
       console.error('Error sending missing-photos notifications:', error);
       res.status(500).json({ message: "Failed to send notifications" });

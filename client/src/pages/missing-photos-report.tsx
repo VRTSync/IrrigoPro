@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Camera, Download, Search, User, Building2, Calendar, ChevronDown, ChevronRight, ArrowLeft, Mail, Clock } from "lucide-react";
+import { Camera, Download, Search, User, Building2, Calendar, ChevronDown, ChevronRight, ArrowLeft, Send, Mail, MessageSquare, Clock } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -26,6 +28,10 @@ import type { BillingSheet } from "@shared/schema";
 interface NotificationInfo {
   lastSentAt: string;
   sheetCount: number;
+  lastEmailAt: string | null;
+  lastSmsAt: string | null;
+  emailSheetCount: number | null;
+  smsSheetCount: number | null;
 }
 
 interface MissingPhotosResponse {
@@ -35,21 +41,41 @@ interface MissingPhotosResponse {
   notifications: Record<string, NotificationInfo>;
 }
 
+type ChannelOutcome =
+  | { channel: 'email' | 'sms'; status: 'sent'; lastSentAt: string }
+  | { channel: 'email' | 'sms'; status: 'skipped_already_notified'; lastSentAt: string }
+  | { channel: 'email' | 'sms'; status: 'skipped_no_contact' }
+  | { channel: 'email' | 'sms'; status: 'failed'; error?: string };
+
 interface NotifyResultRow {
   technicianId: number;
   technicianName: string;
-  status: 'sent' | 'skipped_already_notified' | 'skipped_no_email' | 'skipped_no_user' | 'failed';
   sheetCount: number;
-  lastSentAt?: string;
-  error?: string;
+  skippedNoUser?: boolean;
+  channels: ChannelOutcome[];
 }
 
 interface NotifyResponse {
-  summary: { sent: number; skippedAlreadyNotified: number; skippedNoEmail: number; failed: number };
+  channel: 'email' | 'sms' | 'both';
+  summary: { sent: number; skippedAlreadyNotified: number; skippedNoEmail: number; skippedNoPhone: number; failed: number };
   results: NotifyResultRow[];
 }
 
 type GroupBy = "technician" | "customer";
+type ChannelChoice = "email" | "sms" | "both";
+
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "never";
+  const t = new Date(iso).getTime();
+  const diffMs = Date.now() - t;
+  if (diffMs < 60_000) return "just now";
+  const m = Math.floor(diffMs / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
 
 export default function MissingPhotosReport() {
   const [groupBy, setGroupBy] = useState<GroupBy>("technician");
@@ -58,6 +84,7 @@ export default function MissingPhotosReport() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [forceResend, setForceResend] = useState(false);
+  const [channelChoice, setChannelChoice] = useState<ChannelChoice>("email");
   const [lastSummary, setLastSummary] = useState<NotifyResponse | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -66,19 +93,20 @@ export default function MissingPhotosReport() {
     queryKey: ["/api/billing-sheets/missing-photos"],
   });
 
-  const notifyMutation = useMutation<NotifyResponse, Error, { force: boolean }>({
+  const notifyMutation = useMutation<NotifyResponse, Error, { force: boolean; channel: ChannelChoice }>({
     mutationFn: (vars) => apiRequest("/api/billing-sheets/missing-photos/notify", "POST", vars),
     onSuccess: (resp) => {
       setLastSummary(resp);
-      const { sent, skippedAlreadyNotified, skippedNoEmail, failed } = resp.summary;
+      const { sent, skippedAlreadyNotified, skippedNoEmail, skippedNoPhone, failed } = resp.summary;
       toast({
-        title: sent > 0 ? `Notified ${sent} technician${sent === 1 ? "" : "s"}` : "No new emails sent",
+        title: sent > 0 ? `Notified ${sent} technician${sent === 1 ? "" : "s"}` : "Nothing sent",
         description: [
           sent > 0 ? `${sent} sent` : null,
-          skippedAlreadyNotified > 0 ? `${skippedAlreadyNotified} skipped (already notified — use Force re-send)` : null,
+          skippedAlreadyNotified > 0 ? `${skippedAlreadyNotified} skipped (recently notified — use Force re-send)` : null,
           skippedNoEmail > 0 ? `${skippedNoEmail} skipped (no email on file)` : null,
+          skippedNoPhone > 0 ? `${skippedNoPhone} skipped (no phone on file)` : null,
           failed > 0 ? `${failed} failed` : null,
-        ].filter(Boolean).join(" • "),
+        ].filter(Boolean).join(" • ") || "No deliveries.",
         variant: failed > 0 ? "destructive" : "default",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets/missing-photos"] });
@@ -126,6 +154,9 @@ export default function MissingPhotosReport() {
   const formatDate = (date: string | Date) =>
     new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
+  const channelIcon = (c: 'email' | 'sms') => c === 'email' ? <Mail className="w-3 h-3" /> : <MessageSquare className="w-3 h-3" />;
+  const channelLabel = (c: 'email' | 'sms') => c === 'email' ? 'Email' : 'SMS';
+
   return (
     <PageContainer>
       <PageHeader
@@ -145,7 +176,7 @@ export default function MissingPhotosReport() {
               disabled={isLoading || (data?.count ?? 0) === 0 || notifyMutation.isPending}
               data-testid="button-notify-techs"
             >
-              <Mail className="w-4 h-4 mr-2" />
+              <Send className="w-4 h-4 mr-2" />
               {notifyMutation.isPending ? "Sending…" : "Notify technicians"}
             </Button>
           </div>
@@ -251,14 +282,24 @@ export default function MissingPhotosReport() {
                       <span className="text-base font-semibold text-blue-900">{groupName}</span>
                       <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{items.length}</Badge>
                       {notif && (
-                        <Badge
-                          variant="outline"
-                          className="border-emerald-300 text-emerald-800 bg-emerald-50 gap-1"
-                          data-testid={`badge-last-notified-${techId}`}
-                        >
-                          <Clock className="w-3 h-3" />
-                          Notified {new Date(notif.lastSentAt).toLocaleString()}
-                        </Badge>
+                        <>
+                          <Badge
+                            variant="outline"
+                            className={`gap-1 ${notif.lastEmailAt ? 'border-emerald-300 text-emerald-800 bg-emerald-50' : 'border-gray-300 text-gray-500 bg-white'}`}
+                            data-testid={`badge-last-email-${techId}`}
+                          >
+                            <Mail className="w-3 h-3" />
+                            Email {formatRelative(notif.lastEmailAt)}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`gap-1 ${notif.lastSmsAt ? 'border-emerald-300 text-emerald-800 bg-emerald-50' : 'border-gray-300 text-gray-500 bg-white'}`}
+                            data-testid={`badge-last-sms-${techId}`}
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            SMS {formatRelative(notif.lastSmsAt)}
+                          </Badge>
+                        </>
                       )}
                     </div>
                   </button>
@@ -316,19 +357,27 @@ export default function MissingPhotosReport() {
           <Card data-testid="card-notify-summary">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <p className="font-semibold text-gray-900">Last outreach result</p>
+                <p className="font-semibold text-gray-900">Last outreach result ({lastSummary.channel === 'both' ? 'Email + SMS' : lastSummary.channel === 'sms' ? 'SMS' : 'Email'})</p>
                 <Button variant="ghost" size="sm" onClick={() => setLastSummary(null)}>Dismiss</Button>
               </div>
-              <ul className="space-y-1 text-sm">
+              <ul className="space-y-2 text-sm">
                 {lastSummary.results.map(r => (
-                  <li key={r.technicianId} className="flex items-center justify-between gap-3">
-                    <span className="text-gray-800">{r.technicianName} <span className="text-gray-500">({r.sheetCount} sheet{r.sheetCount === 1 ? "" : "s"})</span></span>
-                    <span className="text-xs">
-                      {r.status === 'sent' && <Badge className="bg-emerald-100 text-emerald-800">Email sent</Badge>}
-                      {r.status === 'skipped_already_notified' && <Badge variant="outline">Skipped — already notified {r.lastSentAt ? new Date(r.lastSentAt).toLocaleString() : ''}</Badge>}
-                      {r.status === 'skipped_no_email' && <Badge variant="outline" className="border-amber-300 text-amber-800">No email on file</Badge>}
-                      {r.status === 'skipped_no_user' && <Badge variant="outline" className="border-amber-300 text-amber-800">User not found</Badge>}
-                      {r.status === 'failed' && <Badge variant="destructive">Failed{r.error ? `: ${r.error}` : ''}</Badge>}
+                  <li key={r.technicianId} className="flex items-start justify-between gap-3">
+                    <span className="text-gray-800 min-w-0">
+                      <span className="font-medium">{r.technicianName}</span>{' '}
+                      <span className="text-gray-500">({r.sheetCount} sheet{r.sheetCount === 1 ? "" : "s"})</span>
+                    </span>
+                    <span className="flex flex-wrap gap-1 justify-end">
+                      {r.skippedNoUser && <Badge variant="outline" className="border-amber-300 text-amber-800">User not found</Badge>}
+                      {r.channels.map((c, i) => {
+                        const icon = channelIcon(c.channel);
+                        const label = channelLabel(c.channel);
+                        if (c.status === 'sent') return <Badge key={i} className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 gap-1">{icon}{label} sent</Badge>;
+                        if (c.status === 'skipped_already_notified') return <Badge key={i} variant="outline" className="gap-1" title={`Last sent ${new Date(c.lastSentAt).toLocaleString()}`}>{icon}{label} skipped — recently notified</Badge>;
+                        if (c.status === 'skipped_no_contact') return <Badge key={i} variant="outline" className="border-amber-300 text-amber-800 gap-1">{icon}No {c.channel === 'email' ? 'email' : 'phone'} on file</Badge>;
+                        if (c.status === 'failed') return <Badge key={i} variant="destructive" className="gap-1">{icon}{label} failed{c.error ? `: ${c.error}` : ''}</Badge>;
+                        return null;
+                      })}
                     </span>
                   </li>
                 ))}
@@ -341,28 +390,50 @@ export default function MissingPhotosReport() {
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Email technicians about missing photos?</AlertDialogTitle>
+            <AlertDialogTitle>Notify technicians about missing photos</AlertDialogTitle>
             <AlertDialogDescription>
-              Each technician will receive a single email listing only their own affected billing sheets, with a deep link into each one.
-              By default, technicians who have already been notified once are skipped so this action stays a one-shot.
+              Pick how to reach each technician. They will receive a list of only their own affected sheets, with a link back into the app.
+              By default, anyone notified on the chosen channel within the last 24 hours is skipped.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={forceResend}
-              onChange={(e) => setForceResend(e.target.checked)}
-              data-testid="checkbox-force-resend"
-            />
-            Re-send even to technicians who were already notified
-          </label>
+          <div className="space-y-3">
+            <RadioGroup value={channelChoice} onValueChange={(v) => setChannelChoice(v as ChannelChoice)}>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="email" id="ch-email" data-testid="radio-channel-email" />
+                <Label htmlFor="ch-email" className="flex items-center gap-2 cursor-pointer">
+                  <Mail className="w-4 h-4 text-gray-600" /> Email
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="sms" id="ch-sms" data-testid="radio-channel-sms" />
+                <Label htmlFor="ch-sms" className="flex items-center gap-2 cursor-pointer">
+                  <MessageSquare className="w-4 h-4 text-gray-600" /> SMS (text message)
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="both" id="ch-both" data-testid="radio-channel-both" />
+                <Label htmlFor="ch-both" className="flex items-center gap-2 cursor-pointer">
+                  <Mail className="w-4 h-4 text-gray-600" /> + <MessageSquare className="w-4 h-4 text-gray-600" /> Both
+                </Label>
+              </div>
+            </RadioGroup>
+            <label className="flex items-center gap-2 text-sm text-gray-700 pt-2 border-t">
+              <input
+                type="checkbox"
+                checked={forceResend}
+                onChange={(e) => setForceResend(e.target.checked)}
+                data-testid="checkbox-force-resend"
+              />
+              Re-send even to technicians notified within the last 24 hours
+            </label>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-notify">Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { setConfirmOpen(false); notifyMutation.mutate({ force: forceResend }); }}
+              onClick={() => { setConfirmOpen(false); notifyMutation.mutate({ force: forceResend, channel: channelChoice }); }}
               data-testid="button-confirm-notify"
             >
-              Send emails
+              {channelChoice === 'both' ? 'Send email + SMS' : channelChoice === 'sms' ? 'Send SMS' : 'Send emails'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -375,8 +446,6 @@ export default function MissingPhotosReport() {
           onOpenChange={(open) => {
             if (!open) {
               setViewingSheet(null);
-              // Refetch so any sheet that just had photos re-attached drops
-              // off this report immediately.
               queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets/missing-photos"] });
             }
           }}

@@ -336,7 +336,7 @@ export interface IStorage {
 
   // Missing-photos outreach tracking — one row per technician
   getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]>;
-  upsertMissingPhotosNotification(technicianId: number, sheetIds: number[], sentByUserId: number | null): Promise<MissingPhotosNotification>;
+  upsertMissingPhotosNotification(technicianId: number, sheetIds: number[], sentByUserId: number | null, channel?: 'email' | 'sms'): Promise<MissingPhotosNotification>;
 
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
@@ -2356,25 +2356,39 @@ export class DatabaseStorage implements IStorage {
     technicianId: number,
     sheetIds: number[],
     sentByUserId: number | null,
+    channel: 'email' | 'sms' = 'email',
   ): Promise<MissingPhotosNotification> {
     const now = new Date();
+    const insertValues: any = {
+      technicianId,
+      sheetIds,
+      sheetCount: sheetIds.length,
+      lastSentAt: now,
+      sentByUserId,
+    };
+    const updateValues: any = {
+      sheetIds,
+      sheetCount: sheetIds.length,
+      lastSentAt: now,
+      sentByUserId,
+    };
+    if (channel === 'email') {
+      insertValues.lastSentEmailAt = now;
+      insertValues.lastEmailSheetCount = sheetIds.length;
+      updateValues.lastSentEmailAt = now;
+      updateValues.lastEmailSheetCount = sheetIds.length;
+    } else {
+      insertValues.lastSentSmsAt = now;
+      insertValues.lastSmsSheetCount = sheetIds.length;
+      updateValues.lastSentSmsAt = now;
+      updateValues.lastSmsSheetCount = sheetIds.length;
+    }
     const [row] = await db
       .insert(missingPhotosNotifications)
-      .values({
-        technicianId,
-        sheetIds,
-        sheetCount: sheetIds.length,
-        lastSentAt: now,
-        sentByUserId,
-      })
+      .values(insertValues)
       .onConflictDoUpdate({
         target: missingPhotosNotifications.technicianId,
-        set: {
-          sheetIds,
-          sheetCount: sheetIds.length,
-          lastSentAt: now,
-          sentByUserId,
-        },
+        set: updateValues,
       })
       .returning();
     return row;

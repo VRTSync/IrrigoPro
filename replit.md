@@ -74,5 +74,6 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **ORM**: Drizzle ORM
 - **Session Management**: connect-pg-simple
 - **Email Service**: Postmark API
+- **SMS Service**: Twilio
 - **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
 - **PDF Generation**: Puppeteer.
