@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -57,26 +57,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **User Management**: Company administrators manage users within their company.
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins.
-
-## Photo pipeline
-
-Photos are stored in object storage with three derived variants per source image:
-
-- `<baseId>__thumb.jpg`  — ~400px JPEG (gallery thumbnails)
-- `<baseId>__medium.jpg` — ~1200px JPEG (lightboxes, modals, PDFs)
-- `originals/<uuid>`     — untouched bytes, EXIF preserved, retained 18 months
-
-The DB-stored `photoId` is the canonical base ID (e.g. `photos/<uuid>`); variants are derived deterministically and discovered with a fallback to the base path for legacy photos that have not been backfilled yet. Single source of truth: `server/photo-pipeline.ts`.
-
-**Client compression**: `client/src/components/ui/file-upload.tsx` runs `browser-image-compression` (and `heic2any` for HEIC sources) before the PUT, then calls `POST /api/upload/photo/finalize` so the server can generate display variants and copy the untouched bytes to `originals/`.
-
-**Variant routing**: `<PhotoImage variant="thumb|medium|original">` (default `medium`). Galleries pass `thumb`. Frontend can batch-resolve signed URLs via `usePhotoSignedUrls(ids, variant)` (POST `/api/photos/signed-urls`).
-
-**HEIC**: server proxy converts HEIC → JPEG with a write-through cache at `<baseId>__heic.jpg` so each file is converted at most once. Display variants get `Cache-Control: public, max-age=1y, immutable`.
-
-**Retention**: `ORIGINAL_RETENTION_MONTHS = 18`. Configure a matching object-storage bucket lifecycle rule against the `originals/` prefix to enforce automatic deletion. Display variants are immutable and not subject to retention.
-
-**Backfill**: one-time script `node --import tsx/esm server/scripts/backfill-photo-variants.ts` walks all photo-bearing tables, generates variants, copies originals, and migrates legacy `./uploads/<filename>` disk files into object storage. Resumable via `app_settings.photoBackfill.done`; failures recorded under `photoBackfill.failed`.
+- **Photo Pipeline**: Photos are stored in object storage with three derived variants per source image: thumbnail (~400px JPEG), medium (~1200px JPEG), and original untouched bytes. Client-side compression and HEIC conversion are handled before upload. Variant routing allows fetching specific sizes, and a server-side proxy handles HEIC to JPEG conversion. Original photos are retained for 18 months, while display variants are immutable.
 
 ## External Dependencies
 
