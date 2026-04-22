@@ -32,9 +32,13 @@ export class SmsService {
     const company = args.companyName || 'IrrigoPro';
     const count = args.sheets.length;
     // Technicians cannot access /billing-sheets/missing-photos (manager-only).
-    // Send them to /billing-sheets, which is in their tech route bundle, where
-    // they can open each affected sheet and tap Add Photos.
-    const reportUrl = `${this.baseUrl}/billing-sheets`;
+    // Deep-link to /billing-sheets with ?ids=… so the tech's billing sheets
+    // page filters down to *only* the sheets that lost their photos. The
+    // page already restricts the underlying list to the tech's own sheets
+    // (see queryFn in client/src/pages/billing-sheets.tsx), so combining
+    // tech-scoped data with the id filter yields exactly their affected list.
+    const idsParam = args.sheets.map(s => s.id).join(',');
+    const reportUrl = `${this.baseUrl}/billing-sheets?ids=${idsParam}`;
     const firstName = (args.technicianName || '').split(' ')[0] || 'there';
 
     const body =

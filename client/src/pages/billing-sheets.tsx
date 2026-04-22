@@ -69,6 +69,20 @@ export default function BillingSheets() {
     return Number.isFinite(id) ? id : null;
   });
 
+  // Deep-link support: ?ids=1,2,3 narrows the page to a specific subset of
+  // billing sheets. Used by the missing-photos SMS outreach so a tech taps the
+  // link and lands on a list of only the sheets that need photos re-attached.
+  const [filterIdSet] = useState<Set<number> | null>(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("ids");
+    if (!raw) return null;
+    const ids = raw
+      .split(",")
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => Number.isFinite(n));
+    return ids.length > 0 ? new Set(ids) : null;
+  });
+
   // Get billing sheets based on role:
   // - Field techs: only their own billing sheets
   // - Managers/Admins: all billing sheets for oversight, but drafts filtered client-side
@@ -98,26 +112,31 @@ export default function BillingSheets() {
     }
   }, [pendingOpenSheetId, billingSheets]);
 
+  // Apply optional ?ids=… narrowing before bucketing into sections.
+  const scopedSheets = billingSheets
+    ? (filterIdSet ? billingSheets.filter(s => filterIdSet.has(s.id)) : billingSheets)
+    : undefined;
+
   // Separate drafts and submitted sheets
   // Drafts are always user-specific, submitted sheets are visible to all with role-based access
-  const draftSheets = billingSheets?.filter(sheet => 
+  const draftSheets = scopedSheets?.filter(sheet =>
     sheet.status === 'draft' && sheet.technicianId === currentUser?.id
   ) || [];
-  const submittedSheets = billingSheets?.filter(sheet => sheet.status !== 'draft') || [];
+  const submittedSheets = scopedSheets?.filter(sheet => sheet.status !== 'draft') || [];
 
   const isBilledSheet = (sheet: BillingSheet) => sheet.status === 'billed' || !!sheet.invoiceId;
 
   // Active: draft (user's own) + submitted + pending_manager_review
   // Completed: approved_passed_to_billing + approved (not billed)
   // Billed: status === 'billed' or has invoiceId
-  const activeSheets = billingSheets?.filter(sheet => {
+  const activeSheets = scopedSheets?.filter(sheet => {
     if (sheet.status === 'draft') return sheet.technicianId === currentUser?.id;
     return sheet.status === 'submitted' || sheet.status === 'pending_manager_review';
   }) || [];
-  const completedSheets = billingSheets?.filter(sheet =>
+  const completedSheets = scopedSheets?.filter(sheet =>
     (sheet.status === 'approved_passed_to_billing' || sheet.status === 'approved') && !isBilledSheet(sheet)
   ) || [];
-  const billedSheets = billingSheets?.filter(sheet => isBilledSheet(sheet)) || [];
+  const billedSheets = scopedSheets?.filter(sheet => isBilledSheet(sheet)) || [];
 
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;

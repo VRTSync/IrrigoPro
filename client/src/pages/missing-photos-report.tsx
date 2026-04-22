@@ -98,10 +98,20 @@ export default function MissingPhotosReport() {
     onSuccess: (resp) => {
       setLastSummary(resp);
       const { sent, skippedAlreadyNotified, skippedNoEmail, skippedNoPhone, failed } = resp.summary;
+      // `sent` is a count of channel deliveries (a single tech in `both` mode
+      // can contribute up to 2). Compute unique technicians who received at
+      // least one successful delivery for accurate copy.
+      const technicianReached = new Set(
+        resp.results
+          .filter(r => r.channels.some(c => c.status === 'sent'))
+          .map(r => r.technicianId),
+      ).size;
       toast({
-        title: sent > 0 ? `Notified ${sent} technician${sent === 1 ? "" : "s"}` : "Nothing sent",
+        title: technicianReached > 0
+          ? `Notified ${technicianReached} technician${technicianReached === 1 ? "" : "s"}`
+          : "Nothing sent",
         description: [
-          sent > 0 ? `${sent} sent` : null,
+          sent > 0 ? `${sent} message${sent === 1 ? "" : "s"} sent` : null,
           skippedAlreadyNotified > 0 ? `${skippedAlreadyNotified} skipped (recently notified — use Force re-send)` : null,
           skippedNoEmail > 0 ? `${skippedNoEmail} skipped (no email on file)` : null,
           skippedNoPhone > 0 ? `${skippedNoPhone} skipped (no phone on file)` : null,
