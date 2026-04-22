@@ -13,7 +13,8 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera } from "lucide-react";
+import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { BillingSheet } from "@shared/schema";
@@ -194,6 +195,19 @@ export default function BillingSheets() {
   // Check if user can edit/delete billing sheets
   const canEditDelete = currentUser?.role === 'company_admin' || currentUser?.role === 'billing_manager' || currentUser?.role === 'irrigation_manager';
 
+  // "Missing photos" detection — drives the amber banner + per-sheet badge
+  // for past sheets that lost their uploaded photos before the Task #143 fix.
+  // The server authoritatively decides which sheets qualify (cutoff lives on
+  // the server) so the UI can't drift out of sync.
+  const canSeeReport = canEditDelete || currentUser?.role === 'super_admin';
+  const { data: missingPhotosData } = useQuery<{ cutoff: string; count: number; sheets: BillingSheet[] }>({
+    queryKey: ["/api/billing-sheets/missing-photos"],
+    enabled: !!canSeeReport,
+  });
+  const missingPhotoIds = new Set((missingPhotosData?.sheets ?? []).map(s => s.id));
+  const isMissingPhotos = (sheet: BillingSheet) => missingPhotoIds.has(sheet.id);
+  const missingPhotosCount = missingPhotosData?.count ?? 0;
+
   // Manager: Approve billing sheet (pending_manager_review -> approved_passed_to_billing)
   const approveBillingSheet = useMutation({
     mutationFn: async (id: number) => {
@@ -302,6 +316,29 @@ export default function BillingSheets() {
             testId="metric-approved"
           />
         </MetricGrid>
+
+        {/* Missing photos report banner */}
+        {canSeeReport && missingPhotosCount > 0 && (
+          <Link href="/billing-sheets/missing-photos">
+            <a
+              className="block border border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors rounded-lg px-4 py-3"
+              data-testid="banner-missing-photos"
+            >
+              <div className="flex items-center gap-3">
+                <Camera className="w-5 h-5 text-amber-700 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {missingPhotosCount} past billing sheet{missingPhotosCount === 1 ? '' : 's'} missing photos
+                  </p>
+                  <p className="text-xs text-amber-800">
+                    Photos uploaded before the recent fix were lost. View the report to ask techs to re-attach them.
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-amber-700 flex-shrink-0" />
+              </div>
+            </a>
+          </Link>
+        )}
 
         {/* Search */}
         <div className="relative">
@@ -414,7 +451,18 @@ export default function BillingSheets() {
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
                               </div>
-                              <div className="flex-shrink-0">{getStatusBadge(sheet.status)}</div>
+                              <div className="flex-shrink-0 flex flex-wrap items-center gap-2">
+                                {getStatusBadge(sheet.status)}
+                                {isMissingPhotos(sheet) && (
+                                  <Badge
+                                    className="bg-amber-100 text-amber-800 hover:bg-amber-100"
+                                    title="Photos uploaded for this sheet were lost. Open the sheet and use Add Photos to re-attach."
+                                    data-testid={`badge-missing-photos-${sheet.id}`}
+                                  >
+                                    <Camera className="w-3 h-3 mr-1" /> Missing Photos
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
 
                             <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${
@@ -568,7 +616,18 @@ export default function BillingSheets() {
                                 <h3 className="font-semibold text-gray-900 truncate">{sheet.billingNumber}</h3>
                                 <p className="text-sm text-gray-600 truncate">{sheet.customerName}</p>
                               </div>
-                              <div className="flex-shrink-0">{getStatusBadge(sheet.status)}</div>
+                              <div className="flex-shrink-0 flex flex-wrap items-center gap-2">
+                                {getStatusBadge(sheet.status)}
+                                {isMissingPhotos(sheet) && (
+                                  <Badge
+                                    className="bg-amber-100 text-amber-800 hover:bg-amber-100"
+                                    title="Photos uploaded for this sheet were lost. Open the sheet and use Add Photos to re-attach."
+                                    data-testid={`badge-missing-photos-${sheet.id}`}
+                                  >
+                                    <Camera className="w-3 h-3 mr-1" /> Missing Photos
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
 
                             <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm ${

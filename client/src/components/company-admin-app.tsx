@@ -17,6 +17,7 @@ import CustomerBilling from "@/pages/customer-billing";
 import BillingDashboard from "@/pages/billing-dashboard";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
+import MissingPhotosReport from "@/pages/missing-photos-report";
 import PartsSettings from "@/pages/parts-settings";
 import LaborRates from "@/pages/labor-rates";
 import AdminCustomers from "@/pages/admin-customers";
@@ -137,6 +138,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing/command-center" component={CustomerBilling} />
           <Route path="/customer-billing" component={RedirectToCommandCenter} />
           <Route path="/field-tech" component={FieldTech} />
+          <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/user-profile" component={UserProfile} />
           <Route path="/switch-user" component={SwitchUser} />

@@ -22,6 +22,7 @@ import NotFound from "@/pages/not-found";
 import ManagerDashboard from "@/pages/manager-dashboard";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import BillingSheets from "@/pages/billing-sheets";
+import MissingPhotosReport from "@/pages/missing-photos-report";
 import CustomerBilling from "@/pages/customer-billing";
 import QuickBooksPage from "@/pages/quickbooks";
 import AdminDashboard from "@/pages/admin-dashboard";
@@ -183,6 +184,7 @@ function Router() {
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
                 <Route path="/site-maps" component={SiteMapsPage} />
+                <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
@@ -217,6 +219,7 @@ function Router() {
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/work-orders" component={WorkOrders} />
+                <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/parts-settings" component={PartsSettings} />

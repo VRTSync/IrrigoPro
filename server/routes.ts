@@ -7007,6 +7007,64 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Report: billing sheets created before the photo-save fix (Task #143) that
+  // currently have zero photos. Used by managers to chase up techs to re-attach
+  // photos via the post-creation "Add Photos" UI.
+  // Cutoff = commit time of the fix (2026-04-22 14:22:39 UTC).
+  const PHOTO_FIX_CUTOFF = new Date("2026-04-22T14:22:39Z");
+  app.get("/api/billing-sheets/missing-photos", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+
+      const all = await storage.getAllBillingSheets();
+      const missing = all.filter(s => {
+        const created = s.createdAt ? new Date(s.createdAt) : null;
+        if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        const photos = Array.isArray(s.photos) ? s.photos : [];
+        return photos.length === 0;
+      });
+
+      // Sort newest first
+      missing.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      const format = (req.query.format as string | undefined)?.toLowerCase();
+      if (format === 'csv') {
+        const escape = (v: any) => {
+          const s = v == null ? '' : String(v);
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const header = ['Billing Number','Technician','Customer','Branch','Property Address','Work Date','Created At','Status','Work Description'];
+        const rows = missing.map(s => [
+          s.billingNumber,
+          s.technicianName,
+          s.customerName,
+          s.branchName ?? '',
+          s.propertyAddress ?? '',
+          s.workDate ? new Date(s.workDate).toISOString().slice(0,10) : '',
+          new Date(s.createdAt).toISOString(),
+          s.status,
+          (s.workDescription ?? '').replace(/\s+/g, ' ').trim(),
+        ].map(escape).join(','));
+        const csv = [header.join(','), ...rows].join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="missing-photos-${new Date().toISOString().slice(0,10)}.csv"`);
+        return res.send(csv);
+      }
+
+      res.json({
+        cutoff: PHOTO_FIX_CUTOFF.toISOString(),
+        count: missing.length,
+        sheets: applyPricingVisibility(req, missing),
+      });
+    } catch (error) {
+      console.error('Error fetching missing-photos report:', error);
+      res.status(500).json({ message: "Failed to fetch missing-photos report" });
+    }
+  });
+
   app.get("/api/billing-sheets/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
