@@ -31,7 +31,10 @@ export class SmsService {
 
     const company = args.companyName || 'IrrigoPro';
     const count = args.sheets.length;
-    const reportUrl = `${this.baseUrl}/billing-sheets/missing-photos`;
+    // Technicians cannot access /billing-sheets/missing-photos (manager-only).
+    // Send them to /billing-sheets, which is in their tech route bundle, where
+    // they can open each affected sheet and tap Add Photos.
+    const reportUrl = `${this.baseUrl}/billing-sheets`;
     const firstName = (args.technicianName || '').split(' ')[0] || 'there';
 
     const body =

@@ -2359,30 +2359,27 @@ export class DatabaseStorage implements IStorage {
     channel: 'email' | 'sms' = 'email',
   ): Promise<MissingPhotosNotification> {
     const now = new Date();
-    const insertValues: any = {
+    const channelFields: Partial<typeof missingPhotosNotifications.$inferInsert> =
+      channel === 'email'
+        ? { lastSentEmailAt: now, lastEmailSheetCount: sheetIds.length }
+        : { lastSentSmsAt: now, lastSmsSheetCount: sheetIds.length };
+
+    const insertValues: typeof missingPhotosNotifications.$inferInsert = {
       technicianId,
       sheetIds,
       sheetCount: sheetIds.length,
       lastSentAt: now,
       sentByUserId,
+      ...channelFields,
     };
-    const updateValues: any = {
+    const updateValues: Partial<typeof missingPhotosNotifications.$inferInsert> = {
       sheetIds,
       sheetCount: sheetIds.length,
       lastSentAt: now,
       sentByUserId,
+      ...channelFields,
     };
-    if (channel === 'email') {
-      insertValues.lastSentEmailAt = now;
-      insertValues.lastEmailSheetCount = sheetIds.length;
-      updateValues.lastSentEmailAt = now;
-      updateValues.lastEmailSheetCount = sheetIds.length;
-    } else {
-      insertValues.lastSentSmsAt = now;
-      insertValues.lastSmsSheetCount = sheetIds.length;
-      updateValues.lastSentSmsAt = now;
-      updateValues.lastSmsSheetCount = sheetIds.length;
-    }
+
     const [row] = await db
       .insert(missingPhotosNotifications)
       .values(insertValues)
