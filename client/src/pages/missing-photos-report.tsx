@@ -44,7 +44,8 @@ interface MissingPhotosResponse {
 type ChannelOutcome =
   | { channel: 'email' | 'sms'; status: 'sent'; lastSentAt: string }
   | { channel: 'email' | 'sms'; status: 'skipped_already_notified'; lastSentAt: string }
-  | { channel: 'email' | 'sms'; status: 'skipped_no_contact' }
+  | { channel: 'email'; status: 'skipped_no_email' }
+  | { channel: 'sms'; status: 'skipped_no_phone' }
   | { channel: 'email' | 'sms'; status: 'failed'; error?: string };
 
 interface NotifyResultRow {
@@ -57,7 +58,14 @@ interface NotifyResultRow {
 
 interface NotifyResponse {
   channel: 'email' | 'sms' | 'both';
-  summary: { sent: number; skippedAlreadyNotified: number; skippedNoEmail: number; skippedNoPhone: number; failed: number };
+  summary: {
+    sent: number;
+    skippedAlreadyNotified: number;
+    skippedNoEmail: number;
+    skippedNoPhone: number;
+    skippedNoUser: number;
+    failed: number;
+  };
   results: NotifyResultRow[];
 }
 
@@ -291,23 +299,23 @@ export default function MissingPhotosReport() {
                       {isCollapsed ? <ChevronRight className="w-5 h-5 text-blue-700" /> : <ChevronDown className="w-5 h-5 text-blue-700" />}
                       <span className="text-base font-semibold text-blue-900">{groupName}</span>
                       <Badge className="bg-blue-200 text-blue-900 hover:bg-blue-200">{items.length}</Badge>
-                      {notif && (
+                      {groupBy === 'technician' && techId != null && (
                         <>
                           <Badge
                             variant="outline"
-                            className={`gap-1 ${notif.lastEmailAt ? 'border-emerald-300 text-emerald-800 bg-emerald-50' : 'border-gray-300 text-gray-500 bg-white'}`}
+                            className={`gap-1 ${notif?.lastEmailAt ? 'border-emerald-300 text-emerald-800 bg-emerald-50' : 'border-gray-300 text-gray-500 bg-white'}`}
                             data-testid={`badge-last-email-${techId}`}
                           >
                             <Mail className="w-3 h-3" />
-                            Email {formatRelative(notif.lastEmailAt)}
+                            Email {formatRelative(notif?.lastEmailAt ?? null)}
                           </Badge>
                           <Badge
                             variant="outline"
-                            className={`gap-1 ${notif.lastSmsAt ? 'border-emerald-300 text-emerald-800 bg-emerald-50' : 'border-gray-300 text-gray-500 bg-white'}`}
+                            className={`gap-1 ${notif?.lastSmsAt ? 'border-emerald-300 text-emerald-800 bg-emerald-50' : 'border-gray-300 text-gray-500 bg-white'}`}
                             data-testid={`badge-last-sms-${techId}`}
                           >
                             <MessageSquare className="w-3 h-3" />
-                            SMS {formatRelative(notif.lastSmsAt)}
+                            SMS {formatRelative(notif?.lastSmsAt ?? null)}
                           </Badge>
                         </>
                       )}
@@ -384,7 +392,8 @@ export default function MissingPhotosReport() {
                         const label = channelLabel(c.channel);
                         if (c.status === 'sent') return <Badge key={i} className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 gap-1">{icon}{label} sent</Badge>;
                         if (c.status === 'skipped_already_notified') return <Badge key={i} variant="outline" className="gap-1" title={`Last sent ${new Date(c.lastSentAt).toLocaleString()}`}>{icon}{label} skipped — recently notified</Badge>;
-                        if (c.status === 'skipped_no_contact') return <Badge key={i} variant="outline" className="border-amber-300 text-amber-800 gap-1">{icon}No {c.channel === 'email' ? 'email' : 'phone'} on file</Badge>;
+                        if (c.status === 'skipped_no_email') return <Badge key={i} variant="outline" className="border-amber-300 text-amber-800 gap-1">{icon}No email on file</Badge>;
+                        if (c.status === 'skipped_no_phone') return <Badge key={i} variant="outline" className="border-amber-300 text-amber-800 gap-1">{icon}No phone on file</Badge>;
                         if (c.status === 'failed') return <Badge key={i} variant="destructive" className="gap-1">{icon}{label} failed{c.error ? `: ${c.error}` : ''}</Badge>;
                         return null;
                       })}

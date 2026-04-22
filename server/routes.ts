@@ -7208,7 +7208,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       type ChannelOutcome =
         | { channel: 'email' | 'sms'; status: 'sent'; lastSentAt: string }
         | { channel: 'email' | 'sms'; status: 'skipped_already_notified'; lastSentAt: string }
-        | { channel: 'email' | 'sms'; status: 'skipped_no_contact' }
+        | { channel: 'email'; status: 'skipped_no_email' }
+        | { channel: 'sms'; status: 'skipped_no_phone' }
         | { channel: 'email' | 'sms'; status: 'failed'; error?: string };
 
       const results: Array<{
@@ -7253,7 +7254,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
           if (channel === 'email') {
             if (!tech.email) {
-              channelOutcomes.push({ channel, status: 'skipped_no_contact' });
+              channelOutcomes.push({ channel: 'email', status: 'skipped_no_email' });
               continue;
             }
             const sendResult = await EmailService.sendMissingPhotosTechnicianEmail({
@@ -7286,7 +7287,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             });
           } else {
             if (!tech.phone) {
-              channelOutcomes.push({ channel, status: 'skipped_no_contact' });
+              channelOutcomes.push({ channel: 'sms', status: 'skipped_no_phone' });
               continue;
             }
             const sendResult = await SmsService.sendMissingPhotosTechnicianSms({
@@ -7325,9 +7326,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const summary = {
         sent: flatOutcomes.filter(c => c.status === 'sent').length,
         skippedAlreadyNotified: flatOutcomes.filter(c => c.status === 'skipped_already_notified').length,
-        skippedNoEmail: flatOutcomes.filter(c => c.channel === 'email' && c.status === 'skipped_no_contact').length
-          + results.filter(r => r.skippedNoUser).length,
-        skippedNoPhone: flatOutcomes.filter(c => c.channel === 'sms' && c.status === 'skipped_no_contact').length,
+        skippedNoEmail: flatOutcomes.filter(c => c.status === 'skipped_no_email').length,
+        skippedNoPhone: flatOutcomes.filter(c => c.status === 'skipped_no_phone').length,
+        skippedNoUser: results.filter(r => r.skippedNoUser).length,
         failed: flatOutcomes.filter(c => c.status === 'failed').length,
       };
 
