@@ -7797,6 +7797,62 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Report: work orders created before the photo-save fix (Task #143) that
+  // currently have zero photos. Mirrors /api/billing-sheets/missing-photos —
+  // same cutoff, same role gate, same CSV option.
+  app.get("/api/work-orders/missing-photos", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+
+      const all = await storage.getWorkOrders();
+      const missing = all.filter(wo => {
+        const created = wo.createdAt ? new Date(wo.createdAt) : null;
+        if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        const photos = Array.isArray(wo.photos) ? wo.photos : [];
+        return photos.length === 0;
+      });
+
+      // Sort newest first
+      missing.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      const format = (req.query.format as string | undefined)?.toLowerCase();
+      if (format === 'csv') {
+        const escape = (v: any) => {
+          const s = v == null ? '' : String(v);
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const header = ['Work Order Number','Technician','Customer','Branch','Project Address','Scheduled Date','Created At','Status','Project Name'];
+        const rows = missing.map(wo => [
+          wo.workOrderNumber,
+          wo.assignedTechnicianName ?? '',
+          wo.customerName,
+          wo.branchName ?? '',
+          wo.projectAddress ?? '',
+          wo.scheduledDate ? new Date(wo.scheduledDate).toISOString().slice(0,10) : '',
+          new Date(wo.createdAt).toISOString(),
+          wo.status,
+          (wo.projectName ?? '').replace(/\s+/g, ' ').trim(),
+        ].map(escape).join(','));
+        const csv = [header.join(','), ...rows].join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="work-orders-missing-photos-${new Date().toISOString().slice(0,10)}.csv"`);
+        return res.send(csv);
+      }
+
+      res.json({
+        cutoff: PHOTO_FIX_CUTOFF.toISOString(),
+        count: missing.length,
+        workOrders: applyPricingVisibility(req, missing),
+      });
+    } catch (error) {
+      console.error('Error fetching work-orders missing-photos report:', error);
+      res.status(500).json({ message: "Failed to fetch missing-photos report" });
+    }
+  });
+
   app.get("/api/work-orders/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

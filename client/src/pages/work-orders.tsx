@@ -41,8 +41,10 @@ import {
   Trash2,
   ExternalLink,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Camera
 } from "lucide-react";
+import { Link } from "wouter";
 import type { WorkOrder } from "@shared/schema";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
@@ -160,6 +162,21 @@ export default function WorkOrders() {
     staleTime: 300000, // 5 minutes
     enabled: currentUser?.role === 'irrigation_manager',
   });
+
+  // "Missing photos" detection — drives the amber banner + per-work-order badge
+  // for past work orders that lost their uploaded photos before the Task #143 fix.
+  // The server authoritatively decides which qualify (cutoff lives on the server).
+  const canSeeMissingPhotos = currentUser?.role === 'company_admin'
+    || currentUser?.role === 'billing_manager'
+    || currentUser?.role === 'irrigation_manager'
+    || currentUser?.role === 'super_admin';
+  const { data: missingPhotosData } = useQuery<{ cutoff: string; count: number; workOrders: WorkOrder[] }>({
+    queryKey: ["/api/work-orders/missing-photos"],
+    enabled: !!canSeeMissingPhotos,
+  });
+  const missingPhotoIds = new Set((missingPhotosData?.workOrders ?? []).map(w => w.id));
+  const isMissingPhotos = (wo: WorkOrder) => missingPhotoIds.has(wo.id);
+  const missingPhotosCount = missingPhotosData?.count ?? 0;
 
 
 
@@ -420,6 +437,29 @@ export default function WorkOrders() {
       />
 
       <PageContent className="space-y-5">
+        {/* Missing photos report banner */}
+        {canSeeMissingPhotos && missingPhotosCount > 0 && (
+          <Link href="/work-orders/missing-photos">
+            <a
+              className="block border border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors rounded-lg px-4 py-3"
+              data-testid="banner-missing-photos"
+            >
+              <div className="flex items-center gap-3">
+                <Camera className="w-5 h-5 text-amber-700 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {missingPhotosCount} past work order{missingPhotosCount === 1 ? '' : 's'} missing photos
+                  </p>
+                  <p className="text-xs text-amber-800">
+                    Photos uploaded before the recent fix were lost. View the report to ask techs to re-attach them.
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-amber-700 flex-shrink-0" />
+              </div>
+            </a>
+          </Link>
+        )}
+
         {/* Stats Cards - Mobile-Optimized Grid */}
         <MetricGrid className="grid-cols-3">
           <MetricTile
@@ -645,9 +685,18 @@ export default function WorkOrders() {
                                     {workOrder.workOrderNumber}
                                   </h4>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap justify-end">
                                   {getStatusBadge(workOrder.status)}
                                   {isBilled(workOrder) && workOrder.status !== 'billed' && getBilledBadge()}
+                                  {canSeeMissingPhotos && isMissingPhotos(workOrder) && (
+                                    <Badge
+                                      className="bg-amber-100 text-amber-800 hover:bg-amber-100"
+                                      title="Photos uploaded for this work order were lost. Open it and use Add Photos to re-attach."
+                                      data-testid={`badge-missing-photos-${workOrder.id}`}
+                                    >
+                                      <Camera className="w-3 h-3 mr-1" /> Missing Photos
+                                    </Badge>
+                                  )}
                                 </div>
                               </div>
 
@@ -914,9 +963,18 @@ export default function WorkOrders() {
                           )}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
                         {getStatusBadge(workOrder.status)}
                         {isBilled(workOrder) && workOrder.status !== 'billed' && getBilledBadge()}
+                        {canSeeMissingPhotos && isMissingPhotos(workOrder) && (
+                          <Badge
+                            className="bg-amber-100 text-amber-800 hover:bg-amber-100"
+                            title="Photos uploaded for this work order were lost. Open it and use Add Photos to re-attach."
+                            data-testid={`badge-missing-photos-${workOrder.id}`}
+                          >
+                            <Camera className="w-3 h-3 mr-1" /> Missing Photos
+                          </Badge>
+                        )}
                       </div>
                     </div>
 
