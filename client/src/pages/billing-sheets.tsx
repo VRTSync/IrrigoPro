@@ -60,6 +60,15 @@ export default function BillingSheets() {
     }
   }, []);
 
+  // Deep-link support: ?openSheet=<id> opens the sheet view modal once the
+  // billing sheet list is loaded. Used by the "missing photos" outreach email.
+  const [pendingOpenSheetId, setPendingOpenSheetId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const v = new URLSearchParams(window.location.search).get("openSheet");
+    const id = v ? parseInt(v, 10) : NaN;
+    return Number.isFinite(id) ? id : null;
+  });
+
   // Get billing sheets based on role:
   // - Field techs: only their own billing sheets
   // - Managers/Admins: all billing sheets for oversight, but drafts filtered client-side
@@ -75,6 +84,19 @@ export default function BillingSheets() {
       }
     },
   });
+
+  // Open the deep-linked sheet once the list arrives, then strip the param
+  useEffect(() => {
+    if (pendingOpenSheetId == null || !billingSheets) return;
+    const target = billingSheets.find(s => s.id === pendingOpenSheetId);
+    if (target) {
+      setViewingSheet(target);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openSheet");
+      window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
+      setPendingOpenSheetId(null);
+    }
+  }, [pendingOpenSheetId, billingSheets]);
 
   // Separate drafts and submitted sheets
   // Drafts are always user-specific, submitted sheets are visible to all with role-based access

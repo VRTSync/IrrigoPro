@@ -511,6 +511,95 @@ The IrrigoPro Team
     }
   }
 
+  static async sendMissingPhotosTechnicianEmail(args: {
+    to: string;
+    technicianName: string;
+    sheets: Array<{
+      id: number;
+      billingNumber: string;
+      customerName: string;
+      branchName?: string | null;
+      propertyAddress?: string | null;
+      workDate?: Date | string | null;
+    }>;
+    companyName?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured');
+      return { success: false, error: 'Email service not configured' };
+    }
+
+    const baseUrl = this.baseUrl;
+    const companyName = args.companyName || 'IrrigoPro';
+    const fmtDate = (d?: Date | string | null) =>
+      d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+    const rowsHtml = args.sheets.map(s => {
+      const url = `${baseUrl}/billing-sheets?openSheet=${s.id}`;
+      const where = [s.customerName, s.branchName, s.propertyAddress].filter(Boolean).join(' — ');
+      return `
+        <tr>
+          <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
+            <div style="font-weight:600;color:#111827;">${s.billingNumber}</div>
+            <div style="color:#6b7280;font-size:13px;">${where}</div>
+            ${s.workDate ? `<div style="color:#6b7280;font-size:12px;">Worked ${fmtDate(s.workDate)}</div>` : ''}
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;text-align:right;">
+            <a href="${url}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-weight:600;font-size:14px;">Add Photos</a>
+          </td>
+        </tr>`;
+    }).join('');
+
+    const rowsText = args.sheets.map(s => {
+      const url = `${baseUrl}/billing-sheets?openSheet=${s.id}`;
+      const where = [s.customerName, s.branchName, s.propertyAddress].filter(Boolean).join(' — ');
+      return `- ${s.billingNumber} (${where})${s.workDate ? ` worked ${fmtDate(s.workDate)}` : ''}\n  ${url}`;
+    }).join('\n');
+
+    const subject = `Action needed: re-attach photos to ${args.sheets.length} of your billing sheet${args.sheets.length === 1 ? '' : 's'}`;
+
+    const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;max-width:640px;margin:0 auto;padding:20px;">
+  <div style="background:#f59e0b;color:#fff;padding:20px;border-radius:10px 10px 0 0;">
+    <h1 style="margin:0;font-size:22px;">Photos missing on your billing sheets</h1>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;padding:24px;">
+    <p>Hi ${args.technicianName},</p>
+    <p>Due to a bug that has now been fixed, the photos you uploaded while creating the following billing sheet${args.sheets.length === 1 ? '' : 's'} were not saved. If those photos are still on your phone, please tap <strong>Add Photos</strong> on each sheet to re-attach them.</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;">${rowsHtml}</table>
+    <p style="color:#6b7280;font-size:13px;">Thanks for taking a moment to fix these — once the photos are back on the sheet you can ignore that sheet on the list.</p>
+    <p style="color:#6b7280;font-size:12px;margin-top:24px;">— ${companyName}</p>
+  </div>
+</body></html>`;
+
+    const text = `Hi ${args.technicianName},
+
+Due to a bug that has now been fixed, the photos you uploaded while creating the following billing sheet${args.sheets.length === 1 ? '' : 's'} were not saved. If those photos are still on your phone, please open each sheet and tap "Add Photos" to re-attach them.
+
+${rowsText}
+
+Thanks,
+${companyName}
+`;
+
+    try {
+      await client.sendEmail({
+        From: process.env.FROM_EMAIL || 'noreply@irrigopro.com',
+        To: args.to,
+        Subject: subject,
+        HtmlBody: html,
+        TextBody: text,
+        Tag: 'missing-photos-tech',
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send missing-photos technician email:', error);
+      const message = error instanceof Error ? error.message : 'Send failed';
+      return { success: false, error: message };
+    }
+  }
+
   static async sendInvoiceDetailPdf(
     customerEmail: string,
     customerName: string,

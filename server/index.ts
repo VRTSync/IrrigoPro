@@ -256,6 +256,24 @@ async function runStartupMigrations() {
     logger.error('Startup migration: manual_part_reviews table error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // Ensure missing_photos_notifications table exists (Task #147 — one-shot
+  // outreach tracking for the Missing Photos Report).
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS missing_photos_notifications (
+        id serial PRIMARY KEY,
+        technician_id integer NOT NULL UNIQUE REFERENCES users(id),
+        last_sent_at timestamp NOT NULL DEFAULT NOW(),
+        sheet_count integer NOT NULL DEFAULT 0,
+        sheet_ids integer[] DEFAULT '{}',
+        sent_by_user_id integer REFERENCES users(id)
+      )
+    `);
+    logger.info('Startup migration: ensured missing_photos_notifications table exists', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: missing_photos_notifications table error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   // Health assertion: verify critical parts columns exist and are readable; log explicit error if drift detected
   try {
     const driftCheck = await pool.query(`

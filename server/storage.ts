@@ -20,6 +20,7 @@ import {
   billingSheets,
   billingSheetItems,
   manualPartReviews,
+  missingPhotosNotifications,
   aiGenerationLogs,
   notifications,
   quickbooksIntegration,
@@ -54,6 +55,7 @@ import {
   type BillingSheet,
   type BillingSheetItem,
   type ManualPartReview,
+  type MissingPhotosNotification,
   type AiGenerationLog,
   type Notification,
   type SiteMap,
@@ -331,6 +333,10 @@ export interface IStorage {
   deleteBillingSheetItem(itemId: number): Promise<boolean>;
   replaceBillingSheetItemsInTransaction(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<BillingSheetItem[]>;
   replaceBillingSheetItemsAndResync(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<{ items: BillingSheetItem[]; partsSubtotal: string; totalAmount: string }>;
+
+  // Missing-photos outreach tracking — one row per technician
+  getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]>;
+  upsertMissingPhotosNotification(technicianId: number, sheetIds: number[], sentByUserId: number | null): Promise<MissingPhotosNotification>;
 
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
@@ -2340,6 +2346,38 @@ export class DatabaseStorage implements IStorage {
     }));
     
     return sheetsWithItems;
+  }
+
+  async getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]> {
+    return await db.select().from(missingPhotosNotifications);
+  }
+
+  async upsertMissingPhotosNotification(
+    technicianId: number,
+    sheetIds: number[],
+    sentByUserId: number | null,
+  ): Promise<MissingPhotosNotification> {
+    const now = new Date();
+    const [row] = await db
+      .insert(missingPhotosNotifications)
+      .values({
+        technicianId,
+        sheetIds,
+        sheetCount: sheetIds.length,
+        lastSentAt: now,
+        sentByUserId,
+      })
+      .onConflictDoUpdate({
+        target: missingPhotosNotifications.technicianId,
+        set: {
+          sheetIds,
+          sheetCount: sheetIds.length,
+          lastSentAt: now,
+          sentByUserId,
+        },
+      })
+      .returning();
+    return row;
   }
 
   // Monthly Invoice Consolidation Methods

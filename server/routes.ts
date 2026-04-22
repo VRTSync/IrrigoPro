@@ -7019,13 +7019,40 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(403).json({ message: "Access denied." });
       }
 
+      // Tenant scoping: non-super_admin requesters only see techs/sheets within
+      // their own company. We resolve company ownership through the assigned
+      // technician's companyId since billing_sheets has no direct companyId column.
+      const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
+      const isSuperAdmin = role === 'super_admin';
+
       const all = await storage.getAllBillingSheets();
-      const missing = all.filter(s => {
+      const techCompanyCache = new Map<number, number | null>();
+      const techCompanyId = async (techId: number | null | undefined): Promise<number | null> => {
+        if (!techId) return null;
+        if (techCompanyCache.has(techId)) return techCompanyCache.get(techId) ?? null;
+        const u = await storage.getUser(techId);
+        const cid = u?.companyId ?? null;
+        techCompanyCache.set(techId, cid);
+        return cid;
+      };
+
+      const candidates = all.filter(s => {
         const created = s.createdAt ? new Date(s.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
         const photos = Array.isArray(s.photos) ? s.photos : [];
         return photos.length === 0;
       });
+
+      const missing = [] as typeof candidates;
+      for (const s of candidates) {
+        if (isSuperAdmin) {
+          missing.push(s);
+          continue;
+        }
+        if (requesterCompanyId == null) continue;
+        const cid = await techCompanyId(s.technicianId);
+        if (cid === requesterCompanyId) missing.push(s);
+      }
 
       // Sort newest first
       missing.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -7054,14 +7081,202 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.send(csv);
       }
 
+      // Tenant-scoped notifications: only expose rows for technicians visible
+      // to this requester (i.e. those who appear in the already-scoped `missing`
+      // dataset). This prevents cross-company metadata leakage.
+      const visibleTechIds = new Set<number>();
+      for (const s of missing) {
+        if (s.technicianId != null) visibleTechIds.add(s.technicianId);
+      }
+      const notifyRows = await storage.getMissingPhotosNotifications();
+      const notifications: Record<string, { lastSentAt: string; sheetCount: number }> = {};
+      for (const n of notifyRows) {
+        if (n.technicianId != null && visibleTechIds.has(n.technicianId)) {
+          notifications[String(n.technicianId)] = {
+            lastSentAt: new Date(n.lastSentAt).toISOString(),
+            sheetCount: n.sheetCount,
+          };
+        }
+      }
+
       res.json({
         cutoff: PHOTO_FIX_CUTOFF.toISOString(),
         count: missing.length,
         sheets: applyPricingVisibility(req, missing),
+        notifications,
       });
     } catch (error) {
       console.error('Error fetching missing-photos report:', error);
       res.status(500).json({ message: "Failed to fetch missing-photos report" });
+    }
+  });
+
+  // One-shot manager-triggered outreach: emails each technician a list of
+  // their own billing sheets that are missing photos, with deep links to the
+  // sheet view (which exposes the Add Photos affordance).
+  // Idempotency: a technician is notified at most once. Subsequent calls skip
+  // technicians who already have a recorded notification, unless `force: true`
+  // is passed in the body (intended for explicit manager re-send).
+  app.post("/api/billing-sheets/missing-photos/notify", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+
+      const force = req.body?.force === true;
+
+      // Tenant scoping: non-super_admin requesters may only notify technicians
+      // belonging to their own company. Without this guard, a manager from one
+      // company could trigger emails to technicians in another company.
+      const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
+      const isSuperAdmin = role === 'super_admin';
+      if (!isSuperAdmin && requesterCompanyId == null) {
+        return res.status(403).json({ message: "Access denied: no company context." });
+      }
+
+      const all = await storage.getAllBillingSheets();
+      const candidates = all.filter(s => {
+        const created = s.createdAt ? new Date(s.createdAt) : null;
+        if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        const photos = Array.isArray(s.photos) ? s.photos : [];
+        return photos.length === 0;
+      });
+
+      // Tenant scope BEFORE grouping/processing: out-of-company technicians
+      // and their sheets must never enter the result set or be exposed in the
+      // response. We resolve company ownership through the assigned technician.
+      type MissingSheet = (typeof candidates)[number];
+      const techCompanyCache = new Map<number, number | null>();
+      const techCompanyId = async (techId: number): Promise<number | null> => {
+        if (techCompanyCache.has(techId)) return techCompanyCache.get(techId) ?? null;
+        const u = await storage.getUser(techId);
+        const cid = u?.companyId ?? null;
+        techCompanyCache.set(techId, cid);
+        return cid;
+      };
+
+      const missing: MissingSheet[] = [];
+      for (const s of candidates) {
+        if (!s.technicianId) continue;
+        if (isSuperAdmin) {
+          missing.push(s);
+          continue;
+        }
+        const cid = await techCompanyId(s.technicianId);
+        if (cid === requesterCompanyId) missing.push(s);
+      }
+
+      // Group by technicianId (already tenant-scoped)
+      const byTech = new Map<number, MissingSheet[]>();
+      for (const s of missing) {
+        if (!s.technicianId) continue;
+        const arr = byTech.get(s.technicianId) ?? [];
+        arr.push(s);
+        byTech.set(s.technicianId, arr);
+      }
+
+      const existingRows = await storage.getMissingPhotosNotifications();
+      const lastSentByTech = new Map<number, Date>();
+      for (const n of existingRows) {
+        if (n.technicianId != null) lastSentByTech.set(n.technicianId, new Date(n.lastSentAt));
+      }
+
+      const results: Array<{
+        technicianId: number;
+        technicianName: string;
+        status: 'sent' | 'skipped_already_notified' | 'skipped_no_email' | 'failed' | 'skipped_no_user';
+        sheetCount: number;
+        lastSentAt?: string;
+        error?: string;
+      }> = [];
+
+      for (const [techId, sheets] of Array.from(byTech.entries())) {
+        const technicianName = sheets[0].technicianName || `User #${techId}`;
+
+        const tech = await storage.getUser(techId);
+        if (!tech) {
+          results.push({ technicianId: techId, technicianName, status: 'skipped_no_user', sheetCount: sheets.length });
+          continue;
+        }
+
+        // True one-shot idempotency: if we've ever sent to this technician,
+        // skip unless the manager explicitly requested a re-send via `force`.
+        const lastSent = lastSentByTech.get(techId);
+        if (!force && lastSent) {
+          results.push({
+            technicianId: techId,
+            technicianName: tech.name || technicianName,
+            status: 'skipped_already_notified',
+            sheetCount: sheets.length,
+            lastSentAt: lastSent.toISOString(),
+          });
+          continue;
+        }
+
+        if (!tech.email) {
+          results.push({ technicianId: techId, technicianName: tech.name || technicianName, status: 'skipped_no_email', sheetCount: sheets.length });
+          continue;
+        }
+
+        let companyName: string | undefined;
+        if (tech.companyId) {
+          try {
+            const company = await storage.getCompanyProfile(tech.companyId);
+            companyName = company?.name || undefined;
+          } catch {}
+        }
+
+        const sendResult = await EmailService.sendMissingPhotosTechnicianEmail({
+          to: tech.email,
+          technicianName: tech.name || technicianName,
+          companyName,
+          sheets: sheets.map((s: MissingSheet) => ({
+            id: s.id,
+            billingNumber: s.billingNumber,
+            customerName: s.customerName,
+            branchName: s.branchName,
+            propertyAddress: s.propertyAddress,
+            workDate: s.workDate,
+          })),
+        });
+
+        if (!sendResult.success) {
+          results.push({
+            technicianId: techId,
+            technicianName: tech.name || technicianName,
+            status: 'failed',
+            sheetCount: sheets.length,
+            error: sendResult.error,
+          });
+          continue;
+        }
+
+        const saved = await storage.upsertMissingPhotosNotification(
+          techId,
+          sheets.map((s: MissingSheet) => s.id),
+          req.authenticatedUserId ?? null,
+        );
+        results.push({
+          technicianId: techId,
+          technicianName: tech.name || technicianName,
+          status: 'sent',
+          sheetCount: sheets.length,
+          lastSentAt: new Date(saved.lastSentAt).toISOString(),
+        });
+      }
+
+      const summary = {
+        sent: results.filter(r => r.status === 'sent').length,
+        skippedAlreadyNotified: results.filter(r => r.status === 'skipped_already_notified').length,
+        skippedNoEmail: results.filter(r => r.status === 'skipped_no_email' || r.status === 'skipped_no_user').length,
+        failed: results.filter(r => r.status === 'failed').length,
+      };
+
+      res.json({ summary, results });
+    } catch (error) {
+      console.error('Error sending missing-photos notifications:', error);
+      res.status(500).json({ message: "Failed to send notifications" });
     }
   });
 

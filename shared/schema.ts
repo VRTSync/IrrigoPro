@@ -261,6 +261,18 @@ export const manualPartReviews = pgTable("manual_part_reviews", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// One-shot tracking of "missing photos" outreach emails sent to technicians.
+// Used to make the manager-triggered notify action idempotent and to surface
+// a "last notified" timestamp on the report UI. One row per technician.
+export const missingPhotosNotifications = pgTable("missing_photos_notifications", {
+  id: serial("id").primaryKey(),
+  technicianId: integer("technician_id").references(() => users.id).notNull().unique(),
+  lastSentAt: timestamp("last_sent_at").defaultNow().notNull(),
+  sheetCount: integer("sheet_count").notNull().default(0),
+  sheetIds: integer("sheet_ids").array().default([]),
+  sentByUserId: integer("sent_by_user_id").references(() => users.id),
+});
+
 // Part assemblies - pre-configured bundles of parts for common repairs
 export const assemblies = pgTable("assemblies", {
   id: serial("id").primaryKey(),
@@ -799,6 +811,7 @@ export type ManualPartReview = typeof manualPartReviews.$inferSelect;
 export type AiGenerationLog = typeof aiGenerationLogs.$inferSelect;
 export type PartUsage = typeof partUsage.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type MissingPhotosNotification = typeof missingPhotosNotifications.$inferSelect;
 
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type InsertUser = z.infer<typeof insertUserSchema>;
