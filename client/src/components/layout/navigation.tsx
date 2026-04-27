@@ -110,7 +110,16 @@ export default function Navigation() {
         ];
       case "company_admin":
         return [
-          { path: "/operations", label: "Operations", icon: FileText },
+          {
+            path: "/operations",
+            label: "Operations",
+            icon: FileText,
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/work-orders", label: "Work Orders", icon: Wrench },
+              { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
+            ]
+          },
           { 
             path: "/customers", 
             label: "Customers", 
@@ -201,7 +210,7 @@ export default function Navigation() {
             icon: DollarSign, 
             isDropdown: true,
             dropdownItems: [
-              { path: "/billing/dashboard", label: "Dashboard", icon: Home },
+              { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
               { path: "/billing/command-center", label: "Command Center", icon: ClipboardList },
             ]
           },
@@ -480,24 +489,26 @@ export default function Navigation() {
                 
                 // For company admin, prioritize essential functions for mobile
                 if (userRole === 'company_admin') {
-                  // First, add non-dropdown items (Operations)
-                  otherItems.filter(item => !item.isDropdown).forEach(item => {
-                    expandedItems.push(item);
-                  });
+                  // Operations is now a dropdown — surface its Work Orders + Billing Sheets entries
+                  const operationsDropdown = otherItems.find(item => item.label === 'Operations' && item.isDropdown);
+                  if (operationsDropdown?.dropdownItems) {
+                    const woLink = operationsDropdown.dropdownItems.find((d: NavDropdownItem) => d.label === 'Work Orders');
+                    const bsLink = operationsDropdown.dropdownItems.find((d: NavDropdownItem) => d.label === 'Billing Sheets');
+                    if (woLink) expandedItems.push(woLink);
+                    if (bsLink) expandedItems.push(bsLink);
+                  }
                   
                   // Add direct Customers link
                   const customersItem = otherItems.find(item => item.label === 'Customers' && item.isDropdown);
                   if (customersItem?.dropdownItems) {
                     const customersLink = customersItem.dropdownItems.find((dropdownItem: NavDropdownItem) => dropdownItem.label === 'Customers');
-                    if (customersLink) expandedItems.push(customersLink);
+                    if (customersLink && expandedItems.length < 4) expandedItems.push(customersLink);
                   }
                   
-                  // Add both Billing links (Dashboard + Command Center) for company_admin mobile
+                  // Fill remaining slots with the Billing Command Center for quick access
                   const billingDropdown = otherItems.find(item => item.label === 'Billing' && item.isDropdown);
                   if (billingDropdown?.dropdownItems) {
-                    const dashLink = billingDropdown.dropdownItems.find((d: NavDropdownItem) => d.label === 'Dashboard');
                     const ccLink = billingDropdown.dropdownItems.find((d: NavDropdownItem) => d.label === 'Command Center');
-                    if (dashLink && expandedItems.length < 4) expandedItems.push(dashLink);
                     if (ccLink && expandedItems.length < 4) expandedItems.push(ccLink);
                   }
                 } else if (userRole === 'irrigation_manager') {
@@ -516,13 +527,13 @@ export default function Navigation() {
                     }
                   }
                 } else if (userRole === 'billing_manager') {
-                  // For billing managers mobile: Work Orders, Billing Dashboard, Billing Command Center, Invoices
+                  // For billing managers mobile: Work Orders, Billing Sheets, Billing Command Center, Invoices
                   const woItem = otherItems.find(item => item.label === 'Work Orders');
                   if (woItem) expandedItems.push(woItem);
                   const billingItem = otherItems.find(item => item.label === 'Billing' && item.isDropdown);
                   if (billingItem?.dropdownItems) {
-                    const dashLink = billingItem.dropdownItems.find((d: NavDropdownItem) => d.label === 'Dashboard');
-                    if (dashLink) expandedItems.push(dashLink);
+                    const sheetsLink = billingItem.dropdownItems.find((d: NavDropdownItem) => d.label === 'Billing Sheets');
+                    if (sheetsLink) expandedItems.push(sheetsLink);
                     const ccLink = billingItem.dropdownItems.find((d: NavDropdownItem) => d.label === 'Command Center');
                     if (ccLink) expandedItems.push(ccLink);
                   }
@@ -622,6 +633,11 @@ export default function Navigation() {
                             <div className="text-xs font-semibold text-center leading-none mt-1">
                               <div>Work</div>
                               <div>Orders</div>
+                            </div>
+                          ) : item.label === "Billing Sheets" ? (
+                            <div className="text-xs font-semibold text-center leading-none mt-1">
+                              <div>Billing</div>
+                              <div>Sheets</div>
                             </div>
                           ) : item.label === "Parts Catalog" ? (
                             <div className="text-xs font-semibold text-center leading-none mt-1">

@@ -17,6 +17,7 @@ import CustomerBilling from "@/pages/customer-billing";
 import BillingDashboard from "@/pages/billing-dashboard";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
+import WorkOrders from "@/pages/work-orders";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import MissingPhotosReport from "@/pages/missing-photos-report";
 import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-report";
@@ -144,6 +145,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
           <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
           <Route path="/billing-sheets" component={BillingSheets} />
+          <Route path="/work-orders" component={WorkOrders} />
           <Route path="/user-profile" component={UserProfile} />
           <Route path="/switch-user" component={SwitchUser} />
           <Route path="/license-agreement" component={LicenseAgreement} />
@@ -152,9 +154,8 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/forgot-password" component={ForgotPassword} />
           <Route path="/reset-password" component={ResetPassword} />
           <Route path="/field-portal" component={FieldPortal} />
-          {/* Redirect estimates and work-orders to operations page */}
+          {/* Estimates still routes through the Operations page */}
           <Route path="/estimates" component={Operations} />
-          <Route path="/work-orders" component={Operations} />
           <Route component={NotFound} />
         </Switch>
       </div>
