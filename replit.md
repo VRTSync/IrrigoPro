@@ -56,8 +56,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes), phone-based user login, session-based authentication.
 - **User Management**: Company administrators manage users within their company.
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
-- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins.
-- **Photo Pipeline**: Photos are stored in object storage with three derived variants per source image: thumbnail (~400px JPEG), medium (~1200px JPEG), and original untouched bytes. Client-side compression and HEIC conversion are handled before upload. Variant routing allows fetching specific sizes, and a server-side proxy handles HEIC to JPEG conversion.
+- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins, including a photo pipeline for processing and storage.
 
 ## External Dependencies
 
