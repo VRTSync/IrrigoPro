@@ -32,6 +32,9 @@ interface NotificationInfo {
   lastSmsAt: string | null;
   emailSheetCount: number | null;
   smsSheetCount: number | null;
+  lastSmsStatus: string | null;
+  lastSmsStatusAt: string | null;
+  lastSmsErrorCode: string | null;
 }
 
 interface MissingPhotosResponse {
@@ -83,6 +86,34 @@ function formatRelative(iso: string | null | undefined): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
   return `${d}d ago`;
+}
+
+// Map a Twilio MessageStatus to a colored badge style + label so managers
+// can see whether the SMS actually reached the technician's phone.
+function smsStatusBadge(status: string | null, errorCode: string | null): {
+  className: string;
+  label: string;
+  title?: string;
+} | null {
+  if (!status) return null;
+  const s = status.toLowerCase();
+  const errSuffix = errorCode ? ` (Twilio error ${errorCode})` : '';
+  if (s === 'delivered' || s === 'received') {
+    return { className: 'border-emerald-300 text-emerald-800 bg-emerald-50', label: 'Delivered' };
+  }
+  if (s === 'sent') {
+    return { className: 'border-blue-300 text-blue-800 bg-blue-50', label: 'Sent' };
+  }
+  if (s === 'queued' || s === 'accepted' || s === 'scheduled' || s === 'sending') {
+    return { className: 'border-gray-300 text-gray-700 bg-gray-50', label: status[0].toUpperCase() + status.slice(1) };
+  }
+  if (s === 'failed') {
+    return { className: 'border-red-300 text-red-800 bg-red-50', label: 'Failed', title: `Carrier reported failed${errSuffix}` };
+  }
+  if (s === 'undelivered') {
+    return { className: 'border-red-300 text-red-800 bg-red-50', label: 'Undelivered', title: `Could not reach phone${errSuffix}` };
+  }
+  return { className: 'border-gray-300 text-gray-700 bg-gray-50', label: status };
 }
 
 export default function MissingPhotosReport() {
@@ -317,6 +348,20 @@ export default function MissingPhotosReport() {
                             <MessageSquare className="w-3 h-3" />
                             SMS {formatRelative(notif?.lastSmsAt ?? null)}
                           </Badge>
+                          {notif?.lastSmsAt && (() => {
+                            const badge = smsStatusBadge(notif.lastSmsStatus, notif.lastSmsErrorCode);
+                            if (!badge) return null;
+                            return (
+                              <Badge
+                                variant="outline"
+                                className={`gap-1 ${badge.className}`}
+                                title={badge.title}
+                                data-testid={`badge-sms-status-${techId}`}
+                              >
+                                {badge.label}
+                              </Badge>
+                            );
+                          })()}
                         </>
                       )}
                     </div>

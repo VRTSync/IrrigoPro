@@ -7,6 +7,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "./email-service";
 import { SmsService } from "./sms-service";
+import twilio from "twilio";
 import { ObjectStorageService } from "./objectStorage";
 import { InvoicePdfService } from "./invoice-pdf-service";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "./ai-prompt-templates";
@@ -7227,6 +7228,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         lastSmsAt: string | null;
         emailSheetCount: number | null;
         smsSheetCount: number | null;
+        lastSmsStatus: string | null;
+        lastSmsStatusAt: string | null;
+        lastSmsErrorCode: string | null;
       }> = {};
       for (const n of notifyRows) {
         if (n.technicianId != null && visibleTechIds.has(n.technicianId)) {
@@ -7237,6 +7241,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             lastSmsAt: n.lastSentSmsAt ? new Date(n.lastSentSmsAt).toISOString() : null,
             emailSheetCount: n.lastEmailSheetCount ?? null,
             smsSheetCount: n.lastSmsSheetCount ?? null,
+            lastSmsStatus: n.lastSmsStatus ?? null,
+            lastSmsStatusAt: n.lastSmsStatusAt ? new Date(n.lastSmsStatusAt).toISOString() : null,
+            lastSmsErrorCode: n.lastSmsErrorCode ?? null,
           };
         }
       }
@@ -7435,6 +7442,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               sheets.map((s: MissingSheet) => s.id),
               req.authenticatedUserId ?? null,
               'sms',
+              sendResult.messageSid ?? null,
             );
             channelOutcomes.push({
               channel,
@@ -7466,6 +7474,65 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error('Error sending missing-photos notifications:', error);
       res.status(500).json({ message: "Failed to send notifications" });
+    }
+  });
+
+  // Twilio status callback webhook for SMS delivery tracking.
+  // Twilio POSTs application/x-www-form-urlencoded with fields including
+  // MessageSid, MessageStatus (queued|sent|delivered|failed|undelivered),
+  // ErrorCode (when failed/undelivered). We update the missing-photos
+  // notification row whose lastSmsMessageSid matches so managers can see
+  // real delivery outcomes instead of just "sent".
+  //
+  // The endpoint must be unauthenticated (Twilio cannot present a session
+  // cookie), so we authenticate the request via Twilio's request signature.
+  app.post("/api/twilio/sms-status", async (req: any, res) => {
+    try {
+      const params = (req.body ?? {}) as Record<string, string>;
+      const messageSid = params.MessageSid;
+      const status = params.MessageStatus || params.SmsStatus;
+      const errorCode = params.ErrorCode || null;
+
+      if (!messageSid || !status) {
+        return res.status(400).send('Missing MessageSid or MessageStatus');
+      }
+
+      // Signature validation:
+      //  - Production: ALWAYS validate. If TWILIO_AUTH_TOKEN is missing the
+      //    webhook refuses every request (secure-by-default).
+      //  - Dev/test: validate when a token is configured; otherwise accept
+      //    so the endpoint can be exercised without external Twilio creds.
+      const token = SmsService.authToken;
+      const isProd = process.env.NODE_ENV === 'production';
+      if (isProd && !token) {
+        console.warn('Twilio status callback rejected: no TWILIO_AUTH_TOKEN configured in production');
+        return res.status(403).send('Webhook not configured');
+      }
+      if (token) {
+        const signature = req.header('X-Twilio-Signature') || '';
+        // Reconstruct the full URL Twilio used to sign the request. Twilio
+        // signs against the public URL, so prefer the configured baseUrl
+        // over req.protocol/host (which may be the internal Replit address).
+        const url = `${SmsService.baseUrl}/api/twilio/sms-status`;
+        const valid = twilio.validateRequest(token, signature, url, params);
+        if (!valid) {
+          console.warn('Twilio status callback: invalid signature', { messageSid, url });
+          return res.status(403).send('Invalid signature');
+        }
+      }
+
+      const updated = await storage.updateMissingPhotosSmsStatus(messageSid, status, errorCode);
+      if (!updated) {
+        // Not all SMS messages are tracked here (e.g. future SMS senders).
+        // Acknowledge so Twilio doesn't retry, but log for visibility.
+        console.log(`Twilio status callback: no matching SMS row for sid=${messageSid} status=${status}`);
+      }
+      // Twilio expects a 2xx with empty body (or TwiML). Empty 204 works.
+      return res.status(204).end();
+    } catch (error) {
+      console.error('Twilio status callback error:', error);
+      // Return 200 anyway so Twilio doesn't retry indefinitely on our bug.
+      return res.status(200).send('OK');
     }
   });
 

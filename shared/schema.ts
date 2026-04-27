@@ -275,6 +275,13 @@ export const missingPhotosNotifications = pgTable("missing_photos_notifications"
   lastSentSmsAt: timestamp("last_sent_sms_at"),
   lastEmailSheetCount: integer("last_email_sheet_count"),
   lastSmsSheetCount: integer("last_sms_sheet_count"),
+  // Twilio delivery tracking for the most recent SMS sent on this row.
+  // Updated by the Twilio status callback webhook as the message moves
+  // through queued -> sent -> delivered -> failed/undelivered.
+  lastSmsMessageSid: text("last_sms_message_sid"),
+  lastSmsStatus: text("last_sms_status"),
+  lastSmsStatusAt: timestamp("last_sms_status_at"),
+  lastSmsErrorCode: text("last_sms_error_code"),
 });
 
 // Part assemblies - pre-configured bundles of parts for common repairs

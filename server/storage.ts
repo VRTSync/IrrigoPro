@@ -336,7 +336,8 @@ export interface IStorage {
 
   // Missing-photos outreach tracking — one row per technician
   getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]>;
-  upsertMissingPhotosNotification(technicianId: number, sheetIds: number[], sentByUserId: number | null, channel?: 'email' | 'sms'): Promise<MissingPhotosNotification>;
+  upsertMissingPhotosNotification(technicianId: number, sheetIds: number[], sentByUserId: number | null, channel?: 'email' | 'sms', smsMessageSid?: string | null): Promise<MissingPhotosNotification>;
+  updateMissingPhotosSmsStatus(messageSid: string, status: string, errorCode?: string | null): Promise<MissingPhotosNotification | undefined>;
 
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
@@ -2715,12 +2716,26 @@ export class DatabaseStorage implements IStorage {
     sheetIds: number[],
     sentByUserId: number | null,
     channel: 'email' | 'sms' = 'email',
+    smsMessageSid: string | null = null,
   ): Promise<MissingPhotosNotification> {
     const now = new Date();
-    const channelFields: Partial<typeof missingPhotosNotifications.$inferInsert> =
-      channel === 'email'
-        ? { lastSentEmailAt: now, lastEmailSheetCount: sheetIds.length }
-        : { lastSentSmsAt: now, lastSmsSheetCount: sheetIds.length };
+    let channelFields: Partial<typeof missingPhotosNotifications.$inferInsert>;
+    if (channel === 'email') {
+      channelFields = { lastSentEmailAt: now, lastEmailSheetCount: sheetIds.length };
+    } else {
+      // For SMS, also (re)seed the delivery tracking fields. We mark the
+      // initial status as 'queued' since Twilio has just accepted the
+      // message; the status callback webhook will update it as the message
+      // moves through sent / delivered / failed / undelivered.
+      channelFields = {
+        lastSentSmsAt: now,
+        lastSmsSheetCount: sheetIds.length,
+        lastSmsMessageSid: smsMessageSid,
+        lastSmsStatus: smsMessageSid ? 'queued' : null,
+        lastSmsStatusAt: smsMessageSid ? now : null,
+        lastSmsErrorCode: null,
+      };
+    }
 
     const insertValues: typeof missingPhotosNotifications.$inferInsert = {
       technicianId,
@@ -2745,6 +2760,61 @@ export class DatabaseStorage implements IStorage {
         target: missingPhotosNotifications.technicianId,
         set: updateValues,
       })
+      .returning();
+    return row;
+  }
+
+  async updateMissingPhotosSmsStatus(
+    messageSid: string,
+    status: string,
+    errorCode: string | null = null,
+  ): Promise<MissingPhotosNotification | undefined> {
+    // Monotonic status guard: Twilio status callbacks can arrive out of
+    // order (e.g. a delayed 'sent' after a 'delivered'/'failed' callback).
+    // Don't let an earlier-stage status overwrite a terminal one. Rank
+    // each status; only persist when the incoming rank is >= the stored
+    // rank.
+    const rank = (s: string | null | undefined): number => {
+      switch ((s ?? '').toLowerCase()) {
+        case 'queued':
+        case 'accepted':
+        case 'scheduled':
+          return 1;
+        case 'sending':
+          return 2;
+        case 'sent':
+          return 3;
+        // Terminal states — equal rank so the most recent terminal callback
+        // (e.g. 'delivered' superseded by a later 'failed') still updates.
+        case 'delivered':
+        case 'received':
+        case 'failed':
+        case 'undelivered':
+          return 4;
+        default:
+          return 0;
+      }
+    };
+
+    const [existing] = await db
+      .select()
+      .from(missingPhotosNotifications)
+      .where(eq(missingPhotosNotifications.lastSmsMessageSid, messageSid));
+    if (!existing) return undefined;
+
+    if (rank(status) < rank(existing.lastSmsStatus)) {
+      // Drop out-of-order earlier-stage callback; preserve terminal state.
+      return existing;
+    }
+
+    const [row] = await db
+      .update(missingPhotosNotifications)
+      .set({
+        lastSmsStatus: status,
+        lastSmsStatusAt: new Date(),
+        lastSmsErrorCode: errorCode,
+      })
+      .where(eq(missingPhotosNotifications.lastSmsMessageSid, messageSid))
       .returning();
     return row;
   }

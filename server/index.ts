@@ -274,6 +274,26 @@ async function runStartupMigrations() {
     logger.error('Startup migration: missing_photos_notifications table error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // Task #153: track Twilio SMS delivery status on missing-photos notifications.
+  // Adds the message SID + most recent delivery status (queued/sent/delivered/
+  // failed/undelivered) reported by the Twilio status callback webhook.
+  try {
+    await pool.query(`
+      ALTER TABLE missing_photos_notifications
+        ADD COLUMN IF NOT EXISTS last_sms_message_sid text,
+        ADD COLUMN IF NOT EXISTS last_sms_status text,
+        ADD COLUMN IF NOT EXISTS last_sms_status_at timestamp,
+        ADD COLUMN IF NOT EXISTS last_sms_error_code text
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS missing_photos_notifications_last_sms_sid_idx
+        ON missing_photos_notifications (last_sms_message_sid)
+    `);
+    logger.info('Startup migration: ensured missing_photos_notifications SMS status columns exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: missing_photos_notifications SMS status columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   // Health assertion: verify critical parts columns exist and are readable; log explicit error if drift detected
   try {
     const driftCheck = await pool.query(`

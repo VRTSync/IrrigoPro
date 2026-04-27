@@ -11,7 +11,11 @@ export class SmsService {
     return !!(client && fromNumber);
   }
 
-  private static get baseUrl() {
+  static get authToken() {
+    return authToken;
+  }
+
+  static get baseUrl() {
     if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/$/, '');
     if (process.env.NODE_ENV === 'production') return 'https://irrigopro.com';
     const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
@@ -19,12 +23,16 @@ export class SmsService {
     return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
   }
 
+  static get statusCallbackUrl() {
+    return `${this.baseUrl}/api/twilio/sms-status`;
+  }
+
   static async sendMissingPhotosTechnicianSms(args: {
     to: string;
     technicianName: string;
     sheets: Array<{ id: number; billingNumber: string }>;
     companyName?: string;
-  }): Promise<{ success: boolean; error?: string }> {
+  }): Promise<{ success: boolean; error?: string; messageSid?: string }> {
     if (!client || !fromNumber) {
       return { success: false, error: 'SMS service not configured (missing Twilio credentials)' };
     }
@@ -49,8 +57,16 @@ export class SmsService {
       `If you still have the photos on your phone, please re-attach them: ${reportUrl}`;
 
     try {
-      await client.messages.create({ from: fromNumber, to: args.to, body });
-      return { success: true };
+      const message = await client.messages.create({
+        from: fromNumber,
+        to: args.to,
+        body,
+        // Twilio will POST delivery status updates (queued → sent → delivered
+        // → failed/undelivered) to this URL so we can surface real delivery
+        // outcomes in the missing-photos report instead of just "sent".
+        statusCallback: this.statusCallbackUrl,
+      });
+      return { success: true, messageSid: message.sid };
     } catch (error) {
       console.error('Failed to send missing-photos SMS:', error);
       const message = error instanceof Error ? error.message : 'Send failed';
