@@ -77,3 +77,11 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **SMS Service**: Twilio
 - **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
 - **PDF Generation**: Puppeteer.
+
+## Authoritative Pricing & $0 Catalog Audit (Task #160)
+- Server-side helper `resolveAuthoritativePartPricing` (server/routes.ts) overwrites client-supplied `unitPrice` for any catalog line item (one with a `partId`) with the catalog's current price. Manual line items (no `partId`) remain editable. Unknown / cross-tenant `partId`s are 4xx-rejected. Wired into POST and PATCH `/api/billing-sheets`, POST `/api/work-orders/:id/billing-sheet`, POST `/api/work-orders`, PATCH `/api/work-orders/:id`, and POST `/api/work-orders/:id/items`.
+- `regressionGuardZeroCatalogPrices` logs an `[AUDIT]` line whenever a catalog item ends up with a final $0 price despite a non-zero catalog row — making any future regression visible.
+- The standalone billing sheet form (client/src/components/billing/standalone-billing-sheet.tsx) strips `unitPrice` from per-item submission payloads when the user is a field tech, so techs never accidentally bill at $0.
+- Admin-only audit endpoints: `GET /api/admin/billing-sheets/zero-price-audit` and `POST /api/admin/billing-sheets/zero-price-audit/repair` (dry-run by default, `selection: [{source, itemId}]`). Storage methods `getZeroPriceCatalogItems` and `repriceBillingSheetItems` cover BOTH `billing_sheet_items` AND `work_order_items`, recompute parent totals using the snapshotted applied rates, and append a short audit note. Super admins may target a specific `companyId` or `'all'`.
+- Admin UI at `/billing-sheets/zero-price-audit` (client/src/pages/billing-zero-price-audit.tsx) lists affected rows from both sources, supports row-level selection, dry-run preview, and repair. Entry banner on the billing sheets page is shown to admin / billing manager / irrigation manager / super admin roles.
+- Test coverage: `tests/billing-pricing-authoritative.test.mjs` (added to the Run Tests workflow) covers $0 client price overwrite, unknown-partId rejection, manual line allowed at $0, and audit dry-run vs. apply.

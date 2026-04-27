@@ -448,6 +448,18 @@ export function StandaloneBillingSheet({
       const url = isUpdating ? `/api/billing-sheets/${draftData.id}` : "/api/billing-sheets";
       const method = isUpdating ? "PATCH" : "POST";
 
+      // Field techs never set pricing — strip unitPrice from per-item payload so the
+      // server-side authoritative-pricing helper can resolve from the catalog without
+      // any client-supplied $0 leaking through. Manual line items (no partId) are also
+      // stripped, but the server allows manual items at $0 by design (manager will
+      // price them via the manual-part review flow).
+      const stripPricingForFieldTech = (rawItems: any[] | undefined) => {
+        if (!Array.isArray(rawItems)) return rawItems;
+        if (!isFieldTech) return rawItems;
+        return rawItems.map(({ unitPrice, ...rest }) => rest);
+      };
+      const itemsForWire = stripPricingForFieldTech(data.items as any[] | undefined);
+
       // Field techs submitting a draft must send only { status: 'submitted' }
       // (the server enforces this restriction for security).
       // When updating an existing sheet (manager edit), preserve the existing status so we
@@ -458,6 +470,7 @@ export function StandaloneBillingSheet({
         : isUpdating
         ? {
             ...data,
+            items: itemsForWire,
             laborSubtotal: totals.laborSubtotal,
             partsSubtotal: totals.partsSubtotal,
             markupAmount: totals.markupAmount,
@@ -470,6 +483,7 @@ export function StandaloneBillingSheet({
           }
         : {
             ...data,
+            items: itemsForWire,
             laborSubtotal: totals.laborSubtotal,
             partsSubtotal: totals.partsSubtotal,
             markupAmount: totals.markupAmount,

@@ -13,7 +13,7 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { FAB } from "@/components/ui/fab";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera } from "lucide-react";
+import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -357,6 +357,29 @@ export default function BillingSheets() {
             testId="metric-approved"
           />
         </MetricGrid>
+
+        {/* Catalog $0 price audit entry — only admins / billing managers */}
+        {canSeeReport && (
+          <Link href="/billing-sheets/zero-price-audit">
+            <a
+              className="block border border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors rounded-lg px-4 py-3 mb-2"
+              data-testid="banner-zero-price-audit"
+            >
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-orange-700 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-orange-900">
+                    Catalog $0 price audit
+                  </p>
+                  <p className="text-xs text-orange-800">
+                    Find and repair billing sheets and work orders saved with a $0 unit price for catalog parts.
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-orange-700 flex-shrink-0" />
+              </div>
+            </a>
+          </Link>
+        )}
 
         {/* Missing photos report banner */}
         {canSeeReport && missingPhotosCount > 0 && (

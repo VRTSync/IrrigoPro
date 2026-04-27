@@ -363,6 +363,55 @@ export interface IStorage {
   saveControllers(siteMapId: number, controllers: InsertController[], companyId?: number): Promise<Controller[]>;
   saveZones(siteMapId: number, zones: InsertIrrigationZone[], companyId?: number): Promise<IrrigationZone[]>;
 
+  // Catalog $0-price audit / backfill (Task #160) — covers BOTH billing sheets AND work orders
+  getZeroPriceCatalogItems(companyId: number | null): Promise<Array<{
+    source: 'billing_sheet' | 'work_order';
+    itemId: number;
+    parentId: number;          // billingSheetId for billing_sheet, workOrderId for work_order
+    parentNumber: string;      // billingNumber or workOrderNumber
+    customerId: number | null;
+    customerName: string;
+    workDate: Date | null;
+    technicianName: string;
+    status: string;
+    invoiceId: number | null;
+    partId: number;
+    partName: string;
+    quantity: string;
+    storedUnitPrice: string;
+    storedTotalPrice: string;
+    catalogUnitPrice: string;
+    expectedTotalPrice: string;
+    difference: string;
+  }>>;
+  repriceBillingSheetItems(
+    selection: Array<{ source: 'billing_sheet' | 'work_order'; itemId: number }>,
+    companyId: number | null,
+    options: { dryRun: boolean; performedByUserId: number | null; performedByName: string | null }
+  ): Promise<{
+    dryRun: boolean;
+    parentCount: number;
+    itemCount: number;
+    totalDifference: string;
+    parents: Array<{
+      source: 'billing_sheet' | 'work_order';
+      parentId: number;
+      parentNumber: string;
+      oldPartsSubtotal: string;
+      newPartsSubtotal: string;
+      oldTotalAmount: string;
+      newTotalAmount: string;
+      updatedItems: Array<{
+        itemId: number;
+        partName: string;
+        oldUnitPrice: string;
+        newUnitPrice: string;
+        oldTotalPrice: string;
+        newTotalPrice: string;
+      }>;
+    }>;
+  }>;
+
   // Manual Part Reviews
   getManualPartReviews(companyId: number): Promise<ManualPartReview[]>;
   getManualPartReview(id: number): Promise<ManualPartReview | undefined>;
@@ -2318,6 +2367,315 @@ export class DatabaseStorage implements IStorage {
   async getBillingSheetItems(billingSheetId: number): Promise<BillingSheetItem[]> {
     return await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
   }
+
+  // ─── Catalog $0-price audit / backfill (Task #160) ──────────────────────────
+  // Covers BOTH billing_sheet_items AND work_order_items. A "bad" row is any
+  // line item with a non-null partId whose stored unit price is 0 while the
+  // catalog row reports a price > 0. Scoping is by parts.company_id (the
+  // catalog is the authoritative source of truth).
+  async getZeroPriceCatalogItems(companyId: number | null) {
+    const billingRows = await db.execute(sql`
+      SELECT
+        'billing_sheet'::text AS source,
+        bsi.id              AS item_id,
+        bsi.billing_sheet_id AS parent_id,
+        bs.billing_number   AS parent_number,
+        bs.customer_id      AS customer_id,
+        bs.customer_name    AS customer_name,
+        bs.work_date        AS work_date,
+        bs.technician_name  AS technician_name,
+        bs.status           AS status,
+        bs.invoice_id       AS invoice_id,
+        bsi.part_id         AS part_id,
+        bsi.part_name       AS part_name,
+        bsi.quantity        AS quantity,
+        bsi.unit_price      AS stored_unit_price,
+        bsi.total_price     AS stored_total_price,
+        p.price             AS catalog_unit_price
+      FROM billing_sheet_items bsi
+      INNER JOIN parts p           ON p.id = bsi.part_id
+      INNER JOIN billing_sheets bs ON bs.id = bsi.billing_sheet_id
+      WHERE bsi.part_id IS NOT NULL
+        AND CAST(bsi.unit_price AS DOUBLE PRECISION) = 0
+        AND CAST(p.price AS DOUBLE PRECISION) > 0
+        AND (${companyId}::int IS NULL OR p.company_id = ${companyId}::int)
+    `);
+
+    const workOrderRows = await db.execute(sql`
+      SELECT
+        'work_order'::text   AS source,
+        woi.id               AS item_id,
+        woi.work_order_id    AS parent_id,
+        wo.work_order_number AS parent_number,
+        wo.customer_id       AS customer_id,
+        wo.customer_name     AS customer_name,
+        wo.scheduled_date    AS work_date,
+        wo.assigned_technician_name AS technician_name,
+        wo.status            AS status,
+        wo.invoice_id        AS invoice_id,
+        woi.part_id          AS part_id,
+        woi.part_name        AS part_name,
+        woi.quantity         AS quantity,
+        woi.part_price       AS stored_unit_price,
+        woi.total_price      AS stored_total_price,
+        p.price              AS catalog_unit_price
+      FROM work_order_items woi
+      INNER JOIN parts p        ON p.id = woi.part_id
+      INNER JOIN work_orders wo ON wo.id = woi.work_order_id
+      WHERE woi.part_id IS NOT NULL
+        AND CAST(woi.part_price AS DOUBLE PRECISION) = 0
+        AND CAST(p.price AS DOUBLE PRECISION) > 0
+        AND (${companyId}::int IS NULL OR p.company_id = ${companyId}::int)
+    `);
+
+    const merged = [...billingRows.rows, ...workOrderRows.rows] as Array<Record<string, unknown>>;
+    return merged
+      .map((r) => {
+        const quantity = parseFloat(String(r.quantity ?? 0));
+        const catalogPrice = parseFloat(String(r.catalog_unit_price ?? 0));
+        const storedTotal = parseFloat(String(r.stored_total_price ?? 0));
+        const expectedTotal = quantity * catalogPrice;
+        const workDate = r.work_date ? (r.work_date as Date) : null;
+        return {
+          source: r.source as 'billing_sheet' | 'work_order',
+          itemId: Number(r.item_id),
+          parentId: Number(r.parent_id),
+          parentNumber: String(r.parent_number ?? ''),
+          customerId: r.customer_id == null ? null : Number(r.customer_id),
+          customerName: String(r.customer_name ?? ''),
+          workDate,
+          technicianName: String(r.technician_name ?? ''),
+          status: String(r.status ?? ''),
+          invoiceId: r.invoice_id == null ? null : Number(r.invoice_id),
+          partId: Number(r.part_id),
+          partName: String(r.part_name ?? ''),
+          quantity: String(r.quantity ?? '0'),
+          storedUnitPrice: String(r.stored_unit_price ?? '0'),
+          storedTotalPrice: String(r.stored_total_price ?? '0'),
+          catalogUnitPrice: String(r.catalog_unit_price ?? '0'),
+          expectedTotalPrice: expectedTotal.toFixed(2),
+          difference: (expectedTotal - storedTotal).toFixed(2),
+        };
+      })
+      .sort((a, b) => {
+        // Most recent first; rows without a work date go to the bottom.
+        const ta = a.workDate ? a.workDate.getTime() : 0;
+        const tb = b.workDate ? b.workDate.getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        return b.parentId - a.parentId;
+      });
+  }
+
+  async repriceBillingSheetItems(
+    selection: Array<{ source: 'billing_sheet' | 'work_order'; itemId: number }>,
+    companyId: number | null,
+    options: { dryRun: boolean; performedByUserId: number | null; performedByName: string | null }
+  ) {
+    const allBad = await this.getZeroPriceCatalogItems(companyId);
+    const selectionKey = (s: 'billing_sheet' | 'work_order', id: number) => `${s}:${id}`;
+    const wantSet = new Set(selection.map((s) => selectionKey(s.source, s.itemId)));
+    const targets = selection.length === 0
+      ? allBad
+      : allBad.filter((row) => wantSet.has(selectionKey(row.source, row.itemId)));
+
+    // Group by parent (sheet or work order) so subtotals are recomputed once each.
+    const byParent = new Map<string, typeof targets>();
+    for (const row of targets) {
+      const k = `${row.source}:${row.parentId}`;
+      const arr = byParent.get(k) ?? [];
+      arr.push(row);
+      byParent.set(k, arr);
+    }
+
+    type ParentSummary = {
+      source: 'billing_sheet' | 'work_order';
+      parentId: number;
+      parentNumber: string;
+      oldPartsSubtotal: string;
+      newPartsSubtotal: string;
+      oldTotalAmount: string;
+      newTotalAmount: string;
+      updatedItems: Array<{
+        itemId: number;
+        partName: string;
+        oldUnitPrice: string;
+        newUnitPrice: string;
+        oldTotalPrice: string;
+        newTotalPrice: string;
+      }>;
+    };
+    const parentSummaries: ParentSummary[] = [];
+    let grandDifference = 0;
+    let totalItemCount = 0;
+
+    const stamp = new Date().toISOString();
+    const actor = options.performedByName ?? (options.performedByUserId ? `user#${options.performedByUserId}` : 'admin');
+
+    type ZeroPriceRow = typeof allBad[number];
+    for (const rows of Array.from(byParent.values()) as ZeroPriceRow[][]) {
+      const sample = rows[0];
+      if (!sample) continue;
+      const updatedItems = rows.map((r: ZeroPriceRow) => ({
+        itemId: r.itemId,
+        partName: r.partName,
+        oldUnitPrice: parseFloat(r.storedUnitPrice).toFixed(2),
+        newUnitPrice: parseFloat(r.catalogUnitPrice).toFixed(2),
+        oldTotalPrice: parseFloat(r.storedTotalPrice).toFixed(2),
+        newTotalPrice: parseFloat(r.expectedTotalPrice).toFixed(2),
+      }));
+      const parentDifference = rows.reduce(
+        (sum: number, r: ZeroPriceRow) => sum + parseFloat(r.difference),
+        0,
+      );
+
+      if (sample.source === 'billing_sheet') {
+        const sheetId = sample.parentId;
+        const [sheet] = await db.select().from(billingSheets).where(eq(billingSheets.id, sheetId));
+        if (!sheet) continue;
+        const oldPartsSubtotal = parseFloat(String(sheet.partsSubtotal ?? 0));
+        const oldTotalAmount = parseFloat(String(sheet.totalAmount ?? 0));
+        const oldLaborSubtotal = parseFloat(String(sheet.laborSubtotal ?? 0));
+        const newPartsSubtotal = oldPartsSubtotal + parentDifference;
+        const newTotalAmount = oldLaborSubtotal + newPartsSubtotal;
+
+        parentSummaries.push({
+          source: 'billing_sheet',
+          parentId: sheetId,
+          parentNumber: sheet.billingNumber,
+          oldPartsSubtotal: oldPartsSubtotal.toFixed(2),
+          newPartsSubtotal: newPartsSubtotal.toFixed(2),
+          oldTotalAmount: oldTotalAmount.toFixed(2),
+          newTotalAmount: newTotalAmount.toFixed(2),
+          updatedItems,
+        });
+        grandDifference += parentDifference;
+        totalItemCount += rows.length;
+
+        if (!options.dryRun) {
+          await db.transaction(async (tx) => {
+            for (const r of rows) {
+              await tx.update(billingSheetItems)
+                .set({
+                  unitPrice: parseFloat(r.catalogUnitPrice).toFixed(2),
+                  totalPrice: parseFloat(r.expectedTotalPrice).toFixed(2),
+                })
+                .where(eq(billingSheetItems.id, r.itemId));
+            }
+            const refreshedItems = await tx.select().from(billingSheetItems)
+              .where(eq(billingSheetItems.billingSheetId, sheetId));
+            const truePartsSubtotal = refreshedItems.reduce(
+              (sum, item) => sum + parseFloat(String(item.totalPrice ?? 0)),
+              0,
+            );
+            const trueTotal = oldLaborSubtotal + truePartsSubtotal;
+            const auditNote = `[${stamp}] Auto-repriced ${rows.length} item(s) from catalog (delta $${parentDifference.toFixed(2)}) by ${actor}.`;
+            const mergedNotes = sheet.notes && sheet.notes.trim().length > 0
+              ? `${sheet.notes}\n${auditNote}`
+              : auditNote;
+            await tx.update(billingSheets)
+              .set({
+                partsSubtotal: truePartsSubtotal.toFixed(2),
+                totalAmount: trueTotal.toFixed(2),
+                notes: mergedNotes,
+              })
+              .where(eq(billingSheets.id, sheetId));
+            console.log(
+              `[AUDIT] billing_sheet_repriced billingSheetId=${sheetId} billingNumber=${sheet.billingNumber} ` +
+              `itemCount=${rows.length} delta=${parentDifference.toFixed(2)} ` +
+              `newPartsSubtotal=${truePartsSubtotal.toFixed(2)} newTotalAmount=${trueTotal.toFixed(2)} actor=${actor}`
+            );
+          });
+        }
+      } else {
+        // work_order
+        const workOrderId = sample.parentId;
+        const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
+        if (!wo) continue;
+        const oldPartsSubtotal = parseFloat(String(wo.partsSubtotal ?? wo.totalPartsCost ?? 0));
+        const oldTotalAmount = parseFloat(String(wo.totalAmount ?? 0));
+
+        parentSummaries.push({
+          source: 'work_order',
+          parentId: workOrderId,
+          parentNumber: wo.workOrderNumber,
+          oldPartsSubtotal: oldPartsSubtotal.toFixed(2),
+          // We will report the recomputed totals after the transaction; for the
+          // dry-run case we approximate them by adding the delta.
+          newPartsSubtotal: (oldPartsSubtotal + parentDifference).toFixed(2),
+          oldTotalAmount: oldTotalAmount.toFixed(2),
+          newTotalAmount: (oldTotalAmount + parentDifference).toFixed(2),
+          updatedItems,
+        });
+        grandDifference += parentDifference;
+        totalItemCount += rows.length;
+
+        if (!options.dryRun) {
+          await db.transaction(async (tx) => {
+            for (const r of rows) {
+              await tx.update(workOrderItems)
+                .set({
+                  partPrice: parseFloat(r.catalogUnitPrice).toFixed(2),
+                  totalPrice: parseFloat(r.expectedTotalPrice).toFixed(2),
+                })
+                .where(eq(workOrderItems.id, r.itemId));
+            }
+            const refreshedItems = await tx.select().from(workOrderItems)
+              .where(eq(workOrderItems.workOrderId, workOrderId));
+            const truePartsCost = refreshedItems.reduce(
+              (sum, item) => sum + parseFloat(String(item.totalPrice ?? 0)),
+              0,
+            );
+
+            // Recompute the work-order financial breakdown using its snapshotted
+            // applied rates (matches the live PATCH behaviour). If the snapshot
+            // is missing applied rates (legacy record), only update totalPartsCost
+            // and append the audit note.
+            const updates: Record<string, string> = {
+              totalPartsCost: truePartsCost.toFixed(2),
+            };
+            const snappedLabor = parseFloat(String(wo.appliedLaborRate ?? ''));
+            const snappedMarkup = parseFloat(String(wo.appliedMarkupRate ?? ''));
+            const snappedTax = parseFloat(String(wo.appliedTaxRate ?? ''));
+            if (Number.isFinite(snappedLabor) && Number.isFinite(snappedMarkup) && Number.isFinite(snappedTax)) {
+              const hrs = parseFloat(String(wo.totalHours ?? '0'));
+              const laborSub = hrs * snappedLabor;
+              const markup = truePartsCost * snappedMarkup;
+              const subtotal = laborSub + truePartsCost + markup;
+              const tax = subtotal * snappedTax;
+              const total = subtotal + tax;
+              updates.laborSubtotal = laborSub.toFixed(2);
+              updates.partsSubtotal = truePartsCost.toFixed(2);
+              updates.markupAmount = markup.toFixed(2);
+              updates.taxAmount = tax.toFixed(2);
+              updates.totalAmount = total.toFixed(2);
+            }
+
+            const auditNote = `[${stamp}] Auto-repriced ${rows.length} item(s) from catalog (delta $${parentDifference.toFixed(2)}) by ${actor}.`;
+            const mergedNotes = wo.notes && wo.notes.trim().length > 0
+              ? `${wo.notes}\n${auditNote}`
+              : auditNote;
+            updates.notes = mergedNotes;
+
+            await tx.update(workOrders).set(updates).where(eq(workOrders.id, workOrderId));
+            console.log(
+              `[AUDIT] work_order_repriced workOrderId=${workOrderId} workOrderNumber=${wo.workOrderNumber} ` +
+              `itemCount=${rows.length} delta=${parentDifference.toFixed(2)} ` +
+              `newTotalPartsCost=${truePartsCost.toFixed(2)} actor=${actor}`
+            );
+          });
+        }
+      }
+    }
+
+    return {
+      dryRun: options.dryRun,
+      parentCount: parentSummaries.length,
+      itemCount: totalItemCount,
+      totalDifference: grandDifference.toFixed(2),
+      parents: parentSummaries,
+    };
+  }
+  // ─── /Catalog $0-price audit / backfill ─────────────────────────────────────
 
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {

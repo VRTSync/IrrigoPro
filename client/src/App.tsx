@@ -24,6 +24,7 @@ import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import BillingSheets from "@/pages/billing-sheets";
 import MissingPhotosReport from "@/pages/missing-photos-report";
 import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-report";
+import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import CustomerBilling from "@/pages/customer-billing";
 import QuickBooksPage from "@/pages/quickbooks";
 import AdminDashboard from "@/pages/admin-dashboard";
@@ -187,6 +188,7 @@ function Router() {
                 <Route path="/site-maps" component={SiteMapsPage} />
                 <Route path="/work-orders/missing-photos" component={WorkOrdersMissingPhotosReport} />
                 <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
+                <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
@@ -223,6 +225,7 @@ function Router() {
                 <Route path="/work-orders/missing-photos" component={WorkOrdersMissingPhotosReport} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
+                <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/parts-settings" component={PartsSettings} />
@@ -302,6 +305,7 @@ function Router() {
               <Route path="/site-maps" component={SiteMapsPage} />
               <Route path="/customer-billing" component={CustomerBilling} />
               <Route path="/field-tech" component={FieldTech} />
+              <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
               <Route path="/billing-sheets" component={BillingSheets} />
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />

@@ -72,6 +72,136 @@ function applyPricingVisibility(req: Request, data: any): any {
   return data;
 }
 
+// ─── Authoritative server-side pricing for billing sheet line items (Task #160) ─
+// Catalog parts (items with a `partId`) must always be persisted with the
+// catalog unit price — never with whatever the client sent. Manual line items
+// (no `partId`) are still allowed at any price (including $0) since they go
+// through the manual-part review flow.
+//
+// Returns either { items } with rewritten line items (unitPrice + totalPrice
+// recomputed from the catalog) and `auditedZeros` describing any client-side
+// price drift we detected, or { error } with a 4xx-shaped message when a
+// `partId` does not resolve to a real catalog row in the user's company.
+type RawBillingItem = {
+  partId?: number | null;
+  partName?: string;
+  partDescription?: string | null;
+  quantity?: number | string;
+  unitPrice?: number | string;
+  laborHours?: number | string;
+  notes?: string | null;
+  [key: string]: unknown;
+};
+
+async function resolveAuthoritativePartPricing(
+  rawItems: RawBillingItem[] | undefined,
+  companyId: number | null | undefined,
+): Promise<{
+  items?: RawBillingItem[];
+  error?: { status: number; message: string };
+  auditedZeros: Array<{ index: number; partId: number; partName: string; clientUnitPrice: number; catalogUnitPrice: number }>;
+}> {
+  const auditedZeros: Array<{ index: number; partId: number; partName: string; clientUnitPrice: number; catalogUnitPrice: number }> = [];
+  if (!Array.isArray(rawItems)) {
+    return { items: rawItems, auditedZeros };
+  }
+
+  const out: RawBillingItem[] = [];
+  for (let i = 0; i < rawItems.length; i++) {
+    const item = rawItems[i] ?? {};
+    const partIdRaw = item.partId as unknown;
+    const partId =
+      partIdRaw == null || partIdRaw === '' ? null : Number(partIdRaw);
+
+    if (!partId || !Number.isFinite(partId)) {
+      // Manual / non-catalog line item — leave the client-supplied price alone.
+      out.push(item);
+      continue;
+    }
+
+    const part = await storage.getPart(partId);
+    const lineLabel = String(item.partName ?? `line ${i + 1}`);
+
+    if (!part) {
+      return {
+        error: {
+          status: 400,
+          message: `Catalog part with ID ${partId} (line item "${lineLabel}") was not found. Cannot save a $0 line item for an unknown catalog part.`,
+        },
+        auditedZeros,
+      };
+    }
+    if (companyId != null && part.companyId !== companyId) {
+      return {
+        error: {
+          status: 400,
+          message: `Catalog part "${part.name}" (ID ${partId}, line item "${lineLabel}") does not belong to your company. Cannot save the line item.`,
+        },
+        auditedZeros,
+      };
+    }
+
+    const catalogUnitPrice = parseFloat(String(part.price ?? 0));
+    const clientUnitPrice = parseFloat(String(item.unitPrice ?? 0));
+    if (catalogUnitPrice > 0 && Math.abs(clientUnitPrice - catalogUnitPrice) > 0.005) {
+      auditedZeros.push({
+        index: i,
+        partId,
+        partName: part.name,
+        clientUnitPrice,
+        catalogUnitPrice,
+      });
+    }
+
+    const qty = parseFloat(String(item.quantity ?? 0));
+    out.push({
+      ...item,
+      partId,
+      partName: item.partName || part.name,
+      partDescription: item.partDescription ?? part.description ?? null,
+      unitPrice: catalogUnitPrice,
+      totalPrice: (qty * catalogUnitPrice).toFixed(2),
+    } as RawBillingItem);
+  }
+
+  return { items: out, auditedZeros };
+}
+
+// Logs (and is the seam for future metrics/audit-row writes) any catalog line
+// item that ended up with a final unitPrice of 0 while the catalog row reports
+// a non-zero price. The authoritative-pricing helper above should make this
+// impossible — this guard makes a future regression visible instead of silent.
+async function regressionGuardZeroCatalogPrices(
+  context: 'create' | 'update' | 'work_order_conversion',
+  billingSheetId: number | null,
+  items: RawBillingItem[] | undefined,
+): Promise<void> {
+  if (!Array.isArray(items)) return;
+  for (const item of items) {
+    const partIdRaw = item.partId as unknown;
+    const partId =
+      partIdRaw == null || partIdRaw === '' ? null : Number(partIdRaw);
+    if (!partId || !Number.isFinite(partId)) continue;
+    const finalPrice = parseFloat(String(item.unitPrice ?? 0));
+    if (finalPrice > 0) continue;
+    try {
+      const part = await storage.getPart(partId);
+      const catalogPrice = part ? parseFloat(String(part.price ?? 0)) : 0;
+      if (catalogPrice > 0) {
+        console.warn(
+          `[AUDIT-ZERO-PRICE-DRIFT] context=${context} billingSheetId=${billingSheetId ?? 'pending'} ` +
+          `partId=${partId} partName="${part?.name ?? item.partName ?? '?'}" ` +
+          `finalUnitPrice=0 catalogUnitPrice=${catalogPrice.toFixed(2)} — catalog price was lost despite authoritative-pricing helper`
+        );
+      }
+    } catch (err) {
+      // Swallow guard errors — they must never block a save.
+      console.warn(`[AUDIT-ZERO-PRICE-DRIFT] guard lookup failed for partId=${partId}:`, err);
+    }
+  }
+}
+// ─── /Authoritative server-side pricing ─────────────────────────────────────────
+
 // Roles allowed to read billing notes
 const BILLING_NOTES_READ_ROLES = new Set(['billing_manager', 'company_admin', 'super_admin']);
 
@@ -7400,16 +7530,71 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Recalculate totals using the authoritative rate from the customer record
       const bsTotalHours = parseFloat(billingSheetData.totalHours || '0');
       const bsLaborSubtotal = bsTotalHours * bsAuthorizedLaborRate;
+
+      // Server-side authoritative pricing (Task #160): for every catalog line item
+      // (those with a `partId`), overwrite the client-supplied `unitPrice` with the
+      // current catalog price. Manual line items (no `partId`) are left alone — they
+      // continue through the manual-part review flow.
+      const rawClientItems: RawBillingItem[] = Array.isArray(billingSheetData.items)
+        ? billingSheetData.items
+        : [];
+      const postCompanyId = req.authenticatedUserCompanyId
+        ?? (req.headers['x-user-company-id']
+          ? parseInt(req.headers['x-user-company-id'] as string)
+          : (customerForRate.companyId ?? null));
+      const pricingResult = await resolveAuthoritativePartPricing(rawClientItems, postCompanyId);
+      if (pricingResult.error) {
+        return res.status(pricingResult.error.status).json({ message: pricingResult.error.message });
+      }
+      const resolvedClientItems = (pricingResult.items as RawBillingItem[]) ?? [];
+      if (pricingResult.auditedZeros.length > 0) {
+        for (const drift of pricingResult.auditedZeros) {
+          console.log(
+            `[AUDIT] billing_sheet_create_price_corrected partId=${drift.partId} ` +
+            `partName="${drift.partName}" clientUnitPrice=${drift.clientUnitPrice.toFixed(2)} ` +
+            `catalogUnitPrice=${drift.catalogUnitPrice.toFixed(2)}`
+          );
+        }
+      }
       // Always derive partsSubtotal from the items the server will write — discard any client-supplied value
-      const clientItems: Array<{ quantity: number | string; unitPrice: number | string; [key: string]: unknown }> =
-        Array.isArray(billingSheetData.items) ? billingSheetData.items : [];
-      const bsPartsSubtotal = clientItems.reduce(
+      const bsPartsSubtotal = resolvedClientItems.reduce(
         (sum, item) => sum + parseFloat(String(item.quantity || 0)) * parseFloat(String(item.unitPrice || 0)),
         0
       );
       const bsTotalAmount = bsLaborSubtotal + bsPartsSubtotal;
 
       // Clean the data - remove any fields that might interfere with timestamps
+      // Ensure every item we hand to storage matches the createBillingSheet
+      // shape (string-typed numerics, totalPrice always present) using the
+      // (possibly server-corrected) quantity * unitPrice.
+      type BillingSheetItemInput = {
+        partName: string;
+        quantity: string;
+        unitPrice: string;
+        totalPrice: string;
+        laborHours: string;
+        notes?: string | null;
+        billingSheetId?: number | null;
+        partId?: number | null;
+        partDescription?: string | null;
+      };
+      const itemsForStorage: BillingSheetItemInput[] = resolvedClientItems.map((it) => {
+        const qty = parseFloat(String(it.quantity ?? 0));
+        const unit = parseFloat(String(it.unitPrice ?? 0));
+        const computedTotal = (qty * unit).toFixed(2);
+        const rawTotal = (it as { totalPrice?: number | string }).totalPrice;
+        return {
+          partId: it.partId ?? null,
+          partName: String(it.partName ?? ''),
+          partDescription: it.partDescription ?? null,
+          quantity: String(it.quantity ?? '0'),
+          unitPrice: String(it.unitPrice ?? '0'),
+          totalPrice: rawTotal != null ? String(rawTotal) : computedTotal,
+          laborHours: String(it.laborHours ?? '0'),
+          notes: it.notes ?? null,
+        };
+      });
+
       const cleanData = {
         customerId: billingSheetData.customerId,
         customerName: billingSheetData.customerName,
@@ -7430,7 +7615,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         photos: billingSheetData.photos || [],
         notes: billingSheetData.notes || '',
         branchName: billingSheetData.branchName || null,
-        items: Array.isArray(billingSheetData.items) ? billingSheetData.items : undefined,
+        items: itemsForStorage.length > 0 ? itemsForStorage : undefined,
       };
       
       // Generate billing number
@@ -7448,6 +7633,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       const createdItemCount = Array.isArray(cleanData.items) ? cleanData.items.length : 0;
       console.log(`[AUDIT] billing_sheet_created billingSheetId=${billingSheet.id} billingNumber=${billingNumber} itemCount=${createdItemCount} status=${resolvedStatus}`);
+
+      // Regression guard: surface any catalog line item that ended up at $0 despite the
+      // authoritative-pricing helper above. Should never trigger; logged loudly if it does.
+      await regressionGuardZeroCatalogPrices('create', billingSheet.id, cleanData.items);
 
       // Notify irrigation managers and admins that a billing sheet was submitted
       try {
@@ -7571,15 +7760,37 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Handle items if provided — atomically replace items AND resync partsSubtotal/totalAmount in one transaction
       if (items && Array.isArray(items)) {
         const countBefore = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
-        const itemsToInsert = items.map((item: any) => ({
+
+        // Server-side authoritative pricing (Task #160): rewrite catalog line items
+        // with the catalog price before persisting. Manual line items pass through.
+        const patchCompanyIdForPricing = req.authenticatedUserCompanyId
+          ?? (req.headers['x-user-company-id']
+            ? parseInt(req.headers['x-user-company-id'] as string)
+            : null);
+        const patchPricingResult = await resolveAuthoritativePartPricing(items as RawBillingItem[], patchCompanyIdForPricing);
+        if (patchPricingResult.error) {
+          return res.status(patchPricingResult.error.status).json({ message: patchPricingResult.error.message });
+        }
+        const resolvedPatchItems = (patchPricingResult.items as RawBillingItem[]) ?? [];
+        if (patchPricingResult.auditedZeros.length > 0) {
+          for (const drift of patchPricingResult.auditedZeros) {
+            console.log(
+              `[AUDIT] billing_sheet_update_price_corrected billingSheetId=${id} partId=${drift.partId} ` +
+              `partName="${drift.partName}" clientUnitPrice=${drift.clientUnitPrice.toFixed(2)} ` +
+              `catalogUnitPrice=${drift.catalogUnitPrice.toFixed(2)}`
+            );
+          }
+        }
+
+        const itemsToInsert = resolvedPatchItems.map((item: any) => ({
           billingSheetId: id,
           partId: item.partId || null,
           partName: item.partName,
           partDescription: item.partDescription || "",
           quantity: item.quantity,
           unitPrice: item.unitPrice.toString(),
-          laborHours: item.laborHours.toString(),
-          totalPrice: (item.quantity * item.unitPrice).toString(),
+          laborHours: (item.laborHours ?? 0).toString(),
+          totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
           notes: item.notes || "",
         }));
         const resyncResult = await storage.replaceBillingSheetItemsAndResync(id, itemsToInsert);
@@ -7587,8 +7798,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         billingSheetData.totalAmount = resyncResult.totalAmount;
         // Overwrite billingSheet reference so res.json() returns post-resync values
         Object.assign(billingSheet, { partsSubtotal: resyncResult.partsSubtotal, totalAmount: resyncResult.totalAmount });
-        console.log(`[AUDIT] billing_sheet_items_replaced billingSheetId=${id} countBefore=${countBefore} countAfter=${items.length}`);
+        console.log(`[AUDIT] billing_sheet_items_replaced billingSheetId=${id} countBefore=${countBefore} countAfter=${resolvedPatchItems.length}`);
         console.log(`[AUDIT] billing_sheet_partsSubtotal_recomputed billingSheetId=${id} partsSubtotal=${resyncResult.partsSubtotal} totalAmount=${resyncResult.totalAmount}`);
+
+        // Regression guard: surface any catalog $0 leak that slipped through.
+        await regressionGuardZeroCatalogPrices('update', id, resolvedPatchItems);
       }
 
       // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
@@ -8168,29 +8382,63 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
+      // Server-side authoritative pricing (Task #160): rewrite catalog line items
+      // with the catalog price BEFORE we create the work order, so that if a
+      // partId is invalid we 4xx-reject without leaving an orphan work order.
+      let resolvedWoCreateItems: RawBillingItem[] = [];
+      let auditedZerosForLog: Array<{ partId: number; partName: string; clientUnitPrice: number; catalogUnitPrice: number }> = [];
+      if (items !== undefined && Array.isArray(items) && items.length > 0) {
+        const woCreateCompanyId = req.authenticatedUserCompanyId
+          ?? (req.headers['x-user-company-id']
+            ? parseInt(req.headers['x-user-company-id'] as string)
+            : null);
+        const woCreatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woCreateCompanyId);
+        if (woCreatePricing.error) {
+          return res.status(woCreatePricing.error.status).json({ message: woCreatePricing.error.message });
+        }
+        resolvedWoCreateItems = (woCreatePricing.items as RawBillingItem[]) ?? [];
+        auditedZerosForLog = woCreatePricing.auditedZeros.map((d) => ({
+          partId: d.partId,
+          partName: d.partName,
+          clientUnitPrice: d.clientUnitPrice,
+          catalogUnitPrice: d.catalogUnitPrice,
+        }));
+      }
+
       const workOrder = await storage.createWorkOrder(workOrderData);
 
-      // Save items if provided at creation time
-      if (items !== undefined && Array.isArray(items) && items.length > 0) {
+      // Save items if provided at creation time (now that the work order exists).
+      if (resolvedWoCreateItems.length > 0) {
+        for (const drift of auditedZerosForLog) {
+          console.log(
+            `[AUDIT] work_order_create_price_corrected workOrderId=${workOrder.id} partId=${drift.partId} ` +
+            `partName="${drift.partName}" clientUnitPrice=${drift.clientUnitPrice.toFixed(2)} ` +
+            `catalogUnitPrice=${drift.catalogUnitPrice.toFixed(2)}`
+          );
+        }
+
+        type WoCreateLine = RawBillingItem & { partPrice?: number | string; zoneId?: number | null };
         let computedPartsCost = 0;
-        for (const item of items) {
-          const qty = Number(item.quantity) || 0;
-          const price = Number(item.unitPrice) || Number(item.partPrice) || 0;
+        for (const raw of resolvedWoCreateItems as WoCreateLine[]) {
+          const qty = Number(raw.quantity) || 0;
+          const price = Number(raw.unitPrice) || Number(raw.partPrice) || 0;
           const lineTotal = qty * price;
           computedPartsCost += lineTotal;
           await storage.addWorkOrderItem({
             workOrderId: workOrder.id,
-            partId: item.partId || null,
-            partName: item.partName,
+            partId: raw.partId || null,
+            partName: raw.partName ?? "",
             partPrice: price.toString(),
             quantity: qty,
-            laborHours: (Number(item.laborHours) || 0).toString(),
+            laborHours: (Number(raw.laborHours) || 0).toString(),
             totalPrice: lineTotal.toString(),
-            notes: item.notes || null,
-            zoneId: item.zoneId || null,
+            notes: raw.notes || null,
+            zoneId: raw.zoneId ?? null,
           });
         }
         await storage.updateWorkOrder(workOrder.id, { totalPartsCost: computedPartsCost.toFixed(2) });
+
+        await regressionGuardZeroCatalogPrices('work_order_conversion', workOrder.id, resolvedWoCreateItems);
       }
 
       const woItemCount = (await storage.getWorkOrderItems(workOrder.id)).length;
@@ -8321,7 +8569,29 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Handle items if provided (delete-and-recreate pattern wrapped in a transaction)
       if (items !== undefined && Array.isArray(items)) {
         const countBefore = (await storage.getWorkOrderItems(id)).length;
-        const itemsToInsert = items.map((item: any) => {
+
+        // Server-side authoritative pricing (Task #160): rewrite catalog line items
+        // with the catalog price. Reject 4xx if a partId points at no part / wrong company.
+        const woUpdateCompanyId = req.authenticatedUserCompanyId
+          ?? (req.headers['x-user-company-id']
+            ? parseInt(req.headers['x-user-company-id'] as string)
+            : null);
+        const woUpdatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woUpdateCompanyId);
+        if (woUpdatePricing.error) {
+          return res.status(woUpdatePricing.error.status).json({ message: woUpdatePricing.error.message });
+        }
+        const resolvedWoUpdateItems = (woUpdatePricing.items as RawBillingItem[]) ?? [];
+        if (woUpdatePricing.auditedZeros.length > 0) {
+          for (const drift of woUpdatePricing.auditedZeros) {
+            console.log(
+              `[AUDIT] work_order_update_price_corrected workOrderId=${id} partId=${drift.partId} ` +
+              `partName="${drift.partName}" clientUnitPrice=${drift.clientUnitPrice.toFixed(2)} ` +
+              `catalogUnitPrice=${drift.catalogUnitPrice.toFixed(2)}`
+            );
+          }
+        }
+
+        const itemsToInsert = resolvedWoUpdateItems.map((item: any) => {
           const qty = Number(item.quantity) || 0;
           const price = Number(item.unitPrice) || 0;
           const lineTotal = qty * price;
@@ -8340,7 +8610,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         await storage.replaceWorkOrderItemsInTransaction(id, itemsToInsert);
         const computedPartsCost = itemsToInsert.reduce((sum: number, i: any) => sum + Number(i.totalPrice), 0);
         await storage.updateWorkOrder(id, { totalPartsCost: computedPartsCost.toFixed(2) });
-        console.log(`[AUDIT] work_order_items_replaced workOrderId=${id} countBefore=${countBefore} countAfter=${items.length}`);
+        console.log(`[AUDIT] work_order_items_replaced workOrderId=${id} countBefore=${countBefore} countAfter=${resolvedWoUpdateItems.length}`);
+
+        await regressionGuardZeroCatalogPrices('work_order_conversion', id, resolvedWoUpdateItems);
       }
 
       // Recompute financial totals if financial inputs were touched (totalHours, totalPartsCost, items)
@@ -8484,11 +8756,47 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (isNaN(workOrderId) || workOrderId <= 0) {
         return res.status(400).json({ message: "Invalid work order ID" });
       }
-      const itemData = insertWorkOrderItemSchema.parse({
+
+      // Server-side authoritative pricing (Task #160): if the body references a
+      // catalog partId, overwrite partPrice from the catalog (and 4xx if invalid).
+      const woItemCompanyId = req.authenticatedUserCompanyId
+        ?? (req.headers['x-user-company-id']
+          ? parseInt(req.headers['x-user-company-id'] as string)
+          : null);
+      // The work-order-item shape uses `partPrice` not `unitPrice`; map both ways.
+      const probeItem: RawBillingItem = {
+        partId: req.body.partId ?? null,
+        partName: req.body.partName,
+        quantity: req.body.quantity,
+        unitPrice: req.body.unitPrice ?? req.body.partPrice ?? 0,
+      };
+      const itemPricing = await resolveAuthoritativePartPricing([probeItem], woItemCompanyId);
+      if (itemPricing.error) {
+        return res.status(itemPricing.error.status).json({ message: itemPricing.error.message });
+      }
+      const resolvedSingle = (itemPricing.items as RawBillingItem[] | undefined)?.[0] ?? probeItem;
+      if (itemPricing.auditedZeros.length > 0) {
+        const drift = itemPricing.auditedZeros[0];
+        console.log(
+          `[AUDIT] work_order_item_add_price_corrected workOrderId=${workOrderId} partId=${drift.partId} ` +
+          `partName="${drift.partName}" clientUnitPrice=${drift.clientUnitPrice.toFixed(2)} ` +
+          `catalogUnitPrice=${drift.catalogUnitPrice.toFixed(2)}`
+        );
+      }
+      // Apply the resolved pricing back into the request body before parsing.
+      const resolvedPrice = Number(resolvedSingle.unitPrice ?? 0);
+      const resolvedBody = {
         ...req.body,
+        partPrice: resolvedPrice.toString(),
+        totalPrice: ((Number(req.body.quantity) || 0) * resolvedPrice).toString(),
+      };
+
+      const itemData = insertWorkOrderItemSchema.parse({
+        ...resolvedBody,
         workOrderId
       });
       const item = await storage.addWorkOrderItem(itemData);
+      await regressionGuardZeroCatalogPrices('work_order_conversion', workOrderId, [resolvedSingle]);
 
       // Recompute financial totals using stored applied rates (if available).
       // This ensures parts additions after completion keep the snapshot consistent.
@@ -8500,7 +8808,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         if (isFinite(snappedMarkupRate) && isFinite(snappedTaxRate)) {
           // Recompute totalPartsCost from all items, then derive full breakdown
           const allItems = await storage.getWorkOrderItems(workOrderId);
-          const newPartsCost = allItems.reduce((sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.unitPrice) || 0), 0);
+          const newPartsCost = allItems.reduce(
+            (sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.partPrice) || 0),
+            0,
+          );
           const hrs = parseFloat(wo.totalHours || '0');
           const recomputedLaborSubtotal = hrs * snappedLaborRate;
           const recomputedPartsSubtotal = newPartsCost;
@@ -8583,6 +8894,107 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // ─── Catalog $0-price audit / backfill (Task #160) ────────────────────────
+  // Authorization: only company_admin / billing_manager / super_admin can
+  // see or repair these rows. We trust ONLY the fields populated by the
+  // `requireAuthentication` middleware — never raw `x-user-*` headers — so a
+  // caller cannot spoof admin access by setting headers themselves.
+  async function getAuditActor(req: any): Promise<{ userId: number | null; role: string | null; companyId: number | null; name: string | null }> {
+    const userId: number | null = typeof req.authenticatedUserId === 'number' ? req.authenticatedUserId : null;
+    const role: string | null = (req.authenticatedUserRole as string) ?? null;
+    const companyId: number | null = typeof req.authenticatedUserCompanyId === 'number' ? req.authenticatedUserCompanyId : null;
+    let name: string | null = null;
+    if (userId != null) {
+      try {
+        const u = await storage.getUser(userId);
+        name = u?.name ?? u?.username ?? null;
+      } catch {
+        name = null;
+      }
+    }
+    return { userId, role, companyId, name };
+  }
+  function isAuditAdmin(role: string | null): boolean {
+    return role === 'company_admin' || role === 'billing_manager' || role === 'super_admin';
+  }
+
+  app.get("/api/admin/billing-sheets/zero-price-audit", requireAuthentication, async (req: any, res) => {
+    try {
+      const actor = await getAuditActor(req);
+      if (!isAuditAdmin(actor.role)) {
+        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+      }
+      // super_admin can scope to a specific company via ?companyId=, or pass companyId=all to see everything
+      let scopeCompanyId: number | null = actor.companyId;
+      if (actor.role === 'super_admin') {
+        const q = req.query.companyId;
+        if (q === 'all') {
+          scopeCompanyId = null;
+        } else if (q) {
+          scopeCompanyId = parseInt(q as string);
+        }
+      }
+      const rows = await storage.getZeroPriceCatalogItems(scopeCompanyId);
+      res.json({ companyId: scopeCompanyId, count: rows.length, rows });
+    } catch (error) {
+      console.error("[zero-price-audit] failed:", error);
+      res.status(500).json({ message: "Failed to load zero-price audit" });
+    }
+  });
+
+  app.post("/api/admin/billing-sheets/zero-price-audit/repair", requireAuthentication, async (req: any, res) => {
+    try {
+      const actor = await getAuditActor(req);
+      if (!isAuditAdmin(actor.role)) {
+        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+      }
+      const body = req.body || {};
+      // Accept either:
+      //   - body.selection: [{ source: 'billing_sheet'|'work_order', itemId: number }, ...]
+      //   - body.itemIds: [number, ...] (legacy shape, treated as billing_sheet)
+      // An empty selection means "repair every bad row in scope" — dry-run defaults
+      // to true for safety.
+      let selection: Array<{ source: 'billing_sheet' | 'work_order'; itemId: number }> = [];
+      if (Array.isArray(body.selection)) {
+        selection = body.selection
+          .map((s: any) => ({
+            source: (s?.source === 'work_order' ? 'work_order' : 'billing_sheet') as 'billing_sheet' | 'work_order',
+            itemId: Number(s?.itemId),
+          }))
+          .filter((s: { source: string; itemId: number }) => Number.isFinite(s.itemId));
+      } else if (Array.isArray(body.itemIds)) {
+        selection = body.itemIds
+          .map((n: unknown) => ({ source: 'billing_sheet' as const, itemId: Number(n) }))
+          .filter((s: { itemId: number }) => Number.isFinite(s.itemId));
+      }
+      const dryRun = body.dryRun !== false; // default to dry-run for safety
+
+      // super_admin may target a specific company (or "all")
+      let scopeCompanyId: number | null = actor.companyId;
+      if (actor.role === 'super_admin' && body.companyId !== undefined) {
+        scopeCompanyId = body.companyId === 'all' ? null : Number(body.companyId);
+      }
+
+      const result = await storage.repriceBillingSheetItems(selection, scopeCompanyId, {
+        dryRun,
+        performedByUserId: actor.userId,
+        performedByName: actor.name,
+      });
+
+      console.log(
+        `[AUDIT] zero_price_audit_repair_invoked actor=${actor.userId ?? '?'} role=${actor.role} ` +
+        `companyId=${scopeCompanyId ?? 'all'} dryRun=${dryRun} parentCount=${result.parentCount} ` +
+        `itemCount=${result.itemCount} totalDifference=${result.totalDifference}`
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error("[zero-price-audit/repair] failed:", error);
+      res.status(500).json({ message: "Failed to repair zero-price items" });
+    }
+  });
+  // ─── /Catalog $0-price audit / backfill ───────────────────────────────────
+
   // Billing Sheet routes
   app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {
     try {
@@ -8664,7 +9076,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         notes?: string | null;
       };
 
-      function mapRawLineItem(item: RawLineItem): ResolvedBillingItem {
+      const mapRawLineItem = (item: RawLineItem): ResolvedBillingItem => {
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || Number(item.partPrice) || 0;
         return {
@@ -8677,7 +9089,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           laborHours: (Number(item.laborHours) || 0).toString(),
           notes: item.notes ?? null,
         };
-      }
+      };
 
       // Build billing sheet items from materialItems and laborItems in the request body.
       // Fall back to work_order_items if no items were provided in this request.
@@ -8687,8 +9099,30 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const rawLaborItems: RawLineItem[] = Array.isArray(laborItems) ? laborItems : [];
       const rawRequestItems = [...rawMaterialItems, ...rawLaborItems];
 
-      if (rawRequestItems.length > 0) {
-        resolvedItems = rawRequestItems.map(mapRawLineItem);
+      // Server-side authoritative pricing (Task #160): rewrite catalog line item
+      // unit prices from the catalog before persisting. 4xx-reject if a partId
+      // points at no part / wrong company.
+      const woCompanyIdForPricing = req.authenticatedUserCompanyId
+        ?? (req.headers['x-user-company-id']
+          ? parseInt(req.headers['x-user-company-id'] as string)
+          : (woCustomerForRate.companyId ?? null));
+      const woPricingResult = await resolveAuthoritativePartPricing(rawRequestItems as RawBillingItem[], woCompanyIdForPricing);
+      if (woPricingResult.error) {
+        return res.status(woPricingResult.error.status).json({ message: woPricingResult.error.message });
+      }
+      const resolvedRequestItems = (woPricingResult.items as RawLineItem[] | undefined) ?? rawRequestItems;
+      if (woPricingResult.auditedZeros.length > 0) {
+        for (const drift of woPricingResult.auditedZeros) {
+          console.log(
+            `[AUDIT] work_order_conversion_price_corrected workOrderId=${workOrderId} partId=${drift.partId} ` +
+            `partName="${drift.partName}" clientUnitPrice=${drift.clientUnitPrice.toFixed(2)} ` +
+            `catalogUnitPrice=${drift.catalogUnitPrice.toFixed(2)}`
+          );
+        }
+      }
+
+      if (resolvedRequestItems.length > 0) {
+        resolvedItems = resolvedRequestItems.map(mapRawLineItem);
       } else {
         // Fall back to items already saved on the work order
         const workOrderItemsList = await storage.getWorkOrderItems(workOrderId);
@@ -8744,6 +9178,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
       console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=${resolvedItems.length}`);
+      // Regression guard: surface any catalog $0 leak that slipped through.
+      await regressionGuardZeroCatalogPrices('work_order_conversion', newBillingSheet.id, resolvedItems as RawBillingItem[]);
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       console.error(error);
