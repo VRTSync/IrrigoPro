@@ -1,5 +1,5 @@
 import { safeGet } from "@/utils/safeStorage";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { FileUpload } from "@/components/ui/file-upload";
 
 import { WorkOrderCompletion } from "./work-order-completion";
 import { AssignmentConfirmationModal } from "./assignment-confirmation-modal";
@@ -41,9 +42,7 @@ import {
   Activity,
   Camera,
   DollarSign,
-  Upload,
   X,
-  Plus
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -67,14 +66,25 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   const [pendingTechnicianId, setPendingTechnicianId] = useState<string>("");
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
-  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const photoInputRef = useRef<HTMLInputElement>(null);
+  // Tracks photo URLs we've sent to the server but that haven't yet
+  // round-tripped back into the workOrder prop. Without this, two
+  // back-to-back upload batches would each compute their merged
+  // photo list off the same stale workOrder.photos and the second
+  // PATCH would overwrite the first.
+  const [inFlightPhotoAdditions, setInFlightPhotoAdditions] = useState<string[]>([]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const woPhotoList: string[] = Array.isArray(workOrder.photos) ? (workOrder.photos as string[]) : [];
   const { getUrl: getWoPhotoUrl } = usePhotoSignedUrls(woPhotoList, "thumb");
+
+  // When the server's photo list catches up with our in-flight
+  // additions, drop the entries that have been confirmed.
+  useEffect(() => {
+    setInFlightPhotoAdditions(prev => prev.filter(url => !woPhotoList.includes(url)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [woPhotoList.join("|")]);
 
   // Get current user from localStorage
   useEffect(() => {
@@ -237,40 +247,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       });
     },
   });
-
-  const handlePhotoUpload = async (selectedFiles: FileList | null) => {
-    if (!selectedFiles?.length) return;
-    setIsUploadingPhoto(true);
-
-    try {
-      const newUrls: string[] = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        // GCS-backed flow: get signed PUT URL, then PUT directly to GCS
-        const signUrlRes = await fetch(
-          `/api/upload/photo?originalName=${encodeURIComponent(file.name)}`,
-          { method: 'POST' }
-        );
-        if (!signUrlRes.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
-        const { signedUrl, url: canonicalUrl } = await signUrlRes.json();
-        const putRes = await fetch(signedUrl, {
-          method: 'PUT',
-          body: file,
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        });
-        if (!putRes.ok) throw new Error(`Failed to upload ${file.name} to storage`);
-        newUrls.push(canonicalUrl);
-      }
-      const existingPhotos: string[] = Array.isArray(workOrder.photos) ? workOrder.photos as string[] : [];
-      updatePhotos.mutate([...existingPhotos, ...newUrls]);
-      toast({ title: "Photos Added", description: `${newUrls.length} photo${newUrls.length > 1 ? 's' : ''} uploaded successfully` });
-    } catch (error: any) {
-      toast({ title: "Upload Failed", description: error.message || "Failed to upload photos", variant: "destructive" });
-    } finally {
-      setIsUploadingPhoto(false);
-      if (photoInputRef.current) photoInputRef.current.value = '';
-    }
-  };
 
   const handleConfirmRemovePhoto = () => {
     if (photoToRemove === null) return;
@@ -777,45 +753,35 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
             {(( workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0) || canEditPhotos) && (
               <Card>
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Camera className="w-5 h-5 text-blue-600" />
-                      Photos {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 ? `(${workOrder.photos.length})` : ''}
-                    </CardTitle>
-                    {canEditPhotos && !isBilledWorkOrder && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => photoInputRef.current?.click()}
-                          disabled={isUploadingPhoto || updatePhotos.isPending}
-                          className="flex items-center gap-1.5"
-                        >
-                          {isUploadingPhoto ? (
-                            <>
-                              <Upload className="w-4 h-4 animate-pulse" />
-                              Uploading...
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="w-4 h-4" />
-                              Add Photos
-                            </>
-                          )}
-                        </Button>
-                        <input
-                          ref={photoInputRef}
-                          type="file"
-                          accept="image/jpeg,image/png,image/gif,image/webp"
-                          multiple
-                          onChange={(e) => handlePhotoUpload(e.target.files)}
-                          className="hidden"
-                        />
-                      </>
-                    )}
-                  </div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Camera className="w-5 h-5 text-blue-600" />
+                    Photos {workOrder.photos && Array.isArray(workOrder.photos) && workOrder.photos.length > 0 ? `(${workOrder.photos.length})` : ''}
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  {canEditPhotos && !isBilledWorkOrder && (
+                    <FileUpload
+                      type="photo"
+                      label="Photos"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      multiple
+                      // Existing photos are rendered in the grid below; pass an empty
+                      // list here so FileUpload only handles the upload + progress UI
+                      // (and emits its own success toast on completion).
+                      files={[]}
+                      onFilesChange={(uploaded) => {
+                        if (!uploaded.length) return;
+                        const newUrls = uploaded.map(f => f.url);
+                        // Merge against the freshest known list: persisted photos
+                        // from props plus any additions that are still in flight
+                        // to the server. This prevents a second back-to-back
+                        // upload from overwriting the previous PATCH.
+                        const merged = [...woPhotoList, ...inFlightPhotoAdditions, ...newUrls];
+                        setInFlightPhotoAdditions(prev => [...prev, ...newUrls]);
+                        updatePhotos.mutate(merged);
+                      }}
+                    />
+                  )}
                   {woPhotoList.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">No photos yet. Click "Add Photos" to upload.</p>
                   ) : (
