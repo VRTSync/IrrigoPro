@@ -241,6 +241,14 @@ export default function BillingSheets() {
   // The server authoritatively decides which sheets qualify (cutoff lives on
   // the server) so the UI can't drift out of sync.
   const canSeeReport = canEditDelete || currentUser?.role === 'super_admin';
+  // Catalog $0 price audit — allowed roles must match the server allowlist
+  // (`/api/admin/billing-sheets/zero-price-audit`): company_admin,
+  // billing_manager, super_admin. Notably this excludes irrigation_manager,
+  // who would otherwise see the banner and hit a 403 on click (Task #163).
+  const canSeeZeroPriceAudit =
+    currentUser?.role === 'company_admin' ||
+    currentUser?.role === 'billing_manager' ||
+    currentUser?.role === 'super_admin';
   const { data: missingPhotosData } = useQuery<{ cutoff: string; count: number; sheets: BillingSheet[] }>({
     queryKey: ["/api/billing-sheets/missing-photos"],
     enabled: !!canSeeReport,
@@ -359,7 +367,7 @@ export default function BillingSheets() {
         </MetricGrid>
 
         {/* Catalog $0 price audit entry — only admins / billing managers */}
-        {canSeeReport && (
+        {canSeeZeroPriceAudit && (
           <Link href="/billing-sheets/zero-price-audit">
             <a
               className="block border border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors rounded-lg px-4 py-3 mb-2"

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ArrowLeft, AlertTriangle, RefreshCw, Wrench, ShieldCheck } from "lucide-react";
+import { ArrowLeft, AlertTriangle, RefreshCw, Wrench, ShieldCheck, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -91,9 +91,13 @@ export default function BillingZeroPriceAuditPage() {
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery<AuditResponse>({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<AuditResponse>({
     queryKey: ["/api/admin/billing-sheets/zero-price-audit"],
   });
+  // The shared fetch helper throws errors formatted as "<status>: <body>".
+  // Detect a 403 so we can show a clear "no access" state instead of the
+  // generic failure card (Task #163).
+  const isForbidden = isError && error instanceof Error && /^403[:\s]/.test(error.message);
 
   const rows = data?.rows ?? [];
   const allSelected = rows.length > 0 && rows.every((r) => selectedKeys.has(selectionKey(r.source, r.itemId)));
@@ -200,6 +204,22 @@ export default function BillingZeroPriceAuditPage() {
               <Skeleton className="h-6 w-1/3" />
               <Skeleton className="h-6 w-2/3" />
               <Skeleton className="h-6 w-1/2" />
+            </CardContent>
+          </Card>
+        ) : isForbidden ? (
+          <Card>
+            <CardContent className="py-12 text-center" data-testid="audit-no-access">
+              <Lock className="w-12 h-12 text-gray-500 mx-auto mb-3" />
+              <h3 className="text-lg font-semibold mb-1">You don't have permission to view this report</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                The catalog $0 price audit is limited to company admins, billing managers, and super admins.
+              </p>
+              <Link href="/billing-sheets">
+                <Button variant="outline" size="sm" data-testid="button-no-access-back">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Billing Sheets
+                </Button>
+              </Link>
             </CardContent>
           </Card>
         ) : isError ? (
