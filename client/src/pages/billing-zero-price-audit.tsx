@@ -11,7 +11,15 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
-type AuditSource = "billing_sheet" | "work_order";
+type AuditSource = "billing_sheet" | "work_order" | "invoice";
+
+function sourceLabel(source: AuditSource): string {
+  switch (source) {
+    case "billing_sheet": return "BS";
+    case "work_order":    return "WO";
+    case "invoice":       return "INV";
+  }
+}
 
 interface AuditRow {
   source: AuditSource;
@@ -155,6 +163,7 @@ export default function BillingZeroPriceAuditPage() {
         qc.invalidateQueries({ queryKey: ["/api/admin/billing-sheets/zero-price-audit"] });
         qc.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
         qc.invalidateQueries({ queryKey: ["/api/work-orders"] });
+        qc.invalidateQueries({ queryKey: ["/api/invoices"] });
       }
     } catch (err: any) {
       toast({
@@ -170,12 +179,13 @@ export default function BillingZeroPriceAuditPage() {
 
   const billingRowCount = rows.filter((r) => r.source === "billing_sheet").length;
   const workOrderRowCount = rows.filter((r) => r.source === "work_order").length;
+  const invoiceRowCount = rows.filter((r) => r.source === "invoice").length;
 
   return (
     <PageContainer>
       <PageHeader
         title="Catalog $0 Price Audit"
-        subtitle="Find and repair billing sheet AND work order line items saved at $0 for catalog parts that should have a non-zero price."
+        subtitle="Find and repair billing sheet, work order, AND invoice line items saved at $0 for catalog parts that should have a non-zero price."
         backHref="/billing-sheets"
       />
       <PageContent>
@@ -234,7 +244,7 @@ export default function BillingZeroPriceAuditPage() {
               <ShieldCheck className="w-12 h-12 text-green-600 mx-auto mb-3" />
               <h3 className="text-lg font-semibold mb-1">All clear</h3>
               <p className="text-sm text-gray-600">
-                No billing sheet or work order line items have a $0 unit price for a catalog part.
+                No billing sheet, work order, or invoice line items have a $0 unit price for a catalog part.
               </p>
             </CardContent>
           </Card>
@@ -247,6 +257,7 @@ export default function BillingZeroPriceAuditPage() {
                   {rows.length} affected line item{rows.length === 1 ? "" : "s"}
                   <Badge variant="outline">Billing sheets: {billingRowCount}</Badge>
                   <Badge variant="outline">Work orders: {workOrderRowCount}</Badge>
+                  <Badge variant="outline">Invoices: {invoiceRowCount}</Badge>
                   <Badge variant="outline" className="ml-2" data-testid="badge-total-difference">
                     Total under-billed: {fmtMoney(totalDifference)}
                   </Badge>
@@ -289,7 +300,7 @@ export default function BillingZeroPriceAuditPage() {
                     <div key={`${p.source}:${p.parentId}`} className="border rounded p-3 bg-amber-50">
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-semibold">
-                          <Badge variant="secondary" className="mr-2">{p.source === "billing_sheet" ? "BS" : "WO"}</Badge>
+                          <Badge variant="secondary" className="mr-2">{sourceLabel(p.source)}</Badge>
                           {p.parentNumber}
                         </span>
                         <span className="text-sm">
@@ -355,7 +366,7 @@ export default function BillingZeroPriceAuditPage() {
                               />
                             </td>
                             <td className="p-3">
-                              <Badge variant="secondary">{r.source === "billing_sheet" ? "BS" : "WO"}</Badge>
+                              <Badge variant="secondary">{sourceLabel(r.source)}</Badge>
                             </td>
                             <td className="p-3 font-mono text-xs">{r.parentNumber}</td>
                             <td className="p-3">{r.customerName}</td>

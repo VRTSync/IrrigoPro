@@ -364,12 +364,13 @@ export interface IStorage {
   saveControllers(siteMapId: number, controllers: InsertController[], companyId?: number): Promise<Controller[]>;
   saveZones(siteMapId: number, zones: InsertIrrigationZone[], companyId?: number): Promise<IrrigationZone[]>;
 
-  // Catalog $0-price audit / backfill (Task #160) — covers BOTH billing sheets AND work orders
+  // Catalog $0-price audit / backfill (Tasks #160 + #161) — covers billing sheets,
+  // work orders, AND invoice line items.
   getZeroPriceCatalogItems(companyId: number | null): Promise<Array<{
-    source: 'billing_sheet' | 'work_order';
+    source: 'billing_sheet' | 'work_order' | 'invoice';
     itemId: number;
-    parentId: number;          // billingSheetId for billing_sheet, workOrderId for work_order
-    parentNumber: string;      // billingNumber or workOrderNumber
+    parentId: number;          // billingSheetId / workOrderId / invoiceId
+    parentNumber: string;      // billingNumber / workOrderNumber / invoiceNumber
     customerId: number | null;
     customerName: string;
     workDate: Date | null;
@@ -386,7 +387,7 @@ export interface IStorage {
     difference: string;
   }>>;
   repriceBillingSheetItems(
-    selection: Array<{ source: 'billing_sheet' | 'work_order'; itemId: number }>,
+    selection: Array<{ source: 'billing_sheet' | 'work_order' | 'invoice'; itemId: number }>,
     companyId: number | null,
     options: { dryRun: boolean; performedByUserId: number | null; performedByName: string | null }
   ): Promise<{
@@ -395,7 +396,7 @@ export interface IStorage {
     itemCount: number;
     totalDifference: string;
     parents: Array<{
-      source: 'billing_sheet' | 'work_order';
+      source: 'billing_sheet' | 'work_order' | 'invoice';
       parentId: number;
       parentNumber: string;
       oldPartsSubtotal: string;
@@ -2369,11 +2370,11 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, billingSheetId));
   }
 
-  // ─── Catalog $0-price audit / backfill (Task #160) ──────────────────────────
-  // Covers BOTH billing_sheet_items AND work_order_items. A "bad" row is any
-  // line item with a non-null partId whose stored unit price is 0 while the
-  // catalog row reports a price > 0. Scoping is by parts.company_id (the
-  // catalog is the authoritative source of truth).
+  // ─── Catalog $0-price audit / backfill (Tasks #160 + #161) ─────────────────
+  // Covers billing_sheet_items, work_order_items, AND invoice_items. A "bad"
+  // row is any line item with a non-null partId whose stored unit price is 0
+  // while the catalog row reports a price > 0. Scoping is by parts.company_id
+  // (the catalog is the authoritative source of truth).
   async getZeroPriceCatalogItems(companyId: number | null) {
     const billingRows = await db.execute(sql`
       SELECT
@@ -2429,16 +2430,45 @@ export class DatabaseStorage implements IStorage {
         AND (${companyId}::int IS NULL OR p.company_id = ${companyId}::int)
     `);
 
-    const merged = [...billingRows.rows, ...workOrderRows.rows] as Array<Record<string, unknown>>;
+    const invoiceRows = await db.execute(sql`
+      SELECT
+        'invoice'::text       AS source,
+        ii.id                 AS item_id,
+        ii.invoice_id         AS parent_id,
+        inv.invoice_number    AS parent_number,
+        inv.customer_id       AS customer_id,
+        inv.customer_name     AS customer_name,
+        ii.work_date          AS work_date,
+        ''::text              AS technician_name,
+        inv.status            AS status,
+        ii.invoice_id         AS invoice_id,
+        ii.part_id            AS part_id,
+        ii.part_name          AS part_name,
+        ii.quantity           AS quantity,
+        ii.unit_price         AS stored_unit_price,
+        ii.total_price        AS stored_total_price,
+        p.price               AS catalog_unit_price
+      FROM invoice_items ii
+      INNER JOIN parts p        ON p.id = ii.part_id
+      INNER JOIN invoices inv   ON inv.id = ii.invoice_id
+      WHERE ii.part_id IS NOT NULL
+        AND CAST(ii.unit_price AS DOUBLE PRECISION) = 0
+        AND CAST(p.price AS DOUBLE PRECISION) > 0
+        AND (${companyId}::int IS NULL OR p.company_id = ${companyId}::int)
+    `);
+
+    const merged = [...billingRows.rows, ...workOrderRows.rows, ...invoiceRows.rows] as Array<Record<string, unknown>>;
     return merged
       .map((r) => {
         const quantity = parseFloat(String(r.quantity ?? 0));
         const catalogPrice = parseFloat(String(r.catalog_unit_price ?? 0));
         const storedTotal = parseFloat(String(r.stored_total_price ?? 0));
         const expectedTotal = quantity * catalogPrice;
-        const workDate = r.work_date ? (r.work_date as Date) : null;
+        const workDate = r.work_date
+          ? (r.work_date instanceof Date ? r.work_date : new Date(String(r.work_date)))
+          : null;
         return {
-          source: r.source as 'billing_sheet' | 'work_order',
+          source: r.source as 'billing_sheet' | 'work_order' | 'invoice',
           itemId: Number(r.item_id),
           parentId: Number(r.parent_id),
           parentNumber: String(r.parent_number ?? ''),
@@ -2468,18 +2498,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async repriceBillingSheetItems(
-    selection: Array<{ source: 'billing_sheet' | 'work_order'; itemId: number }>,
+    selection: Array<{ source: 'billing_sheet' | 'work_order' | 'invoice'; itemId: number }>,
     companyId: number | null,
     options: { dryRun: boolean; performedByUserId: number | null; performedByName: string | null }
   ) {
     const allBad = await this.getZeroPriceCatalogItems(companyId);
-    const selectionKey = (s: 'billing_sheet' | 'work_order', id: number) => `${s}:${id}`;
+    const selectionKey = (s: 'billing_sheet' | 'work_order' | 'invoice', id: number) => `${s}:${id}`;
     const wantSet = new Set(selection.map((s) => selectionKey(s.source, s.itemId)));
     const targets = selection.length === 0
       ? allBad
       : allBad.filter((row) => wantSet.has(selectionKey(row.source, row.itemId)));
 
-    // Group by parent (sheet or work order) so subtotals are recomputed once each.
+    // Group by parent (sheet, work order, or invoice) so subtotals are recomputed once each.
     const byParent = new Map<string, typeof targets>();
     for (const row of targets) {
       const k = `${row.source}:${row.parentId}`;
@@ -2489,7 +2519,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     type ParentSummary = {
-      source: 'billing_sheet' | 'work_order';
+      source: 'billing_sheet' | 'work_order' | 'invoice';
       parentId: number;
       parentNumber: string;
       oldPartsSubtotal: string;
@@ -2587,8 +2617,7 @@ export class DatabaseStorage implements IStorage {
             );
           });
         }
-      } else {
-        // work_order
+      } else if (sample.source === 'work_order') {
         const workOrderId = sample.parentId;
         const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
         if (!wo) continue;
@@ -2662,6 +2691,57 @@ export class DatabaseStorage implements IStorage {
               `[AUDIT] work_order_repriced workOrderId=${workOrderId} workOrderNumber=${wo.workOrderNumber} ` +
               `itemCount=${rows.length} delta=${parentDifference.toFixed(2)} ` +
               `newTotalPartsCost=${truePartsCost.toFixed(2)} actor=${actor}`
+            );
+          });
+        }
+      } else {
+        // invoice
+        const invoiceId = sample.parentId;
+        const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+        if (!inv) continue;
+        const oldPartsSubtotal = parseFloat(String(inv.partsSubtotal ?? 0));
+        const oldTotalAmount = parseFloat(String(inv.totalAmount ?? 0));
+
+        parentSummaries.push({
+          source: 'invoice',
+          parentId: invoiceId,
+          parentNumber: inv.invoiceNumber,
+          oldPartsSubtotal: oldPartsSubtotal.toFixed(2),
+          // Dry-run approximation: the delta flows straight through to the
+          // parts subtotal and the invoice grand total (markup/labor/tax are
+          // not recomputed here because Tasks #160/#161 leave applied-rate
+          // recompute to the live invoice generation flow).
+          newPartsSubtotal: (oldPartsSubtotal + parentDifference).toFixed(2),
+          oldTotalAmount: oldTotalAmount.toFixed(2),
+          newTotalAmount: (oldTotalAmount + parentDifference).toFixed(2),
+          updatedItems,
+        });
+        grandDifference += parentDifference;
+        totalItemCount += rows.length;
+
+        if (!options.dryRun) {
+          await db.transaction(async (tx) => {
+            for (const r of rows) {
+              await tx.update(invoiceItems)
+                .set({
+                  unitPrice: parseFloat(r.catalogUnitPrice).toFixed(2),
+                  totalPrice: parseFloat(r.expectedTotalPrice).toFixed(2),
+                })
+                .where(eq(invoiceItems.id, r.itemId));
+            }
+            const newPartsSubtotal = oldPartsSubtotal + parentDifference;
+            const newTotalAmount = oldTotalAmount + parentDifference;
+            await tx.update(invoices)
+              .set({
+                partsSubtotal: newPartsSubtotal.toFixed(2),
+                totalAmount: newTotalAmount.toFixed(2),
+                updatedAt: new Date(),
+              })
+              .where(eq(invoices.id, invoiceId));
+            console.log(
+              `[AUDIT] invoice_repriced invoiceId=${invoiceId} invoiceNumber=${inv.invoiceNumber} ` +
+              `itemCount=${rows.length} delta=${parentDifference.toFixed(2)} ` +
+              `newPartsSubtotal=${newPartsSubtotal.toFixed(2)} newTotalAmount=${newTotalAmount.toFixed(2)} actor=${actor}`
             );
           });
         }
@@ -2951,11 +3031,13 @@ export class DatabaseStorage implements IStorage {
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
     }).returning();
     
-    // Create invoice items from work orders
+    // Create invoice items from work orders.
+    // Route through createInvoiceItem so the Task #161 catalog-price safeguard
+    // also covers this legacy per-part insert path.
     for (const wo of work.workOrders) {
       const woItems = await db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, wo.id));
       for (const item of woItems) {
-        await db.insert(invoiceItems).values({
+        await this.createInvoiceItem({
           invoiceId: newInvoice.id,
           sourceType: "work_order",
           sourceId: wo.id,
@@ -2974,11 +3056,11 @@ export class DatabaseStorage implements IStorage {
       }
     }
     
-    // Create invoice items from billing sheets
+    // Create invoice items from billing sheets (also via createInvoiceItem).
     for (const bs of work.billingSheets) {
       const bsItems = await db.select().from(billingSheetItems).where(eq(billingSheetItems.billingSheetId, bs.id));
       for (const item of bsItems) {
-        await db.insert(invoiceItems).values({
+        await this.createInvoiceItem({
           invoiceId: newInvoice.id,
           sourceType: "billing_sheet",
           sourceId: bs.id,
@@ -3054,8 +3136,35 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
+  // Task #161 safeguard: when an invoice line item references a catalog part
+  // (partId), the catalog price is the authoritative source of truth. If the
+  // catalog price is > 0 we override any client-supplied unitPrice/totalPrice
+  // (mirrors Task #160 work-order/billing-sheet behaviour). If the partId
+  // points to a missing/deleted part, we throw — silently dropping the row
+  // would mask data quality issues.
+  private async authoritativeInvoiceItemPrice(item: InsertInvoiceItem): Promise<InsertInvoiceItem> {
+    if (item.partId == null) return item;
+    const part = await this.getPart(item.partId);
+    if (!part) {
+      throw new Error(
+        `Catalog part with ID ${item.partId} (line item "${item.partName ?? '?'}") was not found. Cannot save invoice line item.`,
+      );
+    }
+    const catalogPrice = parseFloat(String(part.price ?? 0));
+    if (!(catalogPrice > 0)) return item;
+    const qty = parseFloat(String(item.quantity ?? 0));
+    return {
+      ...item,
+      partName: item.partName || part.name,
+      partDescription: item.partDescription ?? part.description ?? null,
+      unitPrice: catalogPrice.toFixed(2),
+      totalPrice: (qty * catalogPrice).toFixed(2),
+    };
+  }
+
   async createInvoiceItem(item: InsertInvoiceItem): Promise<InvoiceItem> {
-    const [newItem] = await db.insert(invoiceItems).values(item).returning();
+    const corrected = await this.authoritativeInvoiceItemPrice(item);
+    const [newItem] = await db.insert(invoiceItems).values(corrected).returning();
     return newItem;
   }
 

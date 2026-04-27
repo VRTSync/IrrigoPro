@@ -9017,17 +9017,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const body = req.body || {};
       // Accept either:
-      //   - body.selection: [{ source: 'billing_sheet'|'work_order', itemId: number }, ...]
+      //   - body.selection: [{ source: 'billing_sheet'|'work_order'|'invoice', itemId: number }, ...]
       //   - body.itemIds: [number, ...] (legacy shape, treated as billing_sheet)
       // An empty selection means "repair every bad row in scope" — dry-run defaults
       // to true for safety.
-      let selection: Array<{ source: 'billing_sheet' | 'work_order'; itemId: number }> = [];
+      let selection: Array<{ source: 'billing_sheet' | 'work_order' | 'invoice'; itemId: number }> = [];
       if (Array.isArray(body.selection)) {
         selection = body.selection
-          .map((s: any) => ({
-            source: (s?.source === 'work_order' ? 'work_order' : 'billing_sheet') as 'billing_sheet' | 'work_order',
-            itemId: Number(s?.itemId),
-          }))
+          .map((s: any) => {
+            const raw = s?.source;
+            const source: 'billing_sheet' | 'work_order' | 'invoice' =
+              raw === 'work_order' ? 'work_order'
+              : raw === 'invoice' ? 'invoice'
+              : 'billing_sheet';
+            return { source, itemId: Number(s?.itemId) };
+          })
           .filter((s: { source: string; itemId: number }) => Number.isFinite(s.itemId));
       } else if (Array.isArray(body.itemIds)) {
         selection = body.itemIds

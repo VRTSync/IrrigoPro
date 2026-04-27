@@ -3,6 +3,14 @@ import assert from "node:assert/strict";
 
 const BASE_URL = "http://localhost:5000";
 
+// Direct storage / db import — used by the Task #161 invoice test below to
+// plant a "bad" invoice line item that bypasses the live createInvoiceItem
+// safeguard (the safeguard is the very thing we want the audit to catch when
+// data was written before the safeguard existed).
+const { storage } = await import("../server/storage.ts");
+const { db } = await import("../server/db.ts");
+const { invoices, invoiceItems, billingSheets, billingSheetItems } = await import("../shared/schema.ts");
+
 const ADMIN_HEADERS = {
   "Content-Type": "application/json",
   "x-user-id": "2",
@@ -311,6 +319,298 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
     assert.ok(
       Math.abs(parseFloat(fixedItem.totalPrice) - 4 * newPrice) < 0.01,
       `Expected totalPrice ${(4 * newPrice).toFixed(2)}, got ${fixedItem.totalPrice}`,
+    );
+  });
+
+  // ─── Task #161: invoice line items ────────────────────────────────────────
+  test("Audit endpoint surfaces an invoice line item with a stale $0 catalog price and repairs it", async () => {
+    // 1. Create a catalog part starting at $0 so we can plant a $0 invoice row.
+    const tempSku = `INV-AUDIT-${Date.now()}`;
+    const partRes = await api("POST", "/api/parts", {
+      companyId: 99,
+      name: "Invoice Audit Target Part",
+      sku: tempSku,
+      price: "0.00",
+      cost: "0.00",
+      category: "Test",
+    });
+    assert.ok(
+      partRes.status === 201 || partRes.status === 200,
+      `temp part create: ${partRes.status}`,
+    );
+    const targetPartId = partRes.body.id;
+
+    // 2. Plant a bad invoice + invoice_item directly via db. We bypass
+    //    storage.createInvoiceItem on purpose — the safeguard would
+    //    rewrite the price and there'd be nothing for the audit to find.
+    const invoiceNumber = `INV-AUDIT-${Date.now()}`;
+    const periodStart = new Date();
+    const periodEnd = new Date(periodStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const QTY = 5;
+    const oldPartsSubtotal = 0;
+    const oldLaborSubtotal = 100;
+    const oldTotalAmount = oldPartsSubtotal + oldLaborSubtotal;
+    const [planted] = await db.insert(invoices).values({
+      invoiceNumber,
+      customerId: CUSTOMER_ID,
+      customerName: "Authoritative Pricing Customer",
+      customerEmail: "auth_pricing_inv_audit@example.com",
+      invoiceMonth: periodStart.getMonth() + 1,
+      invoiceYear: periodStart.getFullYear(),
+      periodStart,
+      periodEnd,
+      partsSubtotal: oldPartsSubtotal.toFixed(2),
+      laborSubtotal: oldLaborSubtotal.toFixed(2),
+      markupAmount: "0.00",
+      taxAmount: "0.00",
+      totalAmount: oldTotalAmount.toFixed(2),
+    }).returning();
+    const invoiceId = planted.id;
+
+    const [plantedItem] = await db.insert(invoiceItems).values({
+      invoiceId,
+      sourceType: "billing_sheet",
+      sourceId: 0,
+      workDate: periodStart,
+      description: "Planted bad invoice line for Task #161 audit test",
+      partId: targetPartId,
+      partName: "Invoice Audit Target Part",
+      quantity: QTY.toString(),
+      unitPrice: "0.00",
+      totalPrice: "0.00",
+      laborHours: "0",
+      laborRate: "0",
+      laborTotal: "0",
+    }).returning();
+    const invoiceItemId = plantedItem.id;
+
+    // 3. Now raise the catalog price so the audit can detect drift.
+    const newPrice = 8.5;
+    const patchPart = await api("PATCH", `/api/parts/${targetPartId}`, {
+      price: newPrice.toFixed(2),
+    });
+    assert.ok(
+      patchPart.status >= 200 && patchPart.status < 300,
+      `Part price update failed: ${patchPart.status} ${JSON.stringify(patchPart.body)}`,
+    );
+
+    // 4. The audit should now list our row under source 'invoice'.
+    const audit = await api("GET", "/api/admin/billing-sheets/zero-price-audit");
+    assert.equal(audit.status, 200, `Audit list failed: ${JSON.stringify(audit.body)}`);
+    const ourRow = (audit.body.rows ?? []).find(
+      (r) => r.source === "invoice" && r.itemId === invoiceItemId,
+    );
+    assert.ok(ourRow, "Expected audit to surface our zero-price invoice row");
+    assert.equal(parseInt(ourRow.partId), targetPartId);
+    assert.equal(parseInt(ourRow.parentId), invoiceId);
+    assert.equal(ourRow.parentNumber, invoiceNumber);
+    assert.ok(
+      Math.abs(parseFloat(ourRow.catalogUnitPrice) - newPrice) < 0.01,
+      `audit catalog price ${ourRow.catalogUnitPrice} != ${newPrice}`,
+    );
+    const expectedDelta = QTY * newPrice;
+    assert.ok(
+      Math.abs(parseFloat(ourRow.difference) - expectedDelta) < 0.01,
+      `audit delta ${ourRow.difference} != ${expectedDelta}`,
+    );
+
+    // 5. Dry-run repair: nothing should actually change.
+    const dry = await api("POST", "/api/admin/billing-sheets/zero-price-audit/repair", {
+      selection: [{ source: "invoice", itemId: invoiceItemId }],
+      dryRun: true,
+    });
+    assert.equal(dry.status, 200, `Dry-run failed: ${JSON.stringify(dry.body)}`);
+    assert.equal(dry.body.dryRun, true);
+    assert.equal(dry.body.parentCount, 1);
+    assert.equal(dry.body.itemCount, 1);
+    const dryParent = dry.body.parents[0];
+    assert.equal(dryParent.source, "invoice");
+    assert.equal(dryParent.parentNumber, invoiceNumber);
+
+    const stillBad = await storage.getInvoiceById(invoiceId);
+    const stillBadItem = stillBad.items.find((i) => i.id === invoiceItemId);
+    assert.ok(stillBadItem, "row should still be present after dry-run");
+    assert.equal(parseFloat(stillBadItem.unitPrice), 0, "dry-run must not mutate stored unitPrice");
+    assert.equal(parseFloat(stillBad.totalAmount), oldTotalAmount, "dry-run must not mutate invoice total");
+
+    // 6. Apply the repair.
+    const apply = await api("POST", "/api/admin/billing-sheets/zero-price-audit/repair", {
+      selection: [{ source: "invoice", itemId: invoiceItemId }],
+      dryRun: false,
+    });
+    assert.equal(apply.status, 200, `Apply failed: ${JSON.stringify(apply.body)}`);
+    assert.equal(apply.body.dryRun, false);
+    assert.equal(apply.body.parentCount, 1);
+    assert.equal(apply.body.itemCount, 1);
+
+    const fixed = await storage.getInvoiceById(invoiceId);
+    const fixedItem = fixed.items.find((i) => i.id === invoiceItemId);
+    assert.ok(fixedItem, "row should still be present after apply");
+    assert.ok(
+      Math.abs(parseFloat(fixedItem.unitPrice) - newPrice) < 0.01,
+      `Expected unitPrice ${newPrice}, got ${fixedItem.unitPrice}`,
+    );
+    assert.ok(
+      Math.abs(parseFloat(fixedItem.totalPrice) - QTY * newPrice) < 0.01,
+      `Expected totalPrice ${(QTY * newPrice).toFixed(2)}, got ${fixedItem.totalPrice}`,
+    );
+    assert.ok(
+      Math.abs(parseFloat(fixed.partsSubtotal) - (oldPartsSubtotal + expectedDelta)) < 0.01,
+      `Expected partsSubtotal ${(oldPartsSubtotal + expectedDelta).toFixed(2)}, got ${fixed.partsSubtotal}`,
+    );
+    assert.ok(
+      Math.abs(parseFloat(fixed.totalAmount) - (oldTotalAmount + expectedDelta)) < 0.01,
+      `Expected totalAmount ${(oldTotalAmount + expectedDelta).toFixed(2)}, got ${fixed.totalAmount}`,
+    );
+  });
+
+  test("storage.createInvoiceItem overrides client-supplied $0 unit price for a catalog part", async () => {
+    // Plant minimal invoice via db (no items); use storage.createInvoiceItem
+    // for the line item so the safeguard runs.
+    const invoiceNumber = `INV-SAFEGUARD-${Date.now()}`;
+    const now = new Date();
+    const [inv] = await db.insert(invoices).values({
+      invoiceNumber,
+      customerId: CUSTOMER_ID,
+      customerName: "Authoritative Pricing Customer",
+      customerEmail: "auth_pricing_inv_safeguard@example.com",
+      invoiceMonth: now.getMonth() + 1,
+      invoiceYear: now.getFullYear(),
+      periodStart: now,
+      periodEnd: now,
+      partsSubtotal: "0.00",
+      laborSubtotal: "0.00",
+      markupAmount: "0.00",
+      taxAmount: "0.00",
+      totalAmount: "0.00",
+    }).returning();
+
+    const created = await storage.createInvoiceItem({
+      invoiceId: inv.id,
+      sourceType: "billing_sheet",
+      sourceId: 0,
+      workDate: now,
+      description: "Safeguard test",
+      partId: CATALOG_PART_ID,
+      partName: "Auth Pricing Test Part",
+      quantity: "2",
+      unitPrice: "0.00", // client tries to bill $0
+      totalPrice: "0.00",
+      laborHours: "0",
+      laborRate: "0",
+      laborTotal: "0",
+    });
+    assert.ok(
+      Math.abs(parseFloat(created.unitPrice) - CATALOG_PART_PRICE) < 0.01,
+      `Expected unitPrice ~$${CATALOG_PART_PRICE}, got $${created.unitPrice}`,
+    );
+    assert.ok(
+      Math.abs(parseFloat(created.totalPrice) - 2 * CATALOG_PART_PRICE) < 0.01,
+      `Expected totalPrice ~$${(2 * CATALOG_PART_PRICE).toFixed(2)}, got $${created.totalPrice}`,
+    );
+
+    // Unknown partId should throw, NOT silently insert a row.
+    await assert.rejects(
+      () => storage.createInvoiceItem({
+        invoiceId: inv.id,
+        sourceType: "billing_sheet",
+        sourceId: 0,
+        workDate: now,
+        description: "Safeguard reject test",
+        partId: 999999999,
+        partName: "Imaginary Part",
+        quantity: "1",
+        unitPrice: "0.00",
+        totalPrice: "0.00",
+        laborHours: "0",
+        laborRate: "0",
+        laborTotal: "0",
+      }),
+      /Catalog part with ID 999999999/,
+      "Expected createInvoiceItem to reject unknown partId",
+    );
+  });
+
+  // End-to-end: simulate the full historical scenario the task spec calls out
+  // — an invoice generated from a billing sheet that contains a $0 catalog
+  // row (legacy data planted directly to bypass the route safeguard). The
+  // invoice generation safeguard should rewrite the price to the catalog
+  // value when the invoice is created.
+  test("Invoice created from a billing sheet with a previously $0 catalog row uses the catalog price", async () => {
+    // 1. A catalog part priced at $7.25 today.
+    const tempSku = `INV-FROM-SHEET-${Date.now()}`;
+    const partRes = await api("POST", "/api/parts", {
+      companyId: 99,
+      name: "Invoice-From-Sheet Test Part",
+      sku: tempSku,
+      price: "7.25",
+      cost: "1.00",
+      category: "Test",
+    });
+    assert.ok(partRes.status === 201 || partRes.status === 200);
+    const partId = partRes.body.id;
+    const QTY = 6;
+
+    // 2. Plant a billing sheet + sheet item directly via db with unitPrice=0
+    //    for that catalog part. This simulates legacy data written before
+    //    Task #160's safeguard existed.
+    const billingNumber = `BS-LEGACY-${Date.now()}`;
+    // Use a distinct future month so createMonthlyInvoice's "existing invoice"
+    // short-circuit (keyed on customer + month + year) does not return a
+    // previously-created invoice from earlier tests in this file.
+    const workDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    const [legacySheet] = await db.insert(billingSheets).values({
+      billingNumber,
+      customerId: CUSTOMER_ID,
+      customerName: "Authoritative Pricing Customer",
+      propertyAddress: "1 Pricing Way",
+      workDate,
+      technicianName: "Legacy Tech",
+      workDescription: "Legacy sheet planted for invoice-from-sheet test",
+      status: "approved_passed_to_billing",
+      totalHours: "0.00",
+      laborRate: "60.00",
+      laborSubtotal: "0.00",
+      partsSubtotal: "0.00", // historical bug: subtotal $0 even though row exists
+      markupAmount: "0.00",
+      taxAmount: "0.00",
+      totalAmount: "0.00",
+    }).returning();
+    await db.insert(billingSheetItems).values({
+      billingSheetId: legacySheet.id,
+      partId,
+      partName: "Invoice-From-Sheet Test Part",
+      quantity: QTY.toString(),
+      unitPrice: "0.00",
+      totalPrice: "0.00",
+      laborHours: "0",
+    });
+
+    // 3. Build the invoice from this sheet via the storage entry point.
+    //    createMonthlyInvoice routes per-part inserts through createInvoiceItem,
+    //    so the safeguard should rewrite the $0 row to the catalog price.
+    const month = workDate.getMonth() + 1;
+    const year = workDate.getFullYear();
+    const periodStart = new Date(year, month - 1, 1);
+    const periodEnd = new Date(year, month, 0);
+    const invoice = await storage.createMonthlyInvoice(
+      CUSTOMER_ID,
+      { workOrders: [], billingSheets: [legacySheet] },
+      month, year, periodStart, periodEnd,
+    );
+    assert.ok(invoice, "Invoice should be created");
+
+    // 4. The invoice line item must hold the catalog price, NOT the $0 from the sheet.
+    const invoiceWithItems = await storage.getInvoiceById(invoice.id);
+    const ourItem = invoiceWithItems.items.find((i) => i.partId === partId);
+    assert.ok(ourItem, "Expected the invoice to contain a line item for our catalog part");
+    assert.ok(
+      Math.abs(parseFloat(ourItem.unitPrice) - 7.25) < 0.01,
+      `Expected unitPrice 7.25, got ${ourItem.unitPrice}`,
+    );
+    assert.ok(
+      Math.abs(parseFloat(ourItem.totalPrice) - QTY * 7.25) < 0.01,
+      `Expected totalPrice ${(QTY * 7.25).toFixed(2)}, got ${ourItem.totalPrice}`,
     );
   });
 });
