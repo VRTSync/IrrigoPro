@@ -154,6 +154,74 @@ describe("Billing sheet photo persistence", () => {
     assert.equal(patchRes.status, 403, `Expected 403 on billed sheet, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
   });
 
+  test("Field tech B cannot PATCH (photos-only) Tech A's billing sheet", async () => {
+    const sheetId = await createSheet(customerId, ["https://example.com/orig.jpg"]);
+
+    const uniqueSuffix = Date.now();
+    const userRes = await api("POST", "/api/users", {
+      username: `phototechB_photos_${uniqueSuffix}`,
+      password: "test-password-123",
+      name: "Photo Tech B Photos",
+      email: `phototechB_photos_${uniqueSuffix}@example.com`,
+      role: "field_tech",
+      companyId: 99,
+    });
+    assert.equal(userRes.status, 201, `Tech B user creation failed: ${JSON.stringify(userRes.body)}`);
+    const TECH_B_HEADERS = {
+      "Content-Type": "application/json",
+      "x-user-id": String(userRes.body.id),
+      "x-user-role": "field_tech",
+      "x-user-company-id": "99",
+    };
+
+    const patchRes = await api(
+      "PATCH",
+      `/api/billing-sheets/${sheetId}`,
+      { photos: ["https://example.com/techB-stole.jpg"] },
+      TECH_B_HEADERS,
+    );
+    assert.equal(patchRes.status, 403, `Expected 403, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
+    assert.match(
+      patchRes.body.message || "",
+      /Field technicians can only act on their own billing sheets/i,
+      `Unexpected access-denied message: ${JSON.stringify(patchRes.body)}`,
+    );
+  });
+
+  test("Field tech B cannot PATCH (status submit) Tech A's billing sheet", async () => {
+    const sheetId = await createSheet(customerId, ["https://example.com/orig.jpg"]);
+
+    const uniqueSuffix = Date.now();
+    const userRes = await api("POST", "/api/users", {
+      username: `phototechB_submit_${uniqueSuffix}`,
+      password: "test-password-123",
+      name: "Photo Tech B Submit",
+      email: `phototechB_submit_${uniqueSuffix}@example.com`,
+      role: "field_tech",
+      companyId: 99,
+    });
+    assert.equal(userRes.status, 201, `Tech B user creation failed: ${JSON.stringify(userRes.body)}`);
+    const TECH_B_HEADERS = {
+      "Content-Type": "application/json",
+      "x-user-id": String(userRes.body.id),
+      "x-user-role": "field_tech",
+      "x-user-company-id": "99",
+    };
+
+    const patchRes = await api(
+      "PATCH",
+      `/api/billing-sheets/${sheetId}`,
+      { status: "submitted" },
+      TECH_B_HEADERS,
+    );
+    assert.equal(patchRes.status, 403, `Expected 403, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
+    assert.match(
+      patchRes.body.message || "",
+      /Field technicians can only act on their own billing sheets/i,
+      `Unexpected access-denied message: ${JSON.stringify(patchRes.body)}`,
+    );
+  });
+
   test("Field tech PATCH photos on an invoiced sheet returns 403", async () => {
     const sheetId = await createSheet(customerId, ["https://example.com/orig.jpg"]);
 
