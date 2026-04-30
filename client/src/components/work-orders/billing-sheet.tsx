@@ -365,6 +365,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                                 type="photo"
                                 label="Arrival Picture"
                                 accept="image/*"
+                                capture="environment"
                                 multiple={false}
                                 files={field.value
                                   ? [{ url: field.value, fileName: field.value, originalName: 'Arrival Picture' }]
@@ -390,6 +391,7 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                                 type="photo"
                                 label="Finished Photo"
                                 accept="image/*"
+                                capture="environment"
                                 multiple={false}
                                 files={field.value
                                   ? [{ url: field.value, fileName: field.value, originalName: 'Finished Photo' }]

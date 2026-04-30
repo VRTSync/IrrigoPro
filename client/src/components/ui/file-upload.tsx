@@ -110,6 +110,7 @@ interface FileUploadProps {
   label: string;
   accept?: string;
   multiple?: boolean;
+  capture?: 'user' | 'environment';
   files: UploadedFile[];
   onFilesChange: (files: UploadedFile[]) => void;
 }
@@ -204,7 +205,7 @@ function classifyAsNetworkError(err: unknown): boolean {
   return false;
 }
 
-export function FileUpload({ type, label, accept, multiple = true, files = [], onFilesChange }: FileUploadProps) {
+export function FileUpload({ type, label, accept, multiple = true, capture, files = [], onFilesChange }: FileUploadProps) {
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string>("");
@@ -650,6 +651,7 @@ export function FileUpload({ type, label, accept, multiple = true, files = [], o
         type="file"
         accept={accept}
         multiple={multiple}
+        capture={capture}
         onChange={(e) => handleFileSelect(e.target.files)}
         className="hidden"
       />
