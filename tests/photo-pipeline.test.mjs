@@ -451,11 +451,12 @@ describe("HEIC write-through cache via /api/photos/:photoId", () => {
   const photoService = new ObjectStorageService();
   const baseId = `photos/heic-cache-test-${randomUUID()}`;
 
-  // The HEIC branch in downloadObject computes the cache key from the
-  // resolved file's bucket-relative name (which already includes the
-  // configured public search-path prefix), not from the raw photoId. We
-  // mirror that here so the assertion checks the EXACT key the proxy uses.
-  let resolvedCacheKey;
+  // The HEIC branch in downloadObject must compute the cache key from the
+  // canonical baseId (no search-path prefix doubling). The cache companion
+  // therefore lives at exactly `heicCachePath(baseId)`, single-prefix —
+  // i.e. the key is `<baseId>__heic.jpg` and the bucket-relative resolved
+  // path is `<searchPath>/<baseId>__heic.jpg` (NOT `public/public/...`).
+  const resolvedCacheKey = heicCachePath(baseId);
 
   async function safeDelete(key) {
     try {
@@ -487,7 +488,15 @@ describe("HEIC write-through cache via /api/photos/:photoId", () => {
 
     const sourceFile = await photoService.searchPublicObject(baseId);
     assert.ok(sourceFile, `failed to seed HEIC source object at ${baseId}`);
-    resolvedCacheKey = heicCachePath(sourceFile.name);
+
+    // Sanity: the canonical key derivation in objectStorage must agree
+    // with our expectation that resolvedCacheKey === heicCachePath(baseId)
+    // — i.e. the search-path prefix is stripped, never doubled.
+    assert.equal(
+      heicCachePath(photoService.canonicalKeyForFile(sourceFile)),
+      resolvedCacheKey,
+      "canonicalKeyForFile must strip the public search-path prefix so the HEIC cache key is single-prefixed",
+    );
 
     // Make sure no stale companion is hanging around from a previous run.
     await safeDelete(resolvedCacheKey);
@@ -495,7 +504,7 @@ describe("HEIC write-through cache via /api/photos/:photoId", () => {
 
   after(async () => {
     await safeDelete(baseId);
-    if (resolvedCacheKey) await safeDelete(resolvedCacheKey);
+    await safeDelete(resolvedCacheKey);
   });
 
   test("first request converts + caches; second is served from cache (no re-encode); cache-control matches each branch", async () => {
@@ -527,7 +536,7 @@ describe("HEIC write-through cache via /api/photos/:photoId", () => {
     }
     assert.ok(
       cacheFile,
-      `companion __heic.jpg cache object must exist at heicCachePath(file.name) = ${resolvedCacheKey} after the first request`,
+      `companion __heic.jpg cache object must exist at the canonical key heicCachePath(baseId) = ${resolvedCacheKey} after the first request (no public/public/ prefix doubling)`,
     );
 
     // ── Replace the cache contents with a small SENTINEL JPEG. The route

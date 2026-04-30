@@ -67,6 +67,32 @@ export class ObjectStorageService {
     return paths;
   }
 
+  // Strip the matching public search-path prefix from a resolved file's
+  // bucket-relative `file.name` so we get back the canonical key (e.g.
+  // `photos/<uuid>`). Required before deriving companion keys like the
+  // HEIC cache, because `searchPublicObject`/`writeBufferToFirstSearchPath`
+  // re-apply the search-path prefix themselves — passing in a name that
+  // already includes it would double the prefix (e.g. `public/public/...`).
+  canonicalKeyForFile(file: File): string {
+    const fileName = file.name;
+    const fileBucket = file.bucket?.name;
+    for (const searchPath of this.getPublicObjectSearchPaths()) {
+      let bucketName: string;
+      let objectPrefix: string;
+      try {
+        ({ bucketName, objectName: objectPrefix } = parseObjectPath(searchPath));
+      } catch {
+        continue;
+      }
+      if (fileBucket && fileBucket !== bucketName) continue;
+      const prefix = objectPrefix.endsWith("/") ? objectPrefix : `${objectPrefix}/`;
+      if (fileName.startsWith(prefix)) {
+        return fileName.slice(prefix.length);
+      }
+    }
+    return fileName;
+  }
+
   // Search for a public object from the search paths.
   async searchPublicObject(filePath: string): Promise<File | null> {
     for (const searchPath of this.getPublicObjectSearchPaths()) {
@@ -108,7 +134,7 @@ export class ObjectStorageService {
         const heicCacheControl = options.displayVariant
           ? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`
           : `private, max-age=${cacheTtlSec}`;
-        const heicCacheKey = heicCachePath(file.name);
+        const heicCacheKey = heicCachePath(this.canonicalKeyForFile(file));
         const cached = await this.searchPublicObject(heicCacheKey);
         if (cached) {
           const [cachedMeta] = await cached.getMetadata();
