@@ -10,8 +10,8 @@ import { safeGet } from "@/utils/safeStorage";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { preparePhotoForUpload, type PreparedPhoto } from "@/lib/photo-prep";
 
-// `preparePhotoForUpload` lives in `@/lib/photo-prep` so the same display +
-// preserved-original prep is shared with the billing-sheet upload path.
+// `preparePhotoForUpload` lives in `@/lib/photo-prep` so the same display
+// prep is shared with the billing-sheet upload path.
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -99,7 +99,6 @@ const SIGNED_URL_REUSE_MS = 12 * 60 * 1000;
 
 interface PhotoSignedUrlData {
   signedUrl: string;
-  originalSignedUrl?: string;
   canonicalUrl: string;
   originalName: string;
   mintedAt: number;
@@ -116,8 +115,7 @@ interface UploadJob {
   kind: "photo" | "attachment";
   file: File;
   // Cached compressed/HEIC-converted bytes so retries don't re-prep.
-  // Holds both the tight display copy AND the lightly-compressed
-  // preserved original.
+  // Holds the single tight display copy that gets PUT to storage.
   prepared?: PreparedPhoto;
   // Cached signed-URL response so retries reuse the same canonical URL
   // (and skip a /api/upload/photo round-trip) while still fresh.
@@ -273,7 +271,6 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
       const body = await signUrlRes.json();
       signedData = {
         signedUrl: body.signedUrl,
-        originalSignedUrl: body.originalSignedUrl,
         canonicalUrl: body.url,
         originalName: body.originalName || file.name,
         mintedAt: Date.now(),
@@ -295,17 +292,14 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
       throw new DOMException("Aborted", "AbortError");
     }
 
-    // 3. Dual upload: lightly-compressed preserved original to `originals/`,
-    // tight display variant to the canonical key. Report combined progress
-    // weighted by bytes so users on slow LTE see steady forward motion.
-    const { displayFile, originalFile } = prepared;
-    const totalBytes = originalFile.size + displayFile.size;
-    let origLoaded = 0;
-    let dispLoaded = 0;
+    // 3. Single upload: tight display copy to the canonical key. The
+    // server generates `thumb`/`medium` from this in the finalize step.
+    const { displayFile } = prepared;
+    const totalBytes = displayFile.size;
     let lastPct = -1;
-    const reportUpload = () => {
+    const reportUpload = (loaded: number) => {
       const pct = totalBytes > 0
-        ? Math.min(99, Math.round(((origLoaded + dispLoaded) / totalBytes) * 100))
+        ? Math.min(99, Math.round((loaded / totalBytes) * 100))
         : 0;
       if (pct !== lastPct) {
         lastPct = pct;
@@ -314,28 +308,14 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
     };
     updateJob(jobId, { status: "uploading", progress: 0 });
 
-    const [originalPut, displayPut] = await Promise.all([
-      signedData.originalSignedUrl
-        ? xhrPut(signedData.originalSignedUrl, originalFile, {
-            contentType: originalFile.type || 'application/octet-stream',
-            signal: controller.signal,
-            onProgress: (loaded) => { origLoaded = loaded; reportUpload(); },
-          })
-        : Promise.resolve({ ok: true, status: 200 }),
-      xhrPut(signedData.signedUrl, displayFile, {
-        contentType: displayFile.type || 'application/octet-stream',
-        signal: controller.signal,
-        onProgress: (loaded) => { dispLoaded = loaded; reportUpload(); },
-      }),
-    ]);
+    const displayPut = await xhrPut(signedData.signedUrl, displayFile, {
+      contentType: displayFile.type || 'application/octet-stream',
+      signal: controller.signal,
+      onProgress: (loaded) => reportUpload(loaded),
+    });
 
     if (!displayPut.ok) {
       throw new Error(`Failed to upload ${file.name} to storage`);
-    }
-    if (!originalPut.ok) {
-      // Non-fatal: display variants will still be generated. Log so ops
-      // can spot photos missing their preserved original.
-      console.warn(`[file-upload] preserved-original PUT failed for ${file.name}`);
     }
 
     // 4. Finalize — server generates display variants in the background.

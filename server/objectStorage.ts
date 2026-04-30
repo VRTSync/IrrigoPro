@@ -196,16 +196,15 @@ export class ObjectStorageService {
     }
   }
 
-  // Gets the signed upload URLs for a photo. Returns BOTH a signed URL for
-  // the (possibly client-prepared) display source under `photos/<uuid>` AND
-  // a signed URL for the truly untouched original camera bytes under
-  // `originals/<uuid>` so the preserved original is never re-encoded by the
-  // client compression / HEIC pipeline.
+  // Gets a signed upload URL for the display copy of a new photo under
+  // `photos/<uuid>`. We no longer mint a parallel signed URL for an
+  // `originals/<uuid>` PUT — new photos ship a single ~0.35MB display copy
+  // and the server generates `thumb`/`medium` variants from it. Legacy
+  // photos that already have a preserved original keep working: the
+  // `?variant=original` read path continues to resolve them.
   async getPhotoUploadURL(): Promise<{
     signedUrl: string;
-    originalSignedUrl: string;
     photoId: string;
-    originalKey: string;
   }> {
     const publicSearchPaths = this.getPublicObjectSearchPaths();
     if (publicSearchPaths.length === 0) {
@@ -213,17 +212,17 @@ export class ObjectStorageService {
     }
 
     const photoId = `photos/${randomUUID()}`;
-    const originalKey = originalPath(photoId);
     const baseDir = publicSearchPaths[0];
     const displayParts = parseObjectPath(`${baseDir}/${photoId}`);
-    const originalParts = parseObjectPath(`${baseDir}/${originalKey}`);
 
-    const [signedUrl, originalSignedUrl] = await Promise.all([
-      signObjectURL({ bucketName: displayParts.bucketName, objectName: displayParts.objectName, method: "PUT", ttlSec: 900 }),
-      signObjectURL({ bucketName: originalParts.bucketName, objectName: originalParts.objectName, method: "PUT", ttlSec: 900 }),
-    ]);
+    const signedUrl = await signObjectURL({
+      bucketName: displayParts.bucketName,
+      objectName: displayParts.objectName,
+      method: "PUT",
+      ttlSec: 900,
+    });
 
-    return { signedUrl, originalSignedUrl, photoId, originalKey };
+    return { signedUrl, photoId };
   }
 
   // Search for a photo (or one of its variants) in object storage.
@@ -358,9 +357,17 @@ export class ObjectStorageService {
       this.searchPublicObject(originalPath(baseId)).then((f) => !!f),
     ]);
 
-    if (thumbExists && mediumExists && originalExists) {
+    // Idempotency: once display variants exist, there's nothing to (re)do
+    // for new uploads — they intentionally have no preserved original. For
+    // legacy photos that DO have an original, we still report it. We
+    // intentionally do NOT short-circuit when the caller asked for an
+    // original backfill (allowOriginalBackfillFromBase) and the original
+    // is missing — the legacy backfill script needs that path to repair
+    // photos that have display variants but lost their preserved original.
+    if (thumbExists && mediumExists && (originalExists || !opts.allowOriginalBackfillFromBase)) {
       result.skipped = true;
-      result.thumb = result.medium = result.original = true;
+      result.thumb = result.medium = true;
+      result.original = originalExists;
       return result;
     }
 
@@ -381,9 +388,9 @@ export class ObjectStorageService {
     if (originalExists) {
       result.original = true;
     } else if (opts.allowOriginalBackfillFromBase) {
-      // Legacy/backfill only: copy the base object into originals/. In the
-      // dual-upload finalize flow we never substitute compressed display bytes
-      // for a missing original — the client PUTs raw bytes directly.
+      // Legacy/backfill only: copy the base object into originals/. The
+      // standard finalize flow for new uploads never asks for this — new
+      // photos intentionally have no preserved original.
       try {
         await this.writeBufferToFirstSearchPath(
           originalPath(baseId),
@@ -395,9 +402,10 @@ export class ObjectStorageService {
       } catch (err) {
         console.warn(`[OBJECT-STORAGE] failed to preserve original for ${baseId}:`, err);
       }
-    } else {
-      console.warn(`[OBJECT-STORAGE] original missing for ${baseId} after finalize — client original PUT may have failed`);
     }
+    // else: a missing originals/<uuid> is the expected steady state for
+    // new uploads — no warning. Display variants below still get generated
+    // from the base (display) bytes.
 
     try {
       const { thumb, medium } = await generateDisplayVariants(workingBuf);

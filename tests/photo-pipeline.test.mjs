@@ -255,12 +255,15 @@ describe("backfill-photo-variants resumability", () => {
 // ── ensurePhotoVariants safety net ────────────────────────────────────────
 //
 // These tests use a stubbed storage layer (no live bucket required). They
-// guard the two critical invariants of the variant pipeline:
-//   1. Idempotency: a second run on a fully-processed photo short-circuits.
-//   2. Original preservation: the dual-upload finalize path NEVER writes
-//      compressed display bytes to the originals/ prefix. Backfill of an
-//      original from base bytes is gated behind allowOriginalBackfillFromBase
-//      and uses the source content-type with a no-cache header.
+// guard the critical invariants of the variant pipeline:
+//   1. Idempotency: a second run on a photo with display variants short-circuits.
+//   2. Single-upload shape: the standard finalize flow generates thumb +
+//      medium and writes NOTHING under the originals/ prefix.
+//   3. Backfill safety: copying base bytes into originals/ is gated behind
+//      allowOriginalBackfillFromBase and uses the source content-type with
+//      a no-cache header.
+//   4. Legacy compatibility: a photo that already has an original keeps
+//      reporting `original: true` on the idempotent skip path.
 
 class FakeFile {
   constructor(name, buf, contentType) {
@@ -322,36 +325,57 @@ async function makePngBytes() {
 }
 
 describe("ObjectStorageService.ensurePhotoVariants — safety net", () => {
-  test("second call on a fully-processed photo returns { skipped: true } and writes nothing", async () => {
+  test("new-upload finalize path: writes only thumb + medium, NEVER touches originals/, and short-circuits on a second call", async () => {
     const baseId = `photos/${randomUUID()}`;
     const svc = new StubObjectStorageService();
     const baseBytes = await makeJpegBytes();
-    // Seed the dual-upload state: base (display source) AND preserved
-    // original both already exist in the bucket.
+    // Single-upload shape: only the display copy at the base key exists.
+    // No `originals/<uuid>` was ever PUT — that prefix is a legacy-only
+    // artefact now.
     svc.seed(baseId, baseBytes, "image/jpeg");
-    svc.seed(originalPath(baseId), baseBytes, "image/jpeg");
 
     const first = await svc.ensurePhotoVariants(baseId);
     assert.equal(first.error, undefined, `first call must not error: ${first.error}`);
     assert.equal(first.thumb, true);
     assert.equal(first.medium, true);
-    assert.equal(first.original, true);
+    assert.equal(
+      first.original,
+      false,
+      "first call must report original: false for new uploads (no preserved original is written)",
+    );
     assert.notEqual(first.skipped, true, "first call must actually do work");
 
-    // First call should have written exactly the two display variants.
+    // First call must write exactly thumb + medium and absolutely nothing
+    // under the originals/ prefix.
     assert.deepEqual(
       svc.writes.map((w) => w.key).sort(),
       [thumbPath(baseId), mediumPath(baseId)].sort(),
       "first call must only write thumb + medium",
     );
+    assert.equal(
+      svc.writes.filter((w) => w.key.startsWith("originals/")).length,
+      0,
+      "new-upload finalize must never write to originals/",
+    );
+    assert.equal(
+      svc.files.has(originalPath(baseId)),
+      false,
+      "originals/ key must remain absent in storage after a new-upload finalize",
+    );
 
     const writesBeforeSecond = svc.writes.length;
 
+    // Second call: thumb + medium are now present, so we short-circuit
+    // even though no original exists.
     const second = await svc.ensurePhotoVariants(baseId);
     assert.equal(second.skipped, true, "second call must short-circuit with skipped: true");
     assert.equal(second.thumb, true);
     assert.equal(second.medium, true);
-    assert.equal(second.original, true);
+    assert.equal(
+      second.original,
+      false,
+      "skipped call must still report original: false for a new upload that has no preserved original",
+    );
     assert.equal(second.error, undefined);
     assert.equal(
       svc.writes.length,
@@ -360,13 +384,36 @@ describe("ObjectStorageService.ensurePhotoVariants — safety net", () => {
     );
   });
 
+  test("legacy photo with a pre-existing original: skip path reports original: true and writes nothing", async () => {
+    const baseId = `photos/${randomUUID()}`;
+    const svc = new StubObjectStorageService();
+    const baseBytes = await makeJpegBytes();
+    // Legacy state: base + thumb + medium + preserved original all exist.
+    svc.seed(baseId, baseBytes, "image/jpeg");
+    svc.seed(thumbPath(baseId), baseBytes, "image/jpeg");
+    svc.seed(mediumPath(baseId), baseBytes, "image/jpeg");
+    svc.seed(originalPath(baseId), baseBytes, "image/jpeg");
+
+    const result = await svc.ensurePhotoVariants(baseId);
+
+    assert.equal(result.error, undefined, `must not error: ${result.error}`);
+    assert.equal(result.skipped, true, "fully-populated legacy photo must short-circuit");
+    assert.equal(result.thumb, true);
+    assert.equal(result.medium, true);
+    assert.equal(
+      result.original,
+      true,
+      "legacy photo's preserved original must still be reported as present on the skip path",
+    );
+    assert.equal(svc.writes.length, 0, "skip path must not write anything");
+  });
+
   test("without allowOriginalBackfillFromBase, a missing original is NOT written from base bytes", async () => {
     const baseId = `photos/${randomUUID()}`;
     const svc = new StubObjectStorageService();
     const baseBytes = await makeJpegBytes();
-    // Only the base (compressed display source) exists. No preserved
-    // original was uploaded (simulating the dual-upload original PUT having
-    // failed or not yet completed).
+    // Only the base (compressed display source) exists — the steady state
+    // for a freshly-finalized new upload.
     svc.seed(baseId, baseBytes, "image/jpeg");
 
     const result = await svc.ensurePhotoVariants(baseId);
@@ -392,6 +439,48 @@ describe("ObjectStorageService.ensurePhotoVariants — safety net", () => {
       svc.files.has(originalPath(baseId)),
       false,
       "originals/ key must remain absent in storage",
+    );
+  });
+
+  test("with allowOriginalBackfillFromBase: true and existing thumb+medium, the missing original IS still backfilled (skip-path is bypassed for repair)", async () => {
+    // Repair scenario the legacy backfill script depends on: a photo
+    // already has display variants (thumb + medium) but its preserved
+    // original got deleted/lost. Without honoring the backfill opt-in on
+    // the skip path, the repair would silently no-op. With the opt-in,
+    // ensurePhotoVariants must restore the original from the base bytes
+    // and leave thumb/medium untouched.
+    const baseId = `photos/${randomUUID()}`;
+    const svc = new StubObjectStorageService();
+    const baseBytes = await makeJpegBytes();
+    svc.seed(baseId, baseBytes, "image/jpeg");
+    svc.seed(thumbPath(baseId), baseBytes, "image/jpeg");
+    svc.seed(mediumPath(baseId), baseBytes, "image/jpeg");
+    // originals/<uuid> intentionally missing.
+
+    const result = await svc.ensurePhotoVariants(baseId, { allowOriginalBackfillFromBase: true });
+
+    assert.equal(result.error, undefined, `must not error: ${result.error}`);
+    assert.notEqual(result.skipped, true, "backfill repair must NOT short-circuit");
+    assert.equal(result.original, true, "original must be backfilled even when display variants already exist");
+
+    const originalWrites = svc.writes.filter((w) => w.key === originalPath(baseId));
+    assert.equal(originalWrites.length, 1, "exactly one write to the originals/ key is expected");
+    const w = originalWrites[0];
+    assert.equal(w.contentType, "image/jpeg", "preserved-original write must carry the source content-type");
+    assert.equal(w.cacheControl, "private, max-age=0, no-cache", "preserved-original write must use private/no-cache headers");
+    assert.equal(w.size, baseBytes.length, "preserved-original write must use the unmodified source bytes");
+
+    // Thumb and medium were already present — ensurePhotoVariants must NOT
+    // re-write them on a repair pass.
+    assert.equal(
+      svc.writes.filter((w) => w.key === thumbPath(baseId)).length,
+      0,
+      "thumb must not be re-written on a backfill repair pass",
+    );
+    assert.equal(
+      svc.writes.filter((w) => w.key === mediumPath(baseId)).length,
+      0,
+      "medium must not be re-written on a backfill repair pass",
     );
   });
 

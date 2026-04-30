@@ -9323,13 +9323,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const photoService = new ObjectStorageService();
-      const { signedUrl, originalSignedUrl, photoId, originalKey } = await photoService.getPhotoUploadURL();
+      const { signedUrl, photoId } = await photoService.getPhotoUploadURL();
       res.json({
         signedUrl,
-        originalSignedUrl,
         url: photoId,
         fileName: photoId,
-        originalKey,
         originalName,
       });
     } catch (error) {
@@ -9339,9 +9337,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Called by the client after a successful PUT to GCS. Generates display
-  // variants (thumb + medium) and copies the untouched bytes to originals/.
-  // Errors are logged but never fail the request — the next-best variant
-  // (or the base path) will still serve in galleries.
+  // variants (thumb + medium) from the uploaded display copy. New uploads
+  // intentionally have no preserved original under `originals/<uuid>` —
+  // legacy photos that already have one continue to serve via
+  // `?variant=original`. Errors are logged but never fail the request —
+  // the next-best variant (or the base path) will still serve in galleries.
   app.post("/api/upload/photo/finalize", requireAuthentication, async (req, res) => {
     try {
       const photoId = (req.body?.photoId as string)?.trim();

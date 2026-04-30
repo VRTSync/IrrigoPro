@@ -49,8 +49,8 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-// `preparePhotoForUpload` lives in `@/lib/photo-prep` so the same display +
-// preserved-original prep is shared with the work-order upload path.
+// `preparePhotoForUpload` lives in `@/lib/photo-prep` so the same single-pass
+// display-copy prep is shared with the work-order upload path.
 
 interface CompletedWorkDetailModalProps {
   type: "work_order" | "billing_sheet";
@@ -255,9 +255,8 @@ export function CompletedWorkDetailModal({
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
 
-        // 1. Ask the server for signed PUT URLs (display + preserved original).
+        // 1. Ask the server for a signed PUT URL for the display copy.
         let signedUrl: string;
-        let originalSignedUrl: string | undefined;
         let canonicalUrl: string;
         try {
           const signUrlRes = await fetch(
@@ -270,50 +269,30 @@ export function CompletedWorkDetailModal({
           }
           const json = await signUrlRes.json();
           signedUrl = json.signedUrl;
-          originalSignedUrl = json.originalSignedUrl;
           canonicalUrl = json.url;
         } catch (err: any) {
           throw new Error(`Get upload URL failed for ${file.name}: ${err?.message || err}`);
         }
 
-        // 2. Prepare both bytes streams (HEIC → JPEG once, then a tight
-        //    display copy + a lightly-compressed preserved original).
-        const { displayFile, originalFile } = await preparePhotoForUpload(file);
+        // 2. Prepare the display copy (HEIC → JPEG once, then a tight
+        //    ~1600px / ~0.35MB JPEG that drives the server-generated
+        //    thumb / medium variants).
+        const { displayFile } = await preparePhotoForUpload(file);
 
-        // 3. Dual-upload: lightly-compressed preserved original, tight display bytes for variants.
+        // 3. Single upload: tight display bytes go to the canonical key.
         let displayPut: Response;
-        let originalPut: Response;
         try {
-          [originalPut, displayPut] = await Promise.all([
-            originalSignedUrl
-              ? fetch(originalSignedUrl, {
-                  method: 'PUT',
-                  body: originalFile,
-                  headers: { 'Content-Type': originalFile.type || 'application/octet-stream' },
-                })
-              : Promise.resolve({ ok: true } as Response),
-            fetch(signedUrl, {
-              method: 'PUT',
-              body: displayFile,
-              headers: { 'Content-Type': displayFile.type || 'application/octet-stream' },
-            }),
-          ]);
+          displayPut = await fetch(signedUrl, {
+            method: 'PUT',
+            body: displayFile,
+            headers: { 'Content-Type': displayFile.type || 'application/octet-stream' },
+          });
         } catch (err: any) {
           throw new Error(`Upload to storage failed for ${file.name}: ${err?.message || err}`);
         }
         if (!displayPut.ok) {
           const body = await displayPut.text().catch(() => '');
           throw new Error(`Upload to storage failed for ${file.name} (${displayPut.status}${body ? `: ${body.slice(0, 120)}` : ''})`);
-        }
-        if (!originalPut.ok) {
-          // Display variants will still generate, but the preserved
-          // untouched bytes were not saved — surface this so the user
-          // knows EXIF/GPS may be missing on this photo's original.
-          const body = await originalPut.text().catch(() => '');
-          console.warn(`[detail-modal] preserved-original PUT failed for ${file.name}`, originalPut.status, body);
-          partialWarnings.push(
-            `Original bytes for ${file.name} weren't preserved (${originalPut.status}). Thumbnails will still appear.`
-          );
         }
 
         // 4. Ask the server to generate thumb/medium variants. Variant
