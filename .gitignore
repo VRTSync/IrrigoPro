@@ -4,3 +4,19 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Logs
+*.log
+
+# Environment files (allow .env.example template)
+.env
+.env.*
+!.env.example
+
+# Runtime upload directory (kept on disk via uploads/.gitkeep)
+uploads/
+
+# Coverage and editor directories
+coverage/
+.vscode/
+.idea/
