@@ -605,4 +605,93 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
       `Expected totalPrice ${(QTY * 7.25).toFixed(2)}, got ${ourItem.totalPrice}`,
     );
   });
+
+  // Task #206 — Manager-created billing sheets must immediately appear in the
+  // customer's Ready-to-Invoice (unbilledBillingSheets) list. Before the fix
+  // they landed at status='approved' with no transition forward, so the unbilled
+  // filter (which only accepted 'approved_passed_to_billing') hid them forever.
+  test("Manager-created billing sheet immediately appears in unbilledBillingSheets", async () => {
+    const billingManagerHeaders = {
+      "Content-Type": "application/json",
+      "x-user-id": "2",
+      "x-user-role": "billing_manager",
+      "x-user-company-id": "99",
+    };
+
+    // Create a billing sheet as a billing_manager via the real route.
+    const create = await api(
+      "POST",
+      "/api/billing-sheets",
+      {
+        customerId: CUSTOMER_ID,
+        customerName: "Authoritative Pricing Customer",
+        propertyAddress: "1 Pricing Way",
+        workDate: new Date().toISOString().slice(0, 10),
+        technicianName: "Manager Tech",
+        technicianId: null,
+        workDescription: "Task #206 regression — manager self-create",
+        status: "draft", // server should overwrite this based on creator role
+        totalHours: "1",
+        laborRate: "60.00",
+        laborSubtotal: "60.00",
+        partsSubtotal: "0.00",
+        totalAmount: "60.00",
+        items: [],
+      },
+      billingManagerHeaders,
+    );
+    assert.equal(create.status, 200, `Manager BS create failed: ${JSON.stringify(create.body)}`);
+    const sheetId = create.body.id;
+
+    // Server should have routed the sheet directly to approved_passed_to_billing
+    // (NOT the dead-end legacy 'approved'), with the approval audit fields stamped.
+    const fetched = await api("GET", `/api/billing-sheets/${sheetId}`);
+    assert.equal(fetched.status, 200);
+    assert.equal(
+      fetched.body.status,
+      "approved_passed_to_billing",
+      `Manager-created sheet should land at 'approved_passed_to_billing', got '${fetched.body.status}'`,
+    );
+    assert.ok(fetched.body.approvedAt, "approvedAt should be stamped on manager self-approval");
+    assert.ok(fetched.body.approvedBy, "approvedBy should be stamped on manager self-approval");
+
+    // The customer billing endpoint must surface this sheet in unbilledBillingSheets.
+    const billing = await api("GET", `/api/customers/${CUSTOMER_ID}/billing`);
+    assert.equal(billing.status, 200);
+    const unbilled = (billing.body.unbilledBillingSheets ?? []).find((bs) => bs.id === sheetId);
+    assert.ok(
+      unbilled,
+      `Manager-created billing sheet ${sheetId} must appear in unbilledBillingSheets so it can be selected for the monthly invoice`,
+    );
+  });
+
+  // Safety-net half of the Task #206 fix: even if a billing sheet somehow ends
+  // up at the legacy status='approved' (pre-fix data, future regression, etc.),
+  // the customer billing endpoint must still treat it as Ready to Bill.
+  test("Legacy 'approved' billing sheets are still treated as Ready to Bill (safety net)", async () => {
+    const billingNumber = `BS-LEGACY-APPROVED-${Date.now()}`;
+    const [legacy] = await db.insert(billingSheets).values({
+      billingNumber,
+      customerId: CUSTOMER_ID,
+      customerName: "Authoritative Pricing Customer",
+      propertyAddress: "1 Pricing Way",
+      workDate: new Date(),
+      technicianName: "Legacy Tech",
+      workDescription: "Task #206 safety-net test (planted at legacy 'approved')",
+      status: "approved",
+      totalHours: "1.00",
+      laborRate: "60.00",
+      laborSubtotal: "60.00",
+      partsSubtotal: "0.00",
+      totalAmount: "60.00",
+    }).returning();
+
+    const billing = await api("GET", `/api/customers/${CUSTOMER_ID}/billing`);
+    assert.equal(billing.status, 200);
+    const found = (billing.body.unbilledBillingSheets ?? []).find((bs) => bs.id === legacy.id);
+    assert.ok(
+      found,
+      `Legacy 'approved' billing sheet ${legacy.id} must also appear in unbilledBillingSheets`,
+    );
+  });
 });

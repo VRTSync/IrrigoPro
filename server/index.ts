@@ -930,6 +930,58 @@ async function runStartupMigrations() {
     );
   }
 
+  // Task #206 — promote stuck 'approved' billing sheets to 'approved_passed_to_billing'.
+  // Manager-created billing sheets used to land at status='approved' but no transition
+  // existed forward, so they never appeared in the customer's Ready-to-Invoice list.
+  // The create-path fix in routes.ts now writes 'approved_passed_to_billing' directly;
+  // this sweep is the safety net that catches any pre-fix data plus any future leak.
+  // Idempotent — safe to run on every startup.
+  try {
+    const approvedSweep = await pool.query(
+      `UPDATE billing_sheets
+       SET status = 'approved_passed_to_billing',
+           approved_at = COALESCE(approved_at, NOW()),
+           approved_by = COALESCE(approved_by, 'System backfill (Task #206)'),
+           approved_total = COALESCE(approved_total, total_amount)
+       WHERE status = 'approved' AND invoice_id IS NULL
+       RETURNING id`
+    );
+    const promoted = approvedSweep.rowCount ?? 0;
+    if (promoted > 0) {
+      logger.info(
+        `Startup cleanup (approved-billing-sheets-sweep, Task #206): promoted ${promoted} billing sheet(s) from 'approved' to 'approved_passed_to_billing' so they appear in Ready-to-Invoice`,
+        'Server Startup'
+      );
+      console.log(`[Migration] approved-billing-sheets-sweep: ${promoted} billing sheet(s) promoted`);
+    } else {
+      logger.info(
+        "Startup cleanup (approved-billing-sheets-sweep, Task #206): no stuck 'approved' billing sheets found",
+        'Server Startup'
+      );
+    }
+
+    // Regression guard: if any billing sheets are still sitting at 'approved'
+    // after the sweep, log a loud warning. This should always be zero — if it's
+    // not, something is writing the legacy status again and needs investigation.
+    const leftoverCheck = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM billing_sheets WHERE status = 'approved'`
+    );
+    const leftover: number = leftoverCheck.rows[0]?.n ?? 0;
+    if (leftover > 0) {
+      logger.error(
+        `REGRESSION GUARD (Task #206): ${leftover} billing sheet(s) still at status='approved' after sweep — these will NOT appear in Ready-to-Invoice. Investigate the create path immediately.`,
+        new Error(`Billing sheets stuck at 'approved' after Task #206 sweep: ${leftover}`),
+        'Server Startup'
+      );
+    }
+  } catch (err) {
+    logger.error(
+      'Startup cleanup (approved-billing-sheets-sweep, Task #206) error (non-fatal)',
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
+
   // One-time data repair: fix billing sheet items with zero unit_price when the linked part
   // has a real catalog price. After fixing items, recalculate parts_subtotal and total_amount
   // on affected uninvoiced billing sheets.

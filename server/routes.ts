@@ -2027,10 +2027,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
           const unbilledWorkOrders = workOrders.filter(wo =>
-            wo.status === 'approved_passed_to_billing' && !wo.invoiceId && woInRange(wo)
+            (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId && woInRange(wo)
           );
           const unbilledBillingSheets = billingSheets.filter(bs =>
-            bs.status === 'approved_passed_to_billing' && !bs.invoiceId && bsInRange(bs)
+            (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId && bsInRange(bs)
           );
           
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
@@ -2208,12 +2208,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Filter unbilled work: only approved_passed_to_billing tickets surface to billing intake
       const unbilledWorkOrders = workOrders.filter(wo => 
-        wo.status === 'approved_passed_to_billing' && !wo.invoiceId
+        (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
       );
       // A non-null invoiceId is the authoritative signal that a billing sheet has
       // been billed — exclude it from unbilled regardless of status value.
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        bs.status === 'approved_passed_to_billing' && !bs.invoiceId
+        (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
       );
 
       // Calculate total unbilled amount
@@ -2454,7 +2454,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
-          wo.status === 'approved_passed_to_billing' && 
+          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && 
           !wo.invoiceId
         );
       }
@@ -2462,7 +2462,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          bs.status === 'approved_passed_to_billing' && 
+          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && 
           !bs.invoiceId
         );
       }
@@ -2470,10 +2470,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If no specific items selected, fall back to all approved unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          wo.status === 'approved_passed_to_billing' && !wo.invoiceId
+          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          bs.status === 'approved_passed_to_billing' && !bs.invoiceId
+          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
         );
       }
 
@@ -2701,7 +2701,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
-          wo.status === 'approved_passed_to_billing' && 
+          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && 
           !wo.invoiceId
         );
       }
@@ -2709,7 +2709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          bs.status === 'approved_passed_to_billing' && 
+          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && 
           !bs.invoiceId
         );
       }
@@ -2717,10 +2717,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If no specific items selected, fall back to all approved unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          wo.status === 'approved_passed_to_billing' && !wo.invoiceId
+          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          bs.status === 'approved_passed_to_billing' && !bs.invoiceId
+          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
         );
       }
 
@@ -7571,14 +7571,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
       
-      // Determine the correct status based on creator's role
-      // irrigation_manager => 'approved' (skip manual approval step)
-      // field_tech => 'submitted' (goes to irrigation manager for review)
-      // Server is source of truth for status based on creator role
+      // Determine the correct status based on creator's role.
+      // Manager-class roles (irrigation_manager, billing_manager, company_admin,
+      // super_admin) self-approve at creation time and route directly to
+      // 'approved_passed_to_billing' so the sheet immediately surfaces in the
+      // customer's Ready-to-Invoice list (Task #206 — previously these landed
+      // at the dead-end 'approved' status with no transition forward).
+      // field_tech => 'submitted' (goes to manager for review).
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
       let resolvedStatus: string;
-      if (creatorRole === 'irrigation_manager' || creatorRole === 'billing_manager') {
-        resolvedStatus = 'approved';
+      if (
+        creatorRole === 'irrigation_manager' ||
+        creatorRole === 'billing_manager' ||
+        creatorRole === 'company_admin' ||
+        creatorRole === 'super_admin'
+      ) {
+        resolvedStatus = 'approved_passed_to_billing';
       } else if (creatorRole === 'field_tech') {
         resolvedStatus = 'submitted';
       } else {
@@ -7700,6 +7708,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const billingSheet = await storage.createBillingSheet({
         ...cleanData,
       });
+
+      // Task #206 — when a manager-class user creates a billing sheet, it's
+      // self-approved at creation time (status='approved_passed_to_billing').
+      // Stamp the same approval audit fields the manual /approve endpoint uses
+      // so the record is fully traceable in Ready-to-Invoice listings.
+      if (resolvedStatus === 'approved_passed_to_billing') {
+        const approverUser = req.authenticatedUserId
+          ? await storage.getUser(req.authenticatedUserId)
+          : undefined;
+        const approverName = approverUser?.name || 'Manager';
+        const partsSnapshot = JSON.stringify({ partsSubtotal: billingSheet.partsSubtotal });
+        const laborSnapshot = JSON.stringify({
+          totalHours: billingSheet.totalHours,
+          laborRate: billingSheet.laborRate,
+          laborSubtotal: billingSheet.laborSubtotal,
+        });
+        await storage.updateBillingSheet(billingSheet.id, {
+          approvedBy: approverName,
+          approvedByUserId: req.authenticatedUserId || undefined,
+          approvedAt: new Date(),
+          approvedTotal: billingSheet.totalAmount,
+          approvedPartsSnapshot: partsSnapshot,
+          approvedLaborSnapshot: laborSnapshot,
+        } as any);
+      }
 
       const createdItemCount = Array.isArray(cleanData.items) ? cleanData.items.length : 0;
       console.log(`[AUDIT] billing_sheet_created billingSheetId=${billingSheet.id} billingNumber=${billingNumber} itemCount=${createdItemCount} status=${resolvedStatus}`);
@@ -9206,10 +9239,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       const { techName, workPerformed, additionalNotes, totalPartsCost, arrivalPhoto, finishedPhoto, actualStartTime, actualEndTime, materialItems, laborItems, additionalCharges, technicianNotes, laborRate: formLaborRate, aiInputs: reqAiInputs, aiShortDescription, aiDetailedDescription, ...rest } = req.body;
 
+      // Manager-class roles (irrigation_manager, billing_manager, company_admin,
+      // super_admin) self-approve at conversion time and route directly to
+      // 'approved_passed_to_billing' so the resulting billing sheet immediately
+      // surfaces in the customer's Ready-to-Invoice list (Task #206).
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
       let resolvedStatus: string;
-      if (creatorRole === 'irrigation_manager' || creatorRole === 'billing_manager') {
-        resolvedStatus = 'approved';
+      if (
+        creatorRole === 'irrigation_manager' ||
+        creatorRole === 'billing_manager' ||
+        creatorRole === 'company_admin' ||
+        creatorRole === 'super_admin'
+      ) {
+        resolvedStatus = 'approved_passed_to_billing';
       } else if (creatorRole === 'field_tech') {
         resolvedStatus = 'submitted';
       } else {
@@ -9356,6 +9398,30 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
       console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=${resolvedItems.length}`);
+
+      // Task #206 — manager-class self-approval: stamp the same approval audit
+      // fields the manual /approve endpoint uses so the resulting billing
+      // sheet is fully traceable in Ready-to-Invoice listings.
+      if (resolvedStatus === 'approved_passed_to_billing') {
+        const approverUser = req.authenticatedUserId
+          ? await storage.getUser(req.authenticatedUserId)
+          : undefined;
+        const approverName = approverUser?.name || 'Manager';
+        const partsSnapshot = JSON.stringify({ partsSubtotal: newBillingSheet.partsSubtotal });
+        const laborSnapshot = JSON.stringify({
+          totalHours: newBillingSheet.totalHours,
+          laborRate: newBillingSheet.laborRate,
+          laborSubtotal: newBillingSheet.laborSubtotal,
+        });
+        await storage.updateBillingSheet(newBillingSheet.id, {
+          approvedBy: approverName,
+          approvedByUserId: req.authenticatedUserId || undefined,
+          approvedAt: new Date(),
+          approvedTotal: newBillingSheet.totalAmount,
+          approvedPartsSnapshot: partsSnapshot,
+          approvedLaborSnapshot: laborSnapshot,
+        } as any);
+      }
       // Regression guard: surface any catalog $0 leak that slipped through.
       await regressionGuardZeroCatalogPrices('work_order_conversion', newBillingSheet.id, resolvedItems as RawBillingItem[]);
       res.json({ message: "Billing sheet saved successfully" });

@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry, and offering a significant market advantage through efficiency and streamlined operations.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It provides complete business workflow management from estimates through work orders to invoices, with QuickBooks integration and field technician capabilities. The project aims to be a complete solution for managing field services, billing, and customer interactions, enhancing efficiency and customer satisfaction in the irrigation industry.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -58,7 +58,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins, including a photo pipeline for processing and storage.
 - **Authoritative Pricing & $0 Catalog Audit**: Server-side enforcement of catalog pricing for line items and auditing mechanism for $0 catalog prices.
-- **Labor Rate Audit**: Admin page that lists un-invoiced work orders and billing sheets whose stored `labor_rate` no longer matches the customer's current standard or emergency rate. Supports per-row Standard/Emergency override and an apply-repair that re-syncs `labor_rate`, `applied_labor_rate` (WO only), `labor_subtotal`, and `total_amount`.
+- **Labor Rate Audit**: Admin page that lists un-invoiced work orders and billing sheets whose stored `labor_rate` no longer matches the customer's current standard or emergency rate.
 
 ## External Dependencies
 
