@@ -1,0 +1,26 @@
+Clean up repo hygiene. Do the work on a new branch called `chore/repo-cleanup`, commit in logical chunks with clear messages, and open a PR — do not push to main.
+
+1. DELETE these four leftover merge-conflict scratch files at the repo root. They're stale artifacts from an old conflict in server/pdf-generator.ts that has long since been resolved (working tree is clean, no conflict markers in source). Verify with `grep -rn '^<<<<<<<' --include='*.ts' --include='*.tsx' .` first — it should return nothing — then:
+   - conflict_block.txt
+   - head_part.txt
+   - incoming_part.txt
+   - prefix.txt
+   Commit: "chore: remove stale merge-conflict scratch files from repo root"
+
+2. Stop tracking .env.security but keep the file locally. It currently only holds non-secret feature flags, but env files should never be in git. Run `git rm --cached .env.security`, then add `.env*` to .gitignore (and keep an explicit `!.env.example` line if/when you create an example template). Commit: "chore: untrack .env.security and gitignore env files"
+
+3. Stop tracking the uploads/ folder. These are runtime user-uploaded photos that don't belong in source control. Run `git rm -r --cached uploads/`, add `uploads/` to .gitignore, and keep the folder existing on disk via a `uploads/.gitkeep` placeholder so the runtime path still exists. Before committing, briefly check whether any of the 10 photos look like real customer data — if yes, flag for me before pushing. Commit: "chore: untrack uploads/ runtime folder"
+
+4. For attached_assets/ (42 MB of screenshots, pasted error logs, and Replit prompt drafts) — DO NOT delete yet. Instead, report back: list the files grouped by kind (screenshots, pasted text logs, CSVs, PDFs, logos), tell me which are referenced anywhere in source code (`grep -rln 'attached_assets/' client/ server/ shared/ scripts/ docs/`), and recommend a split — e.g. move logos used by the app into client/public/ or server/assets/, and propose archiving the rest outside the repo. Wait for my decision before deleting anything.
+
+5. Update .gitignore to also include common patterns that are missing: `*.log`, `.env`, `.env.*`, `!.env.example`, `coverage/`, `.vscode/`, `.idea/`. Keep the existing entries.
+
+6. Verify after the deletions: run `npm run check` (tsc) and `npm run dev` to confirm nothing broke. Run the test workflow. Report all output.
+
+7. Open the PR with a summary of what was removed, total size reduction, and remaining items still to discuss (attached_assets/ disposition, whether to do a git history rewrite to shrink .git/).
+
+Do NOT do these without explicit follow-up:
+- Don't run `git filter-repo` or any history rewrite
+- Don't delete attached_assets/ until I review your report
+- Don't touch any code in client/, server/, or shared/
+- Don't run `npm audit fix` or upgrade dependencies
