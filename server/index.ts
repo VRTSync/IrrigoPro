@@ -960,17 +960,41 @@ async function runStartupMigrations() {
       );
     }
 
-    // Regression guard: if any billing sheets are still sitting at 'approved'
-    // after the sweep, log a loud warning. This should always be zero — if it's
-    // not, something is writing the legacy status again and needs investigation.
+    // Regression guard: if any UNINVOICED billing sheets are still at
+    // 'approved' after the sweep, log a loud warning. This should always be
+    // zero — invoiced sheets are excluded so historical data does not create
+    // false alarms. The customer billing endpoint already widens its filter
+    // to include legacy 'approved', so an alarm here means a NEW write path
+    // is producing stuck-but-uninvoiced rows that need investigation.
     const leftoverCheck = await pool.query(
-      `SELECT COUNT(*)::int AS n FROM billing_sheets WHERE status = 'approved'`
+      `SELECT COUNT(*)::int AS n FROM billing_sheets
+       WHERE status = 'approved' AND invoice_id IS NULL`
     );
     const leftover: number = leftoverCheck.rows[0]?.n ?? 0;
     if (leftover > 0) {
       logger.error(
-        `REGRESSION GUARD (Task #206): ${leftover} billing sheet(s) still at status='approved' after sweep — these will NOT appear in Ready-to-Invoice. Investigate the create path immediately.`,
+        `REGRESSION GUARD (Task #206): ${leftover} uninvoiced billing sheet(s) still at status='approved' after sweep — investigate the create path immediately.`,
         new Error(`Billing sheets stuck at 'approved' after Task #206 sweep: ${leftover}`),
+        'Server Startup'
+      );
+    }
+
+    // Parallel work-order guard: today no manager-create path on work orders
+    // produces a legacy 'approved' status (manager completion goes through
+    // 'pending_manager_review' → /approve → 'approved_passed_to_billing'),
+    // but the customer billing filter was widened to also accept 'approved'
+    // for work orders as a safety net. Mirror that with a count+warn so any
+    // future regression on the WO side is also surfaced. Read-only — no
+    // backfill, since the WO write paths are not known to produce this.
+    const woLeftoverCheck = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM work_orders
+       WHERE status = 'approved' AND invoice_id IS NULL`
+    );
+    const woLeftover: number = woLeftoverCheck.rows[0]?.n ?? 0;
+    if (woLeftover > 0) {
+      logger.error(
+        `REGRESSION GUARD (Task #206, work orders): ${woLeftover} uninvoiced work order(s) sitting at legacy status='approved' — no known write path produces this, investigate.`,
+        new Error(`Work orders stuck at 'approved' after Task #206 sweep: ${woLeftover}`),
         'Server Startup'
       );
     }
