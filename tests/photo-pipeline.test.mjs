@@ -443,3 +443,145 @@ describe("ObjectStorageService.ensurePhotoVariants — safety net", () => {
   });
 });
 
+describe("HEIC write-through cache via /api/photos/:photoId", () => {
+  // The proxy converts HEIC bytes to JPEG on the first request and writes
+  // the result to `<baseId>__heic.jpg`. Subsequent requests must serve the
+  // cached jpeg directly — a regression here would silently re-encode every
+  // HEIC request and slow the gallery to a crawl.
+  const photoService = new ObjectStorageService();
+  const baseId = `photos/heic-cache-test-${randomUUID()}`;
+
+  // The HEIC branch in downloadObject computes the cache key from the
+  // resolved file's bucket-relative name (which already includes the
+  // configured public search-path prefix), not from the raw photoId. We
+  // mirror that here so the assertion checks the EXACT key the proxy uses.
+  let resolvedCacheKey;
+
+  async function safeDelete(key) {
+    try {
+      const f = await photoService.searchPublicObject(key);
+      if (f) await f.delete();
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  before(async () => {
+    // Seed a HEIC-typed source object. We use a sharp-generated JPEG buffer
+    // but mark contentType as image/heic so the proxy's HEIC branch fires.
+    // sharp's `failOn:"none"` decoder happily round-trips JPEG bytes when
+    // convertHeicToJpeg runs, which keeps this test self-contained without
+    // requiring a libheif build or a fixture HEIC file in the repo.
+    const sourceBuf = await sharp({
+      create: { width: 240, height: 180, channels: 3, background: { r: 32, g: 64, b: 96 } },
+    })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+
+    await photoService.writeBufferToFirstSearchPath(
+      baseId,
+      sourceBuf,
+      "image/heic",
+      "private, no-cache",
+    );
+
+    const sourceFile = await photoService.searchPublicObject(baseId);
+    assert.ok(sourceFile, `failed to seed HEIC source object at ${baseId}`);
+    resolvedCacheKey = heicCachePath(sourceFile.name);
+
+    // Make sure no stale companion is hanging around from a previous run.
+    await safeDelete(resolvedCacheKey);
+  });
+
+  after(async () => {
+    await safeDelete(baseId);
+    if (resolvedCacheKey) await safeDelete(resolvedCacheKey);
+  });
+
+  test("first request converts + caches; second is served from cache (no re-encode); cache-control matches each branch", async () => {
+    // Pre-condition: cache must not exist before the first request fires.
+    const preCache = await photoService.searchPublicObject(resolvedCacheKey);
+    assert.equal(preCache, null, `cache must not pre-exist at ${resolvedCacheKey}`);
+
+    // ── First request: authenticated-original branch (no ?variant) ──────
+    const first = await fetch(`${BASE_URL}/api/photos/${baseId}`, { headers: ADMIN_HEADERS });
+    assert.equal(first.status, 200, `first request status (${first.status}) must be 200`);
+    assert.equal(
+      first.headers.get("content-type"),
+      "image/jpeg",
+      "HEIC source must be transcoded and served as image/jpeg",
+    );
+    assert.equal(
+      first.headers.get("cache-control"),
+      "private, max-age=3600",
+      "authenticated-original branch must use the private, short cache-control",
+    );
+    // Drain the response so the server can finalize the best-effort write.
+    await first.arrayBuffer();
+
+    // The cache write is best-effort and fire-and-forget; poll for it.
+    let cacheFile = null;
+    for (let i = 0; i < 50 && !cacheFile; i++) {
+      cacheFile = await photoService.searchPublicObject(resolvedCacheKey);
+      if (!cacheFile) await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(
+      cacheFile,
+      `companion __heic.jpg cache object must exist at heicCachePath(file.name) = ${resolvedCacheKey} after the first request`,
+    );
+
+    // ── Replace the cache contents with a small SENTINEL JPEG. The route
+    // serves the cached object verbatim; if the next request returns the
+    // sentinel bytes, that proves the cached jpeg was streamed (not the
+    // HEIC source re-encoded). ────────────────────────────────────────────
+    const sentinel = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: { r: 255, g: 0, b: 0 } },
+    })
+      .jpeg({ quality: 70 })
+      .toBuffer();
+    await photoService.writeBufferToFirstSearchPath(
+      resolvedCacheKey,
+      sentinel,
+      "image/jpeg",
+      "private, max-age=3600",
+    );
+
+    // ── Second request: same branch — must serve the SENTINEL from cache.
+    const second = await fetch(`${BASE_URL}/api/photos/${baseId}`, { headers: ADMIN_HEADERS });
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get("content-type"), "image/jpeg");
+    assert.equal(
+      second.headers.get("cache-control"),
+      "private, max-age=3600",
+      "authenticated-original branch must keep the private cache-control on cached hits",
+    );
+    const secondBody = Buffer.from(await second.arrayBuffer());
+    assert.deepEqual(
+      secondBody,
+      sentinel,
+      "second request must stream the cached jpeg verbatim — got bytes that don't match the sentinel, meaning the HEIC source was re-encoded",
+    );
+
+    // ── Display-variant branch: requesting ?variant=medium falls back to
+    // the base file (no medium exists), enters the HEIC branch with
+    // displayVariant=true, and must reuse the SAME cached jpeg with the
+    // long-lived public/immutable cache-control. ──────────────────────────
+    const display = await fetch(
+      `${BASE_URL}/api/photos/${baseId}?variant=medium`,
+      { headers: ADMIN_HEADERS },
+    );
+    assert.equal(display.status, 200);
+    assert.equal(display.headers.get("content-type"), "image/jpeg");
+    assert.equal(
+      display.headers.get("cache-control"),
+      `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`,
+      "display-variant branch must use the long-lived public/immutable cache-control",
+    );
+    const displayBody = Buffer.from(await display.arrayBuffer());
+    assert.deepEqual(
+      displayBody,
+      sentinel,
+      "display-variant request must reuse the same cached jpeg (proven by the sentinel match)",
+    );
+  });
+});
