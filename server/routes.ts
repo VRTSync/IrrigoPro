@@ -247,7 +247,8 @@ import {
   insertAssemblyPartSchema,
   type InsertEstimateZone,
   type InsertEstimateItem,
-  type BillingSheetItem
+  type BillingSheetItem,
+  type InsertBillingSheet
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -7724,14 +7725,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           laborRate: billingSheet.laborRate,
           laborSubtotal: billingSheet.laborSubtotal,
         });
-        await storage.updateBillingSheet(billingSheet.id, {
+        const approvalPatch: Partial<InsertBillingSheet> = {
           approvedBy: approverName,
           approvedByUserId: req.authenticatedUserId || undefined,
           approvedAt: new Date(),
           approvedTotal: billingSheet.totalAmount,
           approvedPartsSnapshot: partsSnapshot,
           approvedLaborSnapshot: laborSnapshot,
-        } as any);
+        };
+        await storage.updateBillingSheet(billingSheet.id, approvalPatch);
       }
 
       const createdItemCount = Array.isArray(cleanData.items) ? cleanData.items.length : 0;
@@ -9413,14 +9415,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           laborRate: newBillingSheet.laborRate,
           laborSubtotal: newBillingSheet.laborSubtotal,
         });
-        await storage.updateBillingSheet(newBillingSheet.id, {
+        const approvalPatch: Partial<InsertBillingSheet> = {
           approvedBy: approverName,
           approvedByUserId: req.authenticatedUserId || undefined,
           approvedAt: new Date(),
           approvedTotal: newBillingSheet.totalAmount,
           approvedPartsSnapshot: partsSnapshot,
           approvedLaborSnapshot: laborSnapshot,
-        } as any);
+        };
+        await storage.updateBillingSheet(newBillingSheet.id, approvalPatch);
       }
       // Regression guard: surface any catalog $0 leak that slipped through.
       await regressionGuardZeroCatalogPrices('work_order_conversion', newBillingSheet.id, resolvedItems as RawBillingItem[]);
