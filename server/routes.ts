@@ -7111,6 +7111,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const candidates = all.filter(s => {
         const created = s.createdAt ? new Date(s.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        // Task #192 — once a billing sheet has been billed, chasing photos
+        // for it is pointless. Hide anything that's been billed (status,
+        // invoice link, or billed timestamp).
+        if (s.status === 'billed' || s.invoiceId != null || s.billedAt != null) return false;
         const photos = Array.isArray(s.photos) ? s.photos : [];
         return photos.length === 0;
       });
@@ -8304,6 +8308,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         // Task #185 — admins can mark a ticket as not needing photos; once
         // flagged it should no longer appear on this report (JSON or CSV).
         if (wo.noPhotosNeeded) return false;
+        // Task #192 — once a work order has been billed, chasing photos for
+        // it is pointless. Hide anything that's been billed (status, invoice
+        // link, or billed timestamp).
+        if (wo.status === 'billed' || wo.invoiceId != null || wo.billedAt != null) return false;
         const photos = Array.isArray(wo.photos) ? wo.photos : [];
         return photos.length === 0;
       });
