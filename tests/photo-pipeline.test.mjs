@@ -2,6 +2,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import sharp from "sharp";
 
 import {
@@ -11,7 +12,9 @@ import {
   heicCachePath,
   variantPath,
   generateDisplayVariants,
+  VARIANT_CACHE_TTL_SECONDS,
 } from "../server/photo-pipeline.ts";
+import { ObjectStorageService } from "../server/objectStorage.ts";
 import { db } from "../server/db.ts";
 import { sql } from "drizzle-orm";
 
@@ -248,3 +251,195 @@ describe("backfill-photo-variants resumability", () => {
     );
   });
 });
+
+// ── ensurePhotoVariants safety net ────────────────────────────────────────
+//
+// These tests use a stubbed storage layer (no live bucket required). They
+// guard the two critical invariants of the variant pipeline:
+//   1. Idempotency: a second run on a fully-processed photo short-circuits.
+//   2. Original preservation: the dual-upload finalize path NEVER writes
+//      compressed display bytes to the originals/ prefix. Backfill of an
+//      original from base bytes is gated behind allowOriginalBackfillFromBase
+//      and uses the source content-type with a no-cache header.
+
+class FakeFile {
+  constructor(name, buf, contentType) {
+    this.name = name;
+    this._buf = buf;
+    this._contentType = contentType;
+  }
+  async getMetadata() {
+    return [{ contentType: this._contentType, size: this._buf.length }];
+  }
+  createReadStream() {
+    // readFileToBuffer concatenates 'data' chunks until 'end'.
+    return Readable.from([this._buf]);
+  }
+}
+
+class StubObjectStorageService extends ObjectStorageService {
+  constructor() {
+    super();
+    this.files = new Map(); // key -> FakeFile
+    this.writes = []; // [{ key, contentType, cacheControl, size }]
+  }
+  getPublicObjectSearchPaths() {
+    return ["/test-bucket/public"];
+  }
+  async searchPublicObject(filePath) {
+    return this.files.get(filePath) || null;
+  }
+  async writeBufferToFirstSearchPath(objectKey, buf, contentType, cacheControl) {
+    const effectiveCacheControl =
+      cacheControl ?? `public, max-age=${VARIANT_CACHE_TTL_SECONDS}, immutable`;
+    this.writes.push({
+      key: objectKey,
+      contentType,
+      cacheControl: effectiveCacheControl,
+      size: buf.length,
+    });
+    this.files.set(objectKey, new FakeFile(objectKey, Buffer.from(buf), contentType));
+  }
+  seed(key, buf, contentType) {
+    this.files.set(key, new FakeFile(key, Buffer.from(buf), contentType));
+  }
+}
+
+async function makeJpegBytes() {
+  return sharp({
+    create: { width: 600, height: 400, channels: 3, background: { r: 30, g: 60, b: 90 } },
+  })
+    .jpeg()
+    .toBuffer();
+}
+
+async function makePngBytes() {
+  return sharp({
+    create: { width: 600, height: 400, channels: 3, background: { r: 30, g: 60, b: 90 } },
+  })
+    .png()
+    .toBuffer();
+}
+
+describe("ObjectStorageService.ensurePhotoVariants — safety net", () => {
+  test("second call on a fully-processed photo returns { skipped: true } and writes nothing", async () => {
+    const baseId = `photos/${randomUUID()}`;
+    const svc = new StubObjectStorageService();
+    const baseBytes = await makeJpegBytes();
+    // Seed the dual-upload state: base (display source) AND preserved
+    // original both already exist in the bucket.
+    svc.seed(baseId, baseBytes, "image/jpeg");
+    svc.seed(originalPath(baseId), baseBytes, "image/jpeg");
+
+    const first = await svc.ensurePhotoVariants(baseId);
+    assert.equal(first.error, undefined, `first call must not error: ${first.error}`);
+    assert.equal(first.thumb, true);
+    assert.equal(first.medium, true);
+    assert.equal(first.original, true);
+    assert.notEqual(first.skipped, true, "first call must actually do work");
+
+    // First call should have written exactly the two display variants.
+    assert.deepEqual(
+      svc.writes.map((w) => w.key).sort(),
+      [thumbPath(baseId), mediumPath(baseId)].sort(),
+      "first call must only write thumb + medium",
+    );
+
+    const writesBeforeSecond = svc.writes.length;
+
+    const second = await svc.ensurePhotoVariants(baseId);
+    assert.equal(second.skipped, true, "second call must short-circuit with skipped: true");
+    assert.equal(second.thumb, true);
+    assert.equal(second.medium, true);
+    assert.equal(second.original, true);
+    assert.equal(second.error, undefined);
+    assert.equal(
+      svc.writes.length,
+      writesBeforeSecond,
+      "second (skipped) call must not write anything",
+    );
+  });
+
+  test("without allowOriginalBackfillFromBase, a missing original is NOT written from base bytes", async () => {
+    const baseId = `photos/${randomUUID()}`;
+    const svc = new StubObjectStorageService();
+    const baseBytes = await makeJpegBytes();
+    // Only the base (compressed display source) exists. No preserved
+    // original was uploaded (simulating the dual-upload original PUT having
+    // failed or not yet completed).
+    svc.seed(baseId, baseBytes, "image/jpeg");
+
+    const result = await svc.ensurePhotoVariants(baseId);
+
+    assert.equal(result.error, undefined, `must not error: ${result.error}`);
+    assert.equal(result.thumb, true, "thumb variant must be generated");
+    assert.equal(result.medium, true, "medium variant must be generated");
+    assert.equal(
+      result.original,
+      false,
+      "original must NOT be marked written when backfill is disallowed",
+    );
+
+    const originalWrites = svc.writes.filter((w) => w.key.startsWith("originals/"));
+    assert.equal(
+      originalWrites.length,
+      0,
+      `must never write to originals/ without the backfill opt-in (got ${JSON.stringify(originalWrites)})`,
+    );
+
+    // Sanity: the originals/ prefix is empty in storage too.
+    assert.equal(
+      svc.files.has(originalPath(baseId)),
+      false,
+      "originals/ key must remain absent in storage",
+    );
+  });
+
+  test("with allowOriginalBackfillFromBase: true, original is preserved using source content-type and private no-cache headers", async () => {
+    const baseId = `photos/${randomUUID()}`;
+    const svc = new StubObjectStorageService();
+    // Use PNG bytes + image/png as the source so the preserved-original
+    // write proves it propagated the source content-type verbatim — not the
+    // image/jpeg default that ensurePhotoVariants falls back to when
+    // metadata is missing, and not the image/jpeg used by display variants.
+    const baseBytes = await makePngBytes();
+    const sourceContentType = "image/png";
+    svc.seed(baseId, baseBytes, sourceContentType);
+
+    const result = await svc.ensurePhotoVariants(baseId, { allowOriginalBackfillFromBase: true });
+
+    assert.equal(result.error, undefined, `must not error: ${result.error}`);
+    assert.equal(result.original, true, "original must be backfilled when opt-in is set");
+    assert.equal(result.thumb, true);
+    assert.equal(result.medium, true);
+
+    const originalWrites = svc.writes.filter((w) => w.key === originalPath(baseId));
+    assert.equal(originalWrites.length, 1, "exactly one write to the originals/ key is expected");
+    const w = originalWrites[0];
+    assert.equal(
+      w.contentType,
+      sourceContentType,
+      "preserved-original write must carry the source content-type",
+    );
+    assert.equal(
+      w.cacheControl,
+      "private, max-age=0, no-cache",
+      "preserved-original write must use private/no-cache headers (never the public-immutable variant default)",
+    );
+    assert.equal(
+      w.size,
+      baseBytes.length,
+      "preserved-original write must use the unmodified source bytes",
+    );
+
+    // Display variants must still be written under the base prefix, not
+    // duplicated into originals/.
+    const variantWrites = svc.writes.filter((w) => w.key.startsWith("originals/") === false);
+    assert.deepEqual(
+      variantWrites.map((w) => w.key).sort(),
+      [thumbPath(baseId), mediumPath(baseId)].sort(),
+      "thumb + medium must be the only non-originals writes",
+    );
+  });
+});
+
