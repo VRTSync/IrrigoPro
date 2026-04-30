@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,8 +7,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
-import { Camera, Download, Search, User, Building2, Calendar, ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Camera, CheckCircle2, Download, Search, User, Building2, Calendar, ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { WorkOrder } from "@shared/schema";
 
 interface MissingPhotosResponse {
@@ -24,10 +36,47 @@ export default function WorkOrdersMissingPhotosReport() {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewingWorkOrder, setViewingWorkOrder] = useState<WorkOrder | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [confirmNoPhotosId, setConfirmNoPhotosId] = useState<number | null>(null);
+  const [pendingNoPhotosId, setPendingNoPhotosId] = useState<number | null>(null);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data, isLoading } = useQuery<MissingPhotosResponse>({
     queryKey: ["/api/work-orders/missing-photos"],
+  });
+
+  const markNoPhotosNeeded = useMutation({
+    mutationFn: async (workOrderId: number) => {
+      return apiRequest(`/api/work-orders/${workOrderId}/no-photos-needed`, "POST");
+    },
+    onMutate: (workOrderId: number) => {
+      setPendingNoPhotosId(workOrderId);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Marked as no photos needed",
+        description: "This work order has been removed from the missing photos list.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders/missing-photos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+    },
+    onError: (error: unknown) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+            ? error
+            : "Failed to mark work order as no photos needed.";
+      toast({
+        title: "Could not mark work order",
+        description: message,
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setPendingNoPhotosId(null);
+      setConfirmNoPhotosId(null);
+    },
   });
 
   const workOrders = data?.workOrders ?? [];
@@ -219,14 +268,27 @@ export default function WorkOrdersMissingPhotosReport() {
                                   </span>
                                 </div>
                               </div>
-                              <Button
-                                size="sm"
-                                onClick={() => setViewingWorkOrder(wo)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
-                                data-testid={`button-open-work-order-${wo.id}`}
-                              >
-                                <Camera className="w-4 h-4 mr-1" /> Add Photos
-                              </Button>
+                              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                                <Button
+                                  size="sm"
+                                  onClick={() => setViewingWorkOrder(wo)}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
+                                  data-testid={`button-open-work-order-${wo.id}`}
+                                >
+                                  <Camera className="w-4 h-4 mr-1" /> Add Photos
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setConfirmNoPhotosId(wo.id)}
+                                  disabled={pendingNoPhotosId === wo.id}
+                                  className="w-full sm:w-auto"
+                                  data-testid={`button-no-photos-needed-${wo.id}`}
+                                >
+                                  <CheckCircle2 className="w-4 h-4 mr-1" />
+                                  {pendingNoPhotosId === wo.id ? "Marking…" : "No Photos Needed"}
+                                </Button>
+                              </div>
                             </div>
                           </CardContent>
                         </Card>
@@ -255,6 +317,42 @@ export default function WorkOrdersMissingPhotosReport() {
           }}
         />
       )}
+
+      <AlertDialog
+        open={confirmNoPhotosId !== null}
+        onOpenChange={(open) => {
+          if (!open && pendingNoPhotosId === null) setConfirmNoPhotosId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark as no photos needed?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Mark this work order as not needing photos? It will be removed from this list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={pendingNoPhotosId !== null}
+              data-testid="button-cancel-no-photos-needed"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pendingNoPhotosId !== null}
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirmNoPhotosId !== null) {
+                  markNoPhotosNeeded.mutate(confirmNoPhotosId);
+                }
+              }}
+              data-testid="button-confirm-no-photos-needed"
+            >
+              {pendingNoPhotosId !== null ? "Marking…" : "Mark as no photos needed"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageContainer>
   );
 }

@@ -8366,6 +8366,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const missing = all.filter(wo => {
         const created = wo.createdAt ? new Date(wo.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        // Task #185 — admins can mark a ticket as not needing photos; once
+        // flagged it should no longer appear on this report (JSON or CSV).
+        if (wo.noPhotosNeeded) return false;
         const photos = Array.isArray(wo.photos) ? wo.photos : [];
         return photos.length === 0;
       });
@@ -8405,6 +8408,42 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error('Error fetching work-orders missing-photos report:', error);
       res.status(500).json({ message: "Failed to fetch missing-photos report" });
+    }
+  });
+
+  // Task #185 — flag a work order as not requiring photos so it disappears
+  // from the missing-photos report. Restricted to the same four roles that
+  // can view the report. Captures the acting user + timestamp on the row.
+  app.post("/api/work-orders/:id/no-photos-needed", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
+
+      const existing = await storage.getWorkOrder(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+
+      const userId = parseInt(String(req.authenticatedUserId ?? req.headers['x-user-id']));
+      if (!userId || isNaN(userId)) {
+        return res.status(401).json({ message: "Authentication required - user ID not found." });
+      }
+
+      const updated = await storage.markWorkOrderNoPhotosNeeded(id, userId);
+      if (!updated) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error('Error marking work order as no-photos-needed:', error);
+      res.status(500).json({ message: "Failed to mark work order" });
     }
   });
 

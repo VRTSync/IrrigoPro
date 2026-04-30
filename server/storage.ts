@@ -311,6 +311,9 @@ export interface IStorage {
   deleteWorkOrder(id: number): Promise<boolean>;
   hasInvoiceItems(workOrderId: number): Promise<boolean>;
   assignWorkOrder(workOrderId: number, technicianId: number, technicianName: string): Promise<boolean>;
+  // Task #185 — flag a work order as not requiring photos so it disappears
+  // from the missing-photos report. Stamps the acting user and timestamp.
+  markWorkOrderNoPhotosNeeded(workOrderId: number, userId: number): Promise<WorkOrder | undefined>;
   
   // Work Order Items
   getWorkOrderItems(workOrderId: number): Promise<WorkOrderItem[]>;
@@ -2113,6 +2116,18 @@ export class DatabaseStorage implements IStorage {
       console.error("Error assigning work order:", error);
       return false;
     }
+  }
+
+  async markWorkOrderNoPhotosNeeded(workOrderId: number, userId: number): Promise<WorkOrder | undefined> {
+    const [updated] = await db.update(workOrders)
+      .set({
+        noPhotosNeeded: true,
+        noPhotosNeededBy: userId,
+        noPhotosNeededAt: new Date(),
+      })
+      .where(eq(workOrders.id, workOrderId))
+      .returning();
+    return updated || undefined;
   }
 
   // Work Order Items

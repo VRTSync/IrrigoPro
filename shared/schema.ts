@@ -556,6 +556,11 @@ export const workOrders = pgTable("work_orders", {
   approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }), // Total at time of approval
   approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
   approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
+  // Task #185 — admin/manager-flagged "no photos needed" so legitimately
+  // photo-less work orders can be cleared off the missing-photos report.
+  noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
+  noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
+  noPhotosNeededAt: timestamp("no_photos_needed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -757,7 +762,17 @@ export const workOrderStatusValues = ['pending', 'assigned', 'in_progress', 'wor
 export type WorkOrderStatus = typeof workOrderStatusValues[number];
 
 export const insertWorkOrderSchema = createInsertSchema(workOrders)
-  .omit({ id: true, workOrderNumber: true, createdAt: true, updatedAt: true })
+  .omit({
+    id: true,
+    workOrderNumber: true,
+    createdAt: true,
+    updatedAt: true,
+    // No-photos-needed audit fields are stamped only via the dedicated
+    // POST /api/work-orders/:id/no-photos-needed endpoint, never via PATCH.
+    noPhotosNeeded: true,
+    noPhotosNeededBy: true,
+    noPhotosNeededAt: true,
+  })
   .extend({
     status: z.enum(workOrderStatusValues).optional(),
     scheduledDate: z.union([z.string(), z.date()]).transform(val => val instanceof Date ? val : val ? new Date(val) : undefined).optional().nullable(),
