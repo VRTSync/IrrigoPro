@@ -11,18 +11,13 @@ interface EstimateItem {
 interface EstimateSummaryProps {
   items: EstimateItem[];
   laborRate: number;
-  markupPercent: number;
-  taxPercent: number;
 }
 
-export function EstimateSummary({ items, laborRate, markupPercent, taxPercent }: EstimateSummaryProps) {
+export function EstimateSummary({ items, laborRate }: EstimateSummaryProps) {
   const partsSubtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
   const totalLaborHours = items.reduce((sum, item) => sum + item.totalLaborHours, 0);
   const laborSubtotal = totalLaborHours * (laborRate || 0);
-  const subtotal = partsSubtotal + laborSubtotal;
-  const markupAmount = subtotal * ((markupPercent || 0) / 100);
-  const taxAmount = (subtotal + markupAmount) * ((taxPercent || 0) / 100);
-  const totalAmount = subtotal + markupAmount + taxAmount;
+  const totalAmount = partsSubtotal + laborSubtotal;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -46,18 +41,6 @@ export function EstimateSummary({ items, laborRate, markupPercent, taxPercent }:
             Labor ({totalLaborHours.toFixed(1)} hours):
           </span>
           <span className="font-medium">{formatCurrency(laborSubtotal)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600">Subtotal:</span>
-          <span className="font-medium">{formatCurrency(subtotal)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600">Markup:</span>
-          <span className="font-medium">{formatCurrency(markupAmount)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-gray-600">Tax:</span>
-          <span className="font-medium">{formatCurrency(taxAmount)}</span>
         </div>
         <div className="border-t border-gray-200 pt-2">
           <div className="flex justify-between">

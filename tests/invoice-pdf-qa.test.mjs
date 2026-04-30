@@ -49,8 +49,6 @@ function makeInvoice(overrides) {
     status: 'draft',
     partsSubtotal: '0.00',
     laborSubtotal: '0.00',
-    markupAmount: '0.00',
-    taxAmount: '0.00',
     totalAmount: '0.00',
     dueDate: null,
     sentAt: null,
@@ -156,8 +154,6 @@ function makeBillingSheet(overrides) {
     laborRate: '50.00',
     laborSubtotal: '150.00',
     partsSubtotal: '0.00',
-    markupAmount: '0.00',
-    taxAmount: '0.00',
     totalAmount: '150.00',
     invoiceId: null,
     billedAt: null,
@@ -334,124 +330,6 @@ describe('Totals arithmetic — buildPdfViewModel', () => {
     assert.equal(viewModel.workOrders[0].laborSubtotal, 300);
     assert.equal(viewModel.workOrders[0].partsSubtotal, 50);
     assert.equal(viewModel.workOrders[0].rowTotal, 350);
-  });
-
-  // ── Tax Tests ──────────────────────────────────────────────────────────────
-  // Tax is stored in the invoice totalAmount. The view model grandTotal equals
-  // storedTotalAmount (which includes tax). These tests verify that the
-  // grandTotal correctly reflects tax being incorporated into the invoice total.
-
-  test('tax: WO-only invoice with 10% tax — grandTotal includes tax (integer-safe cents)', () => {
-    // labor=200, parts=0, tax=20 (10%), totalAmount=220
-    const wo = makeWorkOrder({
-      totalHours: '4.00',
-      laborRate: '50.00',
-      laborSubtotal: '200.00',
-      partsSubtotal: '0.00',
-      totalPartsCost: '0.00',
-      totalAmount: '200.00',
-    });
-    // Invoice total = 220 (includes $20 tax)
-    const invoice = makeInvoice({
-      laborSubtotal: '200.00',
-      partsSubtotal: '0.00',
-      taxAmount: '20.00',
-      totalAmount: '220.00',
-    });
-    const data = { invoice, company: makeCompany(), workOrders: [{ workOrder: wo, items: [] }], billingSheets: [] };
-    const { viewModel } = buildPdfViewModel(data);
-
-    // grandTotal = storedTotalAmount = 220 (tax included)
-    const grandTotalCents = Math.round(viewModel.totals.grandTotal * 100);
-    assert.equal(grandTotalCents, 22000, `Expected 22000 cents (includes tax), got ${grandTotalCents}`);
-    assert.equal(viewModel.totals.storedTotalAmount, 220);
-  });
-
-  test('tax: BS-only invoice with flat $15 tax — grandTotal includes tax (integer-safe cents)', () => {
-    // parts=75, labor=50, tax=15, totalAmount=140
-    const bs = makeBillingSheet({
-      totalHours: '1.00',
-      laborRate: '50.00',
-      laborSubtotal: '50.00',
-      partsSubtotal: '75.00',
-      taxAmount: '15.00',
-      totalAmount: '125.00', // bs row total (pre-tax)
-    });
-    // Invoice level adds the tax on top
-    const invoice = makeInvoice({
-      laborSubtotal: '50.00',
-      partsSubtotal: '75.00',
-      taxAmount: '15.00',
-      totalAmount: '140.00',
-    });
-    const data = { invoice, company: makeCompany(), workOrders: [], billingSheets: [{ billingSheet: bs, items: [] }] };
-    const { viewModel } = buildPdfViewModel(data);
-
-    const grandTotalCents = Math.round(viewModel.totals.grandTotal * 100);
-    assert.equal(grandTotalCents, 14000, `Expected 14000 cents (includes $15 tax), got ${grandTotalCents}`);
-  });
-
-  test('tax: mixed invoice with tax — grandTotal = all WO + BS totals + tax (integer-safe cents)', () => {
-    // WO: labor=100, parts=50, rowTotal=150
-    // BS: labor=60, parts=0, rowTotal=60
-    // tax at invoice level: 21.00
-    // invoiceTotalAmount = 231.00
-    const wo = makeWorkOrder({
-      totalHours: '2.00',
-      laborRate: '50.00',
-      laborSubtotal: '100.00',
-      partsSubtotal: '50.00',
-      totalPartsCost: '50.00',
-      totalAmount: '150.00',
-    });
-    const bs = makeBillingSheet({
-      totalHours: '1.00',
-      laborRate: '60.00',
-      laborSubtotal: '60.00',
-      partsSubtotal: '0.00',
-      totalAmount: '60.00',
-    });
-    const invoice = makeInvoice({
-      laborSubtotal: '160.00',
-      partsSubtotal: '50.00',
-      taxAmount: '21.00',
-      totalAmount: '231.00',
-    });
-    const data = {
-      invoice,
-      company: makeCompany(),
-      workOrders: [{ workOrder: wo, items: [] }],
-      billingSheets: [{ billingSheet: bs, items: [] }],
-    };
-    const { viewModel } = buildPdfViewModel(data);
-
-    const grandTotalCents = Math.round(viewModel.totals.grandTotal * 100);
-    assert.equal(grandTotalCents, 23100, `Expected 23100 cents (includes $21 tax), got ${grandTotalCents}`);
-    assert.equal(viewModel.workOrders[0].rowTotal, 150);
-    assert.equal(viewModel.billingSheets[0].rowTotal, 60);
-  });
-
-  test('tax: zero tax — grandTotal equals sum of subtotals (integer-safe cents)', () => {
-    // partsSubtotal=80, laborSubtotal=120, tax=0, totalAmount=200
-    const bs = makeBillingSheet({
-      totalHours: '2.00',
-      laborRate: '60.00',
-      laborSubtotal: '120.00',
-      partsSubtotal: '80.00',
-      taxAmount: '0.00',
-      totalAmount: '200.00',
-    });
-    const invoice = makeInvoice({
-      laborSubtotal: '120.00',
-      partsSubtotal: '80.00',
-      taxAmount: '0.00',
-      totalAmount: '200.00',
-    });
-    const data = { invoice, company: makeCompany(), workOrders: [], billingSheets: [{ billingSheet: bs, items: [] }] };
-    const { viewModel } = buildPdfViewModel(data);
-
-    const grandTotalCents = Math.round(viewModel.totals.grandTotal * 100);
-    assert.equal(grandTotalCents, 20000, `Expected 20000 cents (no tax), got ${grandTotalCents}`);
   });
 
 });
@@ -740,8 +618,6 @@ describe('Image and logo fallback — buildPdfViewModel and pdf-helpers', () => 
       completedAt: new Date('2026-04-01'),
       totalHours: 2,
       laborRate: 50,
-      markupAmount: 0,
-      taxAmount: 0,
       workDescription: 'Fixed sprinkler',
       workSummary: '',
       aiDetailedDescription: '',
@@ -769,8 +645,6 @@ describe('Image and logo fallback — buildPdfViewModel and pdf-helpers', () => 
       completedAt: new Date('2026-04-01'),
       totalHours: 2,
       laborRate: 50,
-      markupAmount: 0,
-      taxAmount: 0,
       workDescription: 'Fixed sprinkler',
       workSummary: '',
       aiDetailedDescription: '',
@@ -796,8 +670,6 @@ describe('Image and logo fallback — buildPdfViewModel and pdf-helpers', () => 
       workDate: new Date('2026-04-01'),
       totalHours: 3,
       laborRate: 50,
-      markupAmount: 0,
-      taxAmount: 0,
       aiDetailedDescription: '',
       notes: '',
       photos: [],

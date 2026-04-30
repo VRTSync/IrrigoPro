@@ -1747,8 +1747,6 @@ export default function CustomerBilling() {
                                     {wo.hasFinancialBreakdown ? (
                                       <div className="text-xs text-gray-500 font-normal">
                                         Labor: {formatCurrency(wo.laborCost)} | Parts: {formatCurrency(wo.partsCost)}
-                                        {parseFloat(wo.markupAmount || '0') > 0 && <span> | Markup: {formatCurrency(parseFloat(wo.markupAmount || '0'))}</span>}
-                                        {parseFloat(wo.taxAmount || '0') > 0 && <span> | Tax: {formatCurrency(parseFloat(wo.taxAmount || '0'))}</span>}
                                       </div>
                                     ) : (
                                       <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
@@ -1905,8 +1903,6 @@ export default function CustomerBilling() {
                                     {wo.hasFinancialBreakdown ? (
                                       <div className="text-xs text-gray-500 font-normal">
                                         Labor: {formatCurrency(wo.laborCost)} | Parts: {formatCurrency(wo.partsCost)}
-                                        {parseFloat(wo.markupAmount || '0') > 0 && <span> | Markup: {formatCurrency(parseFloat(wo.markupAmount || '0'))}</span>}
-                                        {parseFloat(wo.taxAmount || '0') > 0 && <span> | Tax: {formatCurrency(parseFloat(wo.taxAmount || '0'))}</span>}
                                       </div>
                                     ) : (
                                       <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>
@@ -2523,8 +2519,6 @@ export default function CustomerBilling() {
                         <th className="text-right p-3 font-medium">Labor Hours</th>
                         <th className="text-right p-3 font-medium">Labor</th>
                         <th className="text-right p-3 font-medium">Parts</th>
-                        <th className="text-right p-3 font-medium">Markup</th>
-                        <th className="text-right p-3 font-medium">Tax</th>
                         <th className="text-right p-3 font-medium">Total</th>
                       </tr>
                     </thead>
@@ -2539,8 +2533,6 @@ export default function CustomerBilling() {
                           <td className="p-3 text-right">{item.laborHours || '0.00'}</td>
                           <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.laborAmount || 0)}</td>
                           <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.partsAmount || 0)}</td>
-                          <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.markupAmount || 0)}</td>
-                          <td className="p-3 text-right">{item.hasBreakdown === false ? <span className="text-gray-400 italic text-xs">—</span> : formatCurrency(item.taxAmount || 0)}</td>
                           <td className="p-3 text-right font-medium">{formatCurrency(item.totalAmount || 0)}</td>
                         </tr>
                       ))}
@@ -2560,14 +2552,6 @@ export default function CustomerBilling() {
                     <div className="flex justify-between">
                       <span>Parts Subtotal:</span>
                       <span>{formatCurrency(previewInvoiceData.partsSubtotal)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Markup:</span>
-                      <span>{formatCurrency(previewInvoiceData.markupAmount)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Tax:</span>
-                      <span>{formatCurrency(previewInvoiceData.taxAmount)}</span>
                     </div>
                     <div className="flex justify-between border-t pt-2 font-bold text-lg">
                       <span>Total:</span>
@@ -2730,16 +2714,6 @@ export default function CustomerBilling() {
                                   <div className="text-xs text-gray-500">
                                     Parts: {formatCurrency(workOrder.partsCost)}
                                   </div>
-                                  {parseFloat(workOrder.markupAmount || '0') > 0 && (
-                                    <div className="text-xs text-gray-500">
-                                      Markup: {formatCurrency(parseFloat(workOrder.markupAmount || '0'))}
-                                    </div>
-                                  )}
-                                  {parseFloat(workOrder.taxAmount || '0') > 0 && (
-                                    <div className="text-xs text-gray-500">
-                                      Tax: {formatCurrency(parseFloat(workOrder.taxAmount || '0'))}
-                                    </div>
-                                  )}
                                 </>
                               ) : (
                                 <div className="text-xs text-gray-400 italic">Breakdown unavailable</div>

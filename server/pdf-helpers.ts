@@ -148,20 +148,6 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
 
   const locationLine = [wo.projectAddress, wo.locationNotes].filter(Boolean).join(' — ');
 
-  const markupRow = wo.markupAmount > 0
-    ? `<div class="ticket-fin-row">
-         <span class="ticket-fin-label">Markup</span>
-         <span class="ticket-fin-value">${formatCurrency(wo.markupAmount)}</span>
-       </div>`
-    : '';
-
-  const taxRow = wo.taxAmount > 0
-    ? `<div class="ticket-fin-row">
-         <span class="ticket-fin-label">Tax</span>
-         <span class="ticket-fin-value">${formatCurrency(wo.taxAmount)}</span>
-       </div>`
-    : '';
-
   const approvalHtml = (wo.approvedBy || wo.approvedAt)
     ? `<div class="ticket-approval">
          <span class="ticket-approval-icon">&#10003;</span>
@@ -203,8 +189,6 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
           <span class="ticket-fin-label">Parts Subtotal</span>
           <span class="ticket-fin-value">${formatCurrency(wo.partsSubtotal)}</span>
         </div>
-        ${markupRow}
-        ${taxRow}
         <div class="ticket-fin-row ticket-fin-total">
           <span class="ticket-fin-label">TOTAL</span>
           <span class="ticket-fin-value">${formatCurrency(wo.rowTotal)}</span>
@@ -232,20 +216,6 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
   const photoFailWarningBS = failedPhotoCountBS > 0
     ? `<div class="ticket-photo-fail-warning">
          &#9888; Warning: ${failedPhotoCountBS} photo${failedPhotoCountBS > 1 ? 's' : ''} could not be loaded and ${failedPhotoCountBS > 1 ? 'were' : 'was'} omitted from this PDF.
-       </div>`
-    : '';
-
-  const markupRow = bs.markupAmount > 0
-    ? `<div class="ticket-fin-row">
-         <span class="ticket-fin-label">Markup</span>
-         <span class="ticket-fin-value">${formatCurrency(bs.markupAmount)}</span>
-       </div>`
-    : '';
-
-  const taxRow = bs.taxAmount > 0
-    ? `<div class="ticket-fin-row">
-         <span class="ticket-fin-label">Tax</span>
-         <span class="ticket-fin-value">${formatCurrency(bs.taxAmount)}</span>
        </div>`
     : '';
 
@@ -290,8 +260,6 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
           <span class="ticket-fin-label">Parts Subtotal</span>
           <span class="ticket-fin-value">${formatCurrency(bs.partsSubtotal)}</span>
         </div>
-        ${markupRow}
-        ${taxRow}
         <div class="ticket-fin-row ticket-fin-total">
           <span class="ticket-fin-label">TOTAL</span>
           <span class="ticket-fin-value">${formatCurrency(bs.rowTotal)}</span>

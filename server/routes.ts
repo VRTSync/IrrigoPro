@@ -35,7 +35,6 @@ import {
 const PRICING_FIELDS_TO_STRIP = new Set([
   'laborRate', 'laborSubtotal', 'partsSubtotal', 'totalAmount', 'estimatedTotal',
   'partPrice', 'totalPrice', 'unitPrice', 'price', 'cost',
-  'markupAmount', 'markupPercent', 'taxAmount', 'taxPercent',
   'laborAmount', 'laborTotal', 'partsAmount', 'totalCost',
   'laborCost', 'partsCost', 'totalUnbilledAmount', 'totalPartsCost'
 ]);
@@ -258,13 +257,9 @@ const createEstimateWithZonesSchema = z.object({
     estimateDate: z.union([z.date(), z.string()]).optional(),
     // Allow numbers for decimal fields (will be converted to strings)
     partsSubtotal: z.union([z.string(), z.number()]).optional(),
-    laborSubtotal: z.union([z.string(), z.number()]).optional(), 
-    markupAmount: z.union([z.string(), z.number()]).optional(),
-    taxAmount: z.union([z.string(), z.number()]).optional(),
+    laborSubtotal: z.union([z.string(), z.number()]).optional(),
     totalAmount: z.union([z.string(), z.number()]).optional(),
-    laborRate: z.union([z.string(), z.number()]),
-    markupPercent: z.union([z.string(), z.number()]),
-    taxPercent: z.union([z.string(), z.number()])
+    laborRate: z.union([z.string(), z.number()])
   }),
   zones: z.array(insertEstimateZoneSchema.omit({ estimateId: true }).extend({
     items: z.array(z.object({
@@ -2499,12 +2494,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const partsSubtotal = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
-      
-      const markupAmount = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.markupAmount || '0'), 0);
-      const taxAmount = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.taxAmount || '0'), 0);
-      
+
       // Total is the sum of stored totalAmount per work order + stored totalAmount per billing sheet
       const totalAmount = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
@@ -2517,8 +2507,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const workOrder of selectedWorkOrders) {
         const woLaborAmount = parseFloat(workOrder.laborSubtotal || '0');
         const woPartsAmount = parseFloat(workOrder.partsSubtotal || '0');
-        const woMarkupAmount = parseFloat(workOrder.markupAmount || '0');
-        const woTaxAmount = parseFloat(workOrder.taxAmount || '0');
         const woTotal = parseFloat(workOrder.totalAmount || '0');
         const appliedLaborRate = parseFloat(workOrder.appliedLaborRate || workOrder.laborRate || '0');
         previewItems.push({
@@ -2531,8 +2519,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laborRate: appliedLaborRate,
           laborAmount: woLaborAmount,
           partsAmount: woPartsAmount,
-          markupAmount: woMarkupAmount,
-          taxAmount: woTaxAmount,
           totalAmount: woTotal,
           hasBreakdown: workOrder.laborSubtotal != null
         });
@@ -2565,8 +2551,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         periodEnd: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0),
         partsSubtotal: partsSubtotal.toFixed(2),
         laborSubtotal: laborSubtotal.toFixed(2),
-        markupAmount: markupAmount.toFixed(2),
-        taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         items: previewItems,
         itemCount: selectedWorkOrders.length + selectedBillingSheets.length
@@ -2785,10 +2769,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.partsSubtotal || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.partsSubtotal || '0'), 0);
       
-      const markupAmount = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.markupAmount || '0'), 0);
-      const taxAmount = 
-        selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.taxAmount || '0'), 0);
       const totalAmount = 
         selectedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
         selectedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
@@ -2806,8 +2786,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         periodEnd,
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: partsSubtotal.toFixed(2),
-        markupAmount: markupAmount.toFixed(2),
-        taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         status: 'generated',
       });
@@ -4680,28 +4658,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const laborRate = parseFloat(String(parsed.estimate.laborRate));
-      const markupPercent = parseFloat(String(parsed.estimate.markupPercent));
-      const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
 
       const laborSubtotal = totalLaborHours * laborRate;
-      const markupAmount = partsSubtotal * (markupPercent / 100);
-      const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
-      const taxAmount = subtotalWithMarkup * (taxPercent / 100);
-      const totalAmount = subtotalWithMarkup + taxAmount;
+      const totalAmount = partsSubtotal + laborSubtotal;
 
       const estimate = {
         ...parsed.estimate,
         estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
         partsSubtotal: String(partsSubtotal.toFixed(2)),
         laborSubtotal: String(laborSubtotal.toFixed(2)),
-        markupAmount: String(markupAmount.toFixed(2)),
-        taxAmount: String(taxAmount.toFixed(2)),
         totalAmount: String(totalAmount.toFixed(2)),
-        laborRate: String(parsed.estimate.laborRate),
-        markupPercent: String(parsed.estimate.markupPercent),
-        taxPercent: String(parsed.estimate.taxPercent)
+        laborRate: String(parsed.estimate.laborRate)
       };
-      
+
       const newEstimate = await storage.createEstimate(estimate, zones as (InsertEstimateZone & { items: InsertEstimateItem[] })[]);
       res.status(201).json(newEstimate);
     } catch (error) {
@@ -4764,28 +4733,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const laborRate = parseFloat(String(parsed.estimate.laborRate));
-      const markupPercent = parseFloat(String(parsed.estimate.markupPercent));
-      const taxPercent = parseFloat(String(parsed.estimate.taxPercent));
 
       const laborSubtotal = totalLaborHours * laborRate;
-      const markupAmount = partsSubtotal * (markupPercent / 100);
-      const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
-      const taxAmount = subtotalWithMarkup * (taxPercent / 100);
-      const totalAmount = subtotalWithMarkup + taxAmount;
+      const totalAmount = partsSubtotal + laborSubtotal;
 
       const estimate = {
         ...parsed.estimate,
         estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
         partsSubtotal: String(partsSubtotal.toFixed(2)),
         laborSubtotal: String(laborSubtotal.toFixed(2)),
-        markupAmount: String(markupAmount.toFixed(2)),
-        taxAmount: String(taxAmount.toFixed(2)),
         totalAmount: String(totalAmount.toFixed(2)),
-        laborRate: String(parsed.estimate.laborRate),
-        markupPercent: String(parsed.estimate.markupPercent),
-        taxPercent: String(parsed.estimate.taxPercent)
+        laborRate: String(parsed.estimate.laborRate)
       };
-      
+
       const updatedEstimate = await storage.updateEstimateWithZones(estimateId, estimate, zones as (InsertEstimateZone & { items: InsertEstimateItem[] })[]);
       res.json(updatedEstimate);
     } catch (error) {
@@ -6722,24 +6682,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
-      // Load customer to snapshot their labor rate and tax rate
+      // Load customer to snapshot their labor rate
       const customerForRates = existingWorkOrder?.customerId
         ? await storage.getCustomerById(existingWorkOrder.customerId)
         : undefined;
 
       // Snapshot the customer's configured labor rate at the time of completion.
       const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
-      const appliedMarkupRate = 0;
-      const appliedTaxRate = 0;
 
-      // Calculate totals — no per-customer markup or tax applied
+      // Calculate totals
       const laborHours = parseFloat(totalHours || '0');
       const partsCost = parseFloat(totalPartsCost || '0');
-      
+
       const laborSubtotal = laborHours * appliedLaborRate;
       const partsSubtotal = partsCost;
-      const markupAmount = 0;
-      const taxAmount = 0;
       const totalAmount = laborSubtotal + partsSubtotal;
 
       const creationPhotos: string[] = existingWorkOrder?.photos || [];
@@ -6760,13 +6716,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalPartsCost: partsCost.toString(),
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: partsSubtotal.toFixed(2),
-        markupAmount: markupAmount.toFixed(2),
-        taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         laborRate: appliedLaborRate.toFixed(2),
         appliedLaborRate: appliedLaborRate.toFixed(2),
-        appliedMarkupRate: appliedMarkupRate.toFixed(4),
-        appliedTaxRate: appliedTaxRate.toFixed(4),
         ...(incomingBranchName ? { branchName: incomingBranchName } : {}),
         ...(reqAiInputs ? { aiInputs: reqAiInputs } : {}),
         ...(aiShortDescription ? { aiShortDescription } : {}),
@@ -6851,16 +6803,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ? await storage.getCustomerById(existingWorkOrder.customerId)
         : undefined;
       const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
-      const appliedMarkupRate = 0;
-      const appliedTaxRate = 0;
 
-      // Calculate totals — no per-customer markup or tax applied
+      // Calculate totals
       const laborHours = parseFloat(existingWorkOrder.totalHours || '0');
       const partsCost = parseFloat(existingWorkOrder.totalPartsCost || '0');
       const laborSubtotal = laborHours * appliedLaborRate;
       const partsSubtotal = partsCost;
-      const markupAmount = 0;
-      const taxAmount = 0;
       const totalAmount = laborSubtotal + partsSubtotal;
 
       // Field completion routes into pending_manager_review for manager approval
@@ -6871,13 +6819,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         completedByUserName: completedByUserName as string,
         laborSubtotal: laborSubtotal.toFixed(2),
         partsSubtotal: partsSubtotal.toFixed(2),
-        markupAmount: markupAmount.toFixed(2),
-        taxAmount: taxAmount.toFixed(2),
         totalAmount: totalAmount.toFixed(2),
         laborRate: appliedLaborRate.toFixed(2),
         appliedLaborRate: appliedLaborRate.toFixed(2),
-        appliedMarkupRate: appliedMarkupRate.toFixed(4),
-        appliedTaxRate: appliedTaxRate.toFixed(4),
       });
       if (!workOrder) {
         return res.status(404).json({ message: "Work order not found" });
@@ -6930,13 +6874,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       const partsSnapshot = JSON.stringify({
         partsSubtotal: workOrder.partsSubtotal,
-        markupAmount: workOrder.markupAmount,
       });
       const laborSnapshot = JSON.stringify({
         totalHours: workOrder.totalHours,
         laborRate: workOrder.appliedLaborRate || workOrder.laborRate,
         laborSubtotal: workOrder.laborSubtotal,
-        taxAmount: workOrder.taxAmount,
       });
 
       const updated = await storage.updateWorkOrder(id, {
@@ -7012,13 +6954,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       const partsSnapshot = JSON.stringify({
         partsSubtotal: billingSheet.partsSubtotal,
-        markupAmount: billingSheet.markupAmount,
       });
       const laborSnapshot = JSON.stringify({
         totalHours: billingSheet.totalHours,
         laborRate: billingSheet.laborRate,
         laborSubtotal: billingSheet.laborSubtotal,
-        taxAmount: billingSheet.taxAmount,
       });
 
       const updated = await storage.updateBillingSheet(id, {
@@ -7676,8 +7616,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         laborRate: bsAuthorizedLaborRate.toFixed(2),
         laborSubtotal: bsLaborSubtotal.toFixed(2),
         partsSubtotal: bsPartsSubtotal.toFixed(2),
-        markupAmount: '0.00',
-        taxAmount: '0.00',
         totalAmount: bsTotalAmount.toFixed(2),
         photos: billingSheetData.photos || [],
         notes: billingSheetData.notes || '',
@@ -7799,7 +7737,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
 
-      const { items, markupPercent, taxPercent, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
+      const { items, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
       
       console.log('Updating billing sheet:', id, 'with data:', billingSheetData);
       
@@ -7808,9 +7746,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         billingSheetData.workDate = new Date(billingSheetData.workDate + 'T00:00:00.000Z');
       }
 
-      // Always enforce zero markup/tax on billing sheet updates
-      billingSheetData.markupAmount = '0.00';
-      billingSheetData.taxAmount = '0.00';
       // Recalculate totalAmount whenever subtotals are provided
       if (billingSheetData.laborSubtotal !== undefined || billingSheetData.partsSubtotal !== undefined) {
         const patchLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
@@ -8649,12 +8584,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // the rates/breakdown that were locked in at completion time.
       const {
         appliedLaborRate: _aLR,
-        appliedMarkupRate: _aMR,
-        appliedTaxRate: _aTR,
         laborSubtotal: _lS,
         partsSubtotal: _pS,
-        markupAmount: _mA,
-        taxAmount: _tA,
         totalAmount: _totA,
         ...mutableWorkOrderBody
       } = workOrderBody;
@@ -8726,30 +8657,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (financialFieldsTouched) {
         const freshWo = await storage.getWorkOrder(id);
         if (freshWo && freshWo.appliedLaborRate) {
-          // Use the work order's own snapshotted rates — never the live customer record.
-          // All three applied rates must have been set at completion time; if any is missing
-          // (pre-fix record), skip recompute to avoid fabricating rate data.
+          // Use the work order's own snapshotted labor rate — never the live customer record.
           const snappedLaborRate = parseFloat(freshWo.appliedLaborRate);
-          const snappedMarkupRate = parseFloat(freshWo.appliedMarkupRate ?? '');
-          const snappedTaxRate = parseFloat(freshWo.appliedTaxRate ?? '');
-          if (isFinite(snappedMarkupRate) && isFinite(snappedTaxRate)) {
-            const hrs = parseFloat(freshWo.totalHours || '0');
-            const parts = parseFloat(freshWo.totalPartsCost || '0');
-            const recomputedLaborSubtotal = hrs * snappedLaborRate;
-            const recomputedPartsSubtotal = parts;
-            const recomputedMarkupAmount = recomputedPartsSubtotal * snappedMarkupRate;
-            const recomputedSubtotal = recomputedLaborSubtotal + recomputedPartsSubtotal + recomputedMarkupAmount;
-            const recomputedTaxAmount = recomputedSubtotal * snappedTaxRate;
-            const recomputedTotal = recomputedSubtotal + recomputedTaxAmount;
-            workOrder = await storage.updateWorkOrder(id, {
-              laborSubtotal: recomputedLaborSubtotal.toFixed(2),
-              partsSubtotal: recomputedPartsSubtotal.toFixed(2),
-              markupAmount: recomputedMarkupAmount.toFixed(2),
-              taxAmount: recomputedTaxAmount.toFixed(2),
-              totalAmount: recomputedTotal.toFixed(2),
-            }) || workOrder;
-          }
-          // else: pre-fix record without full rate snapshot — do not recompute to avoid fabricating rate data
+          const hrs = parseFloat(freshWo.totalHours || '0');
+          const parts = parseFloat(freshWo.totalPartsCost || '0');
+          const recomputedLaborSubtotal = hrs * snappedLaborRate;
+          const recomputedPartsSubtotal = parts;
+          const recomputedTotal = recomputedLaborSubtotal + recomputedPartsSubtotal;
+          workOrder = await storage.updateWorkOrder(id, {
+            laborSubtotal: recomputedLaborSubtotal.toFixed(2),
+            partsSubtotal: recomputedPartsSubtotal.toFixed(2),
+            totalAmount: recomputedTotal.toFixed(2),
+          }) || workOrder;
         }
       }
 
@@ -8909,31 +8828,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const wo = await storage.getWorkOrder(workOrderId);
       if (wo && wo.appliedLaborRate) {
         const snappedLaborRate = parseFloat(wo.appliedLaborRate);
-        const snappedMarkupRate = parseFloat(wo.appliedMarkupRate ?? '');
-        const snappedTaxRate = parseFloat(wo.appliedTaxRate ?? '');
-        if (isFinite(snappedMarkupRate) && isFinite(snappedTaxRate)) {
-          // Recompute totalPartsCost from all items, then derive full breakdown
-          const allItems = await storage.getWorkOrderItems(workOrderId);
-          const newPartsCost = allItems.reduce(
-            (sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.partPrice) || 0),
-            0,
-          );
-          const hrs = parseFloat(wo.totalHours || '0');
-          const recomputedLaborSubtotal = hrs * snappedLaborRate;
-          const recomputedPartsSubtotal = newPartsCost;
-          const recomputedMarkupAmount = recomputedPartsSubtotal * snappedMarkupRate;
-          const recomputedSubtotal = recomputedLaborSubtotal + recomputedPartsSubtotal + recomputedMarkupAmount;
-          const recomputedTaxAmount = recomputedSubtotal * snappedTaxRate;
-          const recomputedTotal = recomputedSubtotal + recomputedTaxAmount;
-          await storage.updateWorkOrder(workOrderId, {
-            totalPartsCost: newPartsCost.toFixed(2),
-            laborSubtotal: recomputedLaborSubtotal.toFixed(2),
-            partsSubtotal: recomputedPartsSubtotal.toFixed(2),
-            markupAmount: recomputedMarkupAmount.toFixed(2),
-            taxAmount: recomputedTaxAmount.toFixed(2),
-            totalAmount: recomputedTotal.toFixed(2),
-          });
-        }
+        // Recompute totalPartsCost from all items, then derive full breakdown
+        const allItems = await storage.getWorkOrderItems(workOrderId);
+        const newPartsCost = allItems.reduce(
+          (sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.partPrice) || 0),
+          0,
+        );
+        const hrs = parseFloat(wo.totalHours || '0');
+        const recomputedLaborSubtotal = hrs * snappedLaborRate;
+        const recomputedPartsSubtotal = newPartsCost;
+        const recomputedTotal = recomputedLaborSubtotal + recomputedPartsSubtotal;
+        await storage.updateWorkOrder(workOrderId, {
+          totalPartsCost: newPartsCost.toFixed(2),
+          laborSubtotal: recomputedLaborSubtotal.toFixed(2),
+          partsSubtotal: recomputedPartsSubtotal.toFixed(2),
+          totalAmount: recomputedTotal.toFixed(2),
+        });
       }
 
       res.status(201).json(item);
@@ -9160,8 +9070,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const laborRateVal = parseFloat(woCustomerForRate.laborRate).toFixed(2);
       const laborSubtotalVal = (parseFloat(String(totalHoursVal)) * parseFloat(String(laborRateVal))).toFixed(2);
       const partsSubtotalVal = parseFloat(String(totalPartsCost || "0")).toFixed(2);
-      const taxAmount = ((parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal)) * 0.0825).toFixed(2);
-      const totalAmount = (parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal) + parseFloat(taxAmount)).toFixed(2);
+      const totalAmount = (parseFloat(laborSubtotalVal) + parseFloat(partsSubtotalVal)).toFixed(2);
 
       type RawLineItem = {
         partId?: number | null;
@@ -9274,8 +9183,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         laborRate: laborRateVal,
         laborSubtotal: laborSubtotalVal,
         partsSubtotal: partsSubtotalVal,
-        markupAmount: "0",
-        taxAmount,
         totalAmount,
         status: resolvedStatus,
         notes: additionalNotes || technicianNotes || "",

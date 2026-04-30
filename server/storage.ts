@@ -1188,21 +1188,14 @@ export class DatabaseStorage implements IStorage {
         });
         
         const laborRate = parseFloat(String(estimate.laborRate));
-        const markupPercent = parseFloat(String(estimate.markupPercent));
-        const taxPercent = parseFloat(String(estimate.taxPercent));
-        
+
         const laborSubtotal = totalLaborHours * laborRate;
-        const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
-        const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
-        const taxAmount = subtotalWithMarkup * (taxPercent / 100);
-        const totalAmount = subtotalWithMarkup + taxAmount;
-        
+        const totalAmount = partsSubtotal + laborSubtotal;
+
         return {
           ...estimate,
           partsSubtotal: partsSubtotal.toFixed(2),
           laborSubtotal: laborSubtotal.toFixed(2),
-          markupAmount: markupAmount.toFixed(2),
-          taxAmount: taxAmount.toFixed(2),
           totalAmount: totalAmount.toFixed(2)
         };
       })
@@ -1235,21 +1228,14 @@ export class DatabaseStorage implements IStorage {
     });
     
     const laborRate = parseFloat(String(estimate.laborRate));
-    const markupPercent = parseFloat(String(estimate.markupPercent));
-    const taxPercent = parseFloat(String(estimate.taxPercent));
-    
+
     const laborSubtotal = totalLaborHours * laborRate;
-    const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
-    const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
-    const taxAmount = subtotalWithMarkup * (taxPercent / 100);
-    const totalAmount = subtotalWithMarkup + taxAmount;
-    
+    const totalAmount = partsSubtotal + laborSubtotal;
+
     const estimateWithCalculatedTotals = {
       ...estimate,
       partsSubtotal: partsSubtotal.toFixed(2),
       laborSubtotal: laborSubtotal.toFixed(2),
-      markupAmount: markupAmount.toFixed(2),
-      taxAmount: taxAmount.toFixed(2),
       totalAmount: totalAmount.toFixed(2)
     };
 
@@ -1833,8 +1819,6 @@ export class DatabaseStorage implements IStorage {
           address: qbCustomer.address,
           companyId: 1,
           laborRate: "45.00",
-          markupPercent: "20.00",
-          taxPercent: "8.25",
           paymentTerms: "net_30",
           notes: `Synced from QuickBooks (ID: ${qbCustomer.id})`
         } as InsertCustomer);
@@ -2197,16 +2181,12 @@ export class DatabaseStorage implements IStorage {
     // Calculate totals if they're missing
     let laborSubtotal = Number(sheetData.laborSubtotal || 0);
     let partsSubtotal = Number(sheetData.partsSubtotal || 0);
-    let markupAmount = Number(sheetData.markupAmount || 0);
-    let taxAmount = Number(sheetData.taxAmount || 0);
     let totalAmount = Number(sheetData.totalAmount || 0);
-    
-    // If we have items, calculate the totals — no per-customer markup or tax
+
+    // If we have items, calculate the totals
     if (items && Array.isArray(items)) {
       partsSubtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
       laborSubtotal = Number(sheetData.totalHours || 0) * Number(sheetData.laborRate || 0);
-      markupAmount = 0;
-      taxAmount = 0;
       totalAmount = laborSubtotal + partsSubtotal;
     }
 
@@ -2214,8 +2194,6 @@ export class DatabaseStorage implements IStorage {
       ...sheetData,
       laborSubtotal: laborSubtotal.toString(),
       partsSubtotal: partsSubtotal.toString(),
-      markupAmount: markupAmount.toString(),
-      taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
       workDate: sheetData.workDate ? (sheetData.workDate instanceof Date ? sheetData.workDate : new Date(sheetData.workDate)) : new Date()
     };
@@ -2679,19 +2657,12 @@ export class DatabaseStorage implements IStorage {
               totalPartsCost: truePartsCost.toFixed(2),
             };
             const snappedLabor = parseFloat(String(wo.appliedLaborRate ?? ''));
-            const snappedMarkup = parseFloat(String(wo.appliedMarkupRate ?? ''));
-            const snappedTax = parseFloat(String(wo.appliedTaxRate ?? ''));
-            if (Number.isFinite(snappedLabor) && Number.isFinite(snappedMarkup) && Number.isFinite(snappedTax)) {
+            if (Number.isFinite(snappedLabor)) {
               const hrs = parseFloat(String(wo.totalHours ?? '0'));
               const laborSub = hrs * snappedLabor;
-              const markup = truePartsCost * snappedMarkup;
-              const subtotal = laborSub + truePartsCost + markup;
-              const tax = subtotal * snappedTax;
-              const total = subtotal + tax;
+              const total = laborSub + truePartsCost;
               updates.laborSubtotal = laborSub.toFixed(2);
               updates.partsSubtotal = truePartsCost.toFixed(2);
-              updates.markupAmount = markup.toFixed(2);
-              updates.taxAmount = tax.toFixed(2);
               updates.totalAmount = total.toFixed(2);
             }
 
@@ -2723,7 +2694,7 @@ export class DatabaseStorage implements IStorage {
           parentNumber: inv.invoiceNumber,
           oldPartsSubtotal: oldPartsSubtotal.toFixed(2),
           // Dry-run approximation: the delta flows straight through to the
-          // parts subtotal and the invoice grand total (markup/labor/tax are
+          // parts subtotal and the invoice grand total (labor is
           // not recomputed here because Tasks #160/#161 leave applied-rate
           // recompute to the live invoice generation flow).
           newPartsSubtotal: (oldPartsSubtotal + parentDifference).toFixed(2),
@@ -3018,15 +2989,12 @@ export class DatabaseStorage implements IStorage {
       laborSubtotal += parseFloat(bs.laborSubtotal || "0");
     });
     
-    // No per-customer markup or tax applied
-    const markupAmount = 0;
-    const taxAmount = 0;
     const totalAmount = partsSubtotal + laborSubtotal;
-    
+
     // Generate invoice number
     const invoiceCount = await this.getInvoiceCount();
     const invoiceNumber = `INV-${year}-${String(month).padStart(2, '0')}-${String(invoiceCount + 1).padStart(3, '0')}`;
-    
+
     // Create invoice
     const [newInvoice] = await db.insert(invoices).values({
       invoiceNumber,
@@ -3040,8 +3008,6 @@ export class DatabaseStorage implements IStorage {
       periodEnd,
       partsSubtotal: partsSubtotal.toString(),
       laborSubtotal: laborSubtotal.toString(),
-      markupAmount: markupAmount.toString(),
-      taxAmount: taxAmount.toString(),
       totalAmount: totalAmount.toString(),
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
     }).returning();

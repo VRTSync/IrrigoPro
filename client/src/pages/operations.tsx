@@ -56,7 +56,6 @@ interface BillingSheet {
   laborHours?: number;
   partsTotal?: number;
   laborTotal?: number;
-  taxAmount?: number;
   submittedAt?: string;
   approvedAt?: string;
 }

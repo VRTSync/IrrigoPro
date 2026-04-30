@@ -61,8 +61,6 @@ export const customers = pgTable("customers", {
   contractType: text("contract_type").default("standard"), // standard, premium, commercial, residential
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("45.00"),
   emergencyLaborRate: decimal("emergency_labor_rate", { precision: 10, scale: 2 }).default("125.00"),
-  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).default("15.00"), // Parts markup % (e.g. 15.00 = 15%)
-  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).default("0.00"),
   discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }).default("0.00"),
   // Contract details
   contractStartDate: timestamp("contract_start_date"),
@@ -197,8 +195,6 @@ export const billingSheets = pgTable("billing_sheets", {
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
-  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
-  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   // Invoice linkage - prevents double billing
   invoiceId: integer("invoice_id").references(() => invoices.id),
@@ -338,12 +334,8 @@ export const estimates = pgTable("estimates", {
   status: text("status").notNull().default("pending"), // pending, approved, rejected, expired
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
-  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
-  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
-  markupPercent: decimal("markup_percent", { precision: 5, scale: 2 }).notNull(),
-  taxPercent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
   approvalToken: text("approval_token"), // Secure token for email approval links
@@ -530,14 +522,10 @@ export const workOrders = pgTable("work_orders", {
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }), // Rate used for this job (legacy alias for appliedLaborRate)
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }), // totalHours * appliedLaborRate
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }), // Sum of parts costs
-  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }), // Markup on parts
-  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }), // Tax on subtotal+markup
   estimatedTotal: decimal("estimated_total", { precision: 10, scale: 2 }), // Original estimate total for comparison
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0.00"),
   // Applied rate snapshot — locked at the time financial total is first calculated
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }), // customer.laborRate at completion time
-  appliedMarkupRate: decimal("applied_markup_rate", { precision: 5, scale: 4 }), // markup fraction at completion time (e.g. 0.1500)
-  appliedTaxRate: decimal("applied_tax_rate", { precision: 5, scale: 4 }), // tax fraction at completion time (e.g. 0.0800)
   totalItems: integer("total_items").default(0),
   // Invoice linkage - prevents double billing
   invoiceId: integer("invoice_id").references(() => invoices.id),
@@ -599,8 +587,6 @@ export const invoices = pgTable("invoices", {
   status: text("status").notNull().default("draft"), // draft, sent, paid, overdue, cancelled
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
-  markupAmount: decimal("markup_amount", { precision: 10, scale: 2 }).notNull(),
-  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   // Payment info
   dueDate: timestamp("due_date"),
@@ -715,7 +701,7 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, markupPercent: true, taxPercent: true });
+export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true });
 export const insertPartSchema = createInsertSchema(parts).omit({ 
   id: true, 
   createdAt: true, 

@@ -45,8 +45,6 @@ async function createSheet(customerId, photos, extra = {}) {
     laborRate: "50.00",
     laborSubtotal: "50.00",
     partsSubtotal: "0",
-    markupAmount: "0",
-    taxAmount: "0",
     totalAmount: "50.00",
     photos,
     ...extra,
@@ -238,9 +236,9 @@ describe("Billing sheet photo persistence", () => {
       `INSERT INTO invoices (
         invoice_number, customer_id, customer_name, customer_email,
         invoice_month, invoice_year, period_start, period_end,
-        status, parts_subtotal, labor_subtotal, markup_amount, tax_amount, total_amount
+        status, parts_subtotal, labor_subtotal, total_amount
       ) VALUES ($1, $2, 'Test Customer Photos', 'testphotos@example.com', 1, 2026, $3, $3,
-        'draft', '0', '50.00', '0', '0', '50.00') RETURNING id`,
+        'draft', '0', '50.00', '50.00') RETURNING id`,
       [invoiceNumber, customerId, now],
     );
     await pool.end();

@@ -110,11 +110,11 @@ async function insertOldMissingPhotosSheet(technicianId, technicianName) {
        billing_number, customer_id, customer_name, property_address,
        work_date, technician_name, technician_id, work_description, status,
        total_hours, labor_rate, labor_subtotal, parts_subtotal,
-       markup_amount, tax_amount, total_amount, photos, created_at, updated_at
+       total_amount, photos, created_at, updated_at
      ) VALUES (
        $1, NULL, 'Test Customer (notify)', '1 Notify Way',
        $2, $3, $4, 'multi-channel notify test', 'submitted',
-       '0', '0', '0', '0', '0', '0', '0',
+       '0', '0', '0', '0', '0',
        ARRAY[]::text[], $2, $2
      ) RETURNING id`,
     [billingNumber, OLD_CREATED_AT.toISOString(), technicianName, technicianId],

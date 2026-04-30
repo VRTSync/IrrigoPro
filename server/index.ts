@@ -5,7 +5,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { logger, createRequestLogger } from "./logger";
 import { db, pool } from "./db";
 import { customers, parts, billingSheets, billingSheetItems, users, workOrders, workOrderItems, invoices } from "@shared/schema";
-import { ne, eq, inArray, or, and, isNull } from "drizzle-orm";
+import { eq, inArray, or, and, isNull } from "drizzle-orm";
 
 // Optional API Rate Limiting (disabled by default for production compatibility)
 interface RateLimitOptions {
@@ -132,19 +132,6 @@ process.on('uncaughtException', (error: Error) => {
 });
 
 async function runStartupMigrations() {
-  try {
-    const updated = await db
-      .update(customers)
-      .set({ taxPercent: '0.00' })
-      .where(ne(customers.taxPercent, '0.00'))
-      .returning({ id: customers.id });
-    if (updated.length > 0) {
-      logger.info(`Startup migration: reset ${updated.length} customer(s) to 0.00% tax`, 'Server Startup');
-    }
-  } catch (err) {
-    logger.error('Startup migration error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
-  }
-
   // Add branches column to customers table if not already present
   try {
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS branches text[]`);
@@ -169,19 +156,15 @@ async function runStartupMigrations() {
     logger.error('Startup migration: work_orders.branch_name column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
-  // Add financial breakdown and applied-rate snapshot columns to work_orders if not present
+  // Add applied-labor-rate snapshot column to work_orders if not present
   try {
     await pool.query(`
       ALTER TABLE work_orders
-        ADD COLUMN IF NOT EXISTS markup_amount DECIMAL(10, 2),
-        ADD COLUMN IF NOT EXISTS tax_amount DECIMAL(10, 2),
-        ADD COLUMN IF NOT EXISTS applied_labor_rate DECIMAL(10, 2),
-        ADD COLUMN IF NOT EXISTS applied_markup_rate DECIMAL(5, 4),
-        ADD COLUMN IF NOT EXISTS applied_tax_rate DECIMAL(5, 4)
+        ADD COLUMN IF NOT EXISTS applied_labor_rate DECIMAL(10, 2)
     `);
-    logger.info('Startup migration: ensured work_orders financial snapshot columns exist', 'Server Startup');
+    logger.info('Startup migration: ensured work_orders.applied_labor_rate column exists', 'Server Startup');
   } catch (err) {
-    logger.error('Startup migration: work_orders financial snapshot columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+    logger.error('Startup migration: work_orders.applied_labor_rate column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
   // Add manager approval gate columns to work_orders and billing_sheets
@@ -213,14 +196,6 @@ async function runStartupMigrations() {
     logger.info('Startup migration: ensured billing_sheets approval stamp columns exist', 'Server Startup');
   } catch (err) {
     logger.error('Startup migration: billing_sheets approval stamp columns error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
-  }
-
-  // Add markup_percent column to customers if not present (default 15.00 = 15% parts markup)
-  try {
-    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS markup_percent DECIMAL(5, 2) DEFAULT 15.00`);
-    logger.info('Startup migration: ensured customers.markup_percent column exists', 'Server Startup');
-  } catch (err) {
-    logger.error('Startup migration: customers.markup_percent column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
   // Add approval_status and approved_at columns to parts table if not present
@@ -443,9 +418,7 @@ async function runStartupMigrations() {
       const totalHours = parseFloat(sheet.totalHours ?? '0');
       const newLaborRate = parseFloat(currentLaborRate);
       const newLaborSubtotal = totalHours * newLaborRate;
-      const markupAmount = parseFloat(sheet.markupAmount ?? '0');
-      const taxAmount = parseFloat(sheet.taxAmount ?? '0');
-      const newTotalAmount = newLaborSubtotal + partsSubtotal + markupAmount + taxAmount;
+      const newTotalAmount = newLaborSubtotal + partsSubtotal;
 
       const sheetChanged =
         parseFloat(sheet.laborRate ?? '0').toFixed(2) !== newLaborRate.toFixed(2) ||
@@ -598,9 +571,7 @@ async function runStartupMigrations() {
         computedParts += toNum(item.totalPrice);
       }
 
-      const markupAmount = toNum(sheet.markupAmount);
-      const taxAmount = toNum(sheet.taxAmount);
-      const newTotal = computedParts + computedLabor + markupAmount + taxAmount;
+      const newTotal = computedParts + computedLabor;
 
       await db.update(billingSheets)
         .set({
@@ -636,9 +607,7 @@ async function runStartupMigrations() {
         newLaborSubtotal += toNum(bs.laborSubtotal);
       }
 
-      const markupAmount = toNum(invoice[0].markupAmount);
-      const taxAmount = toNum(invoice[0].taxAmount);
-      const newTotal = newPartsSubtotal + newLaborSubtotal + markupAmount + taxAmount;
+      const newTotal = newPartsSubtotal + newLaborSubtotal;
 
       await db.update(invoices)
         .set({
@@ -709,99 +678,10 @@ async function runStartupMigrations() {
     logger.error('Startup migration (prune-empty-items) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
-  // Zero out markup/tax amounts on work orders and billing sheets that had non-zero values
-  // from per-customer markup/tax rates, and recalculate totalAmount = partsSubtotal + laborSubtotal.
-  // Then update invoice totals for invoices built from those corrected records.
-  try {
-    const toNum3 = (val: string | number | null | undefined): number => {
-      if (val === null || val === undefined) return 0;
-      const n = typeof val === 'string' ? parseFloat(val) : val;
-      return isNaN(n) ? 0 : n;
-    };
-
-    const correctedInvoiceIds = new Set<number>();
-    let woMarkupFixed = 0;
-    let bsMarkupFixed = 0;
-
-    const allWorkOrdersForMarkup = await db.select().from(workOrders);
-    for (const wo of allWorkOrdersForMarkup) {
-      const markupAmt = toNum3(wo.markupAmount);
-      const taxAmt = toNum3(wo.taxAmount);
-      if (markupAmt === 0 && taxAmt === 0) continue;
-
-      const correctTotal = toNum3(wo.partsSubtotal) + toNum3(wo.laborSubtotal);
-      await db.update(workOrders)
-        .set({
-          markupAmount: '0.00',
-          taxAmount: '0.00',
-          appliedMarkupRate: '0.0000',
-          appliedTaxRate: '0.0000',
-          totalAmount: correctTotal.toFixed(2),
-        })
-        .where(eq(workOrders.id, wo.id));
-      woMarkupFixed++;
-      if (wo.invoiceId) correctedInvoiceIds.add(wo.invoiceId);
-      logger.info(`Startup migration (zero-markup-tax): corrected work_order id=${wo.id} markupAmount=${markupAmt} taxAmount=${taxAmt} -> totalAmount=${correctTotal.toFixed(2)}`, 'Server Startup');
-    }
-
-    const allSheetsForMarkup = await db.select().from(billingSheets);
-    for (const sheet of allSheetsForMarkup) {
-      const markupAmt = toNum3(sheet.markupAmount);
-      const taxAmt = toNum3(sheet.taxAmount);
-      if (markupAmt === 0 && taxAmt === 0) continue;
-
-      const correctTotal = toNum3(sheet.partsSubtotal) + toNum3(sheet.laborSubtotal);
-      await db.update(billingSheets)
-        .set({
-          markupAmount: '0.00',
-          taxAmount: '0.00',
-          totalAmount: correctTotal.toFixed(2),
-        })
-        .where(eq(billingSheets.id, sheet.id));
-      bsMarkupFixed++;
-      if (sheet.invoiceId) correctedInvoiceIds.add(sheet.invoiceId);
-      logger.info(`Startup migration (zero-markup-tax): corrected billing_sheet id=${sheet.id} markupAmount=${markupAmt} taxAmount=${taxAmt} -> totalAmount=${correctTotal.toFixed(2)}`, 'Server Startup');
-    }
-
-    let invoiceMarkupFixed = 0;
-    for (const invoiceId of correctedInvoiceIds) {
-      const invoice = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
-      if (!invoice[0]) continue;
-
-      const linkedWorkOrders = await db.select().from(workOrders).where(eq(workOrders.invoiceId, invoiceId));
-      const linkedBillingSheets = await db.select().from(billingSheets).where(eq(billingSheets.invoiceId, invoiceId));
-
-      let newTotal = 0;
-      for (const wo of linkedWorkOrders) {
-        newTotal += toNum3(wo.partsSubtotal) + toNum3(wo.laborSubtotal);
-      }
-      for (const bs of linkedBillingSheets) {
-        newTotal += toNum3(bs.partsSubtotal) + toNum3(bs.laborSubtotal);
-      }
-
-      await db.update(invoices)
-        .set({ totalAmount: newTotal.toFixed(2) })
-        .where(eq(invoices.id, invoiceId));
-      invoiceMarkupFixed++;
-      logger.info(`Startup migration (zero-markup-tax): recomputed invoice id=${invoiceId} totalAmount=${newTotal.toFixed(2)}`, 'Server Startup');
-    }
-
-    if (woMarkupFixed > 0 || bsMarkupFixed > 0 || invoiceMarkupFixed > 0) {
-      logger.info(
-        `Startup migration (zero-markup-tax): corrected ${woMarkupFixed} work order(s), ${bsMarkupFixed} billing sheet(s), ${invoiceMarkupFixed} invoice(s)`,
-        'Server Startup'
-      );
-    }
-  } catch (err) {
-    logger.error('Startup migration (zero-markup-tax) error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
-  }
-
   // Comprehensive total-mismatch repair (fix-total-mismatch-v2):
   // Phase A — Fill in NULL subtotals by recomputing from items or preserving totalAmount.
   // Phase B — Fix any remaining totalAmount != partsSubtotal + laborSubtotal (non-null subtotals).
   // Phase C — Recompute ALL invoice totals from corrected line items.
-  // This catches legacy records that the earlier zero-markup-tax migration missed because
-  // their markup/tax was baked into totalAmount without being stored in the breakdown columns.
   // Guarded by an idempotency key in app_settings so it only fully scans once per environment.
   const TOTAL_MISMATCH_MIGRATION_KEY = 'fix-total-mismatch-v2';
   try {
@@ -851,8 +731,6 @@ async function runStartupMigrations() {
         .set({
           partsSubtotal: computedParts.toFixed(2),
           laborSubtotal: computedLabor.toFixed(2),
-          markupAmount: '0.00',
-          taxAmount: '0.00',
           totalAmount: newTotal.toFixed(2),
         })
         .where(eq(workOrders.id, wo.id));
@@ -869,10 +747,6 @@ async function runStartupMigrations() {
 
       await db.update(workOrders)
         .set({
-          markupAmount: '0.00',
-          taxAmount: '0.00',
-          appliedMarkupRate: '0.0000',
-          appliedTaxRate: '0.0000',
           totalAmount: correct.toFixed(2),
         })
         .where(eq(workOrders.id, wo.id));
@@ -889,8 +763,6 @@ async function runStartupMigrations() {
 
       await db.update(billingSheets)
         .set({
-          markupAmount: '0.00',
-          taxAmount: '0.00',
           totalAmount: correct.toFixed(2),
         })
         .where(eq(billingSheets.id, sheet.id));
@@ -1059,8 +931,8 @@ async function runStartupMigrations() {
   }
 
   // One-time data repair: fix billing sheet items with zero unit_price when the linked part
-  // has a real catalog price. After fixing items, recalculate parts_subtotal, tax_amount, and
-  // total_amount on affected uninvoiced billing sheets.
+  // has a real catalog price. After fixing items, recalculate parts_subtotal and total_amount
+  // on affected uninvoiced billing sheets.
   const ZERO_PRICE_REPAIR_KEY = 'fix-zero-price-billing-sheet-items-v1';
   try {
     const existingZeroPriceRow = await pool.query(
@@ -1118,7 +990,7 @@ async function runStartupMigrations() {
         }
       }
 
-      // Recalculate parts_subtotal, tax_amount, and total_amount for affected sheets
+      // Recalculate parts_subtotal and total_amount for affected sheets
       let sheetsFixed = 0;
       for (const sheetId of affectedSheetIds) {
         const sheet = await db.select().from(billingSheets).where(eq(billingSheets.id, sheetId));
@@ -1133,20 +1005,14 @@ async function runStartupMigrations() {
         }
 
         const laborSubtotal = toNumZP(sheet[0].laborSubtotal);
-        const markupAmount = toNumZP(sheet[0].markupAmount);
-        // Billing sheets always carry zero tax (enforced by the PATCH handler).
-        // Recompute taxAmount as zero to correct any stale non-zero values.
-        const newTaxAmount = 0;
-        const newTotalAmount = newPartsSubtotal + laborSubtotal + markupAmount + newTaxAmount;
+        const newTotalAmount = newPartsSubtotal + laborSubtotal;
 
         const prevPartsSubtotal = toNumZP(sheet[0].partsSubtotal);
-        const prevTaxAmount = toNumZP(sheet[0].taxAmount);
         const prevTotalAmount = toNumZP(sheet[0].totalAmount);
 
         await db.update(billingSheets)
           .set({
             partsSubtotal: newPartsSubtotal.toFixed(2),
-            taxAmount: newTaxAmount.toFixed(2),
             totalAmount: newTotalAmount.toFixed(2),
           })
           .where(eq(billingSheets.id, sheetId));
@@ -1155,7 +1021,6 @@ async function runStartupMigrations() {
         logger.info(
           `Startup migration '${ZERO_PRICE_REPAIR_KEY}': repaired billing_sheet id=${sheetId} billingNumber=${sheet[0].billingNumber} ` +
           `partsSubtotal: ${prevPartsSubtotal.toFixed(2)}->${newPartsSubtotal.toFixed(2)} ` +
-          `taxAmount: ${prevTaxAmount.toFixed(2)}->${newTaxAmount.toFixed(2)} ` +
           `totalAmount: ${prevTotalAmount.toFixed(2)}->${newTotalAmount.toFixed(2)}`,
           'Server Startup'
         );
@@ -1295,7 +1160,7 @@ async function runStartupMigrations() {
         // Find all work orders missing applied_labor_rate but having a non-zero labor_subtotal
         const candidates = await client.query(`
           SELECT wo.id, wo.total_hours, wo.labor_subtotal, wo.parts_subtotal,
-                 wo.markup_amount, wo.tax_amount, wo.total_amount, wo.invoice_id,
+                 wo.total_amount, wo.invoice_id,
                  c.labor_rate as customer_labor_rate
           FROM work_orders wo
           JOIN customers c ON wo.customer_id = c.id
@@ -1313,8 +1178,6 @@ async function runStartupMigrations() {
           const totalHours = parseFloat(row.total_hours ?? '0');
           const customerRate = parseFloat(row.customer_labor_rate ?? '0');
           const partsSubtotal = parseFloat(row.parts_subtotal ?? '0');
-          const markupAmount = parseFloat(row.markup_amount ?? '0');
-          const taxAmount = parseFloat(row.tax_amount ?? '0');
 
           if (totalHours <= 0 || customerRate <= 0) {
             log(`[MIGRATION] fix-labor-rate-from-customer-v1: skipping work_order id=${row.id} — totalHours=${totalHours} customerRate=${customerRate} (cannot recalculate)`, 'Server Startup');
@@ -1322,7 +1185,7 @@ async function runStartupMigrations() {
           }
 
           const newLaborSubtotal = totalHours * customerRate;
-          const newTotalAmount = newLaborSubtotal + partsSubtotal + markupAmount + taxAmount;
+          const newTotalAmount = newLaborSubtotal + partsSubtotal;
 
           await client.query(`
             UPDATE work_orders

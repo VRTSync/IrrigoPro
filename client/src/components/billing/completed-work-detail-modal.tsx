@@ -809,12 +809,6 @@ export function CompletedWorkDetailModal({
                       <span className="font-medium text-gray-900">{currency(laborSubtotal)}</span>
                     </div>
                   )}
-                  {bs?.markupAmount && parseFloat(String(bs.markupAmount)) > 0 && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600">Markup</span>
-                      <span className="font-medium text-gray-900">{currency(bs.markupAmount)}</span>
-                    </div>
-                  )}
                   <Separator />
                   <div className="flex justify-between items-center">
                     <span className="text-base font-bold text-gray-900">Total</span>

@@ -33,8 +33,6 @@ const estimateFormSchema = z.object({
   estimateDate: z.string().default(() => new Date().toISOString().split('T')[0]),
   createdBy: z.string().default("Irrigation Manager"),
   laborRate: z.coerce.number().min(0, "Labor rate must be positive"),
-  markupPercent: z.coerce.number().min(0, "Markup percentage must be positive"),
-  taxPercent: z.coerce.number().min(0, "Tax percentage must be positive"),
 });
 
 type EstimateFormValues = z.infer<typeof estimateFormSchema>;
@@ -85,8 +83,6 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       estimateDate: new Date().toISOString().split('T')[0],
       createdBy: "Irrigation Manager",
       laborRate: 45,
-      markupPercent: 20,
-      taxPercent: 8.25,
     },
   });
 
@@ -122,8 +118,7 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     };
     
     form.setValue("laborRate", safeParseFloat(customer.laborRate, "45"));
-    form.setValue("taxPercent", safeParseFloat(customer.taxPercent, "8.25"));
-    
+
     // Clear validation errors for auto-populated fields
     form.clearErrors("customerName");
     form.clearErrors("customerEmail");
@@ -263,21 +258,13 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
     };
     
     const laborRate = getValue(form.getValues("laborRate"), 75);
-    const markupPercent = getValue(form.getValues("markupPercent"), 20);
-    const taxPercent = getValue(form.getValues("taxPercent"), 8.25);
-    
+
     const laborSubtotal = totalLaborHours * laborRate;
-    const subtotal = partsSubtotal + laborSubtotal;
-    const markupAmount = subtotal * (markupPercent / 100);
-    const taxAmount = (subtotal + markupAmount) * (taxPercent / 100);
-    const totalAmount = subtotal + markupAmount + taxAmount;
+    const totalAmount = partsSubtotal + laborSubtotal;
 
     return {
       partsSubtotal,
       laborSubtotal,
-      subtotal,
-      markupAmount,
-      taxAmount,
       totalAmount,
       totalLaborHours,
     };
@@ -316,12 +303,8 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
       status: "pending",
       partsSubtotal: totals.partsSubtotal.toFixed(2),
       laborSubtotal: totals.laborSubtotal.toFixed(2),
-      markupAmount: totals.markupAmount.toFixed(2),
-      taxAmount: totals.taxAmount.toFixed(2),
       totalAmount: totals.totalAmount.toFixed(2),
       laborRate: data.laborRate.toFixed(2),
-      markupPercent: data.markupPercent.toFixed(2),
-      taxPercent: data.taxPercent.toFixed(2),
       photos: photos.map(photo => photo.url),
       attachments: attachments.map(attachment => attachment.url),
     };
@@ -668,8 +651,6 @@ export function EstimateModal({ open, onOpenChange }: EstimateModalProps) {
                     <EstimateSummary
                       items={zones.flatMap(zone => zone.items)}
                       laborRate={form.watch("laborRate")}
-                      markupPercent={form.watch("markupPercent")}
-                      taxPercent={form.watch("taxPercent")}
                     />
                   </div>
                 </CardContent>

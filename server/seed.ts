@@ -51,7 +51,6 @@ export async function seedDatabase() {
         address: "123 Oak Street, Springfield, IL 62701",
         contractType: "residential",
         laborRate: "42.00",
-        taxPercent: "8.25",
         discountPercent: "0.00",
         paymentTerms: "net_30",
         notes: "Preferred residential customer with seasonal maintenance contract"
@@ -64,7 +63,6 @@ export async function seedDatabase() {
         address: "456 Business Ave, Springfield, IL 62702",
         contractType: "commercial",
         laborRate: "55.00",
-        taxPercent: "8.25",
         discountPercent: "5.00",
         paymentTerms: "net_15",
         notes: "Commercial contract with bulk pricing discount"
@@ -77,7 +75,6 @@ export async function seedDatabase() {
         address: "789 Garden Way, Springfield, IL 62703",
         contractType: "premium",
         laborRate: "50.00",
-        taxPercent: "8.25",
         discountPercent: "10.00",
         paymentTerms: "net_30",
         notes: "Premium service contract with priority scheduling"
@@ -90,7 +87,6 @@ export async function seedDatabase() {
         address: "321 Maple Drive, Springfield, IL 62704",
         contractType: "standard",
         laborRate: "45.00",
-        taxPercent: "8.25",
         discountPercent: "0.00",
         paymentTerms: "net_30",
         notes: "Standard residential customer"
@@ -159,12 +155,8 @@ export async function seedDatabase() {
         status: "pending",
         partsSubtotal: "450.00",
         laborSubtotal: "562.50",
-        markupAmount: "202.50",
-        taxAmount: "100.16",
-        totalAmount: "1315.16",
+        totalAmount: "1012.50",
         laborRate: "75.00",
-        markupPercent: "20.00",
-        taxPercent: "8.25",
       },
       {
         estimateNumber: "EST-2024-002",
@@ -177,12 +169,8 @@ export async function seedDatabase() {
         status: "approved",
         partsSubtotal: "1250.00",
         laborSubtotal: "1875.00",
-        markupAmount: "625.00",
-        taxAmount: "309.38",
-        totalAmount: "4059.38",
+        totalAmount: "3125.00",
         laborRate: "75.00",
-        markupPercent: "20.00",
-        taxPercent: "8.25",
       },
     ];
 
@@ -412,9 +400,7 @@ export async function seedBillingMonth() {
     const bsTotalHours = "4.00";
     const bsLaborSubtotal = (4.0 * parseFloat(bsLaborRate)).toFixed(2);
     const bsPartsSubtotal = "99.75";
-    const bsMarkupAmount = "0.00";
-    const bsTaxAmount = ((parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal) + parseFloat(bsMarkupAmount)) * parseFloat(customer.taxPercent || "8.25") / 100).toFixed(2);
-    const bsTotalAmount = (parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal) + parseFloat(bsMarkupAmount) + parseFloat(bsTaxAmount)).toFixed(2);
+    const bsTotalAmount = (parseFloat(bsPartsSubtotal) + parseFloat(bsLaborSubtotal)).toFixed(2);
 
     const insertedBS = await db.insert(billingSheets).values([
       {
@@ -430,8 +416,6 @@ export async function seedBillingMonth() {
         laborRate: bsLaborRate,
         laborSubtotal: bsLaborSubtotal,
         partsSubtotal: bsPartsSubtotal,
-        markupAmount: bsMarkupAmount,
-        taxAmount: bsTaxAmount,
         totalAmount: bsTotalAmount,
         notes: "Customer reported leaking drip lines. Replaced damaged sections and added frost protection.",
         createdAt: bsDate,

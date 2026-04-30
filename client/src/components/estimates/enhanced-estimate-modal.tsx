@@ -31,8 +31,6 @@ const estimateFormSchema = z.object({
   estimateDate: z.string().default(() => new Date().toISOString().split('T')[0]),
   createdBy: z.string().default("Irrigation Manager"),
   laborRate: z.coerce.number().min(0, "Labor rate must be positive"),
-  markupPercent: z.coerce.number().min(0, "Markup percentage must be positive"),
-  taxPercent: z.coerce.number().min(0, "Tax percentage must be positive"),
 });
 
 type EstimateFormValues = z.infer<typeof estimateFormSchema>;
@@ -119,8 +117,6 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       estimateDate: new Date().toISOString().split('T')[0],
       createdBy: currentUser?.name || "Irrigation Manager",
       laborRate: 45,
-      markupPercent: 20,
-      taxPercent: 8.25,
     },
   });
 
@@ -148,8 +144,6 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
         estimateDate: new Date(estimate.estimateDate).toISOString().split('T')[0],
         createdBy: estimate.createdBy,
         laborRate: parseFloat(estimate.laborRate),
-        markupPercent: parseFloat(estimate.markupPercent),
-        taxPercent: parseFloat(estimate.taxPercent),
       });
 
       // Convert estimate zones to our zone format
@@ -192,8 +186,7 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
     form.setValue("customerPhone", customer.phone || "");
     // Use customer's contract rates - labor rate is pulled from customer profile
     form.setValue("laborRate", parseFloat(customer.laborRate || "45"));
-    form.setValue("taxPercent", parseFloat(customer.taxPercent || "8.25"));
-    
+
     // Clear validation errors after autofill
     setTimeout(() => {
       form.clearErrors();
@@ -386,21 +379,12 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
       total + zone.items.reduce((zoneTotal, item) => zoneTotal + item.totalLaborHours, 0), 0
     );
     const laborSubtotal = totalLaborHours * laborRate;
-    
-    const markupPercent = form.getValues("markupPercent") || 0;
-    const markupAmount = partsSubtotal * (markupPercent / 100); // Markup only on parts
-    
-    const subtotalWithMarkup = partsSubtotal + laborSubtotal + markupAmount;
-    const taxPercent = form.getValues("taxPercent") || 0;
-    const taxAmount = subtotalWithMarkup * (taxPercent / 100);
-    
-    const totalAmount = subtotalWithMarkup + taxAmount;
+
+    const totalAmount = partsSubtotal + laborSubtotal;
 
     return {
       partsSubtotal,
       laborSubtotal,
-      markupAmount,
-      taxAmount,
       totalAmount,
       totalLaborHours,
     };
@@ -728,34 +712,6 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                       </FormItem>
                     )}
                   />
-                  
-                  <FormField
-                    control={form.control}
-                    name="markupPercent"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Markup (%)</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="number" step="0.01" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  
-                  <FormField
-                    control={form.control}
-                    name="taxPercent"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Tax (%)</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="number" step="0.01" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </div>
 
                 {/* Estimate Summary */}
@@ -770,14 +726,6 @@ export function EnhancedEstimateModal({ open, onOpenChange, estimateId }: Enhanc
                       Labor ({totals.totalLaborHours.toFixed(1)}h @ ${form.getValues("laborRate")}/hr):
                     </span>
                     <span className="font-medium">${totals.laborSubtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 text-sm sm:text-base">Markup ({form.getValues("markupPercent")}%):</span>
-                    <span className="font-medium">${totals.markupAmount.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 text-sm sm:text-base">Tax ({form.getValues("taxPercent")}%):</span>
-                    <span className="font-medium">${totals.taxAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-gray-300">
                     <span className="font-semibold text-gray-900">Total:</span>

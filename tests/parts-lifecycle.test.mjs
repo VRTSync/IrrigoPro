@@ -68,8 +68,6 @@ describe("Billing sheet parts lifecycle", () => {
       laborRate: "50.00",
       laborSubtotal: "100.00",
       partsSubtotal: partsSubtotal.toFixed(2),
-      markupAmount: "0",
-      taxAmount: "0",
       totalAmount: (100 + partsSubtotal).toFixed(2),
       items,
     });
@@ -137,8 +135,6 @@ describe("Billing sheet parts lifecycle", () => {
       laborRate: "50.00",
       laborSubtotal: "50.00",
       partsSubtotal: "99.99",
-      markupAmount: "0",
-      taxAmount: "0",
       totalAmount: "149.99",
     });
     assert.equal(createRes.status, 200, `Guard test create failed: ${JSON.stringify(createRes.body)}`);

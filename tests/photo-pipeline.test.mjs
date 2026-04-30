@@ -206,12 +206,12 @@ describe("backfill-photo-variants resumability", () => {
         billing_number, customer_name, property_address, work_date,
         technician_name, work_description, status,
         total_hours, labor_rate, labor_subtotal, parts_subtotal,
-        markup_amount, tax_amount, total_amount, photos
+        total_amount, photos
       ) VALUES (
         ${BILLING_NUMBER}, 'resume-test', 'addr', now(),
         'tech', 'resume marker test', 'draft',
         '0', '0', '0', '0',
-        '0', '0', '0', ARRAY[${ID_DONE}::text, ${ID_TODO}::text]
+        '0', ARRAY[${ID_DONE}::text, ${ID_TODO}::text]
       ) RETURNING id
     `);
     savedSheetId = ins.rows?.[0]?.id;

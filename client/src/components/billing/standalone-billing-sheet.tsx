@@ -298,18 +298,14 @@ export function StandaloneBillingSheet({
 
   const partsSubtotal = Array.isArray(items) ? items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0) : 0;
   const laborSubtotal = totalHours * laborRate;
-  
-  const markupAmount = 0;
+
   const subtotal = partsSubtotal + laborSubtotal;
-  const taxAmount = 0;
   const totalAmount = subtotal;
 
   const totals = {
     partsSubtotal,
     laborSubtotal,
-    markupAmount,
     subtotal,
-    taxAmount,
     totalAmount,
   };
 
@@ -473,8 +469,6 @@ export function StandaloneBillingSheet({
             items: itemsForWire,
             laborSubtotal: totals.laborSubtotal,
             partsSubtotal: totals.partsSubtotal,
-            markupAmount: totals.markupAmount,
-            taxAmount: totals.taxAmount,
             totalAmount: totals.totalAmount,
             technicianId: currentUser?.id,
             photos: uploadedPhotos.map(p => p.url),
@@ -486,8 +480,6 @@ export function StandaloneBillingSheet({
             items: itemsForWire,
             laborSubtotal: totals.laborSubtotal,
             partsSubtotal: totals.partsSubtotal,
-            markupAmount: totals.markupAmount,
-            taxAmount: totals.taxAmount,
             totalAmount: totals.totalAmount,
             technicianId: currentUser?.id,
             photos: uploadedPhotos.map(p => p.url),

@@ -76,8 +76,6 @@ async function createSheetWithItems(items, extra = {}) {
     laborRate: "60.00",
     laborSubtotal: "60.00",
     partsSubtotal: partsSubtotal.toFixed(2),
-    markupAmount: "0",
-    taxAmount: "0",
     totalAmount: (60 + partsSubtotal).toFixed(2),
     items,
     ...extra,
@@ -361,8 +359,6 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
       periodEnd,
       partsSubtotal: oldPartsSubtotal.toFixed(2),
       laborSubtotal: oldLaborSubtotal.toFixed(2),
-      markupAmount: "0.00",
-      taxAmount: "0.00",
       totalAmount: oldTotalAmount.toFixed(2),
     }).returning();
     const invoiceId = planted.id;
@@ -480,8 +476,6 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
       periodEnd: now,
       partsSubtotal: "0.00",
       laborSubtotal: "0.00",
-      markupAmount: "0.00",
-      taxAmount: "0.00",
       totalAmount: "0.00",
     }).returning();
 
@@ -572,8 +566,6 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
       laborRate: "60.00",
       laborSubtotal: "0.00",
       partsSubtotal: "0.00", // historical bug: subtotal $0 even though row exists
-      markupAmount: "0.00",
-      taxAmount: "0.00",
       totalAmount: "0.00",
     }).returning();
     await db.insert(billingSheetItems).values({
