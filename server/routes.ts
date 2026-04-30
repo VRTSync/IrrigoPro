@@ -414,14 +414,17 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
       }
     }
 
-    // Field techs may also patch ONLY the photos array on a work order assigned to them
+    // Field techs may also patch ONLY the photos array on a work order assigned to them.
+    // Task #191: photos may be added even after the ticket has been moved to billing
+    // (status === 'approved_passed_to_billing', 'billed', or invoiceId is set) so techs
+    // can backfill missing photos after the fact. Cancelled tickets remain locked.
     const updateKeys = updateData && typeof updateData === 'object' ? Object.keys(updateData) : [];
     const isPhotosOnlyEdit = updateKeys.length === 1 && updateKeys[0] === 'photos' && Array.isArray(updateData.photos);
     if (isPhotosOnlyEdit) {
       try {
         const workOrder = await storage.getWorkOrder(workOrderId);
         const userIdNum = parseInt(userId as string);
-        if (workOrder && workOrder.assignedTechnicianId === userIdNum && workOrder.status !== 'cancelled' && workOrder.status !== 'billed' && !workOrder.invoiceId) {
+        if (workOrder && workOrder.assignedTechnicianId === userIdNum && workOrder.status !== 'cancelled') {
           return next();
         }
       } catch (error) {
@@ -469,12 +472,10 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
       const userIdNum = parseInt(userId as string);
 
       if (billingSheet && billingSheet.technicianId === userIdNum) {
-        // For photos-only edits, also block once the sheet is billed/invoiced
-        if (isPhotosOnlyEdit && (billingSheet.status === 'billed' || billingSheet.invoiceId)) {
-          return res.status(403).json({
-            message: "Cannot modify photos on a billing sheet that has already been billed."
-          });
-        }
+        // Task #191: photos-only edits are allowed even when the billing sheet
+        // has been moved to billing (status === 'billed' or invoiceId is set),
+        // so techs can backfill missing photos. Other photos-only restrictions
+        // (ownership above) and the non-photo lock paths stay in place.
         return next();
       }
     } catch (error) {
@@ -7729,14 +7730,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const id = parseInt(req.params.id);
 
+      // Task #191: photos-only patches (single key 'photos' with an array value)
+      // bypass the billed and approved-passed-to-billing locks below so that
+      // techs (and admins) can backfill photos onto already-billed sheets.
+      // Every other field on a billed/approved sheet stays locked.
+      const bsPatchKeys = req.body && typeof req.body === 'object' ? Object.keys(req.body) : [];
+      const isBsPhotosOnlyPatch =
+        bsPatchKeys.length === 1 && bsPatchKeys[0] === 'photos' && Array.isArray(req.body.photos);
+
       // Billing lock: reject updates to billing sheets that have been invoiced or approved for billing
       const existingBsForLockCheck = await storage.getBillingSheetById(id);
-      if (existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
+      if (!isBsPhotosOnlyPatch && existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
         return res.status(409).json({ message: "This record has been billed and cannot be edited." });
       }
       // Lock after manager approval — only admins and billing managers can proceed
       const patchUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
-      if (existingBsForLockCheck?.status === 'approved_passed_to_billing' &&
+      if (!isBsPhotosOnlyPatch && existingBsForLockCheck?.status === 'approved_passed_to_billing' &&
           patchUserRole !== 'company_admin' && patchUserRole !== 'super_admin' && patchUserRole !== 'billing_manager') {
         return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
@@ -8525,14 +8534,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Invalid work order ID" });
       }
 
+      // Task #191: photos-only patches (single key 'photos' with an array value)
+      // bypass the billed and approved-passed-to-billing locks below so that
+      // techs (and admins) can backfill photos onto already-billed tickets.
+      // Every other field on a billed/approved ticket stays locked.
+      const woPatchKeys = req.body && typeof req.body === 'object' ? Object.keys(req.body) : [];
+      const isWoPhotosOnlyPatch =
+        woPatchKeys.length === 1 && woPatchKeys[0] === 'photos' && Array.isArray(req.body.photos);
+
       // Billing lock: reject updates to work orders that have been invoiced
       const existingForLockCheck = await storage.getWorkOrder(id);
-      if (existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
+      if (!isWoPhotosOnlyPatch && existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
         return res.status(409).json({ message: "This record has been billed and cannot be edited." });
       }
       // Lock after manager approval — only admins and billing managers can proceed
       const woUpdateUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
-      if (existingForLockCheck?.status === 'approved_passed_to_billing' &&
+      if (!isWoPhotosOnlyPatch && existingForLockCheck?.status === 'approved_passed_to_billing' &&
           woUpdateUserRole !== 'company_admin' && woUpdateUserRole !== 'super_admin' && woUpdateUserRole !== 'billing_manager') {
         return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }

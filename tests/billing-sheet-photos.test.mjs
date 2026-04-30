@@ -136,20 +136,48 @@ describe("Billing sheet photo persistence", () => {
     assert.equal(patchRes.status, 403, `Expected 403, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
   });
 
-  test("Field tech PATCH photos on a billed sheet returns 403", async () => {
+  test("Field tech PATCH photos on a billed sheet succeeds (Task #191)", async () => {
     const sheetId = await createSheet(customerId, ["https://example.com/orig.jpg"]);
 
     // Manager marks the sheet as billed
     const billRes = await api("PATCH", `/api/billing-sheets/${sheetId}`, { status: "billed" });
     assert.equal(billRes.status, 200, `Marking sheet as billed failed: ${JSON.stringify(billRes.body)}`);
 
+    // Task #191: photos-only PATCH should now be allowed on billed sheets
+    // so techs can backfill missing photos after the fact.
+    const newPhotos = ["https://example.com/late.jpg"];
     const patchRes = await api(
       "PATCH",
       `/api/billing-sheets/${sheetId}`,
-      { photos: ["https://example.com/late.jpg"] },
+      { photos: newPhotos },
       FIELD_TECH_HEADERS,
     );
-    assert.equal(patchRes.status, 403, `Expected 403 on billed sheet, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
+    assert.equal(patchRes.status, 200, `Expected 200 on photos-only PATCH for billed sheet, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
+
+    const getRes = await api("GET", `/api/billing-sheets/${sheetId}`);
+    assert.equal(getRes.status, 200);
+    assert.deepEqual(getRes.body.photos, newPhotos, `Photos should persist on billed sheet: ${JSON.stringify(getRes.body.photos)}`);
+  });
+
+  test("Field tech PATCH non-photo fields on a billed sheet still returns 403", async () => {
+    const sheetId = await createSheet(customerId, ["https://example.com/orig.jpg"]);
+
+    const billRes = await api("PATCH", `/api/billing-sheets/${sheetId}`, { status: "billed" });
+    assert.equal(billRes.status, 200, `Marking sheet as billed failed: ${JSON.stringify(billRes.body)}`);
+
+    // Mixing photos with another field is NOT a photos-only PATCH and must
+    // still be rejected by the middleware (field techs cannot edit anything
+    // other than photos on someone else's sheet).
+    const patchRes = await api(
+      "PATCH",
+      `/api/billing-sheets/${sheetId}`,
+      {
+        photos: ["https://example.com/late.jpg"],
+        workDescription: "Tech is trying to change description",
+      },
+      FIELD_TECH_HEADERS,
+    );
+    assert.equal(patchRes.status, 403, `Expected 403 for non-photo PATCH on billed sheet, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
   });
 
   test("Field tech B cannot PATCH (photos-only) Tech A's billing sheet", async () => {
@@ -220,12 +248,12 @@ describe("Billing sheet photo persistence", () => {
     );
   });
 
-  test("Field tech PATCH photos on an invoiced sheet returns 403", async () => {
+  test("Field tech PATCH photos on an invoiced sheet succeeds (Task #191)", async () => {
     const sheetId = await createSheet(customerId, ["https://example.com/orig.jpg"]);
 
     // Create a real invoice row directly via the DB so we can attach it via FK,
-    // then PATCH the billing sheet's invoiceId so the lock branch
-    // `billingSheet.invoiceId` (in requireBillingSheetUpdateAccess) is exercised.
+    // then PATCH the billing sheet's invoiceId. Task #191 relaxes the
+    // billed/invoiced photo lock so the tech can backfill photos here.
     const { Pool, neonConfig } = await import("@neondatabase/serverless");
     const ws = (await import("ws")).default;
     neonConfig.webSocketConstructor = ws;
@@ -247,12 +275,17 @@ describe("Billing sheet photo persistence", () => {
     const attachRes = await api("PATCH", `/api/billing-sheets/${sheetId}`, { invoiceId });
     assert.equal(attachRes.status, 200, `Attaching invoiceId failed: ${JSON.stringify(attachRes.body)}`);
 
+    const newPhotos = ["https://example.com/late.jpg"];
     const patchRes = await api(
       "PATCH",
       `/api/billing-sheets/${sheetId}`,
-      { photos: ["https://example.com/late.jpg"] },
+      { photos: newPhotos },
       FIELD_TECH_HEADERS,
     );
-    assert.equal(patchRes.status, 403, `Expected 403 on invoiced sheet, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
+    assert.equal(patchRes.status, 200, `Expected 200 on photos-only PATCH for invoiced sheet, got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`);
+
+    const getRes = await api("GET", `/api/billing-sheets/${sheetId}`);
+    assert.equal(getRes.status, 200);
+    assert.deepEqual(getRes.body.photos, newPhotos, `Photos should persist on invoiced sheet: ${JSON.stringify(getRes.body.photos)}`);
   });
 });

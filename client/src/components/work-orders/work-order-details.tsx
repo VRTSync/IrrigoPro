@@ -759,7 +759,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {canEditPhotos && !isBilledWorkOrder && (
+                  {canEditPhotos && workOrder.status !== 'cancelled' && (
                     <FileUpload
                       type="photo"
                       label="Photos"
@@ -794,7 +794,7 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                           >
                             <PhotoImage photoUrl={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" variant="thumb" batchManaged signedUrlOverride={getWoPhotoUrl(url)} />
                           </button>
-                          {canEditPhotos && !isBilledWorkOrder && (
+                          {canEditPhotos && workOrder.status !== 'cancelled' && (
                             <button
                               onClick={() => setPhotoToRemove(idx)}
                               disabled={updatePhotos.isPending}

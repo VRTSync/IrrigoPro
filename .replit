@@ -52,7 +52,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "node --import tsx/esm --test --test-concurrency=1 tests/invoice-pdf-qa.test.mjs tests/parts-lifecycle.test.mjs tests/billing-sheet-photos.test.mjs tests/billing-pricing-authoritative.test.mjs tests/photo-pipeline.test.mjs tests/work-orders-no-photos-needed.test.mjs"
+args = "node --import tsx/esm --test --test-concurrency=1 tests/invoice-pdf-qa.test.mjs tests/parts-lifecycle.test.mjs tests/billing-sheet-photos.test.mjs tests/billing-pricing-authoritative.test.mjs tests/photo-pipeline.test.mjs tests/work-orders-no-photos-needed.test.mjs tests/work-orders-photos-after-billing.test.mjs"
 
 [[workflows.workflow]]
 name = "qb-token-tests"

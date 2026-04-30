@@ -124,6 +124,39 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
   const editablePhotoUrls = editablePhotos.map(p => p.url);
   const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(editablePhotoUrls, "thumb");
 
+  // Task #191: when the sheet is billed/invoiced, the rest of the form is
+  // locked but photo additions/removals are still permitted. Fire a
+  // photos-only PATCH directly so the change persists without needing the
+  // hidden "Save Changes" button. Apply optimistic UI: snapshot the previous
+  // photos array, swap in the new one, and roll back on PATCH failure so the
+  // local UI stays in sync with the server.
+  const photosOnlyPatch = useMutation({
+    mutationFn: async ({ nextPhotos }: { nextPhotos: UploadedFile[]; previous: UploadedFile[] }) => {
+      return apiRequest(
+        `/api/billing-sheets/${billingSheet.id}`,
+        "PATCH",
+        { photos: nextPhotos.map((p) => p.url) },
+      );
+    },
+    onMutate: ({ nextPhotos }) => {
+      setEditablePhotos(nextPhotos);
+    },
+    onSuccess: () => {
+      toast({ title: "Photos updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+      onSuccess();
+    },
+    onError: (error: any, variables) => {
+      // Roll back the optimistic UI change so the modal matches the server.
+      setEditablePhotos(variables.previous);
+      toast({
+        title: "Couldn't save photos",
+        description: error?.message || "Failed to update photos",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleClose = () => {
     setAiSuggestion(null);
     onClose();
@@ -477,49 +510,70 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
               </div>
             </SectionCard>
 
-            {/* Photos (editable — add/remove) */}
-            <SectionCard title={`Photos (${editablePhotos.length})`} icon={<Camera className="w-4 h-4" />}>
-              <div className="space-y-3">
-                {editablePhotos.length > 0 && (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {editablePhotos.map((photo, idx) => (
-                      <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-100">
-                        <button
-                          type="button"
-                          onClick={() => openLightbox(photo.url, idx)}
-                          className="w-full h-full"
-                        >
-                          <PhotoImage
-                            photoUrl={photo.url}
-                            alt={`Photo ${idx + 1}`}
-                            variant="thumb"
-                            batchManaged
-                            signedUrlOverride={getPhotoSignedUrl(photo.url)}
-                            className="w-full h-full object-cover"
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditablePhotos(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Remove photo"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <FileUpload
-                  type="photo"
-                  label="Add Photos"
-                  accept="image/*"
-                  multiple
-                  files={[]}
-                  onFilesChange={(newFiles) => setEditablePhotos(prev => [...prev, ...newFiles])}
-                />
-              </div>
-            </SectionCard>
+            {/* Photos (editable — add/remove). Task #191: photo edits stay
+                available even when the sheet is billed/invoiced, so techs can
+                backfill photos. The wrapper escapes the parent's pointer-events-none
+                lock and changes auto-save via a photos-only PATCH in that mode. */}
+            <div className={isReadOnly ? "pointer-events-auto select-auto opacity-100" : ""}>
+              <SectionCard title={`Photos (${editablePhotos.length})`} icon={<Camera className="w-4 h-4" />}>
+                <div className="space-y-3">
+                  {editablePhotos.length > 0 && (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {editablePhotos.map((photo, idx) => (
+                        <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-100">
+                          <button
+                            type="button"
+                            onClick={() => openLightbox(photo.url, idx)}
+                            className="w-full h-full"
+                          >
+                            <PhotoImage
+                              photoUrl={photo.url}
+                              alt={`Photo ${idx + 1}`}
+                              variant="thumb"
+                              batchManaged
+                              signedUrlOverride={getPhotoSignedUrl(photo.url)}
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = editablePhotos.filter((_, i) => i !== idx);
+                              if (isReadOnly) {
+                                photosOnlyPatch.mutate({ nextPhotos: next, previous: editablePhotos });
+                              } else {
+                                setEditablePhotos(next);
+                              }
+                            }}
+                            disabled={photosOnlyPatch.isPending}
+                            className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Remove photo"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <FileUpload
+                    type="photo"
+                    label="Add Photos"
+                    accept="image/*"
+                    multiple
+                    files={[]}
+                    onFilesChange={(newFiles) => {
+                      if (!newFiles.length) return;
+                      const next = [...editablePhotos, ...newFiles];
+                      if (isReadOnly) {
+                        photosOnlyPatch.mutate({ nextPhotos: next, previous: editablePhotos });
+                      } else {
+                        setEditablePhotos(next);
+                      }
+                    }}
+                  />
+                </div>
+              </SectionCard>
+            </div>
 
             {/* Notes */}
             <SectionCard title="Notes & Description" icon={<FileText className="w-4 h-4" />}>

@@ -208,11 +208,13 @@ export function CompletedWorkDetailModal({
   const photos = localPhotos;
   const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(photos, "thumb");
 
-  // Photo edit access (billing sheet only — work orders use their own detail view)
-  const isBilledOrInvoiced = bs?.status === 'billed' || !!bs?.invoiceId;
+  // Photo edit access (billing sheet only — work orders use their own detail view).
+  // Task #191: photos may still be added/removed even when the sheet has been
+  // moved to billing (status === 'billed' or has an invoiceId), so techs can
+  // backfill missing photos. The "billed lock notice" still shows below; this
+  // exception applies only to the photo control.
   const canEditPhotos =
     type === 'billing_sheet' &&
-    !isBilledOrInvoiced &&
     (
       userRole === 'company_admin' ||
       userRole === 'super_admin' ||
