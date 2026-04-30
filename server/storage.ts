@@ -420,6 +420,58 @@ export interface IStorage {
     }>;
   }>;
 
+  // Labor rate mismatch audit (Task #200) — un-invoiced WO + BS whose
+  // stored labor rate no longer matches the customer's current standard
+  // OR emergency rate. The "inferred classification" is whichever current
+  // rate the stored rate is numerically closer to.
+  getLaborRateMismatchTickets(companyId: number | null): Promise<Array<{
+    source: 'work_order' | 'billing_sheet';
+    parentId: number;
+    parentNumber: string;
+    customerId: number | null;
+    customerName: string;
+    workDate: Date | null;
+    technicianName: string;
+    status: string;
+    totalHours: string;
+    storedLaborRate: string;
+    storedLaborSubtotal: string;
+    storedPartsSubtotal: string;
+    storedTotalAmount: string;
+    customerStandardRate: string;
+    customerEmergencyRate: string;
+    inferredClassification: 'standard' | 'emergency';
+    expectedLaborRate: string;
+    expectedLaborSubtotal: string;
+    expectedTotalAmount: string;
+  }>>;
+  repriceLaborRateMismatches(
+    selection: Array<{ source: 'work_order' | 'billing_sheet'; parentId: number; classification: 'standard' | 'emergency' }>,
+    companyId: number | null,
+    options: { dryRun: boolean; performedByUserId: number | null; performedByName: string | null }
+  ): Promise<{
+    dryRun: boolean;
+    parentCount: number;
+    totalDifference: string;
+    parents: Array<{
+      source: 'work_order' | 'billing_sheet';
+      parentId: number;
+      parentNumber: string;
+      classification: 'standard' | 'emergency';
+      oldLaborRate: string;
+      newLaborRate: string;
+      oldLaborSubtotal: string;
+      newLaborSubtotal: string;
+      oldTotalAmount: string;
+      newTotalAmount: string;
+    }>;
+    skipped: Array<{
+      source: 'work_order' | 'billing_sheet';
+      parentId: number;
+      reason: string;
+    }>;
+  }>;
+
   // Manual Part Reviews
   getManualPartReviews(companyId: number): Promise<ManualPartReview[]>;
   getManualPartReview(id: number): Promise<ManualPartReview | undefined>;
@@ -2758,6 +2810,347 @@ export class DatabaseStorage implements IStorage {
     };
   }
   // ─── /Catalog $0-price audit / backfill ─────────────────────────────────────
+
+  // ─── Labor Rate Mismatch audit (Task #200) ──────────────────────────────────
+  // Lists every un-invoiced Work Order and Billing Sheet whose stored
+  // labor_rate does not match BOTH the customer's current standard rate AND
+  // the customer's current emergency rate. The "inferred classification" is
+  // whichever current rate the stored rate is numerically closest to —
+  // admins can override this in the UI before applying the repair.
+  async getLaborRateMismatchTickets(companyId: number | null) {
+    const billingRows = await db.execute(sql`
+      SELECT
+        'billing_sheet'::text     AS source,
+        bs.id                     AS parent_id,
+        bs.billing_number         AS parent_number,
+        bs.customer_id            AS customer_id,
+        bs.customer_name          AS customer_name,
+        bs.work_date              AS work_date,
+        bs.technician_name        AS technician_name,
+        bs.status                 AS status,
+        bs.total_hours            AS total_hours,
+        bs.labor_rate             AS stored_labor_rate,
+        bs.labor_subtotal         AS stored_labor_subtotal,
+        bs.parts_subtotal         AS stored_parts_subtotal,
+        bs.total_amount           AS stored_total_amount,
+        c.labor_rate              AS customer_standard_rate,
+        c.emergency_labor_rate    AS customer_emergency_rate
+      FROM billing_sheets bs
+      INNER JOIN customers c ON c.id = bs.customer_id
+      WHERE bs.invoice_id IS NULL
+        AND bs.customer_id IS NOT NULL
+        AND bs.labor_rate IS NOT NULL
+        AND c.labor_rate IS NOT NULL
+        AND c.emergency_labor_rate IS NOT NULL
+        AND ABS(CAST(bs.labor_rate AS DOUBLE PRECISION) - CAST(c.labor_rate AS DOUBLE PRECISION)) > 0.005
+        AND ABS(CAST(bs.labor_rate AS DOUBLE PRECISION) - CAST(c.emergency_labor_rate AS DOUBLE PRECISION)) > 0.005
+        AND (${companyId}::int IS NULL OR c.company_id = ${companyId}::int)
+    `);
+
+    const workOrderRows = await db.execute(sql`
+      SELECT
+        'work_order'::text          AS source,
+        wo.id                       AS parent_id,
+        wo.work_order_number        AS parent_number,
+        wo.customer_id              AS customer_id,
+        wo.customer_name            AS customer_name,
+        wo.scheduled_date           AS work_date,
+        wo.assigned_technician_name AS technician_name,
+        wo.status                   AS status,
+        wo.total_hours              AS total_hours,
+        COALESCE(wo.applied_labor_rate, wo.labor_rate) AS stored_labor_rate,
+        wo.labor_subtotal           AS stored_labor_subtotal,
+        wo.parts_subtotal           AS stored_parts_subtotal,
+        wo.total_amount             AS stored_total_amount,
+        c.labor_rate                AS customer_standard_rate,
+        c.emergency_labor_rate      AS customer_emergency_rate
+      FROM work_orders wo
+      INNER JOIN customers c ON c.id = wo.customer_id
+      WHERE wo.invoice_id IS NULL
+        AND COALESCE(wo.applied_labor_rate, wo.labor_rate) IS NOT NULL
+        AND c.labor_rate IS NOT NULL
+        AND c.emergency_labor_rate IS NOT NULL
+        AND ABS(CAST(COALESCE(wo.applied_labor_rate, wo.labor_rate) AS DOUBLE PRECISION) - CAST(c.labor_rate AS DOUBLE PRECISION)) > 0.005
+        AND ABS(CAST(COALESCE(wo.applied_labor_rate, wo.labor_rate) AS DOUBLE PRECISION) - CAST(c.emergency_labor_rate AS DOUBLE PRECISION)) > 0.005
+        AND (${companyId}::int IS NULL OR c.company_id = ${companyId}::int)
+    `);
+
+    const merged = [...billingRows.rows, ...workOrderRows.rows] as Array<Record<string, unknown>>;
+    return merged
+      .map((r) => {
+        const totalHours = parseFloat(String(r.total_hours ?? 0));
+        const storedRate = parseFloat(String(r.stored_labor_rate ?? 0));
+        const storedPartsSubtotal = parseFloat(String(r.stored_parts_subtotal ?? 0));
+        const storedTotalAmount = parseFloat(String(r.stored_total_amount ?? 0));
+        const standardRate = parseFloat(String(r.customer_standard_rate ?? 0));
+        const emergencyRate = parseFloat(String(r.customer_emergency_rate ?? 0));
+        const distStandard = Math.abs(storedRate - standardRate);
+        const distEmergency = Math.abs(storedRate - emergencyRate);
+        const inferredClassification: 'standard' | 'emergency' =
+          distEmergency < distStandard ? 'emergency' : 'standard';
+        const expectedRate = inferredClassification === 'emergency' ? emergencyRate : standardRate;
+        const expectedLaborSubtotal = totalHours * expectedRate;
+        const expectedTotalAmount = expectedLaborSubtotal + storedPartsSubtotal;
+        const workDate = r.work_date
+          ? (r.work_date instanceof Date ? r.work_date : new Date(String(r.work_date)))
+          : null;
+        return {
+          source: r.source as 'work_order' | 'billing_sheet',
+          parentId: Number(r.parent_id),
+          parentNumber: String(r.parent_number ?? ''),
+          customerId: r.customer_id == null ? null : Number(r.customer_id),
+          customerName: String(r.customer_name ?? ''),
+          workDate,
+          technicianName: String(r.technician_name ?? ''),
+          status: String(r.status ?? ''),
+          totalHours: totalHours.toFixed(2),
+          storedLaborRate: storedRate.toFixed(2),
+          storedLaborSubtotal: (parseFloat(String(r.stored_labor_subtotal ?? 0))).toFixed(2),
+          storedPartsSubtotal: storedPartsSubtotal.toFixed(2),
+          storedTotalAmount: storedTotalAmount.toFixed(2),
+          customerStandardRate: standardRate.toFixed(2),
+          customerEmergencyRate: emergencyRate.toFixed(2),
+          inferredClassification,
+          expectedLaborRate: expectedRate.toFixed(2),
+          expectedLaborSubtotal: expectedLaborSubtotal.toFixed(2),
+          expectedTotalAmount: expectedTotalAmount.toFixed(2),
+        };
+      })
+      .sort((a, b) => {
+        const ta = a.workDate ? a.workDate.getTime() : 0;
+        const tb = b.workDate ? b.workDate.getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        return b.parentId - a.parentId;
+      });
+  }
+
+  async repriceLaborRateMismatches(
+    selection: Array<{ source: 'work_order' | 'billing_sheet'; parentId: number; classification: 'standard' | 'emergency' }>,
+    companyId: number | null,
+    options: { dryRun: boolean; performedByUserId: number | null; performedByName: string | null }
+  ) {
+    type ParentSummary = {
+      source: 'work_order' | 'billing_sheet';
+      parentId: number;
+      parentNumber: string;
+      classification: 'standard' | 'emergency';
+      oldLaborRate: string;
+      newLaborRate: string;
+      oldLaborSubtotal: string;
+      newLaborSubtotal: string;
+      oldTotalAmount: string;
+      newTotalAmount: string;
+    };
+    const parents: ParentSummary[] = [];
+    const skipped: Array<{ source: 'work_order' | 'billing_sheet'; parentId: number; reason: string }> = [];
+    let grandDifference = 0;
+
+    const stamp = new Date().toISOString();
+    const actor = options.performedByName ?? (options.performedByUserId ? `user#${options.performedByUserId}` : 'admin');
+
+    // De-duplicate: last classification wins for a given (source, parentId)
+    const wantMap = new Map<string, 'standard' | 'emergency'>();
+    for (const s of selection) {
+      wantMap.set(`${s.source}:${s.parentId}`, s.classification);
+    }
+
+    for (const [key, classification] of Array.from(wantMap.entries())) {
+      const [src, idStr] = key.split(':');
+      const source = src as 'work_order' | 'billing_sheet';
+      const parentId = parseInt(idStr);
+      if (!Number.isFinite(parentId)) continue;
+
+      if (source === 'billing_sheet') {
+        const [sheet] = await db.select().from(billingSheets).where(eq(billingSheets.id, parentId));
+        if (!sheet) {
+          skipped.push({ source, parentId, reason: 'Billing sheet not found' });
+          continue;
+        }
+        // Re-validate that the sheet is still un-invoiced at write time
+        if (sheet.invoiceId != null) {
+          skipped.push({ source, parentId, reason: 'Already invoiced' });
+          continue;
+        }
+        if (!sheet.customerId) {
+          skipped.push({ source, parentId, reason: 'Billing sheet has no customer' });
+          continue;
+        }
+        if (companyId != null) {
+          const [cust] = await db.select().from(customers).where(eq(customers.id, sheet.customerId));
+          if (!cust || cust.companyId !== companyId) {
+            skipped.push({ source, parentId, reason: 'Outside scope' });
+            continue;
+          }
+        }
+        const [customer] = await db.select().from(customers).where(eq(customers.id, sheet.customerId));
+        if (!customer) {
+          skipped.push({ source, parentId, reason: 'Customer not found' });
+          continue;
+        }
+        const newRateStr = classification === 'emergency'
+          ? customer.emergencyLaborRate
+          : customer.laborRate;
+        const newRate = newRateStr != null ? parseFloat(String(newRateStr)) : NaN;
+        if (!Number.isFinite(newRate) || newRate <= 0) {
+          skipped.push({
+            source,
+            parentId,
+            reason: `Customer is missing a valid ${classification} labor rate; configure it on the customer profile before re-pricing.`,
+          });
+          continue;
+        }
+        const totalHours = parseFloat(String(sheet.totalHours ?? 0));
+        const partsSubtotal = parseFloat(String(sheet.partsSubtotal ?? 0));
+        const oldRate = parseFloat(String(sheet.laborRate ?? 0));
+        const oldLaborSubtotal = parseFloat(String(sheet.laborSubtotal ?? 0));
+        const oldTotalAmount = parseFloat(String(sheet.totalAmount ?? 0));
+        if (Math.abs(oldRate - newRate) < 0.005) {
+          skipped.push({
+            source,
+            parentId,
+            reason: `Already in sync at $${newRate.toFixed(2)} (${classification}).`,
+          });
+          continue;
+        }
+        const newLaborSubtotal = totalHours * newRate;
+        const newTotalAmount = newLaborSubtotal + partsSubtotal;
+        const delta = newTotalAmount - oldTotalAmount;
+
+        parents.push({
+          source: 'billing_sheet',
+          parentId,
+          parentNumber: sheet.billingNumber,
+          classification,
+          oldLaborRate: oldRate.toFixed(2),
+          newLaborRate: newRate.toFixed(2),
+          oldLaborSubtotal: oldLaborSubtotal.toFixed(2),
+          newLaborSubtotal: newLaborSubtotal.toFixed(2),
+          oldTotalAmount: oldTotalAmount.toFixed(2),
+          newTotalAmount: newTotalAmount.toFixed(2),
+        });
+        grandDifference += delta;
+
+        if (!options.dryRun) {
+          const auditNote = `[${stamp}] Auto-repriced labor rate from $${oldRate.toFixed(2)} to $${newRate.toFixed(2)} (${classification}) by ${actor}.`;
+          const mergedNotes = sheet.notes && sheet.notes.trim().length > 0
+            ? `${sheet.notes}\n${auditNote}`
+            : auditNote;
+          await db.update(billingSheets)
+            .set({
+              laborRate: newRate.toFixed(2),
+              laborSubtotal: newLaborSubtotal.toFixed(2),
+              totalAmount: newTotalAmount.toFixed(2),
+              notes: mergedNotes,
+            })
+            .where(eq(billingSheets.id, parentId));
+          console.log(
+            `[AUDIT] billing_sheet_labor_repriced billingSheetId=${parentId} billingNumber=${sheet.billingNumber} ` +
+            `classification=${classification} oldRate=${oldRate.toFixed(2)} newRate=${newRate.toFixed(2)} ` +
+            `delta=${delta.toFixed(2)} actor=${actor}`
+          );
+        }
+      } else {
+        // work_order
+        const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, parentId));
+        if (!wo) {
+          skipped.push({ source, parentId, reason: 'Work order not found' });
+          continue;
+        }
+        if (wo.invoiceId != null) {
+          skipped.push({ source, parentId, reason: 'Already invoiced' });
+          continue;
+        }
+        if (!wo.customerId) {
+          skipped.push({ source, parentId, reason: 'Work order has no customer' });
+          continue;
+        }
+        if (companyId != null) {
+          const [cust] = await db.select().from(customers).where(eq(customers.id, wo.customerId));
+          if (!cust || cust.companyId !== companyId) {
+            skipped.push({ source, parentId, reason: 'Outside scope' });
+            continue;
+          }
+        }
+        const [customer] = await db.select().from(customers).where(eq(customers.id, wo.customerId));
+        if (!customer) {
+          skipped.push({ source, parentId, reason: 'Customer not found' });
+          continue;
+        }
+        const newRateStr = classification === 'emergency'
+          ? customer.emergencyLaborRate
+          : customer.laborRate;
+        const newRate = newRateStr != null ? parseFloat(String(newRateStr)) : NaN;
+        if (!Number.isFinite(newRate) || newRate <= 0) {
+          skipped.push({
+            source,
+            parentId,
+            reason: `Customer is missing a valid ${classification} labor rate; configure it on the customer profile before re-pricing.`,
+          });
+          continue;
+        }
+        const totalHours = parseFloat(String(wo.totalHours ?? 0));
+        const partsSubtotal = parseFloat(String(wo.partsSubtotal ?? wo.totalPartsCost ?? 0));
+        const oldRate = parseFloat(String(wo.appliedLaborRate ?? wo.laborRate ?? 0));
+        const oldLaborSubtotal = parseFloat(String(wo.laborSubtotal ?? 0));
+        const oldTotalAmount = parseFloat(String(wo.totalAmount ?? 0));
+        if (Math.abs(oldRate - newRate) < 0.005) {
+          skipped.push({
+            source,
+            parentId,
+            reason: `Already in sync at $${newRate.toFixed(2)} (${classification}).`,
+          });
+          continue;
+        }
+        const newLaborSubtotal = totalHours * newRate;
+        const newTotalAmount = newLaborSubtotal + partsSubtotal;
+        const delta = newTotalAmount - oldTotalAmount;
+
+        parents.push({
+          source: 'work_order',
+          parentId,
+          parentNumber: wo.workOrderNumber,
+          classification,
+          oldLaborRate: oldRate.toFixed(2),
+          newLaborRate: newRate.toFixed(2),
+          oldLaborSubtotal: oldLaborSubtotal.toFixed(2),
+          newLaborSubtotal: newLaborSubtotal.toFixed(2),
+          oldTotalAmount: oldTotalAmount.toFixed(2),
+          newTotalAmount: newTotalAmount.toFixed(2),
+        });
+        grandDifference += delta;
+
+        if (!options.dryRun) {
+          const auditNote = `[${stamp}] Auto-repriced labor rate from $${oldRate.toFixed(2)} to $${newRate.toFixed(2)} (${classification}) by ${actor}.`;
+          const mergedNotes = wo.notes && wo.notes.trim().length > 0
+            ? `${wo.notes}\n${auditNote}`
+            : auditNote;
+          await db.update(workOrders)
+            .set({
+              laborRate: newRate.toFixed(2),
+              appliedLaborRate: newRate.toFixed(2),
+              laborSubtotal: newLaborSubtotal.toFixed(2),
+              totalAmount: newTotalAmount.toFixed(2),
+              notes: mergedNotes,
+            })
+            .where(eq(workOrders.id, parentId));
+          console.log(
+            `[AUDIT] work_order_labor_repriced workOrderId=${parentId} workOrderNumber=${wo.workOrderNumber} ` +
+            `classification=${classification} oldRate=${oldRate.toFixed(2)} newRate=${newRate.toFixed(2)} ` +
+            `delta=${delta.toFixed(2)} actor=${actor}`
+          );
+        }
+      }
+    }
+
+    return {
+      dryRun: options.dryRun,
+      parentCount: parents.length,
+      totalDifference: grandDifference.toFixed(2),
+      parents,
+      skipped,
+    };
+  }
+  // ─── /Labor Rate Mismatch audit ─────────────────────────────────────────────
 
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {

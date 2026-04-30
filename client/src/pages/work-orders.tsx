@@ -111,9 +111,19 @@ export default function WorkOrders() {
       setShowWorkOrderForm(true);
       window.history.replaceState({}, '', window.location.pathname);
     }
-    
+
     refreshUserData();
   }, []);
+
+  // Deep-link support: ?openWorkOrder=<id> opens the work-order details modal
+  // once the list is loaded. Used by the Labor Rate Audit page so admins can
+  // jump straight to a specific ticket.
+  const [pendingOpenWorkOrderId, setPendingOpenWorkOrderId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const v = new URLSearchParams(window.location.search).get("openWorkOrder");
+    const id = v ? parseInt(v, 10) : NaN;
+    return Number.isFinite(id) ? id : null;
+  });
 
   // For field techs, only show work orders assigned to them
   const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
@@ -127,6 +137,19 @@ export default function WorkOrders() {
     refetchOnMount: true,
     enabled: !!currentUser,
   });
+
+  // Open the deep-linked work order once the list arrives, then strip the param
+  useEffect(() => {
+    if (pendingOpenWorkOrderId == null || !workOrders) return;
+    const target = workOrders.find((wo: WorkOrder) => wo.id === pendingOpenWorkOrderId);
+    if (target) {
+      setSelectedWorkOrder(target);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openWorkOrder");
+      window.history.replaceState({}, "", url.toString());
+      setPendingOpenWorkOrderId(null);
+    }
+  }, [pendingOpenWorkOrderId, workOrders]);
 
   // Fetch notifications for assignment dates (field techs only)
   const { data: notifications } = useQuery({

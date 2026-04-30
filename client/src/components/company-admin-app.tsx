@@ -19,6 +19,7 @@ import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import WorkOrders from "@/pages/work-orders";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
+import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import MissingPhotosReport from "@/pages/missing-photos-report";
 import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-report";
 import PartsSettings from "@/pages/parts-settings";
@@ -144,6 +145,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/work-orders/missing-photos" component={WorkOrdersMissingPhotosReport} />
           <Route path="/billing-sheets/missing-photos" component={MissingPhotosReport} />
           <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
+          <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/work-orders" component={WorkOrders} />
           <Route path="/user-profile" component={UserProfile} />

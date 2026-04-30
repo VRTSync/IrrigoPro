@@ -9100,6 +9100,82 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
   // ─── /Catalog $0-price audit / backfill ───────────────────────────────────
 
+  // ─── Labor Rate Mismatch audit (Task #200) ────────────────────────────────
+  // Lists every un-invoiced WO + BS whose stored labor rate no longer
+  // matches the customer's current standard or emergency rate, and lets an
+  // admin re-price selected tickets in place. Mirrors the auth, scoping and
+  // request/response conventions of the catalog $0-price audit above.
+  app.get("/api/admin/labor-rate-audit", requireAuthentication, async (req: any, res) => {
+    try {
+      const actor = await getAuditActor(req);
+      if (!isAuditAdmin(actor.role)) {
+        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+      }
+      let scopeCompanyId: number | null = actor.companyId;
+      if (actor.role === 'super_admin') {
+        const q = req.query.companyId;
+        if (q === 'all') {
+          scopeCompanyId = null;
+        } else if (q) {
+          scopeCompanyId = parseInt(q as string);
+        }
+      }
+      const rows = await storage.getLaborRateMismatchTickets(scopeCompanyId);
+      res.json({ companyId: scopeCompanyId, count: rows.length, rows });
+    } catch (error) {
+      console.error("[labor-rate-audit] failed:", error);
+      res.status(500).json({ message: "Failed to load labor rate audit" });
+    }
+  });
+
+  app.post("/api/admin/labor-rate-audit/repair", requireAuthentication, async (req: any, res) => {
+    try {
+      const actor = await getAuditActor(req);
+      if (!isAuditAdmin(actor.role)) {
+        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+      }
+      const body = req.body || {};
+      let selection: Array<{ source: 'work_order' | 'billing_sheet'; parentId: number; classification: 'standard' | 'emergency' }> = [];
+      if (Array.isArray(body.selection)) {
+        selection = body.selection
+          .map((s: any) => {
+            const rawSource = s?.source;
+            const source: 'work_order' | 'billing_sheet' =
+              rawSource === 'work_order' ? 'work_order' : 'billing_sheet';
+            const rawClass = s?.classification;
+            const classification: 'standard' | 'emergency' =
+              rawClass === 'emergency' ? 'emergency' : 'standard';
+            return { source, parentId: Number(s?.parentId), classification };
+          })
+          .filter((s: { parentId: number }) => Number.isFinite(s.parentId));
+      }
+      const dryRun = body.dryRun !== false; // default to dry-run for safety
+
+      let scopeCompanyId: number | null = actor.companyId;
+      if (actor.role === 'super_admin' && body.companyId !== undefined) {
+        scopeCompanyId = body.companyId === 'all' ? null : Number(body.companyId);
+      }
+
+      const result = await storage.repriceLaborRateMismatches(selection, scopeCompanyId, {
+        dryRun,
+        performedByUserId: actor.userId,
+        performedByName: actor.name,
+      });
+
+      console.log(
+        `[AUDIT] labor_rate_audit_repair_invoked actor=${actor.userId ?? '?'} role=${actor.role} ` +
+        `companyId=${scopeCompanyId ?? 'all'} dryRun=${dryRun} parentCount=${result.parentCount} ` +
+        `totalDifference=${result.totalDifference} skipped=${result.skipped.length}`
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error("[labor-rate-audit/repair] failed:", error);
+      res.status(500).json({ message: "Failed to repair labor rate mismatches" });
+    }
+  });
+  // ─── /Labor Rate Mismatch audit ───────────────────────────────────────────
+
   // Billing Sheet routes
   app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {
     try {

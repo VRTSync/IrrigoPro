@@ -389,6 +389,29 @@ export default function BillingSheets() {
           </Link>
         )}
 
+        {/* Labor rate mismatch audit — same role allowlist as the $0 audit */}
+        {canSeeZeroPriceAudit && (
+          <Link href="/billing-sheets/labor-rate-audit">
+            <a
+              className="block border border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors rounded-lg px-4 py-3 mb-2"
+              data-testid="banner-labor-rate-audit"
+            >
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-orange-700 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-orange-900">
+                    Labor rate audit
+                  </p>
+                  <p className="text-xs text-orange-800">
+                    Find and re-price un-invoiced work orders and billing sheets whose labor rate no longer matches the customer's current rate.
+                  </p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-orange-700 flex-shrink-0" />
+              </div>
+            </a>
+          </Link>
+        )}
+
         {/* Missing photos report banner */}
         {canSeeReport && missingPhotosCount > 0 && (
           <Link href="/billing-sheets/missing-photos">
