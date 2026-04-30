@@ -8,51 +8,10 @@ import { Upload, X, Image, FileText, Eye, Loader2, CheckCircle2, AlertCircle, Ro
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
-import imageCompression from "browser-image-compression";
+import { preparePhotoForUpload, type PreparedPhoto } from "@/lib/photo-prep";
 
-// Best-effort client-side photo prep: HEIC → JPEG, then downscale & re-encode
-// to keep uploads small enough to succeed on weak LTE. Falls back to the
-// original file bytes if anything goes wrong.
-async function preparePhotoForUpload(
-  file: File,
-  onProgress?: (pct: number) => void,
-): Promise<File> {
-  let working: File = file;
-  const lowerName = file.name.toLowerCase();
-  const looksHeic = file.type === "image/heic" || file.type === "image/heif"
-    || lowerName.endsWith(".heic") || lowerName.endsWith(".heif");
-
-  if (looksHeic) {
-    try {
-      // heic2any is browser-only and has a heavy WASM payload — load it lazily.
-      const heic2any = (await import("heic2any")).default;
-      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
-      const blob = Array.isArray(converted) ? converted[0] : converted;
-      working = new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
-    } catch (err) {
-      console.warn("[file-upload] HEIC conversion failed, falling back to original bytes", err);
-      // Fall through with the original file — the server will still handle HEIC.
-    }
-  }
-
-  try {
-    const compressed = await imageCompression(working, {
-      maxSizeMB: 0.5,
-      maxWidthOrHeight: 2048,
-      useWebWorker: true,
-      initialQuality: 0.85,
-      fileType: working.type === "image/png" ? "image/jpeg" : undefined,
-      onProgress: (pct: number) => {
-        if (onProgress) onProgress(Math.max(0, Math.min(100, Math.round(pct))));
-      },
-    });
-    if (compressed instanceof File) return compressed;
-    return new File([compressed], working.name, { type: compressed.type || working.type });
-  } catch (err) {
-    console.warn("[file-upload] image compression failed, uploading original bytes", err);
-    return working;
-  }
-}
+// `preparePhotoForUpload` lives in `@/lib/photo-prep` so the same display +
+// preserved-original prep is shared with the billing-sheet upload path.
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -157,7 +116,9 @@ interface UploadJob {
   kind: "photo" | "attachment";
   file: File;
   // Cached compressed/HEIC-converted bytes so retries don't re-prep.
-  prepared?: File;
+  // Holds both the tight display copy AND the lightly-compressed
+  // preserved original.
+  prepared?: PreparedPhoto;
   // Cached signed-URL response so retries reuse the same canonical URL
   // (and skip a /api/upload/photo round-trip) while still fresh.
   signedUrlData?: PhotoSignedUrlData;
@@ -334,10 +295,11 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
       throw new DOMException("Aborted", "AbortError");
     }
 
-    // 3. Dual upload: untouched original to `originals/`, compressed display
-    // variant to the canonical key. Report combined progress weighted by
-    // bytes so users on slow LTE see steady forward motion.
-    const totalBytes = file.size + prepared.size;
+    // 3. Dual upload: lightly-compressed preserved original to `originals/`,
+    // tight display variant to the canonical key. Report combined progress
+    // weighted by bytes so users on slow LTE see steady forward motion.
+    const { displayFile, originalFile } = prepared;
+    const totalBytes = originalFile.size + displayFile.size;
     let origLoaded = 0;
     let dispLoaded = 0;
     let lastPct = -1;
@@ -354,14 +316,14 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
 
     const [originalPut, displayPut] = await Promise.all([
       signedData.originalSignedUrl
-        ? xhrPut(signedData.originalSignedUrl, file, {
-            contentType: file.type || 'application/octet-stream',
+        ? xhrPut(signedData.originalSignedUrl, originalFile, {
+            contentType: originalFile.type || 'application/octet-stream',
             signal: controller.signal,
             onProgress: (loaded) => { origLoaded = loaded; reportUpload(); },
           })
         : Promise.resolve({ ok: true, status: 200 }),
-      xhrPut(signedData.signedUrl, prepared, {
-        contentType: prepared.type || 'application/octet-stream',
+      xhrPut(signedData.signedUrl, displayFile, {
+        contentType: displayFile.type || 'application/octet-stream',
         signal: controller.signal,
         onProgress: (loaded) => { dispLoaded = loaded; reportUpload(); },
       }),

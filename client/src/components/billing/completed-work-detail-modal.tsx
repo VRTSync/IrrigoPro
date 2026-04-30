@@ -28,7 +28,7 @@ import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import imageCompression from "browser-image-compression";
+import { preparePhotoForUpload } from "@/lib/photo-prep";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -49,38 +49,8 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-async function preparePhotoForUpload(file: File): Promise<File> {
-  let working: File = file;
-  const lowerName = file.name.toLowerCase();
-  const looksHeic = file.type === "image/heic" || file.type === "image/heif"
-    || lowerName.endsWith(".heic") || lowerName.endsWith(".heif");
-
-  if (looksHeic) {
-    try {
-      const heic2any = (await import("heic2any")).default;
-      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
-      const blob = Array.isArray(converted) ? converted[0] : converted;
-      working = new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
-    } catch (err) {
-      console.warn("[detail-modal] HEIC conversion failed, falling back to original bytes", err);
-    }
-  }
-
-  try {
-    const compressed = await imageCompression(working, {
-      maxSizeMB: 0.5,
-      maxWidthOrHeight: 2048,
-      useWebWorker: true,
-      initialQuality: 0.85,
-      fileType: working.type === "image/png" ? "image/jpeg" : undefined,
-    });
-    if (compressed instanceof File) return compressed;
-    return new File([compressed], working.name, { type: compressed.type || working.type });
-  } catch (err) {
-    console.warn("[detail-modal] image compression failed, uploading original bytes", err);
-    return working;
-  }
-}
+// `preparePhotoForUpload` lives in `@/lib/photo-prep` so the same display +
+// preserved-original prep is shared with the work-order upload path.
 
 interface CompletedWorkDetailModalProps {
   type: "work_order" | "billing_sheet";
@@ -304,10 +274,11 @@ export function CompletedWorkDetailModal({
           throw new Error(`Get upload URL failed for ${file.name}: ${err?.message || err}`);
         }
 
-        // 2. Prepare display bytes (HEIC → JPEG, downscale + compress for slow LTE).
-        const prepared = await preparePhotoForUpload(file);
+        // 2. Prepare both bytes streams (HEIC → JPEG once, then a tight
+        //    display copy + a lightly-compressed preserved original).
+        const { displayFile, originalFile } = await preparePhotoForUpload(file);
 
-        // 3. Dual-upload: original bytes preserved untouched, display bytes for variants.
+        // 3. Dual-upload: lightly-compressed preserved original, tight display bytes for variants.
         let displayPut: Response;
         let originalPut: Response;
         try {
@@ -315,14 +286,14 @@ export function CompletedWorkDetailModal({
             originalSignedUrl
               ? fetch(originalSignedUrl, {
                   method: 'PUT',
-                  body: file,
-                  headers: { 'Content-Type': file.type || 'application/octet-stream' },
+                  body: originalFile,
+                  headers: { 'Content-Type': originalFile.type || 'application/octet-stream' },
                 })
               : Promise.resolve({ ok: true } as Response),
             fetch(signedUrl, {
               method: 'PUT',
-              body: prepared,
-              headers: { 'Content-Type': prepared.type || 'application/octet-stream' },
+              body: displayFile,
+              headers: { 'Content-Type': displayFile.type || 'application/octet-stream' },
             }),
           ]);
         } catch (err: any) {
