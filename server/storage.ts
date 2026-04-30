@@ -336,6 +336,9 @@ export interface IStorage {
   deleteBillingSheetItem(itemId: number): Promise<boolean>;
   replaceBillingSheetItemsInTransaction(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<BillingSheetItem[]>;
   replaceBillingSheetItemsAndResync(billingSheetId: number, items: InsertBillingSheetItem[]): Promise<{ items: BillingSheetItem[]; partsSubtotal: string; totalAmount: string }>;
+  // Task #197 — flag a billing sheet as not requiring photos so it disappears
+  // from the missing-photos report. Stamps the acting user and timestamp.
+  markBillingSheetNoPhotosNeeded(sheetId: number, userId: number): Promise<BillingSheet | undefined>;
 
   // Missing-photos outreach tracking — one row per technician
   getMissingPhotosNotifications(): Promise<MissingPhotosNotification[]>;
@@ -2256,6 +2259,18 @@ export class DatabaseStorage implements IStorage {
   async updateBillingSheet(id: number, billingSheetData: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined> {
     const [updatedSheet] = await db.update(billingSheets).set(billingSheetData).where(eq(billingSheets.id, id)).returning();
     return updatedSheet || undefined;
+  }
+
+  async markBillingSheetNoPhotosNeeded(sheetId: number, userId: number): Promise<BillingSheet | undefined> {
+    const [updated] = await db.update(billingSheets)
+      .set({
+        noPhotosNeeded: true,
+        noPhotosNeededBy: userId,
+        noPhotosNeededAt: new Date(),
+      })
+      .where(eq(billingSheets.id, sheetId))
+      .returning();
+    return updated || undefined;
   }
 
   async deleteBillingSheet(id: number): Promise<boolean> {

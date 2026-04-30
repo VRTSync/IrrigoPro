@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import { Camera, Download, Search, User, Building2, Calendar, ChevronDown, ChevronRight, ArrowLeft, Send, Mail, MessageSquare, Clock } from "lucide-react";
+import { Camera, Download, Search, User, Building2, Calendar, ChevronDown, ChevronRight, ArrowLeft, Send, Mail, MessageSquare, Clock, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -125,8 +125,21 @@ export default function MissingPhotosReport() {
   const [forceResend, setForceResend] = useState(false);
   const [channelChoice, setChannelChoice] = useState<ChannelChoice>("email");
   const [lastSummary, setLastSummary] = useState<NotifyResponse | null>(null);
+  const [pendingNoPhotosSheet, setPendingNoPhotosSheet] = useState<BillingSheet | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const noPhotosNeededMutation = useMutation<BillingSheet, Error, number>({
+    mutationFn: (sheetId) => apiRequest(`/api/billing-sheets/${sheetId}/no-photos-needed`, "POST"),
+    onSuccess: () => {
+      toast({ title: "Marked as 'No Photos Needed'", description: "The billing sheet was removed from this report." });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets/missing-photos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+    },
+    onError: (err) => {
+      toast({ title: "Could not mark sheet", description: err.message, variant: "destructive" });
+    },
+  });
 
   const { data, isLoading } = useQuery<MissingPhotosResponse>({
     queryKey: ["/api/billing-sheets/missing-photos"],
@@ -397,14 +410,27 @@ export default function MissingPhotosReport() {
                                   </span>
                                 </div>
                               </div>
-                              <Button
-                                size="sm"
-                                onClick={() => setViewingSheet(sheet)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
-                                data-testid={`button-open-sheet-${sheet.id}`}
-                              >
-                                <Camera className="w-4 h-4 mr-1" /> Add Photos
-                              </Button>
+                              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                                <Button
+                                  size="sm"
+                                  onClick={() => setViewingSheet(sheet)}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
+                                  data-testid={`button-open-sheet-${sheet.id}`}
+                                >
+                                  <Camera className="w-4 h-4 mr-1" /> Add Photos
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setPendingNoPhotosSheet(sheet)}
+                                  disabled={noPhotosNeededMutation.isPending && noPhotosNeededMutation.variables === sheet.id}
+                                  className="w-full sm:w-auto"
+                                  data-testid={`button-no-photos-needed-${sheet.id}`}
+                                >
+                                  <CheckCircle2 className="w-4 h-4 mr-1" />
+                                  {noPhotosNeededMutation.isPending && noPhotosNeededMutation.variables === sheet.id ? "Marking…" : "No Photos Needed"}
+                                </Button>
+                              </div>
                             </div>
                           </CardContent>
                         </Card>
@@ -498,6 +524,37 @@ export default function MissingPhotosReport() {
               data-testid="button-confirm-notify"
             >
               {channelChoice === 'both' ? 'Send email + SMS' : channelChoice === 'sms' ? 'Send SMS' : 'Send emails'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!pendingNoPhotosSheet} onOpenChange={(open) => { if (!open) setPendingNoPhotosSheet(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark as 'No Photos Needed'</AlertDialogTitle>
+            <AlertDialogDescription>
+              Mark this billing sheet as not needing photos? It will be removed from this list.
+              {pendingNoPhotosSheet ? (
+                <span className="block mt-2 text-gray-700">
+                  <strong>{pendingNoPhotosSheet.billingNumber}</strong>
+                  {pendingNoPhotosSheet.customerName ? ` — ${pendingNoPhotosSheet.customerName}` : ''}
+                </span>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-no-photos-needed">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingNoPhotosSheet) {
+                  noPhotosNeededMutation.mutate(pendingNoPhotosSheet.id);
+                  setPendingNoPhotosSheet(null);
+                }
+              }}
+              data-testid="button-confirm-no-photos-needed"
+            >
+              Mark as not needed
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

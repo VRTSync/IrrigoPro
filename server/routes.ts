@@ -7112,6 +7112,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const candidates = all.filter(s => {
         const created = s.createdAt ? new Date(s.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        // Task #197 — admins/managers can mark a billing sheet as not
+        // needing photos; once flagged it should disappear from the report
+        // (JSON and CSV) and stay off the list permanently.
+        if (s.noPhotosNeeded) return false;
         // Task #192 — once a billing sheet has been billed, chasing photos
         // for it is pointless. Hide anything that's been billed (status,
         // invoice link, or billed timestamp).
@@ -7239,6 +7243,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const candidates = all.filter(s => {
         const created = s.createdAt ? new Date(s.createdAt) : null;
         if (!created || created >= PHOTO_FIX_CUTOFF) return false;
+        // Task #197 — billing sheets explicitly flagged as not needing
+        // photos must be excluded from technician outreach.
+        if (s.noPhotosNeeded) return false;
         const photos = Array.isArray(s.photos) ? s.photos : [];
         return photos.length === 0;
       });
@@ -7419,6 +7426,59 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error('Error sending missing-photos notifications:', error);
       res.status(500).json({ message: "Failed to send notifications" });
+    }
+  });
+
+  // Task #197 — flag a billing sheet as not requiring photos so it disappears
+  // from the missing-photos report. Restricted to the same four roles that
+  // can view the report. Captures the acting user + timestamp on the row.
+  // Tenant-scoped: non-super-admin users may only mark sheets whose
+  // technician belongs to their own company.
+  app.post("/api/billing-sheets/:id/no-photos-needed", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid billing sheet ID" });
+      }
+
+      const existing = await storage.getBillingSheetById(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+
+      // Tenant scoping: non-super_admin users can only mark sheets whose
+      // assigned technician belongs to the same company. Without this guard,
+      // a manager from one company could clear another company's sheets.
+      const isSuperAdmin = role === 'super_admin';
+      if (!isSuperAdmin) {
+        const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
+        if (requesterCompanyId == null) {
+          return res.status(403).json({ message: "Access denied: no company context." });
+        }
+        const tech = existing.technicianId ? await storage.getUser(existing.technicianId) : null;
+        if (!tech || tech.companyId !== requesterCompanyId) {
+          return res.status(403).json({ message: "Access denied." });
+        }
+      }
+
+      const userId = parseInt(String(req.authenticatedUserId ?? req.headers['x-user-id']));
+      if (!userId || isNaN(userId)) {
+        return res.status(401).json({ message: "Authentication required - user ID not found." });
+      }
+
+      const updated = await storage.markBillingSheetNoPhotosNeeded(id, userId);
+      if (!updated) {
+        return res.status(404).json({ message: "Billing sheet not found" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error('Error marking billing sheet as no-photos-needed:', error);
+      res.status(500).json({ message: "Failed to mark billing sheet" });
     }
   });
 

@@ -213,6 +213,11 @@ export const billingSheets = pgTable("billing_sheets", {
   approvedTotal: decimal("approved_total", { precision: 10, scale: 2 }), // Total at time of approval
   approvedPartsSnapshot: text("approved_parts_snapshot"), // JSON snapshot of parts at approval
   approvedLaborSnapshot: text("approved_labor_snapshot"), // JSON snapshot of labor details at approval
+  // Task #197 — admin/manager-flagged "no photos needed" so legitimately
+  // photo-less billing sheets can be cleared off the missing-photos report.
+  noPhotosNeeded: boolean("no_photos_needed").notNull().default(false),
+  noPhotosNeededBy: integer("no_photos_needed_by").references(() => users.id),
+  noPhotosNeededAt: timestamp("no_photos_needed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -769,7 +774,17 @@ export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 export const insertInvoicePdfSchema = createInsertSchema(invoicePdfs).omit({ id: true, createdAt: true });
-export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({ id: true, billingNumber: true, createdAt: true, updatedAt: true });
+export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({
+  id: true,
+  billingNumber: true,
+  createdAt: true,
+  updatedAt: true,
+  // Task #197 — no-photos-needed audit fields are stamped only via the
+  // dedicated POST /api/billing-sheets/:id/no-photos-needed endpoint.
+  noPhotosNeeded: true,
+  noPhotosNeededBy: true,
+  noPhotosNeededAt: true,
+});
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
 export const insertManualPartReviewSchema = createInsertSchema(manualPartReviews).omit({ id: true, createdAt: true });
 export const insertAiGenerationLogSchema = createInsertSchema(aiGenerationLogs).omit({ id: true, createdAt: true });
