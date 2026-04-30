@@ -58,7 +58,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins, including a photo pipeline for processing and storage.
 - **Authoritative Pricing & $0 Catalog Audit**: Server-side enforcement of catalog pricing for line items and auditing mechanism for $0 catalog prices.
-- **Labor Rate Audit**: Admin page (`/billing-sheets/labor-rate-audit`) that lists un-invoiced work orders and billing sheets whose stored `labor_rate` no longer matches the customer's current standard or emergency rate. Supports per-row Standard/Emergency override and an apply-repair that re-syncs `labor_rate`, `applied_labor_rate` (WO only), `labor_subtotal`, and `total_amount`. Backed by `getLaborRateMismatchTickets` / `repriceLaborRateMismatches` in `server/storage.ts` and `GET|POST /api/admin/labor-rate-audit` in `server/routes.ts`.
+- **Labor Rate Audit**: Admin page that lists un-invoiced work orders and billing sheets whose stored `labor_rate` no longer matches the customer's current standard or emergency rate. Supports per-row Standard/Emergency override and an apply-repair that re-syncs `labor_rate`, `applied_labor_rate` (WO only), `labor_subtotal`, and `total_amount`.
 
 ## External Dependencies
 
