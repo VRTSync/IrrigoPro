@@ -441,7 +441,9 @@ export default function CustomerBilling() {
       if (statusFilter !== "all") {
         switch (statusFilter) {
           case "has_unbilled":
-            if ((preview.combinedTotal || 0) <= 0) return false;
+            // Derive from the two component subtotals to stay in single-source
+            // sync with the displayed Total cells (no reliance on combinedTotal).
+            if (((Number(preview.approvedTotal) || 0) + (Number(preview.unapprovedTotal) || 0)) <= 0) return false;
             break;
           case "no_activity":
             if (preview.totalWorkOrders > 0) return false;
@@ -557,7 +559,16 @@ export default function CustomerBilling() {
       const preview = getCustomerPreview(c);
       return (preview.approvedTotal || 0) > 0 || (preview.unapprovedTotal || 0) > 0;
     })
-    .sort((a, b) => getCustomerPreview(b).combinedTotal - getCustomerPreview(a).combinedTotal);
+    .sort((a, b) => {
+      // Sort by displayed Total (approved + unapproved) so list order tracks
+      // the same number shown to the user, not the separately-computed
+      // combinedTotal field.
+      const pa = getCustomerPreview(a);
+      const pb = getCustomerPreview(b);
+      const ta = (Number(pa.approvedTotal) || 0) + (Number(pa.unapprovedTotal) || 0);
+      const tb = (Number(pb.approvedTotal) || 0) + (Number(pb.unapprovedTotal) || 0);
+      return tb - ta;
+    });
 
   const otherCustomers = filteredCustomers
     .filter(c => {
@@ -962,7 +973,7 @@ export default function CustomerBilling() {
                   )}
                   {(() => {
                     const preview = getCustomerPreview(selectedCustomer);
-                    const combined = (preview.combinedTotal || 0);
+                    const combined = (Number(preview.approvedTotal) || 0) + (Number(preview.unapprovedTotal) || 0);
                     return combined > 0 ? (
                       <div className="mt-2 flex gap-2 flex-wrap">
                         {(preview.approvedTotal || 0) > 0 && (
@@ -1540,7 +1551,7 @@ export default function CustomerBilling() {
                             </div>
                             <div className="flex items-center justify-between border-t border-gray-100 pt-0.5">
                               <span className="text-xs text-orange-700 font-medium">Total:</span>
-                              <span className="text-xs font-semibold text-orange-800">{formatCurrency(preview.combinedTotal || 0)}</span>
+                              <span className="text-xs font-semibold text-orange-800">{formatCurrency((Number(preview.approvedTotal) || 0) + (Number(preview.unapprovedTotal) || 0))}</span>
                             </div>
                             {preview.lastInvoiceDate && (
                               <div className="flex items-center justify-between">
