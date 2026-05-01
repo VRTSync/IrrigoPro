@@ -103,11 +103,17 @@ export default function ManagerDashboard() {
   const openWorkOrders = (workOrders as WorkOrder[]).filter((wo) =>
     OPEN_STATUSES.includes(wo.status)
   );
+  // Match server/routes.ts billing-preview semantics exactly: a record is
+  // "ready for billing" only when its status is in BILLING_READY_STATUSES AND
+  // it has not already been attached to an invoice. Without the invoiceId
+  // null-check, this count drifts above the Customer Billing command center
+  // total because already-invoiced records that retain an "approved" status
+  // would be double-counted.
   const billingReadyWorkOrders = (workOrders as WorkOrder[]).filter((wo) =>
-    BILLING_READY_STATUSES.includes(wo.status)
+    BILLING_READY_STATUSES.includes(wo.status) && wo.invoiceId == null
   );
   const billingReadyBillingSheets = (billingSheets as BillingSheet[]).filter((bs) =>
-    BILLING_READY_STATUSES.includes(bs.status)
+    BILLING_READY_STATUSES.includes(bs.status) && bs.invoiceId == null
   );
 
   const needsReviewCount = attentionWorkOrders.length + attentionBillingSheets.length;

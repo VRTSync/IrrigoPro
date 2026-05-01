@@ -2118,13 +2118,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
           const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
 
-          // Real drift guard: warn when any raw totalAmount upstream was non-finite
-          // (NaN / "TBD" / Infinity / etc) and was silently coerced to 0 by safeAmount.
-          // This is the actual data-quality signal — the previous combinedTotal-vs-sum
-          // check was a tautology (combinedTotal is *defined* as approved + unapproved
-          // a few lines up, so the comparison can never trip). De-dupe by source so a
-          // single bad row doesn't flood the log when it's referenced multiple times
-          // across the date-filtered + all-time + current-month rollups.
+          // Drift guards — two complementary checks for the same invariant.
+          //
+          // Guard 1 (coercion log): warn when any raw totalAmount upstream was
+          // non-finite (NaN / "TBD" / Infinity / etc) and was silently coerced
+          // to 0 by safeAmount. This is the actual data-quality signal — it
+          // catches the upstream cause of the original bug before the math is
+          // even attempted. De-duped by source so a single bad row doesn't
+          // flood the log when it's referenced across multiple rollups.
           if (coercions.length > 0) {
             const uniqueSources = Array.from(new Set(coercions.map(c => c.source)));
             const sample = coercions.slice(0, 3).map(c =>
@@ -2134,6 +2135,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
               `[billing-preview] customer ${customer.id}: coerced ${coercions.length} ` +
               `non-finite totalAmount value(s) to 0 across ${uniqueSources.length} source ` +
               `record(s). Sample: ${sample.join(', ')}${coercions.length > 3 ? ', …' : ''}`
+            );
+          }
+          //
+          // Guard 2 (invariant log): explicitly assert that combinedTotal ===
+          // approvedTotal + unapprovedTotal at the moment we serialize the
+          // response. With the math written as `const combinedTotal = approvedTotal
+          // + unapprovedTotal;` this looks tautological, but it intentionally
+          // pins the invariant per Task #209's acceptance criteria so any
+          // future refactor that, for example, switches combinedTotal to a
+          // separately-derived backend aggregate immediately surfaces drift in
+          // the logs instead of silently mis-totalling on the customer-facing
+          // command center. 0.005 tolerance covers IEEE-754 rounding when
+          // summing many decimal totalAmount strings.
+          const expectedCombined = approvedTotal + unapprovedTotal;
+          if (Math.abs(combinedTotal - expectedCombined) > 0.005) {
+            console.warn(
+              `[billing-preview] customer ${customer.id}: combined-vs-sum drift — ` +
+              `combinedTotal=${combinedTotal.toFixed(2)} expected=${expectedCombined.toFixed(2)} ` +
+              `(approvedTotal=${approvedTotal.toFixed(2)}, unapprovedTotal=${unapprovedTotal.toFixed(2)})`
             );
           }
 
