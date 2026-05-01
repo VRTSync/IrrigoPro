@@ -2134,14 +2134,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             );
           }
           // Guard 2: combinedTotal (independent pass) must equal approvedTotal + unapprovedTotal.
+          // The independent pass exists only as a drift sentinel — log if it diverges,
+          // then normalize the API payload to the subtotal sum so any future surface
+          // that reads combinedTotal directly cannot disagree with Approved + Unapproved.
           const expectedCombined = approvedTotal + unapprovedTotal;
           if (Math.abs(combinedTotal - expectedCombined) > 0.005) {
             console.warn(
               `[billing-preview] customer ${customer.id}: combined-vs-sum drift — ` +
-              `combinedTotal=${combinedTotal.toFixed(2)} expected=${expectedCombined.toFixed(2)} ` +
-              `(approvedTotal=${approvedTotal.toFixed(2)}, unapprovedTotal=${unapprovedTotal.toFixed(2)})`
+              `independent combinedTotal=${combinedTotal.toFixed(2)} ` +
+              `expected=${expectedCombined.toFixed(2)} ` +
+              `(approvedTotal=${approvedTotal.toFixed(2)}, unapprovedTotal=${unapprovedTotal.toFixed(2)}) ` +
+              `— payload normalized to expected.`
             );
           }
+          const combinedTotalForPayload = expectedCombined;
 
           return {
             id: customer.id,
@@ -2151,7 +2157,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unbilledAmount,
             approvedTotal,
             unapprovedTotal,
-            combinedTotal,
+            combinedTotal: combinedTotalForPayload,
             totalUnbilled,
             currentMonthUnbilled,
             currentMonthBilling: 0,
