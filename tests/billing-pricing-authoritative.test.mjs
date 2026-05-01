@@ -695,3 +695,89 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task #209: billing-preview aggregation invariants
+//
+// Locks in two guarantees that the orange "Total / Approved / Unapproved" box
+// (and the Billing Dashboard tiles) depend on:
+//   1. Every per-customer money field returned is a finite Number, never NaN.
+//   2. combinedTotal is computed independently of the two subtotals, but must
+//      always equal approvedTotal + unapprovedTotal (within rounding).
+//      This is the regression sentinel for the original Task #209 bug
+//      ("Total < Approved + Unapproved").
+//   3. totalUnbilled (no date filter) >= the date-windowed combinedTotal,
+//      and currentMonthUnbilled is also finite.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("billing-preview aggregation invariants (Task #209)", () => {
+  const TOL = 0.005;
+
+  test("every customer's money fields are finite and combinedTotal === approved + unapproved", async () => {
+    const res = await api(
+      "GET",
+      "/api/customers/billing-preview?dateFilter=all",
+    );
+    assert.equal(
+      res.status,
+      200,
+      `billing-preview must return 200, got ${res.status}: ${JSON.stringify(res.body)}`,
+    );
+
+    const previews = Array.isArray(res.body) ? res.body : [];
+    assert.ok(
+      previews.length > 0,
+      "billing-preview should return at least one customer (test seeds one)",
+    );
+
+    const moneyFields = [
+      "approvedTotal",
+      "unapprovedTotal",
+      "combinedTotal",
+      "totalUnbilled",
+      "currentMonthUnbilled",
+    ];
+
+    for (const p of previews) {
+      for (const f of moneyFields) {
+        const n = Number(p[f]);
+        assert.ok(
+          Number.isFinite(n),
+          `customer ${p.id} field "${f}" must be a finite number, got ${JSON.stringify(p[f])}`,
+        );
+      }
+
+      const approved = Number(p.approvedTotal) || 0;
+      const unapproved = Number(p.unapprovedTotal) || 0;
+      const combined = Number(p.combinedTotal) || 0;
+      assert.ok(
+        Math.abs(combined - (approved + unapproved)) <= TOL,
+        `customer ${p.id}: combinedTotal (${combined}) must equal ` +
+          `approvedTotal + unapprovedTotal (${approved} + ${unapproved} = ${approved + unapproved})`,
+      );
+
+      const totalUnbilled = Number(p.totalUnbilled) || 0;
+      assert.ok(
+        totalUnbilled + TOL >= combined,
+        `customer ${p.id}: totalUnbilled (${totalUnbilled}, no date filter) ` +
+          `must be >= combinedTotal (${combined}) for dateFilter=all`,
+      );
+    }
+  });
+
+  test("dateFilter=all: totalUnbilled equals combinedTotal for every customer", async () => {
+    const res = await api(
+      "GET",
+      "/api/customers/billing-preview?dateFilter=all",
+    );
+    assert.equal(res.status, 200);
+    for (const p of (res.body ?? [])) {
+      const combined = Number(p.combinedTotal) || 0;
+      const totalUnbilled = Number(p.totalUnbilled) || 0;
+      assert.ok(
+        Math.abs(totalUnbilled - combined) <= TOL,
+        `customer ${p.id}: with dateFilter=all, totalUnbilled (${totalUnbilled}) ` +
+          `must equal combinedTotal (${combined})`,
+      );
+    }
+  });
+});
