@@ -2028,12 +2028,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Coerce stored decimal/text totalAmount to a finite number; track
           // every non-finite raw value so we can warn per customer afterwards.
-          const coercions: Array<{ source: string; raw: unknown }> = [];
+          // Dedupe by source so a single bad row doesn't multiply across the
+          // approved / unapproved / independent-combined / current-month passes.
+          const coercions = new Map<string, unknown>();
           const safeAmount = (raw: unknown, source: string): number => {
             if (raw === null || raw === undefined) return 0;
             const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
             if (!Number.isFinite(n)) {
-              coercions.push({ source, raw });
+              if (!coercions.has(source)) coercions.set(source, raw);
               return 0;
             }
             return n;
@@ -2120,15 +2122,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
 
           // Guard 1: warn when any raw totalAmount was non-finite and coerced to 0.
-          if (coercions.length > 0) {
-            const uniqueSources = Array.from(new Set(coercions.map(c => c.source)));
-            const sample = coercions.slice(0, 3).map(c =>
-              `${c.source}=${typeof c.raw === 'string' ? JSON.stringify(c.raw) : String(c.raw)}`
+          if (coercions.size > 0) {
+            const entries = Array.from(coercions.entries());
+            const sample = entries.slice(0, 3).map(([src, raw]) =>
+              `${src}=${typeof raw === 'string' ? JSON.stringify(raw) : String(raw)}`
             );
             console.warn(
-              `[billing-preview] customer ${customer.id}: coerced ${coercions.length} ` +
-              `non-finite totalAmount value(s) to 0 across ${uniqueSources.length} source ` +
-              `record(s). Sample: ${sample.join(', ')}${coercions.length > 3 ? ', …' : ''}`
+              `[billing-preview] customer ${customer.id}: coerced non-finite totalAmount ` +
+              `to 0 on ${coercions.size} distinct source record(s). ` +
+              `Sample: ${sample.join(', ')}${entries.length > 3 ? ', …' : ''}`
             );
           }
           // Guard 2: combinedTotal (independent pass) must equal approvedTotal + unapprovedTotal.
