@@ -19,7 +19,10 @@ import { format } from "date-fns";
 
 const ATTENTION_STATUSES = ["work_completed", "pending_manager_review", "submitted"];
 const OPEN_STATUSES = ["assigned", "in_progress"];
-const BILLING_READY_STATUSES = ["approved_passed_to_billing"];
+// Mirror server/routes.ts billing-preview: include the legacy 'approved' status
+// alongside 'approved_passed_to_billing' so the dashboard "Ready for Billing"
+// count matches the Customer Billing command center for the same data window.
+const BILLING_READY_STATUSES = ["approved_passed_to_billing", "approved"];
 
 function formatStatus(status: string) {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

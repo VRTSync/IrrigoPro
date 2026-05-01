@@ -2031,11 +2031,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // and parseFloat returns NaN. NaN then JSON-serializes to null, so the
           // frontend's `(p.field || 0)` quietly turns it into 0 — which produced the
           // observed Approved / Total mismatch in production. Always return 0 for
-          // any non-finite value so the three totals stay reconcilable.
-          const safeAmount = (raw: unknown): number => {
+          // any non-finite value so the three totals stay reconcilable, and track
+          // every coercion so we can log a real warning per customer afterwards
+          // (this is the actual data-quality signal — not the tautological
+          // approvedTotal+unapprovedTotal vs combinedTotal check).
+          const coercions: Array<{ source: string; raw: unknown }> = [];
+          const safeAmount = (raw: unknown, source: string): number => {
             if (raw === null || raw === undefined) return 0;
             const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
-            return Number.isFinite(n) ? n : 0;
+            if (!Number.isFinite(n)) {
+              coercions.push({ source, raw });
+              return 0;
+            }
+            return n;
           };
 
           // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
@@ -2048,8 +2056,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
           const unbilledAmount =
-            unbilledWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount), 0) +
-            unbilledBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount), 0);
+            unbilledWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
+            unbilledBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
 
           // Approved total: approved_passed_to_billing with no invoiceId (same as unbilledAmount)
           const approvedTotal = unbilledAmount;
@@ -2062,20 +2070,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (bs.status === 'pending_manager_review' || bs.status === 'completed' || bs.status === 'submitted') && !bs.invoiceId
           );
           const unapprovedTotal =
-            unapprovedWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount), 0) +
-            unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount), 0);
+            unapprovedWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
+            unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
 
           const combinedTotal = approvedTotal + unapprovedTotal;
-
-          // Drift guard: combinedTotal must always equal approvedTotal + unapprovedTotal.
-          // If this ever fires, something upstream produced a non-finite amount that
-          // slipped past safeAmount — log enough context to trace it without leaking PII.
-          if (Math.abs(combinedTotal - (approvedTotal + unapprovedTotal)) > 0.005) {
-            console.warn(
-              `[billing-preview] combinedTotal drift for customer ${customer.id}: ` +
-              `approved=${approvedTotal} unapproved=${unapprovedTotal} combined=${combinedTotal}`
-            );
-          }
 
           // ── Two extra rollups exposed alongside the date-filtered totals ──
           // 1. totalUnbilled    — every approved + unapproved ticket regardless of
@@ -2101,8 +2099,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
           );
           const allTimeApprovedTotal =
-            allTimeApprovedWOs.reduce((s, wo) => s + safeAmount(wo.totalAmount), 0) +
-            allTimeApprovedBSs.reduce((s, bs) => s + safeAmount(bs.totalAmount), 0);
+            allTimeApprovedWOs.reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
+            allTimeApprovedBSs.reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
 
           // unapprovedTotal is already unfiltered, so total unbilled is just the sum
           const totalUnbilled = allTimeApprovedTotal + unapprovedTotal;
@@ -2110,15 +2108,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Current-month slice across both buckets
           const currentMonthApprovedTotal =
             allTimeApprovedWOs.filter(wo => inCurrentMonth(woAnyDate(wo)))
-              .reduce((s, wo) => s + safeAmount(wo.totalAmount), 0) +
+              .reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
             allTimeApprovedBSs.filter(bs => inCurrentMonth(bsAnyDate(bs)))
-              .reduce((s, bs) => s + safeAmount(bs.totalAmount), 0);
+              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
           const currentMonthUnapprovedTotal =
             unapprovedWorkOrders.filter(wo => inCurrentMonth(woAnyDate(wo)))
-              .reduce((s, wo) => s + safeAmount(wo.totalAmount), 0) +
+              .reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
             unapprovedBillingSheets.filter(bs => inCurrentMonth(bsAnyDate(bs)))
-              .reduce((s, bs) => s + safeAmount(bs.totalAmount), 0);
+              .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
           const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
+
+          // Real drift guard: warn when any raw totalAmount upstream was non-finite
+          // (NaN / "TBD" / Infinity / etc) and was silently coerced to 0 by safeAmount.
+          // This is the actual data-quality signal — the previous combinedTotal-vs-sum
+          // check was a tautology (combinedTotal is *defined* as approved + unapproved
+          // a few lines up, so the comparison can never trip). De-dupe by source so a
+          // single bad row doesn't flood the log when it's referenced multiple times
+          // across the date-filtered + all-time + current-month rollups.
+          if (coercions.length > 0) {
+            const uniqueSources = Array.from(new Set(coercions.map(c => c.source)));
+            const sample = coercions.slice(0, 3).map(c =>
+              `${c.source}=${typeof c.raw === 'string' ? JSON.stringify(c.raw) : String(c.raw)}`
+            );
+            console.warn(
+              `[billing-preview] customer ${customer.id}: coerced ${coercions.length} ` +
+              `non-finite totalAmount value(s) to 0 across ${uniqueSources.length} source ` +
+              `record(s). Sample: ${sample.join(', ')}${coercions.length > 3 ? ', …' : ''}`
+            );
+          }
 
           return {
             id: customer.id,
