@@ -2026,6 +2026,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return d >= startDate && d <= endDate;
           };
 
+          // Safely parse a stored decimal/text totalAmount into a finite number.
+          // parseFloat(null|undefined|'') is NaN; '"TBD" || "0"' short-circuits to "TBD"
+          // and parseFloat returns NaN. NaN then JSON-serializes to null, so the
+          // frontend's `(p.field || 0)` quietly turns it into 0 — which produced the
+          // observed Approved / Total mismatch in production. Always return 0 for
+          // any non-finite value so the three totals stay reconcilable.
+          const safeAmount = (raw: unknown): number => {
+            if (raw === null || raw === undefined) return 0;
+            const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+            return Number.isFinite(n) ? n : 0;
+          };
+
           // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
           const unbilledWorkOrders = workOrders.filter(wo =>
             (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId && woInRange(wo)
@@ -2033,16 +2045,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const unbilledBillingSheets = billingSheets.filter(bs =>
             (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId && bsInRange(bs)
           );
-          
+
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
-          const unbilledAmount = 
-            unbilledWorkOrders.reduce((sum, wo) => {
-              return sum + parseFloat(wo.totalAmount || '0');
-            }, 0) +
-            unbilledBillingSheets.reduce((sum, bs) => {
-              // Use stored totalAmount as the authoritative billing sheet total
-              return sum + parseFloat(bs.totalAmount || '0');
-            }, 0);
+          const unbilledAmount =
+            unbilledWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount), 0) +
+            unbilledBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount), 0);
 
           // Approved total: approved_passed_to_billing with no invoiceId (same as unbilledAmount)
           const approvedTotal = unbilledAmount;
@@ -2055,10 +2062,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (bs.status === 'pending_manager_review' || bs.status === 'completed' || bs.status === 'submitted') && !bs.invoiceId
           );
           const unapprovedTotal =
-            unapprovedWorkOrders.reduce((sum, wo) => sum + parseFloat(wo.totalAmount || '0'), 0) +
-            unapprovedBillingSheets.reduce((sum, bs) => sum + parseFloat(bs.totalAmount || '0'), 0);
+            unapprovedWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount), 0) +
+            unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount), 0);
 
           const combinedTotal = approvedTotal + unapprovedTotal;
+
+          // Drift guard: combinedTotal must always equal approvedTotal + unapprovedTotal.
+          // If this ever fires, something upstream produced a non-finite amount that
+          // slipped past safeAmount — log enough context to trace it without leaking PII.
+          if (Math.abs(combinedTotal - (approvedTotal + unapprovedTotal)) > 0.005) {
+            console.warn(
+              `[billing-preview] combinedTotal drift for customer ${customer.id}: ` +
+              `approved=${approvedTotal} unapproved=${unapprovedTotal} combined=${combinedTotal}`
+            );
+          }
 
           return {
             id: customer.id,

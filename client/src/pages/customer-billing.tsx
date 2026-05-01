@@ -629,33 +629,38 @@ export default function CustomerBilling() {
               <h1 className="text-xl font-bold text-gray-900 mb-4">Customer Billing</h1>
               
               {/* Summary Stats */}
-              {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
+              {!loadingCustomers && !loadingPreviews && customers.length > 0 && (() => {
+                const summaryApproved = customerPreviews.reduce((sum, p) => sum + (Number(p.approvedTotal) || 0), 0);
+                const summaryUnapproved = customerPreviews.reduce((sum, p) => sum + (Number(p.unapprovedTotal) || 0), 0);
+                const summaryTotal = summaryApproved + summaryUnapproved;
+                return (
                 <div className="mb-4">
                   <div className="bg-orange-50 p-3 rounded-lg">
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs text-green-700 font-medium">Approved</span>
                       <span className="text-xs font-bold text-green-800">
-                        {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.approvedTotal || 0), 0))}
+                        {formatCurrency(summaryApproved)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs text-yellow-700 font-medium">Unapproved</span>
                       <span className="text-xs font-bold text-yellow-800">
-                        {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.unapprovedTotal || 0), 0))}
+                        {formatCurrency(summaryUnapproved)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
                       <span className="text-xs text-orange-700 font-semibold">Total</span>
                       <span className="text-xs font-bold text-orange-800">
-                        {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.combinedTotal || 0), 0))}
+                        {formatCurrency(summaryTotal)}
                       </span>
                     </div>
                     <div className="text-xs text-orange-600 mt-2 text-center">
-                      {customerPreviews.filter(p => (p.approvedTotal || 0) > 0).length} customers need billing
+                      {customerPreviews.filter(p => (Number(p.approvedTotal) || 0) > 0).length} customers need billing
                     </div>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* Search Bar */}
               <div className="relative mb-4">
@@ -811,8 +816,8 @@ export default function CustomerBilling() {
                               <div className="flex items-center justify-between mb-1">
                                 <div className="font-medium text-base text-gray-900">{customer.irrigoName || customer.name}</div>
                                 {(() => {
-                                  const approved = preview.approvedTotal || 0;
-                                  const unapproved = preview.unapprovedTotal || 0;
+                                  const approved = Number(preview.approvedTotal) || 0;
+                                  const unapproved = Number(preview.unapprovedTotal) || 0;
                                   if (approved === 0 && unapproved === 0) {
                                     return <Badge className="bg-gray-100 text-gray-600 text-xs">Up to Date</Badge>;
                                   } else if (approved === 0 && unapproved > 0) {
@@ -828,18 +833,27 @@ export default function CustomerBilling() {
                               {customer.phone && (
                                 <div className="text-sm text-gray-600 mb-1">{customer.phone}</div>
                               )}
-                              <div className="flex items-center justify-between text-xs mb-0.5">
-                                <span className="text-green-700">Approved:</span>
-                                <span className="font-medium text-green-800">{formatCurrency(preview.approvedTotal || 0)}</span>
-                              </div>
-                              <div className="flex items-center justify-between text-xs mb-0.5">
-                                <span className="text-yellow-700">Unapproved:</span>
-                                <span className="font-medium text-yellow-800">{formatCurrency(preview.unapprovedTotal || 0)}</span>
-                              </div>
-                              <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-1 mt-0.5">
-                                <span className="text-orange-700 font-medium">Total:</span>
-                                <span className="font-semibold text-orange-800">{formatCurrency(preview.combinedTotal || 0)}</span>
-                              </div>
+                              {(() => {
+                                const cardApproved = Number(preview.approvedTotal) || 0;
+                                const cardUnapproved = Number(preview.unapprovedTotal) || 0;
+                                const cardTotal = cardApproved + cardUnapproved;
+                                return (
+                                  <>
+                                    <div className="flex items-center justify-between text-xs mb-0.5">
+                                      <span className="text-green-700">Approved:</span>
+                                      <span className="font-medium text-green-800">{formatCurrency(cardApproved)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-xs mb-0.5">
+                                      <span className="text-yellow-700">Unapproved:</span>
+                                      <span className="font-medium text-yellow-800">{formatCurrency(cardUnapproved)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-1 mt-0.5">
+                                      <span className="text-orange-700 font-medium">Total:</span>
+                                      <span className="font-semibold text-orange-800">{formatCurrency(cardTotal)}</span>
+                                    </div>
+                                  </>
+                                );
+                              })()}
                               {customer.address && (
                                 <div className="text-xs text-gray-500 mt-1 truncate">{customer.address}</div>
                               )}
@@ -1285,33 +1299,38 @@ export default function CustomerBilling() {
 
           
           {/* Summary Stats */}
-          {!loadingCustomers && !loadingPreviews && customers.length > 0 && (
+          {!loadingCustomers && !loadingPreviews && customers.length > 0 && (() => {
+            const summaryApproved = customerPreviews.reduce((sum, p) => sum + (Number(p.approvedTotal) || 0), 0);
+            const summaryUnapproved = customerPreviews.reduce((sum, p) => sum + (Number(p.unapprovedTotal) || 0), 0);
+            const summaryTotal = summaryApproved + summaryUnapproved;
+            return (
             <div className="mb-4">
               <div className="bg-orange-50 p-3 rounded-lg">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-green-700 font-medium">Approved</span>
                   <span className="text-xs font-bold text-green-800">
-                    {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.approvedTotal || 0), 0))}
+                    {formatCurrency(summaryApproved)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-yellow-700 font-medium">Unapproved</span>
                   <span className="text-xs font-bold text-yellow-800">
-                    {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.unapprovedTotal || 0), 0))}
+                    {formatCurrency(summaryUnapproved)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
                   <span className="text-xs text-orange-700 font-semibold">Total</span>
                   <span className="text-xs font-bold text-orange-800">
-                    {formatCurrency(customerPreviews.reduce((sum, p) => sum + (p.combinedTotal || 0), 0))}
+                    {formatCurrency(summaryTotal)}
                   </span>
                 </div>
                 <div className="text-xs text-orange-600 mt-2 text-center">
-                  {customerPreviews.filter(p => (p.approvedTotal || 0) > 0).length} customers need billing
+                  {customerPreviews.filter(p => (Number(p.approvedTotal) || 0) > 0).length} customers need billing
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* Desktop Search Bar */}
           <div className="relative mb-4">
