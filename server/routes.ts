@@ -2026,15 +2026,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return d >= startDate && d <= endDate;
           };
 
-          // Safely parse a stored decimal/text totalAmount into a finite number.
-          // parseFloat(null|undefined|'') is NaN; '"TBD" || "0"' short-circuits to "TBD"
-          // and parseFloat returns NaN. NaN then JSON-serializes to null, so the
-          // frontend's `(p.field || 0)` quietly turns it into 0 — which produced the
-          // observed Approved / Total mismatch in production. Always return 0 for
-          // any non-finite value so the three totals stay reconcilable, and track
-          // every coercion so we can log a real warning per customer afterwards
-          // (this is the actual data-quality signal — not the tautological
-          // approvedTotal+unapprovedTotal vs combinedTotal check).
+          // Coerce stored decimal/text totalAmount to a finite number; track
+          // every non-finite raw value so we can warn per customer afterwards.
           const coercions: Array<{ source: string; raw: unknown }> = [];
           const safeAmount = (raw: unknown, source: string): number => {
             if (raw === null || raw === undefined) return 0;
@@ -2073,15 +2066,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unapprovedWorkOrders.reduce((sum, wo) => sum + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
             unapprovedBillingSheets.reduce((sum, bs) => sum + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
 
-          const combinedTotal = approvedTotal + unapprovedTotal;
+          // Independent accumulation of combinedTotal — single pass over all
+          // four source arrays rather than reusing the approvedTotal /
+          // unapprovedTotal locals. This is what makes the drift guard below
+          // a real invariant check: if any future refactor changes how one
+          // of the four subtotals is computed (e.g. adds tax, swaps the
+          // amount field, applies a discount), this independent sum diverges
+          // and the warn fires.
+          let combinedTotal = 0;
+          for (const wo of unbilledWorkOrders) combinedTotal += safeAmount(wo.totalAmount, `wo:${wo.id}`);
+          for (const bs of unbilledBillingSheets) combinedTotal += safeAmount(bs.totalAmount, `bs:${bs.id}`);
+          for (const wo of unapprovedWorkOrders) combinedTotal += safeAmount(wo.totalAmount, `wo:${wo.id}`);
+          for (const bs of unapprovedBillingSheets) combinedTotal += safeAmount(bs.totalAmount, `bs:${bs.id}`);
 
-          // ── Two extra rollups exposed alongside the date-filtered totals ──
-          // 1. totalUnbilled    — every approved + unapproved ticket regardless of
-          //    date, so the number always matches the Billing Dashboard's
-          //    "all unbilled" figure even when the user has a narrower filter on.
-          // 2. currentMonthUnbilled — same scope but trimmed to the current
-          //    calendar month, so managers can see the running month at a glance
-          //    without having to change the date filter.
+          // Two extra rollups (date-filter independent) exposed alongside the
+          // date-filtered totals: totalUnbilled = all approved+unapproved
+          // regardless of date; currentMonthUnbilled = same scope, current
+          // calendar month only.
           const woAnyDate = (wo: typeof workOrders[0]) =>
             wo.completedAt ? new Date(wo.completedAt) : (wo.createdAt ? new Date(wo.createdAt) : null);
           const bsAnyDate = (bs: typeof billingSheets[0]) =>
@@ -2118,14 +2119,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .reduce((s, bs) => s + safeAmount(bs.totalAmount, `bs:${bs.id}`), 0);
           const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
 
-          // Drift guards — two complementary checks for the same invariant.
-          //
-          // Guard 1 (coercion log): warn when any raw totalAmount upstream was
-          // non-finite (NaN / "TBD" / Infinity / etc) and was silently coerced
-          // to 0 by safeAmount. This is the actual data-quality signal — it
-          // catches the upstream cause of the original bug before the math is
-          // even attempted. De-duped by source so a single bad row doesn't
-          // flood the log when it's referenced across multiple rollups.
+          // Guard 1: warn when any raw totalAmount was non-finite and coerced to 0.
           if (coercions.length > 0) {
             const uniqueSources = Array.from(new Set(coercions.map(c => c.source)));
             const sample = coercions.slice(0, 3).map(c =>
@@ -2137,17 +2131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               `record(s). Sample: ${sample.join(', ')}${coercions.length > 3 ? ', …' : ''}`
             );
           }
-          //
-          // Guard 2 (invariant log): explicitly assert that combinedTotal ===
-          // approvedTotal + unapprovedTotal at the moment we serialize the
-          // response. With the math written as `const combinedTotal = approvedTotal
-          // + unapprovedTotal;` this looks tautological, but it intentionally
-          // pins the invariant per Task #209's acceptance criteria so any
-          // future refactor that, for example, switches combinedTotal to a
-          // separately-derived backend aggregate immediately surfaces drift in
-          // the logs instead of silently mis-totalling on the customer-facing
-          // command center. 0.005 tolerance covers IEEE-754 rounding when
-          // summing many decimal totalAmount strings.
+          // Guard 2: combinedTotal (independent pass) must equal approvedTotal + unapprovedTotal.
           const expectedCombined = approvedTotal + unapprovedTotal;
           if (Math.abs(combinedTotal - expectedCombined) > 0.005) {
             console.warn(
