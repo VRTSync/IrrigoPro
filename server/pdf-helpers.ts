@@ -204,7 +204,12 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
 }
 
 export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, photoDataUris: string[], logoDataUri?: string | null, companyName?: string): string {
-  const workText = bs.aiDetailedDescription || bs.notes || bs.workDescription;
+  // WORK PERFORMED is customer-facing. Source ONLY from technician-authored
+  // fields (`aiDetailedDescription` then `workDescription`) — never from
+  // `bs.notes`, which holds internal manager notes and historically also
+  // accumulated `[timestamp] Auto-repriced …` audit lines from the catalog
+  // and labor-rate audit jobs (Task #210).
+  const workText = bs.aiDetailedDescription || bs.workDescription;
   const workBullets = workText
     ? `<div class="ticket-section">
          <div class="ticket-section-label">WORK PERFORMED</div>

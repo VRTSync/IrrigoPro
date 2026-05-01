@@ -732,6 +732,99 @@ describe('Image and logo fallback — buildPdfViewModel and pdf-helpers', () => 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── Task #210: Internal audit notes must NOT leak into PDF Work Performed ────
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Regression test for the bug that put a line like
+//   `[2026-04-30T17:52:58.296Z] Auto-repriced 3 item(s) from catalog (delta $649.75) by Mike Durrill.`
+// under WORK PERFORMED on a customer-facing invoice PDF.
+//
+// The billing-sheet ticket page used to fall back to `bs.notes` when
+// `aiDetailedDescription` was empty. `notes` is an internal field that the
+// catalog/labor reprice audits also polluted. The fallback has been dropped
+// (Task #210) so even sheets with polluted historical `notes` produce clean
+// customer-facing PDFs.
+
+describe('Task #210 — internal notes do not leak into PDF WORK PERFORMED', () => {
+
+  const AUDIT_LINE_BS = '[2026-04-30T17:52:58.296Z] Auto-repriced 3 item(s) from catalog (delta $649.75) by Mike Durrill.';
+  const AUDIT_LINE_LABOR = '[2026-04-30T18:01:00.000Z] Auto-repriced labor rate from $45.00 to $55.00 (standard) by Mike Durrill.';
+  const HUMAN_NOTE = 'Internal: customer paid in cash on site';
+  const TECHNICIAN_WORK = 'Replaced 3 broken rotor heads in zone 4';
+
+  function makeBsView(overrides) {
+    return Object.assign({
+      billingNumber: 'BS-2026-0088',
+      workDescription: TECHNICIAN_WORK,
+      propertyAddress: '789 Oak Ave',
+      technicianName: 'Tech B',
+      workDate: new Date('2026-04-20'),
+      totalHours: 3,
+      laborRate: 50,
+      aiDetailedDescription: '',
+      notes: '',
+      photos: [],
+      items: [],
+      partsSubtotal: 0,
+      laborSubtotal: 150,
+      rowTotal: 150,
+      approvedBy: null,
+      approvedAt: null,
+    }, overrides || {});
+  }
+
+  test('BS ticket: notes containing only an audit line render no WORK PERFORMED audit text', () => {
+    const bs = makeBsView({
+      aiDetailedDescription: '',
+      workDescription: '',
+      notes: AUDIT_LINE_BS,
+    });
+    const html = ticketPageBS(bs, 'INV-001', []);
+    assert.ok(!html.includes('Auto-repriced'), 'Audit text must never appear in the rendered HTML');
+    assert.ok(!html.includes('Mike Durrill'), 'Audit author must never appear in the rendered HTML');
+    // With no real work text and no fallback to notes, WORK PERFORMED is omitted entirely.
+    assert.ok(!html.includes('WORK PERFORMED'), 'WORK PERFORMED section must be omitted when only audit text exists');
+  });
+
+  test('BS ticket: notes mixing human content + audit line still keep audit text out of WORK PERFORMED', () => {
+    // Mirrors the originally reported BS-2026-0088 shape: workDescription has the
+    // technician's actual work, and `notes` was polluted with an audit line.
+    const bs = makeBsView({
+      workDescription: TECHNICIAN_WORK,
+      notes: `${HUMAN_NOTE}\n${AUDIT_LINE_BS}`,
+    });
+    const html = ticketPageBS(bs, 'INV-001', []);
+    assert.ok(html.includes('WORK PERFORMED'), 'WORK PERFORMED section should render from workDescription');
+    assert.ok(html.includes('Replaced 3 broken rotor heads'), 'Technician work text should render');
+    assert.ok(!html.includes('Auto-repriced'), 'Audit text from notes must never leak into the PDF');
+    assert.ok(!html.includes('Mike Durrill'), 'Audit author must never leak into the PDF');
+    assert.ok(!html.includes(HUMAN_NOTE), 'Internal human notes must not leak either — notes is no longer a source');
+  });
+
+  test('BS ticket: labor-rate audit line in notes also does not leak', () => {
+    const bs = makeBsView({
+      workDescription: TECHNICIAN_WORK,
+      notes: AUDIT_LINE_LABOR,
+    });
+    const html = ticketPageBS(bs, 'INV-001', []);
+    assert.ok(!html.includes('Auto-repriced'), 'Labor-rate audit text must never appear in the rendered HTML');
+    assert.ok(html.includes('Replaced 3 broken rotor heads'), 'Technician work text should still render');
+  });
+
+  test('BS ticket: aiDetailedDescription wins over workDescription, notes still ignored', () => {
+    const bs = makeBsView({
+      aiDetailedDescription: 'AI summary: zone 4 rotor heads replaced and pressure-tested.',
+      workDescription: TECHNICIAN_WORK,
+      notes: AUDIT_LINE_BS,
+    });
+    const html = ticketPageBS(bs, 'INV-001', []);
+    assert.ok(html.includes('AI summary'), 'aiDetailedDescription should be the source of WORK PERFORMED');
+    assert.ok(!html.includes('Auto-repriced'), 'Audit text must never leak');
+  });
+
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ── Helpers for PDF smoke tests ───────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 

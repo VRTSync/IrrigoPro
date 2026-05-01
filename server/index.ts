@@ -464,6 +464,106 @@ async function runStartupMigrations() {
     );
   }
 
+  // Task #210: one-time scrub of historical "[ISO-timestamp] Auto-repriced …"
+  // and "[ISO-timestamp] Auto-repriced labor rate …" lines that the catalog
+  // and labor-rate audit jobs used to append into billing_sheets.notes and
+  // work_orders.notes. The audit trail still lives in [AUDIT] log lines.
+  // Idempotent — recorded in app_settings under SCRUB_AUDIT_NOTES_KEY.
+  const SCRUB_AUDIT_NOTES_KEY = 'scrub-audit-notes-v1';
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const existing = await pool.query(
+      'SELECT value FROM app_settings WHERE key = $1',
+      [SCRUB_AUDIT_NOTES_KEY]
+    );
+    if (existing.rows.length > 0 && existing.rows[0].value === 'completed') {
+      logger.info(`Startup migration '${SCRUB_AUDIT_NOTES_KEY}': already completed, skipping`, 'Server Startup');
+    } else {
+      // Match exactly the two audit-line shapes that storage.ts used to append:
+      //   `[<ISO-timestamp>] Auto-repriced <N> item(s) from catalog (delta $X.YZ) by <actor>.`
+      //   `[<ISO-timestamp>] Auto-repriced labor rate from $X.YZ to $A.BC (<class>) by <actor>.`
+      // The bracketed-timestamp prefix is unique enough that we do not need
+      // multiline anchoring; consume the rest of the line plus the optional
+      // trailing newline. `regexp_replace(..., 'g')` strips every occurrence,
+      // then `btrim` cleans up leftover whitespace and `NULLIF('')` drops
+      // notes that contained only audit text.
+      const auditLineRegex = String.raw`\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z\] Auto-repriced[^\n]*\n?`;
+
+      const sheetsResult = await pool.query(
+        `
+        WITH stripped AS (
+          SELECT
+            id,
+            notes AS old_notes,
+            NULLIF(
+              btrim(regexp_replace(notes, $1, '', 'g')),
+              ''
+            ) AS new_notes
+          FROM billing_sheets
+          WHERE notes ~ $1
+        )
+        UPDATE billing_sheets bs
+        SET notes = s.new_notes
+        FROM stripped s
+        WHERE bs.id = s.id
+          AND COALESCE(bs.notes, '') IS DISTINCT FROM COALESCE(s.new_notes, '')
+        RETURNING bs.id
+        `,
+        [auditLineRegex]
+      );
+
+      const woResult = await pool.query(
+        `
+        WITH stripped AS (
+          SELECT
+            id,
+            notes AS old_notes,
+            NULLIF(
+              btrim(regexp_replace(notes, $1, '', 'g')),
+              ''
+            ) AS new_notes
+          FROM work_orders
+          WHERE notes ~ $1
+        )
+        UPDATE work_orders wo
+        SET notes = s.new_notes
+        FROM stripped s
+        WHERE wo.id = s.id
+          AND COALESCE(wo.notes, '') IS DISTINCT FROM COALESCE(s.new_notes, '')
+        RETURNING wo.id
+        `,
+        [auditLineRegex]
+      );
+
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ($1, 'completed', NOW())
+         ON CONFLICT (key) DO UPDATE SET value = 'completed', updated_at = NOW()`,
+        [SCRUB_AUDIT_NOTES_KEY]
+      );
+
+      logger.info(
+        `Startup migration '${SCRUB_AUDIT_NOTES_KEY}': scrubbed audit-note lines from ${sheetsResult.rowCount ?? 0} billing sheet(s) and ${woResult.rowCount ?? 0} work order(s)`,
+        'Server Startup'
+      );
+      console.log(
+        `[Migration] ${SCRUB_AUDIT_NOTES_KEY}: ${sheetsResult.rowCount ?? 0} billing_sheets, ${woResult.rowCount ?? 0} work_orders cleaned`
+      );
+    }
+  } catch (err) {
+    logger.error(
+      `Startup migration '${SCRUB_AUDIT_NOTES_KEY}' error (non-fatal)`,
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
+
   try {
     const irrigationManagers = await db
       .select({ id: users.id })

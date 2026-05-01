@@ -2599,7 +2599,8 @@ export class DatabaseStorage implements IStorage {
     let grandDifference = 0;
     let totalItemCount = 0;
 
-    const stamp = new Date().toISOString();
+    // Task #210: removed `stamp` (was used to prefix audit text written into
+    // `notes`). Audit lines now live only in `[AUDIT]` console logs.
     const actor = options.performedByName ?? (options.performedByUserId ? `user#${options.performedByUserId}` : 'admin');
 
     type ZeroPriceRow = typeof allBad[number];
@@ -2659,15 +2660,14 @@ export class DatabaseStorage implements IStorage {
               0,
             );
             const trueTotal = oldLaborSubtotal + truePartsSubtotal;
-            const auditNote = `[${stamp}] Auto-repriced ${rows.length} item(s) from catalog (delta $${parentDifference.toFixed(2)}) by ${actor}.`;
-            const mergedNotes = sheet.notes && sheet.notes.trim().length > 0
-              ? `${sheet.notes}\n${auditNote}`
-              : auditNote;
+            // Task #210: do NOT write the audit note into billing_sheets.notes.
+            // That column is shown to managers in the UI and previously leaked
+            // into the customer-facing PDF "WORK PERFORMED" section. The audit
+            // trail still lives in the [AUDIT] log line below.
             await tx.update(billingSheets)
               .set({
                 partsSubtotal: truePartsSubtotal.toFixed(2),
                 totalAmount: trueTotal.toFixed(2),
-                notes: mergedNotes,
               })
               .where(eq(billingSheets.id, sheetId));
             console.log(
@@ -2733,12 +2733,8 @@ export class DatabaseStorage implements IStorage {
               updates.totalAmount = total.toFixed(2);
             }
 
-            const auditNote = `[${stamp}] Auto-repriced ${rows.length} item(s) from catalog (delta $${parentDifference.toFixed(2)}) by ${actor}.`;
-            const mergedNotes = wo.notes && wo.notes.trim().length > 0
-              ? `${wo.notes}\n${auditNote}`
-              : auditNote;
-            updates.notes = mergedNotes;
-
+            // Task #210: do NOT write the audit note into work_orders.notes.
+            // The [AUDIT] log line below preserves the audit trail in server logs.
             await tx.update(workOrders).set(updates).where(eq(workOrders.id, workOrderId));
             console.log(
               `[AUDIT] work_order_repriced workOrderId=${workOrderId} workOrderNumber=${wo.workOrderNumber} ` +
@@ -2945,7 +2941,8 @@ export class DatabaseStorage implements IStorage {
     const skipped: Array<{ source: 'work_order' | 'billing_sheet'; parentId: number; reason: string }> = [];
     let grandDifference = 0;
 
-    const stamp = new Date().toISOString();
+    // Task #210: removed `stamp` (was used to prefix audit text written into
+    // `notes`). Audit lines now live only in `[AUDIT]` console logs.
     const actor = options.performedByName ?? (options.performedByUserId ? `user#${options.performedByUserId}` : 'admin');
 
     // De-duplicate: last classification wins for a given (source, parentId)
@@ -3031,16 +3028,13 @@ export class DatabaseStorage implements IStorage {
         grandDifference += delta;
 
         if (!options.dryRun) {
-          const auditNote = `[${stamp}] Auto-repriced labor rate from $${oldRate.toFixed(2)} to $${newRate.toFixed(2)} (${classification}) by ${actor}.`;
-          const mergedNotes = sheet.notes && sheet.notes.trim().length > 0
-            ? `${sheet.notes}\n${auditNote}`
-            : auditNote;
+          // Task #210: do NOT write the audit note into billing_sheets.notes.
+          // The [AUDIT] log line below preserves the audit trail in server logs.
           await db.update(billingSheets)
             .set({
               laborRate: newRate.toFixed(2),
               laborSubtotal: newLaborSubtotal.toFixed(2),
               totalAmount: newTotalAmount.toFixed(2),
-              notes: mergedNotes,
             })
             .where(eq(billingSheets.id, parentId));
           console.log(
@@ -3120,17 +3114,14 @@ export class DatabaseStorage implements IStorage {
         grandDifference += delta;
 
         if (!options.dryRun) {
-          const auditNote = `[${stamp}] Auto-repriced labor rate from $${oldRate.toFixed(2)} to $${newRate.toFixed(2)} (${classification}) by ${actor}.`;
-          const mergedNotes = wo.notes && wo.notes.trim().length > 0
-            ? `${wo.notes}\n${auditNote}`
-            : auditNote;
+          // Task #210: do NOT write the audit note into work_orders.notes.
+          // The [AUDIT] log line below preserves the audit trail in server logs.
           await db.update(workOrders)
             .set({
               laborRate: newRate.toFixed(2),
               appliedLaborRate: newRate.toFixed(2),
               laborSubtotal: newLaborSubtotal.toFixed(2),
               totalAmount: newTotalAmount.toFixed(2),
-              notes: mergedNotes,
             })
             .where(eq(workOrders.id, parentId));
           console.log(
