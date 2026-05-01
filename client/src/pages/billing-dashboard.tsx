@@ -28,6 +28,8 @@ interface CustomerPreview {
   approvedTotal: number;
   unapprovedTotal: number;
   combinedTotal: number;
+  totalUnbilled?: number;
+  currentMonthUnbilled?: number;
   lastInvoiceDate?: string;
   totalWorkOrders: number;
   pendingWorkOrders: number;
@@ -102,9 +104,14 @@ export default function BillingDashboard() {
   const isLoading = loadingPreviews;
 
   // ── Row 1: Financial Exposure ──────────────────────────────────────────
-  const totalApproved = customerPreviews.reduce((sum, c) => sum + (c.approvedTotal || 0), 0);
-  const totalUnapproved = customerPreviews.reduce((sum, c) => sum + (c.unapprovedTotal || 0), 0);
-  const totalCombined = totalApproved + totalUnapproved;
+  const totalApproved = customerPreviews.reduce((sum, c) => sum + (Number(c.approvedTotal) || 0), 0);
+  const totalUnapproved = customerPreviews.reduce((sum, c) => sum + (Number(c.unapprovedTotal) || 0), 0);
+  // "Total Unbilled" = every approved + unapproved ticket, regardless of date.
+  // The dashboard already pulls dateFilter=all, so this matches approved+unapproved
+  // here, but we still source it from the dedicated backend field so Customer Billing
+  // (which may have a narrower date filter on) reads the same number.
+  const totalUnbilled = customerPreviews.reduce((sum, c) => sum + (Number(c.totalUnbilled) || 0), 0);
+  const totalThisMonth = customerPreviews.reduce((sum, c) => sum + (Number(c.currentMonthUnbilled) || 0), 0);
 
   // ── Row 2: Action Trigger Panel ────────────────────────────────────────
   const customersReadyToBill = customerPreviews.filter((c) => c.approvedTotal > 0).length;
@@ -194,7 +201,7 @@ export default function BillingDashboard() {
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
           <TrendingUp className="w-4 h-4" /> Financial Exposure
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card className="border-l-4 border-l-green-500">
             <CardContent className="pt-5 pb-4">
               <div className="flex items-start justify-between">
@@ -233,14 +240,31 @@ export default function BillingDashboard() {
             <CardContent className="pt-5 pb-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-sm text-gray-500 font-medium">Combined Total</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">
-                    {formatCurrency(totalCombined)}
+                  <p className="text-sm text-gray-500 font-medium">Total Unbilled</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1" data-testid="text-dashboard-total-unbilled">
+                    {formatCurrency(totalUnbilled)}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">All unbilled work</p>
                 </div>
                 <div className="bg-blue-100 p-2 rounded-lg">
                   <DollarSign className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-purple-500">
+            <CardContent className="pt-5 pb-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm text-gray-500 font-medium">This Month</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1" data-testid="text-dashboard-this-month">
+                    {formatCurrency(totalThisMonth)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">Current calendar month</p>
+                </div>
+                <div className="bg-purple-100 p-2 rounded-lg">
+                  <TrendingUp className="w-5 h-5 text-purple-600" />
                 </div>
               </div>
             </CardContent>

@@ -90,6 +90,8 @@ interface CustomerPreview {
   approvedTotal: number;
   unapprovedTotal: number;
   combinedTotal: number;
+  totalUnbilled?: number;
+  currentMonthUnbilled?: number;
   lastInvoiceDate?: string;
   totalWorkOrders: number;
   pendingWorkOrders: number;
@@ -633,6 +635,8 @@ export default function CustomerBilling() {
                 const summaryApproved = customerPreviews.reduce((sum, p) => sum + (Number(p.approvedTotal) || 0), 0);
                 const summaryUnapproved = customerPreviews.reduce((sum, p) => sum + (Number(p.unapprovedTotal) || 0), 0);
                 const summaryTotal = summaryApproved + summaryUnapproved;
+                const summaryTotalUnbilled = customerPreviews.reduce((sum, p) => sum + (Number(p.totalUnbilled) || 0), 0);
+                const summaryThisMonth = customerPreviews.reduce((sum, p) => sum + (Number(p.currentMonthUnbilled) || 0), 0);
                 return (
                 <div className="mb-4">
                   <div className="bg-orange-50 p-3 rounded-lg">
@@ -652,6 +656,18 @@ export default function CustomerBilling() {
                       <span className="text-xs text-orange-700 font-semibold">Total</span>
                       <span className="text-xs font-bold text-orange-800">
                         {formatCurrency(summaryTotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
+                      <span className="text-xs text-blue-700 font-semibold">Total Unbilled</span>
+                      <span className="text-xs font-bold text-blue-800" data-testid="text-mobile-total-unbilled">
+                        {formatCurrency(summaryTotalUnbilled)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs text-purple-700 font-semibold">This Month</span>
+                      <span className="text-xs font-bold text-purple-800" data-testid="text-mobile-this-month">
+                        {formatCurrency(summaryThisMonth)}
                       </span>
                     </div>
                     <div className="text-xs text-orange-600 mt-2 text-center">
@@ -1303,6 +1319,8 @@ export default function CustomerBilling() {
             const summaryApproved = customerPreviews.reduce((sum, p) => sum + (Number(p.approvedTotal) || 0), 0);
             const summaryUnapproved = customerPreviews.reduce((sum, p) => sum + (Number(p.unapprovedTotal) || 0), 0);
             const summaryTotal = summaryApproved + summaryUnapproved;
+            const summaryTotalUnbilled = customerPreviews.reduce((sum, p) => sum + (Number(p.totalUnbilled) || 0), 0);
+            const summaryThisMonth = customerPreviews.reduce((sum, p) => sum + (Number(p.currentMonthUnbilled) || 0), 0);
             return (
             <div className="mb-4">
               <div className="bg-orange-50 p-3 rounded-lg">
@@ -1322,6 +1340,18 @@ export default function CustomerBilling() {
                   <span className="text-xs text-orange-700 font-semibold">Total</span>
                   <span className="text-xs font-bold text-orange-800">
                     {formatCurrency(summaryTotal)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center border-t border-orange-200 pt-1 mt-1">
+                  <span className="text-xs text-blue-700 font-semibold">Total Unbilled</span>
+                  <span className="text-xs font-bold text-blue-800" data-testid="text-desktop-total-unbilled">
+                    {formatCurrency(summaryTotalUnbilled)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-purple-700 font-semibold">This Month</span>
+                  <span className="text-xs font-bold text-purple-800" data-testid="text-desktop-this-month">
+                    {formatCurrency(summaryThisMonth)}
                   </span>
                 </div>
                 <div className="text-xs text-orange-600 mt-2 text-center">

@@ -2077,6 +2077,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
             );
           }
 
+          // ── Two extra rollups exposed alongside the date-filtered totals ──
+          // 1. totalUnbilled    — every approved + unapproved ticket regardless of
+          //    date, so the number always matches the Billing Dashboard's
+          //    "all unbilled" figure even when the user has a narrower filter on.
+          // 2. currentMonthUnbilled — same scope but trimmed to the current
+          //    calendar month, so managers can see the running month at a glance
+          //    without having to change the date filter.
+          const woAnyDate = (wo: typeof workOrders[0]) =>
+            wo.completedAt ? new Date(wo.completedAt) : (wo.createdAt ? new Date(wo.createdAt) : null);
+          const bsAnyDate = (bs: typeof billingSheets[0]) =>
+            bs.workDate ? new Date(bs.workDate) : (bs.createdAt ? new Date(bs.createdAt) : null);
+          const inCurrentMonth = (d: Date | null) => {
+            if (!d) return false;
+            return d >= currentMonthStart && d <= currentDate;
+          };
+
+          // All-time approved (deliberately ignore the user's date filter)
+          const allTimeApprovedWOs = workOrders.filter(wo =>
+            (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
+          );
+          const allTimeApprovedBSs = billingSheets.filter(bs =>
+            (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
+          );
+          const allTimeApprovedTotal =
+            allTimeApprovedWOs.reduce((s, wo) => s + safeAmount(wo.totalAmount), 0) +
+            allTimeApprovedBSs.reduce((s, bs) => s + safeAmount(bs.totalAmount), 0);
+
+          // unapprovedTotal is already unfiltered, so total unbilled is just the sum
+          const totalUnbilled = allTimeApprovedTotal + unapprovedTotal;
+
+          // Current-month slice across both buckets
+          const currentMonthApprovedTotal =
+            allTimeApprovedWOs.filter(wo => inCurrentMonth(woAnyDate(wo)))
+              .reduce((s, wo) => s + safeAmount(wo.totalAmount), 0) +
+            allTimeApprovedBSs.filter(bs => inCurrentMonth(bsAnyDate(bs)))
+              .reduce((s, bs) => s + safeAmount(bs.totalAmount), 0);
+          const currentMonthUnapprovedTotal =
+            unapprovedWorkOrders.filter(wo => inCurrentMonth(woAnyDate(wo)))
+              .reduce((s, wo) => s + safeAmount(wo.totalAmount), 0) +
+            unapprovedBillingSheets.filter(bs => inCurrentMonth(bsAnyDate(bs)))
+              .reduce((s, bs) => s + safeAmount(bs.totalAmount), 0);
+          const currentMonthUnbilled = currentMonthApprovedTotal + currentMonthUnapprovedTotal;
+
           return {
             id: customer.id,
             name: customer.name,
@@ -2086,6 +2129,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             approvedTotal,
             unapprovedTotal,
             combinedTotal,
+            totalUnbilled,
+            currentMonthUnbilled,
             currentMonthBilling: 0,
             monthlyAverage: 0,
             billingPace: 1,
@@ -2104,6 +2149,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             approvedTotal: 0,
             unapprovedTotal: 0,
             combinedTotal: 0,
+            totalUnbilled: 0,
+            currentMonthUnbilled: 0,
             currentMonthBilling: 0,
             monthlyAverage: 0,
             billingPace: 1,
