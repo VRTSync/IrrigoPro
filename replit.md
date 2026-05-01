@@ -1,7 +1,7 @@
 # IrrigoPro - Irrigation Business Management System
 
 ## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It manages the entire workflow from estimates and customer approvals to work orders and invoices. The system enhances efficiency and customer satisfaction through features like site map management, QuickBooks integration, and robust role-based access control. IrrigoPro aims to provide a complete solution for managing field services, billing, and customer interactions, ultimately improving business operations within the irrigation industry.
+IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It manages the entire workflow from estimates and customer approvals to work orders and invoices, enhancing efficiency and customer satisfaction. Key capabilities include site map management, QuickBooks integration, and robust role-based access control, providing a complete solution for managing field services, billing, and customer interactions within the irrigation industry. The project's vision is to be the leading operational backbone for irrigation companies, enabling growth and improving service delivery.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -33,7 +33,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 
 ### Frontend
 - **Framework**: React with TypeScript, Vite.
-- **UI/UX**: shadcn/ui components with Radix UI, Tailwind CSS. Responsive design, mobile-first, dual-layout, and role-based mobile navigation.
+- **UI/UX**: shadcn/ui components with Radix UI, Tailwind CSS. Responsive, mobile-first design with dual-layout and role-based mobile navigation.
 - **State Management**: TanStack React Query.
 - **Routing**: Wouter.
 - **Forms**: React Hook Form with Zod validation.
@@ -46,19 +46,18 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **API Design**: RESTful API with JSON responses.
 
 ### Core Features
-- **Complete Business Workflow**: Estimates, customer approval, work order generation, field work, invoicing, and standalone billing sheets.
+- **Complete Business Workflow**: Manages estimates, customer approval, work order generation, field work, invoicing, and standalone billing sheets.
 - **Monthly Invoice Consolidation**: Consolidates customer work into single monthly, tax-free QuickBooks invoices.
-- **Role-based Access Control**: Admin, Manager, and Field Tech roles with distinct permissions, including granular control over pricing visibility for field technicians.
+- **Role-based Access Control**: Granular permissions for Admin, Manager, and Field Tech roles, including pricing visibility control for field technicians.
 - **Site Maps & Controller Management System**: KML import for interactive irrigation maps using Leaflet.
 - **Customer Email Approval System**: Token-based estimate approval.
-- **Notification System**: Database-driven notifications for work order assignments, completions, and estimate approvals, including iOS PWA Push Notifications.
-- **Location Management Enhancement**: Comprehensive location fields with an optional interactive map-based picker featuring live GPS and "Use My Location" functionality.
+- **Notification System**: Database-driven notifications for work order assignments, completions, estimate approvals, and iOS PWA Push Notifications.
+- **Location Management Enhancement**: Interactive map-based picker with live GPS and "Use My Location" functionality.
 - **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes), phone-based user login, session-based authentication.
-- **User Management**: Company administrators manage users within their company.
-- **External Work Order API**: REST API for CRM integration allowing external systems to create and track work orders with API key authentication.
-- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions for managers and admins, including a photo pipeline for processing and storage.
-- **Authoritative Pricing & $0 Catalog Audit**: Server-side enforcement of catalog pricing for line items and auditing mechanism for $0 catalog prices.
-- **Labor Rate Audit**: Admin page that lists un-invoiced work orders and billing sheets whose stored `labor_rate` no longer matches the customer's current standard or emergency rate.
+- **User Management**: Company administrators manage users.
+- **External Work Order API**: REST API for CRM integration with API key authentication.
+- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions and a photo processing pipeline.
+- **Authoritative Pricing & Auditing**: Server-side enforcement of catalog pricing for line items and auditing for $0 catalog prices and labor rates.
 
 ## External Dependencies
 
