@@ -564,33 +564,10 @@ async function runStartupMigrations() {
     );
   }
 
-  try {
-    const irrigationManagers = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.role, 'irrigation_manager'));
-    if (irrigationManagers.length > 0) {
-      const managerIds = irrigationManagers.map((u) => u.id);
-      const updated = await db
-        .update(billingSheets)
-        .set({ status: 'approved' })
-        .where(
-          and(
-            inArray(billingSheets.technicianId, managerIds),
-            or(
-              eq(billingSheets.status, 'draft'),
-              eq(billingSheets.status, 'submitted')
-            )
-          )
-        )
-        .returning({ id: billingSheets.id });
-      if (updated.length > 0) {
-        logger.info(`Startup migration: approved ${updated.length} billing sheet(s) created by irrigation managers`, 'Server Startup');
-      }
-    }
-  } catch (err) {
-    logger.error('Startup migration error (irrigation manager billing sheets, non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
-  }
+  // Task #207 — removed the irrigation-manager billing-sheet auto-promotion
+  // block that used to set status='approved'. The legacy 'approved' status
+  // no longer exists in the schema; manager-created sheets now land at
+  // 'approved_passed_to_billing' directly via the create endpoint.
 
   // Recompute zero subtotals for work orders and billing sheets that have line items
   try {
@@ -1030,81 +1007,11 @@ async function runStartupMigrations() {
     );
   }
 
-  // Task #206 — promote stuck 'approved' billing sheets to 'approved_passed_to_billing'.
-  // Manager-created billing sheets used to land at status='approved' but no transition
-  // existed forward, so they never appeared in the customer's Ready-to-Invoice list.
-  // The create-path fix in routes.ts now writes 'approved_passed_to_billing' directly;
-  // this sweep is the safety net that catches any pre-fix data plus any future leak.
-  // Idempotent — safe to run on every startup.
-  try {
-    const approvedSweep = await pool.query(
-      `UPDATE billing_sheets
-       SET status = 'approved_passed_to_billing',
-           approved_at = COALESCE(approved_at, NOW()),
-           approved_by = COALESCE(approved_by, 'System backfill (Task #206)'),
-           approved_total = COALESCE(approved_total, total_amount)
-       WHERE status = 'approved' AND invoice_id IS NULL
-       RETURNING id`
-    );
-    const promoted = approvedSweep.rowCount ?? 0;
-    if (promoted > 0) {
-      logger.info(
-        `Startup cleanup (approved-billing-sheets-sweep, Task #206): promoted ${promoted} billing sheet(s) from 'approved' to 'approved_passed_to_billing' so they appear in Ready-to-Invoice`,
-        'Server Startup'
-      );
-      console.log(`[Migration] approved-billing-sheets-sweep: ${promoted} billing sheet(s) promoted`);
-    } else {
-      logger.info(
-        "Startup cleanup (approved-billing-sheets-sweep, Task #206): no stuck 'approved' billing sheets found",
-        'Server Startup'
-      );
-    }
-
-    // Regression guard: if any UNINVOICED billing sheets are still at
-    // 'approved' after the sweep, log a loud warning. This should always be
-    // zero — invoiced sheets are excluded so historical data does not create
-    // false alarms. The customer billing endpoint already widens its filter
-    // to include legacy 'approved', so an alarm here means a NEW write path
-    // is producing stuck-but-uninvoiced rows that need investigation.
-    const leftoverCheck = await pool.query(
-      `SELECT COUNT(*)::int AS n FROM billing_sheets
-       WHERE status = 'approved' AND invoice_id IS NULL`
-    );
-    const leftover: number = leftoverCheck.rows[0]?.n ?? 0;
-    if (leftover > 0) {
-      logger.error(
-        `REGRESSION GUARD (Task #206): ${leftover} uninvoiced billing sheet(s) still at status='approved' after sweep — investigate the create path immediately.`,
-        new Error(`Billing sheets stuck at 'approved' after Task #206 sweep: ${leftover}`),
-        'Server Startup'
-      );
-    }
-
-    // Parallel work-order guard: today no manager-create path on work orders
-    // produces a legacy 'approved' status (manager completion goes through
-    // 'pending_manager_review' → /approve → 'approved_passed_to_billing'),
-    // but the customer billing filter was widened to also accept 'approved'
-    // for work orders as a safety net. Mirror that with a count+warn so any
-    // future regression on the WO side is also surfaced. Read-only — no
-    // backfill, since the WO write paths are not known to produce this.
-    const woLeftoverCheck = await pool.query(
-      `SELECT COUNT(*)::int AS n FROM work_orders
-       WHERE status = 'approved' AND invoice_id IS NULL`
-    );
-    const woLeftover: number = woLeftoverCheck.rows[0]?.n ?? 0;
-    if (woLeftover > 0) {
-      logger.error(
-        `REGRESSION GUARD (Task #206, work orders): ${woLeftover} uninvoiced work order(s) sitting at legacy status='approved' — no known write path produces this, investigate.`,
-        new Error(`Work orders stuck at 'approved' after Task #206 sweep: ${woLeftover}`),
-        'Server Startup'
-      );
-    }
-  } catch (err) {
-    logger.error(
-      'Startup cleanup (approved-billing-sheets-sweep, Task #206) error (non-fatal)',
-      err instanceof Error ? err : new Error(String(err)),
-      'Server Startup'
-    );
-  }
+  // Task #207 — removed the Task #206 'approved' → 'approved_passed_to_billing'
+  // billing-sheet sweep and its WO regression guard. The legacy 'approved'
+  // status has been deleted from the Zod schema and all server filter sites,
+  // so no new rows can land at that status. A pre-deploy check confirmed
+  // SELECT COUNT(*) FROM billing_sheets WHERE status = 'approved' returns 0.
 
   // One-time data repair: fix billing sheet items with zero unit_price when the linked part
   // has a real catalog price. After fixing items, recalculate parts_subtotal and total_amount

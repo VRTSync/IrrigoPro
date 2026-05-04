@@ -605,11 +605,6 @@ export default function CustomerBilling() {
       completed: "bg-green-100 text-green-800",
       pending_manager_review: "bg-orange-100 text-orange-800",
       approved_passed_to_billing: "bg-teal-100 text-teal-800",
-      // Task #206 — legacy 'approved' status means the same thing as
-      // 'approved_passed_to_billing' (Ready to Bill). Render them
-      // identically so the UI no longer shows two terminal states for
-      // the same business meaning.
-      approved: "bg-teal-100 text-teal-800",
       draft: "bg-gray-100 text-gray-800",
       submitted: "bg-blue-100 text-blue-800",
       billed: "bg-purple-100 text-purple-800"
@@ -618,7 +613,6 @@ export default function CustomerBilling() {
     const statusLabels: Record<string, string> = {
       pending_manager_review: "Pending Manager Review",
       approved_passed_to_billing: "Approved / Ready to Bill",
-      approved: "Approved / Ready to Bill",
       in_progress: "In Progress",
     };
     

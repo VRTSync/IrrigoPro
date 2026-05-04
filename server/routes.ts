@@ -248,7 +248,9 @@ import {
   type InsertEstimateZone,
   type InsertEstimateItem,
   type BillingSheetItem,
-  type InsertBillingSheet
+  type InsertBillingSheet,
+  type BillingSheetStatus,
+  billingSheetStatusValues
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -2043,10 +2045,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Calculate unbilled amounts for this customer (only approved/passed-to-billing tickets)
           const unbilledWorkOrders = workOrders.filter(wo =>
-            (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId && woInRange(wo)
+            (wo.status === 'approved_passed_to_billing') && !wo.invoiceId && woInRange(wo)
           );
           const unbilledBillingSheets = billingSheets.filter(bs =>
-            (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId && bsInRange(bs)
+            (bs.status === 'approved_passed_to_billing') && !bs.invoiceId && bsInRange(bs)
           );
 
           // Use stored totalAmount as the authoritative total (historical backfill guardrail)
@@ -2096,10 +2098,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // All-time approved (deliberately ignore the user's date filter)
           const allTimeApprovedWOs = workOrders.filter(wo =>
-            (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
+            (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
           );
           const allTimeApprovedBSs = billingSheets.filter(bs =>
-            (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
+            (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
           );
           const allTimeApprovedTotal =
             allTimeApprovedWOs.reduce((s, wo) => s + safeAmount(wo.totalAmount, `wo:${wo.id}`), 0) +
@@ -2302,12 +2304,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Filter unbilled work: only approved_passed_to_billing tickets surface to billing intake
       const unbilledWorkOrders = workOrders.filter(wo => 
-        (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
+        (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
       );
       // A non-null invoiceId is the authoritative signal that a billing sheet has
       // been billed — exclude it from unbilled regardless of status value.
       const unbilledBillingSheets = billingSheets.filter(bs => 
-        (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
+        (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
       );
 
       // Calculate total unbilled amount
@@ -2548,7 +2550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
-          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && 
+          (wo.status === 'approved_passed_to_billing') && 
           !wo.invoiceId
         );
       }
@@ -2556,7 +2558,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && 
+          (bs.status === 'approved_passed_to_billing') && 
           !bs.invoiceId
         );
       }
@@ -2564,10 +2566,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If no specific items selected, fall back to all approved unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
+          (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
+          (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
         );
       }
 
@@ -2795,7 +2797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (workOrderIds.length > 0) {
         selectedWorkOrders = workOrders.filter(wo => 
           workOrderIds.includes(wo.id) && 
-          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && 
+          (wo.status === 'approved_passed_to_billing') && 
           !wo.invoiceId
         );
       }
@@ -2803,7 +2805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (billingSheetIds.length > 0) {
         selectedBillingSheets = billingSheets.filter(bs => 
           billingSheetIds.includes(bs.id) && 
-          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && 
+          (bs.status === 'approved_passed_to_billing') && 
           !bs.invoiceId
         );
       }
@@ -2811,10 +2813,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If no specific items selected, fall back to all approved unbilled items
       if (workOrderIds.length === 0 && billingSheetIds.length === 0) {
         selectedWorkOrders = workOrders.filter(wo => 
-          (wo.status === 'approved_passed_to_billing' || wo.status === 'approved') && !wo.invoiceId
+          (wo.status === 'approved_passed_to_billing') && !wo.invoiceId
         );
         selectedBillingSheets = billingSheets.filter(bs => 
-          (bs.status === 'approved_passed_to_billing' || bs.status === 'approved') && !bs.invoiceId
+          (bs.status === 'approved_passed_to_billing') && !bs.invoiceId
         );
       }
 
@@ -7669,11 +7671,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Manager-class roles (irrigation_manager, billing_manager, company_admin,
       // super_admin) self-approve at creation time and route directly to
       // 'approved_passed_to_billing' so the sheet immediately surfaces in the
-      // customer's Ready-to-Invoice list (Task #206 — previously these landed
-      // at the dead-end 'approved' status with no transition forward).
+      // customer's Ready-to-Invoice list (Task #206 fixed the previous
+      // dead-end 'approved' status; Task #207 removed it from the schema).
       // field_tech => 'submitted' (goes to manager for review).
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
-      let resolvedStatus: string;
+      let resolvedStatus: BillingSheetStatus;
       if (
         creatorRole === 'irrigation_manager' ||
         creatorRole === 'billing_manager' ||
@@ -7684,7 +7686,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       } else if (creatorRole === 'field_tech') {
         resolvedStatus = 'submitted';
       } else {
-        resolvedStatus = billingSheetData.status || 'draft';
+        // Task #207 — runtime-validate the fallback so the legacy 'approved'
+        // (or any other unknown value) cannot sneak in via an unexpected role.
+        const parsed = z.enum(billingSheetStatusValues).safeParse(billingSheetData.status);
+        resolvedStatus = parsed.success ? parsed.data : 'draft';
       }
 
       // Always look up the customer's authoritative labor rate — ignore any client-supplied value.
@@ -7930,7 +7935,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const { items, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
-      
+
+      // Task #207: enforce billing-sheet status enum on PATCH so the legacy
+      // 'approved' value (and any other unknown status) cannot be persisted
+      // by the API. The DB column is plain text with no check constraint, so
+      // this is the authoritative validation point.
+      if (billingSheetData.status !== undefined) {
+        const patchStatusParse = z.enum(billingSheetStatusValues).safeParse(billingSheetData.status);
+        if (!patchStatusParse.success) {
+          return res.status(400).json({
+            message: `Invalid billing sheet status '${billingSheetData.status}'. Allowed values: ${billingSheetStatusValues.join(', ')}.`,
+          });
+        }
+        billingSheetData.status = patchStatusParse.data;
+      }
+
       console.log('Updating billing sheet:', id, 'with data:', billingSheetData);
       
       // Convert date string to Date object if present
@@ -7999,8 +8018,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         await regressionGuardZeroCatalogPrices('update', id, resolvedPatchItems);
       }
 
-      // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
-      if (billingSheetData.status === 'submitted' || billingSheetData.status === 'approved') {
+      // Submission guard: if status transitions to submitted, check items vs partsSubtotal
+      if (billingSheetData.status === 'submitted') {
         const partsSubtotal = parseFloat(String(billingSheetData.partsSubtotal ?? billingSheet.partsSubtotal ?? '0'));
         const currentSheet = await storage.getBillingSheetById(id);
         const currentItems = currentSheet?.items ?? [];
@@ -8876,18 +8895,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
-      // Submission guard: if status transitions to submitted/approved, check items vs partsSubtotal
-      if (workOrderData.status === 'submitted' || workOrderData.status === 'approved') {
-        const freshWorkOrder = await storage.getWorkOrder(id);
-        const partsSubtotal = parseFloat(String(freshWorkOrder?.partsSubtotal ?? '0'));
-        if (partsSubtotal > 0) {
-          const currentItems = await storage.getWorkOrderItems(id);
-          if (currentItems.length === 0) {
-            return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
-          }
-        }
-        console.log(`[AUDIT] work_order_status_change workOrderId=${id} status=${workOrderData.status} itemCount=${(await storage.getWorkOrderItems(id)).length}`);
-      }
+      // Task #207 — removed dead submission guard that checked for legacy
+      // 'submitted'/'approved' work-order statuses. Neither value is valid
+      // under workOrderStatusValues, so the branch was unreachable.
 
       res.json(workOrder);
     } catch (error) {
@@ -9421,7 +9431,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // 'approved_passed_to_billing' so the resulting billing sheet immediately
       // surfaces in the customer's Ready-to-Invoice list (Task #206).
       const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
-      let resolvedStatus: string;
+      let resolvedStatus: BillingSheetStatus;
       if (
         creatorRole === 'irrigation_manager' ||
         creatorRole === 'billing_manager' ||

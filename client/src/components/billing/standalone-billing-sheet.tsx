@@ -176,7 +176,7 @@ export function StandaloneBillingSheet({
     mutationFn: async (data: any) => {
       const payload = {
         ...data,
-        status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft',
+        status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved_passed_to_billing' : 'draft',
         technicianId: isFieldTech ? currentUser?.id : null,
         companyId: currentUser?.companyId,
         photos: uploadedPhotos.map(photo => photo.url),
@@ -483,7 +483,7 @@ export function StandaloneBillingSheet({
             totalAmount: totals.totalAmount,
             technicianId: currentUser?.id,
             photos: uploadedPhotos.map(p => p.url),
-            status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved' : 'draft',
+            status: isFieldTech ? 'submitted' : isIrrigationManager ? 'approved_passed_to_billing' : 'draft',
           };
 
       setIsSubmitting(true);

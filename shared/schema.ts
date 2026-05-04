@@ -190,7 +190,7 @@ export const billingSheets = pgTable("billing_sheets", {
   technicianName: text("technician_name").notNull(),
   technicianId: integer("technician_id").references(() => users.id),
   workDescription: text("work_description").notNull(),
-  status: text("status").notNull().default("draft"), // draft, submitted, completed, pending_manager_review, approved_passed_to_billing, billed
+  status: text("status").notNull().default("draft"), // draft, submitted, completed, pending_manager_review, approved_passed_to_billing, billed (see billingSheetStatusValues)
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -752,6 +752,12 @@ export const insertQuickbooksSyncSchema = createInsertSchema(quickbooksSync).omi
 export const workOrderStatusValues = ['pending', 'assigned', 'in_progress', 'work_completed', 'pending_manager_review', 'approved_passed_to_billing', 'cancelled', 'billed'] as const;
 export type WorkOrderStatus = typeof workOrderStatusValues[number];
 
+// Task #207 — billing sheet status values, locked to the modern set so the
+// legacy 'approved' status (replaced by 'approved_passed_to_billing') can no
+// longer enter the system via the API.
+export const billingSheetStatusValues = ['draft', 'submitted', 'completed', 'pending_manager_review', 'approved_passed_to_billing', 'billed'] as const;
+export type BillingSheetStatus = typeof billingSheetStatusValues[number];
+
 export const insertWorkOrderSchema = createInsertSchema(workOrders)
   .omit({
     id: true,
@@ -774,17 +780,22 @@ export const insertWorkOrderItemSchema = createInsertSchema(workOrderItems).omit
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, invoiceNumber: true, createdAt: true, updatedAt: true });
 export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({ id: true });
 export const insertInvoicePdfSchema = createInsertSchema(invoicePdfs).omit({ id: true, createdAt: true });
-export const insertBillingSheetSchema = createInsertSchema(billingSheets).omit({
-  id: true,
-  billingNumber: true,
-  createdAt: true,
-  updatedAt: true,
-  // Task #197 — no-photos-needed audit fields are stamped only via the
-  // dedicated POST /api/billing-sheets/:id/no-photos-needed endpoint.
-  noPhotosNeeded: true,
-  noPhotosNeededBy: true,
-  noPhotosNeededAt: true,
-});
+export const insertBillingSheetSchema = createInsertSchema(billingSheets)
+  .omit({
+    id: true,
+    billingNumber: true,
+    createdAt: true,
+    updatedAt: true,
+    // Task #197 — no-photos-needed audit fields are stamped only via the
+    // dedicated POST /api/billing-sheets/:id/no-photos-needed endpoint.
+    noPhotosNeeded: true,
+    noPhotosNeededBy: true,
+    noPhotosNeededAt: true,
+  })
+  .extend({
+    // Task #207 — reject the legacy 'approved' status at the API boundary.
+    status: z.enum(billingSheetStatusValues).optional(),
+  });
 export const insertBillingSheetItemSchema = createInsertSchema(billingSheetItems).omit({ id: true });
 export const insertManualPartReviewSchema = createInsertSchema(manualPartReviews).omit({ id: true, createdAt: true });
 export const insertAiGenerationLogSchema = createInsertSchema(aiGenerationLogs).omit({ id: true, createdAt: true });

@@ -3501,7 +3501,7 @@ export class DatabaseStorage implements IStorage {
       .from(billingSheets)
       .where(
         and(
-          eq(billingSheets.status, "approved"),
+          eq(billingSheets.status, "approved_passed_to_billing"),
           gte(billingSheets.workDate, periodStart),
           lte(billingSheets.workDate, periodEnd)
         )

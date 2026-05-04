@@ -665,33 +665,60 @@ describe("Authoritative pricing for billing sheets and work orders", () => {
     );
   });
 
-  // Safety-net half of the Task #206 fix: even if a billing sheet somehow ends
-  // up at the legacy status='approved' (pre-fix data, future regression, etc.),
-  // the customer billing endpoint must still treat it as Ready to Bill.
-  test("Legacy 'approved' billing sheets are still treated as Ready to Bill (safety net)", async () => {
-    const billingNumber = `BS-LEGACY-APPROVED-${Date.now()}`;
-    const [legacy] = await db.insert(billingSheets).values({
-      billingNumber,
+  // Task #207 — the legacy 'approved' billing-sheet status is gone from the
+  // schema. POST /api/billing-sheets must NEVER produce a row whose status
+  // is the legacy 'approved': manager-class roles get their status
+  // overridden to 'approved_passed_to_billing' regardless of the payload,
+  // and the fallback branch runs the payload through z.enum so unknown
+  // values collapse to 'draft'. (The previous Task #206 safety-net test,
+  // which planted an 'approved' row directly via the DB and asserted it
+  // appeared in Ready to Bill, was removed because the safety net no
+  // longer exists.)
+  test("POST /api/billing-sheets never persists legacy status='approved'", async () => {
+    const res = await api("POST", "/api/billing-sheets", {
       customerId: CUSTOMER_ID,
       customerName: "Authoritative Pricing Customer",
       propertyAddress: "1 Pricing Way",
-      workDate: new Date(),
+      workDate: new Date().toISOString(),
       technicianName: "Legacy Tech",
-      workDescription: "Task #206 safety-net test (planted at legacy 'approved')",
+      workDescription: "Task #207 — legacy status should be normalized away",
       status: "approved",
       totalHours: "1.00",
       laborRate: "60.00",
       laborSubtotal: "60.00",
       partsSubtotal: "0.00",
       totalAmount: "60.00",
-    }).returning();
+    });
+    assert.equal(res.status, 200, `Unexpected status ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.notEqual(
+      res.body.status,
+      "approved",
+      `Server must normalize legacy 'approved' away; got status='${res.body.status}'`,
+    );
+    // Re-read from the API to confirm the persisted row is not 'approved' either.
+    const fetched = await api("GET", `/api/billing-sheets/${res.body.id}`);
+    assert.equal(fetched.status, 200);
+    assert.notEqual(
+      fetched.body.status,
+      "approved",
+      `Persisted billing sheet must not be at legacy status='approved'`,
+    );
 
-    const billing = await api("GET", `/api/customers/${CUSTOMER_ID}/billing`);
-    assert.equal(billing.status, 200);
-    const found = (billing.body.unbilledBillingSheets ?? []).find((bs) => bs.id === legacy.id);
+    // PATCH must also reject the legacy value: the DB column is plain text
+    // with no check constraint, so the API is the authoritative guard.
+    const patchRes = await api("PATCH", `/api/billing-sheets/${res.body.id}`, {
+      status: "approved",
+    });
     assert.ok(
-      found,
-      `Legacy 'approved' billing sheet ${legacy.id} must also appear in unbilledBillingSheets`,
+      patchRes.status >= 400 && patchRes.status < 500,
+      `Expected 4xx for PATCH status='approved', got ${patchRes.status}: ${JSON.stringify(patchRes.body)}`,
+    );
+    const fetchedAfterPatch = await api("GET", `/api/billing-sheets/${res.body.id}`);
+    assert.equal(fetchedAfterPatch.status, 200);
+    assert.notEqual(
+      fetchedAfterPatch.body.status,
+      "approved",
+      `PATCH must not have been able to write legacy status='approved'`,
     );
   });
 });
