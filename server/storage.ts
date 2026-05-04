@@ -504,6 +504,9 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  private _billingCounterTableReady = false;
+  private _billingCounterPrefixSeeded = new Set<string>();
+
   constructor() {
     // Database initialization - schema is managed by Drizzle
     this.initializeUsers();
@@ -2240,20 +2243,37 @@ export class DatabaseStorage implements IStorage {
   async getNextBillingNumber(): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `BS-${year}-`;
-    const result = await db
-      .select({ billingNumber: billingSheets.billingNumber })
-      .from(billingSheets)
-      .where(like(billingSheets.billingNumber, `${prefix}%`));
 
-    let maxSeq = 0;
-    for (const row of result) {
-      const suffix = row.billingNumber.slice(prefix.length);
-      const seq = parseInt(suffix, 10);
-      if (!isNaN(seq) && seq > maxSeq) {
-        maxSeq = seq;
-      }
+    if (!this._billingCounterTableReady) {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS billing_number_counters (
+          prefix TEXT PRIMARY KEY,
+          last_seq INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      this._billingCounterTableReady = true;
     }
-    return `${prefix}${(maxSeq + 1).toString().padStart(4, '0')}`;
+
+    if (!this._billingCounterPrefixSeeded.has(prefix)) {
+      const likePattern = `${prefix}%`;
+      await db.execute(sql`
+        INSERT INTO billing_number_counters (prefix, last_seq)
+        VALUES (${prefix}, COALESCE(
+          (SELECT MAX(CAST(SUBSTRING(billing_number FROM '[0-9]+$') AS INTEGER))
+            FROM billing_sheets WHERE billing_number LIKE ${likePattern}), 0))
+        ON CONFLICT (prefix) DO NOTHING
+      `);
+      this._billingCounterPrefixSeeded.add(prefix);
+    }
+
+    const result = await db.execute(sql`
+      UPDATE billing_number_counters
+      SET last_seq = last_seq + 1
+      WHERE prefix = ${prefix}
+      RETURNING last_seq
+    `);
+    const seq = Number(result.rows[0].last_seq);
+    return `${prefix}${seq.toString().padStart(4, '0')}`;
   }
 
   async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet> {

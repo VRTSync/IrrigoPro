@@ -58,6 +58,7 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **External Work Order API**: REST API for CRM integration with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions and a photo processing pipeline.
 - **Authoritative Pricing & Auditing**: Server-side enforcement of catalog pricing for line items and auditing for $0 catalog prices and labor rates.
+- **Billing Number Generation**: Uses a `billing_number_counters` table for monotonically increasing billing numbers (format `BS-YYYY-NNNN`). The counter survives row deletions and handles concurrent creates atomically via `UPDATE ... RETURNING`. The retry loop in `createBillingSheet` remains as defense-in-depth.
 
 ## External Dependencies
 
