@@ -87,6 +87,7 @@ type UploadJobStatus =
   | "uploading"
   | "finalizing"
   | "retrying"
+  | "waiting"
   | "done"
   | "error"
   | "cancelled";
@@ -130,6 +131,10 @@ interface UploadJob {
   // True when the last error was a network/connectivity failure (vs a
   // server 4xx/5xx). Drives the auto-retry-on-online behavior.
   wasNetworkError: boolean;
+  // Set by the `offline` listener immediately before aborting an
+  // in-flight upload, so the catch path can transition the job into
+  // "waiting" instead of "cancelled". Cleared again on retry.
+  wasOfflineAbort: boolean;
 }
 
 function statusLabel(j: UploadJob): string {
@@ -144,6 +149,8 @@ function statusLabel(j: UploadJob): string {
       return "Finalizing…";
     case "retrying":
       return "Retrying…";
+    case "waiting":
+      return "Waiting for network…";
     case "done":
       return "Done";
     case "error":
@@ -206,7 +213,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
 
   const isUploading = jobs.some(j =>
     j.status === "queued" || j.status === "preparing" || j.status === "uploading"
-    || j.status === "finalizing" || j.status === "retrying"
+    || j.status === "finalizing" || j.status === "retrying" || j.status === "waiting"
   );
 
   const updateJob = (id: string, patch: Partial<UploadJob>) => {
@@ -388,7 +395,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
 
   // Run a single upload for the given job. Centralized so both initial
   // submission and retries share the same success/error/cancel handling.
-  async function runUploadJob(jobId: string, opts: { isRetry?: boolean } = {}): Promise<"done" | "error" | "cancelled"> {
+  async function runUploadJob(jobId: string, opts: { isRetry?: boolean } = {}): Promise<"done" | "error" | "cancelled" | "waiting"> {
     const job = jobsRef.current.find(j => j.id === jobId);
     if (!job) return "cancelled";
 
@@ -427,12 +434,28 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
         || (err instanceof Error && err.name === 'AbortError');
       const latest = jobsRef.current.find(j => j.id === jobId);
       const aborted = latest?.controller.signal.aborted || isAbortError;
+      // If the browser went offline mid-flight, surface "Waiting for
+      // network…" instead of a hard error or a cancellation. The
+      // `online` listener will pick this job up and run the same retry
+      // path. We treat any abort with `wasOfflineAbort` set, plus any
+      // network-classified failure while navigator reports offline, as
+      // a wait-for-network condition.
+      const offlineNow = typeof navigator !== "undefined" && navigator.onLine === false;
+      const networkError = classifyAsNetworkError(err);
+      if (latest?.wasOfflineAbort || (!aborted && networkError && offlineNow)) {
+        updateJob(jobId, {
+          status: "waiting",
+          errorMessage: undefined,
+          wasNetworkError: true,
+          wasOfflineAbort: true,
+        });
+        return "waiting";
+      }
       if (aborted) {
         updateJob(jobId, { status: "cancelled" });
         return "cancelled";
       }
       const message = err instanceof Error ? err.message : "Upload failed";
-      const networkError = classifyAsNetworkError(err);
       updateJob(jobId, {
         status: "error",
         errorMessage: message,
@@ -448,7 +471,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
   async function retryJob(jobId: string): Promise<void> {
     const job = jobsRef.current.find(j => j.id === jobId);
     if (!job) return;
-    if (job.status !== "error" && job.status !== "cancelled") return;
+    if (job.status !== "error" && job.status !== "cancelled" && job.status !== "waiting") return;
     // If the cached signed URL has aged out, drop it so uploadPhoto mints
     // a fresh one on this attempt.
     const stillFresh = job.signedUrlData
@@ -460,29 +483,67 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
       controller: new AbortController(),
       retryCount: job.retryCount + 1,
       signedUrlData: stillFresh ? job.signedUrlData : undefined,
+      wasOfflineAbort: false,
     });
     await runUploadJob(jobId, { isRetry: true });
   }
 
-  // Auto-retry once when the browser reports it's back online. We only
-  // touch jobs whose last failure was a network error AND that haven't
-  // already been auto-retried, so manual retries remain the user's lever
-  // for repeated failures.
+  // Auto-retry once when the browser reports it's back online. We touch
+  // two kinds of jobs:
+  //   1. Jobs that hard-errored on a network failure (and haven't been
+  //      auto-retried yet) — manual retries remain the user's lever for
+  //      repeated failures.
+  //   2. Jobs that the offline listener parked into "waiting" — these
+  //      always resume on reconnect; the abort was ours, not the
+  //      server's, so it doesn't count against the auto-retry budget.
   useEffect(() => {
     const handleOnline = () => {
-      const candidates = jobsRef.current.filter(j =>
+      const networkFailures = jobsRef.current.filter(j =>
         j.status === "error" && j.wasNetworkError && !j.autoRetried
       );
+      const waitingJobs = jobsRef.current.filter(j => j.status === "waiting");
+      const candidates = [...networkFailures, ...waitingJobs];
       if (candidates.length === 0) return;
-      // Mark first so a flapping connection doesn't trigger duplicate retries.
-      const ids = new Set(candidates.map(c => c.id));
+      // Mark first so a flapping connection doesn't trigger duplicate
+      // retries. retryJob also flips status to "retrying" synchronously,
+      // which guards against a second `online` event racing past.
+      const networkIds = new Set(networkFailures.map(c => c.id));
       mutateJobs(prev => prev.map(j =>
-        ids.has(j.id) ? { ...j, autoRetried: true } : j
+        networkIds.has(j.id) ? { ...j, autoRetried: true } : j
       ));
       candidates.forEach(c => { void retryJob(c.id); });
     };
+    // Proactively abort in-flight uploads as soon as the browser fires
+    // `offline` — otherwise the XHR keeps pushing bytes into a dead pipe
+    // until the kernel-level TCP timeout (often 60-120s on cellular),
+    // wasting battery and delaying the user-visible retry signal.
+    const handleOffline = () => {
+      // Only act on jobs that are actually pushing bytes / making
+      // network calls. Queued jobs haven't started yet — they'll see
+      // the offline state naturally when handleFileSelect's loop gets
+      // to them and their fetch/XHR fails fast.
+      const inFlight = jobsRef.current.filter(j =>
+        j.status === "preparing" || j.status === "uploading"
+        || j.status === "finalizing" || j.status === "retrying"
+      );
+      if (inFlight.length === 0) return;
+      // Mark wasOfflineAbort BEFORE aborting so the in-flight job's
+      // catch handler can read it and route to "waiting" instead of
+      // "cancelled". jobsRef + mutateJobs gives us a synchronous write.
+      const ids = new Set(inFlight.map(j => j.id));
+      mutateJobs(prev => prev.map(j =>
+        ids.has(j.id) ? { ...j, wasOfflineAbort: true } : j
+      ));
+      for (const j of inFlight) {
+        try { j.controller.abort(); } catch {}
+      }
+    };
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -501,6 +562,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
       retryCount: 0,
       autoRetried: false,
       wasNetworkError: false,
+      wasOfflineAbort: false,
     }));
     mutateJobs(prev => [...prev, ...newJobs]);
 
@@ -509,6 +571,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
     let cancelledCount = 0;
 
     try {
+      let waitingCount = 0;
       for (const job of newJobs) {
         if (job.controller.signal.aborted) {
           updateJob(job.id, { status: "cancelled" });
@@ -518,7 +581,15 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
         const outcome = await runUploadJob(job.id);
         if (outcome === "done") successCount++;
         else if (outcome === "error") errorCount++;
+        else if (outcome === "waiting") waitingCount++;
         else cancelledCount++;
+      }
+
+      if (waitingCount > 0 && successCount === 0 && errorCount === 0) {
+        toast({
+          title: "Connection lost",
+          description: `${waitingCount} upload${waitingCount > 1 ? 's are' : ' is'} waiting for the network — will resume automatically`,
+        });
       }
 
       if (successCount > 0) {
@@ -606,7 +677,8 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
               || job.status === "preparing"
               || job.status === "uploading"
               || job.status === "finalizing"
-              || job.status === "retrying";
+              || job.status === "retrying"
+              || job.status === "waiting";
             const showBar =
               job.status === "preparing"
               || job.status === "uploading"
@@ -619,7 +691,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    {inFlight && (
+                    {inFlight && job.status !== "waiting" && (
                       <Loader2 className="w-4 h-4 animate-spin text-blue-500 flex-shrink-0" />
                     )}
                     {job.status === "done" && (
@@ -627,6 +699,9 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
                     )}
                     {(job.status === "error" || job.status === "cancelled") && (
                       <AlertCircle className={`w-4 h-4 flex-shrink-0 ${job.status === "error" ? "text-red-600" : "text-gray-500"}`} />
+                    )}
+                    {job.status === "waiting" && (
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-600" />
                     )}
                     <span className="text-sm truncate" title={job.name}>{job.name}</span>
                   </div>
@@ -637,6 +712,7 @@ export function FileUpload({ type, label, accept, multiple = true, capture, file
                           : job.status === "cancelled" ? "text-gray-500"
                           : job.status === "done" ? "text-green-600"
                           : job.status === "retrying" ? "text-blue-600"
+                          : job.status === "waiting" ? "text-amber-600"
                           : "text-gray-600"
                       }`}
                       data-testid={`upload-job-status-${job.id}`}
