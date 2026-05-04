@@ -328,7 +328,7 @@ export interface IStorage {
   // Billing Sheets - for work done without work orders
   getAllBillingSheets(): Promise<BillingSheetWithItems[]>;
   getBillingSheetById(id: number): Promise<BillingSheetWithItems | undefined>;
-  getBillingSheetCount(): Promise<number>;
+  getNextBillingNumber(): Promise<string>;
   createBillingSheet(billingSheet: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet>;
   updateBillingSheet(id: number, billingSheet: Partial<InsertBillingSheet>): Promise<BillingSheet | undefined>;
   deleteBillingSheet(id: number): Promise<boolean>;
@@ -2237,9 +2237,23 @@ export class DatabaseStorage implements IStorage {
     return { ...sheet, items };
   }
 
-  async getBillingSheetCount(): Promise<number> {
-    const result = await db.select({ count: billingSheets.id }).from(billingSheets);
-    return result.length;
+  async getNextBillingNumber(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `BS-${year}-`;
+    const result = await db
+      .select({ billingNumber: billingSheets.billingNumber })
+      .from(billingSheets)
+      .where(like(billingSheets.billingNumber, `${prefix}%`));
+
+    let maxSeq = 0;
+    for (const row of result) {
+      const suffix = row.billingNumber.slice(prefix.length);
+      const seq = parseInt(suffix, 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+    return `${prefix}${(maxSeq + 1).toString().padStart(4, '0')}`;
   }
 
   async createBillingSheet(billingSheetData: InsertBillingSheet & { items?: InsertBillingSheetItem[] }): Promise<BillingSheet> {
@@ -2267,20 +2281,40 @@ export class DatabaseStorage implements IStorage {
     };
 
     console.log('Creating billing sheet with data:', finalSheetData);
-    
-    // Generate billing number
-    const count = await this.getBillingSheetCount();
-    const billingNumber = `BS-${new Date().getFullYear()}-${(count + 1).toString().padStart(4, '0')}`;
-    
-    const finalSheetDataWithNumber = {
-      ...finalSheetData,
-      billingNumber
-    };
-    
-    // Remove any timestamp fields that Drizzle manages automatically
-    const { createdAt, updatedAt, ...insertData } = finalSheetDataWithNumber as Record<string, unknown>;
-    
-    const [newSheet] = await db.insert(billingSheets).values([toDrizzleInsert<DrizzleBillingSheetInsert>(insertData)]).returning();
+
+    const MAX_RETRIES = 3;
+    let newSheet: BillingSheet | undefined;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const billingNumber = await this.getNextBillingNumber();
+
+      const finalSheetDataWithNumber = {
+        ...finalSheetData,
+        billingNumber
+      };
+
+      const { createdAt, updatedAt, ...insertData } = finalSheetDataWithNumber as Record<string, unknown>;
+
+      try {
+        const [inserted] = await db.insert(billingSheets).values([toDrizzleInsert<DrizzleBillingSheetInsert>(insertData)]).returning();
+        newSheet = inserted;
+        break;
+      } catch (err: unknown) {
+        const errObj = err as Record<string, unknown> | null | undefined;
+        const code = typeof errObj?.code === 'string' ? errObj.code : '';
+        const message = typeof errObj?.message === 'string' ? errObj.message : '';
+        const isUniqueViolation = code === '23505' || message.includes('unique');
+        if (isUniqueViolation && attempt < MAX_RETRIES) {
+          console.warn(`[billing] Billing number collision on attempt ${attempt} (${billingNumber}), retrying...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!newSheet) {
+      throw new Error('Failed to create billing sheet after max retries');
+    }
     
     // If items are provided, insert them and then re-derive partsSubtotal from the persisted rows
     if (items && Array.isArray(items)) {

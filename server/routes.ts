@@ -7790,15 +7790,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         items: itemsForStorage.length > 0 ? itemsForStorage : undefined,
       };
       
-      // Generate billing number
-      const count = await storage.getBillingSheetCount();
-      const billingNumber = `BS-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
-      
-      console.log('Creating billing sheet with clean data:', {
-        ...cleanData,
-        billingNumber
-      });
-      
       const billingSheet = await storage.createBillingSheet({
         ...cleanData,
       });
@@ -7830,7 +7821,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
 
       const createdItemCount = Array.isArray(cleanData.items) ? cleanData.items.length : 0;
-      console.log(`[AUDIT] billing_sheet_created billingSheetId=${billingSheet.id} billingNumber=${billingNumber} itemCount=${createdItemCount} status=${resolvedStatus}`);
+      console.log(`[AUDIT] billing_sheet_created billingSheetId=${billingSheet.id} billingNumber=${billingSheet.billingNumber} itemCount=${createdItemCount} status=${resolvedStatus}`);
 
       // Regression guard: surface any catalog line item that ended up at $0 despite the
       // authoritative-pricing helper above. Should never trigger; logged loudly if it does.
@@ -7847,7 +7838,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             userId: user.id,
             type: "billing_sheet_submitted",
             title: "Billing Sheet Submitted",
-            message: `Billing sheet ${billingNumber} for ${cleanData.customerName || 'a customer'} has been submitted${cleanData.technicianName ? ` by ${cleanData.technicianName}` : ''}.`,
+            message: `Billing sheet ${billingSheet.billingNumber} for ${cleanData.customerName || 'a customer'} has been submitted${cleanData.technicianName ? ` by ${cleanData.technicianName}` : ''}.`,
             relatedEntityType: "billing_sheet",
             relatedEntityId: billingSheet.id,
             isRead: false,
@@ -7894,7 +7885,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
                   userId: bm.id,
                   type: "manual_part_pending_review",
                   title: "Manual Part Needs Pricing Review",
-                  message: `A manually entered part "${manualItem.partName}" on billing sheet ${billingNumber} needs your price review.`,
+                  message: `A manually entered part "${manualItem.partName}" on billing sheet ${billingSheet.billingNumber} needs your price review.`,
                   relatedEntityType: "billing_sheet",
                   relatedEntityId: billingSheet.id,
                   isRead: false,
