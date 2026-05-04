@@ -1368,6 +1368,7 @@ export function StandaloneBillingSheet({
                         type="photo"
                         label="Photos"
                         accept="image/*"
+                        capture="environment"
                         multiple
                         files={uploadedPhotos}
                         onFilesChange={setUploadedPhotos}
