@@ -57,7 +57,6 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **User Management**: Company administrators manage users.
 - **External Work Order API**: REST API for CRM integration with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions and a photo processing pipeline.
-- **Originals Storage Backfill**: A one-time script (`server/scripts/shrink-originals.ts`) for re-encoding older photos to optimize storage.
 - **Authoritative Pricing & Auditing**: Server-side enforcement of catalog pricing for line items and auditing for $0 catalog prices and labor rates.
 - **Billing Number Generation**: Uses a `billing_number_counters` table for monotonically increasing billing numbers.
 
