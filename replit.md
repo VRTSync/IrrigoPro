@@ -57,9 +57,9 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **User Management**: Company administrators manage users.
 - **External Work Order API**: REST API for CRM integration with API key authentication.
 - **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions and a photo processing pipeline.
-- **Originals Storage Backfill**: A one-time script (`server/scripts/shrink-originals.ts`) walks every object under the `originals/` bucket prefix and re-encodes photos uploaded before the new compression pipeline at ~3840px / JPEG q=0.90, overwriting the bucket object in place. Run with `node --import tsx/esm server/scripts/shrink-originals.ts --dry-run` first to see total bytes that would be freed, then re-run without `--dry-run` to apply (resumable via the `originalsShrink.done` marker in `app_settings`; failures are recorded under `originalsShrink.failed`). The script never touches `thumb`/`medium` display variants and skips originals already small enough or stored as HEIC/HEIF (handled by the HEIC cache pipeline). Bytes freed in production from the initial run: _to be filled in after first prod run_.
+- **Originals Storage Backfill**: A one-time script (`server/scripts/shrink-originals.ts`) for re-encoding older photos to optimize storage.
 - **Authoritative Pricing & Auditing**: Server-side enforcement of catalog pricing for line items and auditing for $0 catalog prices and labor rates.
-- **Billing Number Generation**: Uses a `billing_number_counters` table for monotonically increasing billing numbers (format `BS-YYYY-NNNN`). The counter survives row deletions and handles concurrent creates atomically via `UPDATE ... RETURNING`.
+- **Billing Number Generation**: Uses a `billing_number_counters` table for monotonically increasing billing numbers.
 
 ## External Dependencies
 
