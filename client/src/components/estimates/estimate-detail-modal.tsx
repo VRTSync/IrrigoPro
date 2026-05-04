@@ -25,11 +25,6 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     enabled: !!estimateId && open,
   });
 
-  const { data: estimateZones } = useQuery<any[]>({
-    queryKey: ["/api/estimates", estimateId, "zones"],
-    enabled: !!estimateId && open,
-  });
-
   const approveEstimateMutation = useMutation({
     mutationFn: async () => {
       return apiRequest(`/api/estimates/${estimateId}/approve`, 'PATCH');
@@ -322,53 +317,51 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   <div className="bg-purple-50 p-4 rounded-lg">
                     <div className="flex items-center space-x-2">
                       <Calendar className="w-5 h-5 text-purple-600" />
-                      <span className="font-medium text-purple-900">Zones</span>
+                      <span className="font-medium text-purple-900">Line Items</span>
                     </div>
                     <p className="text-2xl font-bold text-purple-900 mt-1">
-                      {estimateZones?.length || 0}
+                      {estimate.items?.length || 0}
                     </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Zones */}
-            {estimateZones && estimateZones.length > 0 && (
+            {/* Line Items */}
+            {estimate.items && estimate.items.length > 0 && (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Project Zones</CardTitle>
+                  <CardTitle className="text-lg">Line Items</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {estimateZones.map((zone: any, index: number) => (
-                      <div key={zone.id} className="border rounded-lg p-4">
-                        <div className="flex justify-between items-start mb-3">
-                          <h4 className="font-medium text-gray-900">Zone {index + 1}: {zone.zoneName}</h4>
-                          <Badge variant="outline">{zone.zoneType}</Badge>
-                        </div>
-                        {zone.description && (
-                          <p className="text-gray-600 mb-3">{zone.description}</p>
-                        )}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-sm">
-                          <div>
-                            <span className="font-medium text-gray-700">Labor Hours:</span>
-                            <p>{zone.laborHours}h</p>
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-700">Labor Cost:</span>
-                            <p>{formatCurrency(zone.laborCost)}</p>
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-700">Parts Cost:</span>
-                            <p>{formatCurrency(zone.partsCost)}</p>
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-700">Zone Total:</span>
-                            <p className="font-semibold">{formatCurrency(zone.zoneTotal)}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-gray-700">
+                          <th className="py-2 pr-2">Part</th>
+                          <th className="py-2 pr-2 text-right">Qty</th>
+                          <th className="py-2 pr-2 text-right">Unit $</th>
+                          <th className="py-2 pr-2 text-right">Labor h</th>
+                          <th className="py-2 pr-2 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {estimate.items.map((item: any) => (
+                          <tr key={item.id} className="border-b last:border-b-0 align-top">
+                            <td className="py-2 pr-2">
+                              <div className="font-medium text-gray-900">{item.partName}</div>
+                              {item.description && (
+                                <div className="text-xs text-gray-600 mt-0.5">{item.description}</div>
+                              )}
+                            </td>
+                            <td className="py-2 pr-2 text-right">{item.quantity}</td>
+                            <td className="py-2 pr-2 text-right">{formatCurrency(item.partPrice)}</td>
+                            <td className="py-2 pr-2 text-right">{item.laborHours}</td>
+                            <td className="py-2 pr-2 text-right font-semibold">{formatCurrency(item.totalPrice)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </CardContent>
               </Card>

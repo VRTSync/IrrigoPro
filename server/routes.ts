@@ -232,7 +232,6 @@ import {
   insertCustomerSchema, 
   insertPartSchema, 
   insertEstimateSchema, 
-  insertEstimateZoneSchema, 
   insertEstimateItemSchema,
   insertPropertyZoneSchema,
   insertZoneSchema,
@@ -245,7 +244,7 @@ import {
   insertCompanySchema,
   insertAssemblySchema,
   insertAssemblyPartSchema,
-  type InsertEstimateZone,
+  type InsertEstimate,
   type InsertEstimateItem,
   type BillingSheetItem,
   type InsertBillingSheet,
@@ -254,7 +253,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 
-const createEstimateWithZonesSchema = z.object({
+const createEstimateWithItemsSchema = z.object({
   estimate: insertEstimateSchema.extend({
     // Allow date as string (will be converted)
     estimateDate: z.union([z.date(), z.string()]).optional(),
@@ -264,23 +263,16 @@ const createEstimateWithZonesSchema = z.object({
     totalAmount: z.union([z.string(), z.number()]).optional(),
     laborRate: z.union([z.string(), z.number()])
   }),
-  zones: z.array(insertEstimateZoneSchema.omit({ estimateId: true }).extend({
-    items: z.array(z.object({
-      part: z.object({
-        id: z.number(),
-        name: z.string(),
-        price: z.union([z.string(), z.number()]),
-        laborHours: z.union([z.string(), z.number()]).optional()
-      }).optional(),
-      partId: z.number().nullable().optional(),
-      partName: z.string().optional(),
-      partPrice: z.union([z.string(), z.number()]).optional(),
-      quantity: z.number(),
-      laborHours: z.union([z.string(), z.number()]).optional(),
-      totalPrice: z.union([z.string(), z.number()]),
-      totalLaborHours: z.number().nullable().optional()
-    }))
-  }))
+  items: z.array(z.object({
+    description: z.string().optional().default(""),
+    partId: z.number(),
+    partName: z.string(),
+    partPrice: z.union([z.string(), z.number()]),
+    quantity: z.number(),
+    laborHours: z.union([z.string(), z.number()]).optional(),
+    totalPrice: z.union([z.string(), z.number()]).optional(),
+    sortOrder: z.number().optional(),
+  })).min(1, "An estimate must have at least one line item"),
 });
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
@@ -717,7 +709,7 @@ setInterval(() => {
 
 import { db } from "./db";
 import { 
-  customers, estimates, workOrders, estimateItems, estimateZones, parts, billingSheets, billingSheetItems, 
+  customers, estimates, workOrders, estimateItems, parts, billingSheets, billingSheetItems, 
   users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs
 } from "@shared/schema";
@@ -4706,82 +4698,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/estimates/:id/zones", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const zones = await storage.getEstimateZones(id);
-      res.json(zones);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch estimate zones" });
-    }
-  });
+  function processEstimatePayload(parsed: z.infer<typeof createEstimateWithItemsSchema>) {
+    const items = parsed.items.map((item, idx) => {
+      const quantity = item.quantity || 1;
+      const partPrice = parseFloat(String(item.partPrice ?? 0));
+      const laborHours = parseFloat(String(item.laborHours ?? 0));
+      const totalPrice = item.totalPrice !== undefined
+        ? parseFloat(String(item.totalPrice))
+        : partPrice * quantity;
+      return {
+        description: item.description ?? "",
+        partId: item.partId,
+        partName: item.partName,
+        partPrice: String(partPrice),
+        quantity,
+        laborHours: String(laborHours),
+        totalPrice: totalPrice.toFixed(2),
+        sortOrder: item.sortOrder ?? idx,
+      };
+    });
+
+    // laborHours on every line item is the per-line total (already multiplied
+    // by quantity on the client). Storage recompute, the email renderer, and
+    // the displayed totals all share this convention.
+    let partsSubtotal = 0;
+    let totalLaborHours = 0;
+    items.forEach(item => {
+      partsSubtotal += parseFloat(item.totalPrice);
+      totalLaborHours += parseFloat(item.laborHours);
+    });
+
+    const laborRate = parseFloat(String(parsed.estimate.laborRate));
+    const laborSubtotal = totalLaborHours * laborRate;
+    const totalAmount = partsSubtotal + laborSubtotal;
+
+    const estimate: InsertEstimate = {
+      ...parsed.estimate,
+      estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
+      partsSubtotal: partsSubtotal.toFixed(2),
+      laborSubtotal: laborSubtotal.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
+      laborRate: String(parsed.estimate.laborRate),
+    };
+
+    return { estimate, items: items as InsertEstimateItem[] };
+  }
 
   app.post("/api/estimates", requireAuthentication, async (req, res) => {
     try {
-      const parsed = createEstimateWithZonesSchema.parse(req.body);
-      
-      // Process zones and items first to calculate totals
-      const zones = parsed.zones.map(zone => ({
-        ...zone,
-        items: zone.items.map(item => {
-          // Handle nested part data structure from frontend
-          const partData = item.part;
-          const quantity = item.quantity || 1;
-          const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
-          const laborHours = parseFloat(String(item.laborHours || 0));
-          return {
-            partId: partData?.id || item.partId,
-            partName: partData?.name || item.partName || '',
-            partPrice: String(partPrice),
-            quantity: quantity,
-            laborHours: String(laborHours),
-            totalPrice: String((partPrice * quantity).toFixed(2))
-          };
-        })
-      }));
-
-      // Calculate totals from processed zones
-      let partsSubtotal = 0;
-      let totalLaborHours = 0;
-
-      zones.forEach(zone => {
-        zone.items.forEach(item => {
-          const itemTotal = parseFloat(item.totalPrice);
-          const itemLaborHours = parseFloat(item.laborHours);
-          partsSubtotal += itemTotal;
-          totalLaborHours += itemLaborHours;
-        });
-      });
-
-      const laborRate = parseFloat(String(parsed.estimate.laborRate));
-
-      const laborSubtotal = totalLaborHours * laborRate;
-      const totalAmount = partsSubtotal + laborSubtotal;
-
-      const estimate = {
-        ...parsed.estimate,
-        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
-        partsSubtotal: String(partsSubtotal.toFixed(2)),
-        laborSubtotal: String(laborSubtotal.toFixed(2)),
-        totalAmount: String(totalAmount.toFixed(2)),
-        laborRate: String(parsed.estimate.laborRate)
-      };
-
-      const newEstimate = await storage.createEstimate(estimate, zones as (InsertEstimateZone & { items: InsertEstimateItem[] })[]);
+      const parsed = createEstimateWithItemsSchema.parse(req.body);
+      const { estimate, items } = processEstimatePayload(parsed);
+      const newEstimate = await storage.createEstimate(estimate, items);
       res.status(201).json(newEstimate);
     } catch (error) {
       console.error("Estimate creation error:", error);
       if (error instanceof z.ZodError) {
-        console.error("Validation errors:", error.errors);
         return res.status(400).json({ 
           message: "Invalid estimate data", 
           errors: error.errors,
-          details: error.errors.map(err => ({
-            path: err.path.join('.'),
-            message: err.message,
-            received: 'received' in err ? (err as z.ZodIssue & { received?: unknown }).received : undefined
-          }))
         });
       }
       res.status(500).json({ message: "Failed to create estimate" });
@@ -4794,69 +4768,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (isNaN(estimateId)) {
         return res.status(400).json({ message: "Invalid estimate ID" });
       }
-      const parsed = createEstimateWithZonesSchema.parse(req.body);
-      
-      // Process zones and items first to calculate totals
-      const zones = parsed.zones.map(zone => ({
-        ...zone,
-        items: zone.items.map(item => {
-          // Handle nested part data structure from frontend
-          const partData = item.part;
-          const quantity = item.quantity || 1;
-          const partPrice = parseFloat(String(partData?.price || item.partPrice || 0));
-          const laborHours = parseFloat(String(item.laborHours || 0));
-          return {
-            partId: partData?.id || item.partId,
-            partName: partData?.name || item.partName || '',
-            partPrice: String(partPrice),
-            quantity: quantity,
-            laborHours: String(laborHours),
-            totalPrice: String((partPrice * quantity).toFixed(2))
-          };
-        })
-      }));
-
-      // Calculate totals from processed zones
-      let partsSubtotal = 0;
-      let totalLaborHours = 0;
-
-      zones.forEach(zone => {
-        zone.items.forEach(item => {
-          const itemTotal = parseFloat(item.totalPrice);
-          const itemLaborHours = parseFloat(item.laborHours);
-          partsSubtotal += itemTotal;
-          totalLaborHours += itemLaborHours;
-        });
-      });
-
-      const laborRate = parseFloat(String(parsed.estimate.laborRate));
-
-      const laborSubtotal = totalLaborHours * laborRate;
-      const totalAmount = partsSubtotal + laborSubtotal;
-
-      const estimate = {
-        ...parsed.estimate,
-        estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
-        partsSubtotal: String(partsSubtotal.toFixed(2)),
-        laborSubtotal: String(laborSubtotal.toFixed(2)),
-        totalAmount: String(totalAmount.toFixed(2)),
-        laborRate: String(parsed.estimate.laborRate)
-      };
-
-      const updatedEstimate = await storage.updateEstimateWithZones(estimateId, estimate, zones as (InsertEstimateZone & { items: InsertEstimateItem[] })[]);
+      const parsed = createEstimateWithItemsSchema.parse(req.body);
+      const { estimate, items } = processEstimatePayload(parsed);
+      const updatedEstimate = await storage.updateEstimateWithItems(estimateId, estimate, items);
       res.json(updatedEstimate);
     } catch (error) {
       console.error("Estimate update error:", error);
       if (error instanceof z.ZodError) {
-        console.error("Validation errors:", error.errors);
         return res.status(400).json({ 
           message: "Invalid estimate data", 
           errors: error.errors,
-          details: error.errors.map(err => ({
-            path: err.path.join('.'),
-            message: err.message,
-            received: 'received' in err ? (err as z.ZodIssue & { received?: unknown }).received : undefined
-          }))
         });
       }
       res.status(500).json({ message: "Failed to update estimate" });
@@ -6333,14 +6254,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvalSentAt: new Date()
       });
 
-      // Get estimate with zones for email
-      const estimateWithZones = await storage.getEstimate(id);
-      const zones = estimateWithZones?.zones;
-      
-      // Import EmailService
+      // Get estimate with items for email
+      const estimateWithItems = await storage.getEstimate(id);
+      const items = estimateWithItems?.items ?? [];
+      const laborRate = parseFloat(estimate.laborRate);
+
       const { EmailService } = await import('./email-service');
-      
-      // Send approval email
+
       await EmailService.sendEstimateApprovalEmail({
         estimateId: estimate.id,
         estimateNumber: estimate.estimateNumber,
@@ -6353,15 +6273,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         estimateDate: new Date(estimate.estimateDate).toLocaleDateString(),
         createdBy: estimate.createdBy,
         companyId: estimate.companyId!,
-        zones: zones?.map(zone => ({
-          zoneName: zone.zoneName,
-          workDescription: zone.workDescription,
-          laborHours: zone.items?.reduce((sum, item) => sum + parseFloat(item.laborHours), 0) || 0,
-          partsCost: zone.items?.reduce((sum, item) => sum + parseFloat(item.totalPrice), 0) || 0,
-          laborCost: (zone.items?.reduce((sum, item) => sum + parseFloat(item.laborHours), 0) || 0) * parseFloat(estimate.laborRate),
-          zoneTotal: (zone.items?.reduce((sum, item) => sum + parseFloat(item.totalPrice), 0) || 0) + 
-                    ((zone.items?.reduce((sum, item) => sum + parseFloat(item.laborHours), 0) || 0) * parseFloat(estimate.laborRate))
-        }))
+        items: items.map(item => ({
+          description: item.description || item.partName,
+          partName: item.partName,
+          quantity: item.quantity,
+          partPrice: parseFloat(item.partPrice),
+          laborHours: parseFloat(item.laborHours),
+          partsCost: parseFloat(item.totalPrice),
+          laborCost: parseFloat(item.laborHours) * laborRate,
+          lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
+        })),
       });
 
       res.json({ 
@@ -8673,7 +8594,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           );
         }
 
-        type WoCreateLine = RawBillingItem & { partPrice?: number | string; zoneId?: number | null };
+        type WoCreateLine = RawBillingItem & { partPrice?: number | string };
         let computedPartsCost = 0;
         for (const raw of resolvedWoCreateItems as WoCreateLine[]) {
           const qty = Number(raw.quantity) || 0;
@@ -8689,7 +8610,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             laborHours: (Number(raw.laborHours) || 0).toString(),
             totalPrice: lineTotal.toString(),
             notes: raw.notes || null,
-            zoneId: raw.zoneId ?? null,
           });
         }
         await storage.updateWorkOrder(workOrder.id, { totalPartsCost: computedPartsCost.toFixed(2) });
@@ -8864,7 +8784,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             laborHours: (Number(item.laborHours) || 0).toString(),
             totalPrice: lineTotal.toString(),
             notes: item.notes || null,
-            zoneId: item.zoneId || null,
           };
         });
         await storage.replaceWorkOrderItemsInTransaction(id, itemsToInsert);

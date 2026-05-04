@@ -17,13 +17,15 @@ export interface EstimateEmailData {
   estimateDate: string;
   createdBy: string;
   companyId: number;
-  zones?: Array<{
-    zoneName: string;
-    workDescription: string;
+  items?: Array<{
+    description: string;
+    partName: string;
+    quantity: number;
+    partPrice: number;
     laborHours: number;
     partsCost: number;
     laborCost: number;
-    zoneTotal: number;
+    lineTotal: number;
   }>;
 }
 
@@ -123,17 +125,32 @@ export class EmailService {
       website: string;
     }
   ): string {
-    const zonesHTML = data.zones?.map(zone => `
-      <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 8px 0;">
-        <h4 style="margin: 0 0 8px 0; color: #374151; font-size: 16px;">${zone.zoneName}</h4>
-        <p style="margin: 4px 0; color: #6b7280; font-size: 14px;">${zone.workDescription}</p>
-        <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 14px;">
-          <span>Labor: ${zone.laborHours}h ($${zone.laborCost.toFixed(2)})</span>
-          <span>Parts: $${zone.partsCost.toFixed(2)}</span>
-          <span style="font-weight: 600;">Total: $${zone.zoneTotal.toFixed(2)}</span>
-        </div>
-      </div>
+    const itemsRowsHTML = data.items?.map(item => `
+        <tr>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; color: #1f2937;">${item.description || item.partName}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${item.quantity}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">$${item.partPrice.toFixed(2)}</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${item.laborHours.toFixed(2)}h</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap; font-weight: 600;">$${item.lineTotal.toFixed(2)}</td>
+        </tr>
     `).join('') || '';
+
+    const itemsHTML = itemsRowsHTML ? `
+      <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 14px;">
+        <thead>
+          <tr style="background: #f3f4f6;">
+            <th style="padding: 10px 12px; text-align: left; color: #374151; font-weight: 600;">Description</th>
+            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Qty</th>
+            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Unit</th>
+            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Labor</th>
+            <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRowsHTML}
+        </tbody>
+      </table>
+    ` : '';
 
     return `
 <!DOCTYPE html>
@@ -189,10 +206,10 @@ export class EmailService {
       </table>
     </div>
 
-    ${zonesHTML ? `
+    ${itemsHTML ? `
     <div style="margin: 20px 0;">
-      <h3 style="color: #374151; margin-bottom: 16px;">Work Zones</h3>
-      ${zonesHTML}
+      <h3 style="color: #374151; margin-bottom: 16px;">Line Items</h3>
+      ${itemsHTML}
     </div>
     ` : ''}
 
@@ -245,8 +262,8 @@ export class EmailService {
       website: string;
     }
   ): string {
-    const zonesText = data.zones?.map(zone => 
-      `${zone.zoneName}: ${zone.workDescription} - Labor: ${zone.laborHours}h ($${zone.laborCost.toFixed(2)}) + Parts: $${zone.partsCost.toFixed(2)} = $${zone.zoneTotal.toFixed(2)}`
+    const itemsText = data.items?.map(item =>
+      `${item.description || item.partName}: ${item.quantity} × $${item.partPrice.toFixed(2)} + Labor ${item.laborHours.toFixed(2)}h ($${item.laborCost.toFixed(2)}) = $${item.lineTotal.toFixed(2)}`
     ).join('\n') || '';
 
     return `
@@ -263,9 +280,9 @@ ${data.projectAddress ? `- Location: ${data.projectAddress}` : ''}
 - Date: ${data.estimateDate}
 - Prepared by: ${data.createdBy}
 
-${zonesText ? `
-WORK ZONES:
-${zonesText}
+${itemsText ? `
+LINE ITEMS:
+${itemsText}
 ` : ''}
 
 TOTAL ESTIMATE: ${data.totalAmount}

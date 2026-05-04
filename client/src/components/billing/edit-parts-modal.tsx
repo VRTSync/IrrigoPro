@@ -13,7 +13,6 @@ export interface EditPartRow {
   quantity: string;
   unitPrice: string;
   laborHours?: string;
-  zoneId?: number | null;
   notes?: string;
 }
 
@@ -62,7 +61,6 @@ export function EditPartsModal({
           quantity: String(qty || 1),
           unitPrice: String(parseFloat(part.price) || 0),
           laborHours: String((part as Part & { laborHours?: string }).laborHours || 0),
-          zoneId: null,
           notes: "",
         },
       ];
@@ -72,7 +70,7 @@ export function EditPartsModal({
   const addManualPart = () => {
     setParts((prev) => [
       ...prev,
-      { partId: null, partName: "", quantity: "1", unitPrice: "0", laborHours: "0", zoneId: null, notes: "" },
+      { partId: null, partName: "", quantity: "1", unitPrice: "0", laborHours: "0", notes: "" },
     ]);
   };
 

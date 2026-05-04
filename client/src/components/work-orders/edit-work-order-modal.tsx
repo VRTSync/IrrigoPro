@@ -182,7 +182,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
           quantity: String(item.quantity),
           unitPrice: String(item.partPrice),
           laborHours: String(item.laborHours),
-          zoneId: item.zoneId ?? null,
           notes: item.notes ?? "",
         }))
       );
@@ -230,7 +229,6 @@ export function EditWorkOrderModal({ workOrder, open, onClose, onSuccess }: Edit
             quantity: Number(p.quantity) || 0,
             unitPrice: Number(p.unitPrice) || 0,
             laborHours: Number(p.laborHours) || 0,
-            zoneId: p.zoneId,
             notes: p.notes || null,
           })),
         totalPartsCost: partsTotal.toFixed(2),

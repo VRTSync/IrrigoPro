@@ -356,27 +356,17 @@ export const estimates = pgTable("estimates", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const estimateZones = pgTable("estimate_zones", {
-  id: serial("id").primaryKey(),
-  estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
-  controllerId: text("controller_id").notNull(), // Controller A, B, C, D, etc.
-  zoneNumber: text("zone_number").notNull(), // Zone number within controller
-  zoneName: text("zone_name").notNull(), // Full zone name like "Controller B Zone 21"
-  workDescription: text("work_description").notNull(), // Description of work to be done
-  clockInTime: text("clock_in_time"),
-  sortOrder: integer("sort_order").default(0),
-});
-
 export const estimateItems = pgTable("estimate_items", {
   id: serial("id").primaryKey(),
   estimateId: integer("estimate_id").references(() => estimates.id).notNull(),
-  zoneId: integer("zone_id").references(() => estimateZones.id),
+  description: text("description").notNull().default(""),
   partId: integer("part_id").references(() => parts.id).notNull(),
   partName: text("part_name").notNull(),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
   laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 
@@ -562,7 +552,6 @@ export const workOrders = pgTable("work_orders", {
 export const workOrderItems = pgTable("work_order_items", {
   id: serial("id").primaryKey(),
   workOrderId: integer("work_order_id").references(() => workOrders.id).notNull(),
-  zoneId: integer("zone_id").references(() => estimateZones.id),
   partId: integer("part_id").references(() => parts.id),
   partName: text("part_name").notNull(),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
@@ -741,7 +730,6 @@ export const insertAssemblyPartSchema = createInsertSchema(assemblyParts).omit({
 });
 
 export const insertEstimateSchema = createInsertSchema(estimates).omit({ id: true, estimateNumber: true, createdAt: true, updatedAt: true });
-export const insertEstimateZoneSchema = createInsertSchema(estimateZones).omit({ id: true });
 export const insertEstimateItemSchema = createInsertSchema(estimateItems).omit({ id: true });
 export const insertPropertyZoneSchema = createInsertSchema(propertyZones).omit({ id: true });
 export const insertZoneSchema = createInsertSchema(zones).omit({ id: true });
@@ -830,7 +818,6 @@ export type Part = typeof parts.$inferSelect;
 export type Assembly = typeof assemblies.$inferSelect;
 export type AssemblyPart = typeof assemblyParts.$inferSelect;
 export type Estimate = typeof estimates.$inferSelect;
-export type EstimateZone = typeof estimateZones.$inferSelect;
 export type EstimateItem = typeof estimateItems.$inferSelect;
 export type PropertyZone = typeof propertyZones.$inferSelect;
 export type Zone = typeof zones.$inferSelect;
@@ -858,7 +845,6 @@ export type InsertPart = z.infer<typeof insertPartSchema>;
 export type InsertAssembly = z.infer<typeof insertAssemblySchema>;
 export type InsertAssemblyPart = z.infer<typeof insertAssemblyPartSchema>;
 export type InsertEstimate = z.infer<typeof insertEstimateSchema>;
-export type InsertEstimateZone = z.infer<typeof insertEstimateZoneSchema>;
 export type InsertEstimateItem = z.infer<typeof insertEstimateItemSchema>;
 export type InsertPropertyZone = z.infer<typeof insertPropertyZoneSchema>;
 export type InsertZone = z.infer<typeof insertZoneSchema>;
@@ -881,10 +867,6 @@ export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type InsertSiteMap = z.infer<typeof insertSiteMapSchema>;
 export type InsertController = z.infer<typeof insertControllerSchema>;
 export type InsertIrrigationZone = z.infer<typeof insertIrrigationZoneSchema>;
-
-export type EstimateWithZones = Estimate & {
-  zones: (EstimateZone & { items: EstimateItem[] })[];
-};
 
 export type EstimateWithItems = Estimate & {
   items: EstimateItem[];

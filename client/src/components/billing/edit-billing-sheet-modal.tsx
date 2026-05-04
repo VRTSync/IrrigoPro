@@ -202,7 +202,6 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
           quantity: String(item.quantity),
           unitPrice: String(item.unitPrice),
           laborHours: String(item.laborHours),
-          zoneId: null,
           notes: "",
         }))
       );

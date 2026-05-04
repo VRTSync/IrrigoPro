@@ -106,11 +106,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     queryKey: ["/api/work-orders", workOrder.id, "items"],
   });
 
-  const { data: estimateZones } = useQuery({
-    queryKey: ["/api/estimates", workOrder.estimateId, "zones"],
-    enabled: !!workOrder.estimateId,
-  });
-
   const updatePriority = useMutation({
     mutationFn: async (priority: string) => {
       return apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", { priority });
@@ -573,60 +568,44 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </CardHeader>
                 </Card>
 
-                {/* Zones and Work Items */}
-                {estimateZones && Array.isArray(estimateZones) && estimateZones.length > 0 ? (
-                  <div className="space-y-4">
-                    {estimateZones.map((zone: any, index: number) => {
-                      // Get items for this zone
-                      const zoneItems = (Array.isArray(workOrderItems) ? workOrderItems?.filter((item: any) => item.zoneId === zone.id) : []) || [];
-                      
-                      return (
-                        <Card key={zone.id} className="border-l-4 border-l-blue-500">
-                          <CardHeader className="pb-3">
-                            <div className="flex items-center justify-between">
-                              <CardTitle className="text-base flex items-center gap-2">
-                                <Wrench className="w-4 h-4 text-blue-600" />
-                                {zone.zoneName}
-                              </CardTitle>
-                              <Badge variant="outline" className="text-xs">
-                                {zoneItems.length} part{zoneItems.length !== 1 ? 's' : ''}
-                              </Badge>
-                            </div>
-                            {zone.workDescription && (
-                              <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                <p className="text-sm font-medium text-yellow-800 mb-1">Work Description:</p>
-                                <p className="text-yellow-700">{zone.workDescription}</p>
-                              </div>
-                            )}
-                          </CardHeader>
+                {Array.isArray(workOrderItems) && workOrderItems.length > 0 ? (
+                  <Card className="border-l-4 border-l-blue-500">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Wrench className="w-4 h-4 text-blue-600" />
+                          Line Items
+                        </CardTitle>
+                        <Badge variant="outline" className="text-xs">
+                          {workOrderItems.length} item{workOrderItems.length !== 1 ? 's' : ''}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Package className="w-4 h-4 text-gray-600" />
+                          <span className="font-medium text-gray-700">Parts & Materials:</span>
+                        </div>
 
-                          {zoneItems.length > 0 && (
-                            <CardContent className="pt-0">
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <Package className="w-4 h-4 text-gray-600" />
-                                  <span className="font-medium text-gray-700">Parts & Materials:</span>
-                                </div>
-                                
-                                {zoneItems.map((item: any) => (
-                                  <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                    <div className="flex-1">
-                                      <p className="font-medium text-gray-900">{item.partName}</p>
-                                      <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
-                                        <span>Qty: {item.quantity}</span>
-                                        <span>Labor: {item.laborHours}h</span>
-                                        <span>Total: ${item.totalPrice}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
+                        {workOrderItems.map((item: any) => (
+                          <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{item.partName}</p>
+                              {item.description && (
+                                <p className="text-sm text-gray-600 mt-0.5">{item.description}</p>
+                              )}
+                              <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                                <span>Qty: {item.quantity}</span>
+                                <span>Labor: {item.laborHours}h</span>
+                                <span>Total: ${item.totalPrice}</span>
                               </div>
-                            </CardContent>
-                          )}
-                        </Card>
-                      );
-                    })}
-                  </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
                 ) : (
                   <Card>
                     <CardContent className="p-8 text-center">

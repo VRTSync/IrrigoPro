@@ -1,10 +1,9 @@
 import { db } from "./db";
-import { customers, parts, estimates, estimateZones, estimateItems, propertyZones, zones, users, workOrders, workOrderItems, billingSheets, billingSheetItems } from "@shared/schema";
+import { customers, parts, estimates, estimateItems, propertyZones, zones, users, workOrders, workOrderItems, billingSheets, billingSheetItems } from "@shared/schema";
 
 type UserInsert = typeof users.$inferInsert;
 type CustomerInsert = typeof customers.$inferInsert;
 type PartInsert = typeof parts.$inferInsert;
-type EstimateZoneInsert = typeof estimateZones.$inferInsert;
 
 export async function seedDatabase() {
   console.log("Starting database seeding...");
@@ -177,21 +176,11 @@ export async function seedDatabase() {
     const insertedEstimates = await db.insert(estimates).values(sampleEstimates).returning();
     console.log(`Inserted ${insertedEstimates.length} estimates`);
 
-    // Seed estimate zones
-    const sampleEstimateZones: EstimateZoneInsert[] = [
-      { estimateId: insertedEstimates[0].id, controllerId: "A", zoneNumber: "1", zoneName: "Front Yard", workDescription: "Install sprinkler system for front lawn and flower beds", clockInTime: "8:00 AM", sortOrder: 1 },
-      { estimateId: insertedEstimates[0].id, controllerId: "A", zoneNumber: "2", zoneName: "Back Yard", workDescription: "Install rotor system for large back lawn area", clockInTime: "10:00 AM", sortOrder: 2 },
-      { estimateId: insertedEstimates[1].id, controllerId: "B", zoneNumber: "1", zoneName: "Parking Area", workDescription: "Install commercial sprinkler system for landscaping", clockInTime: "7:00 AM", sortOrder: 1 },
-    ];
-
-    const insertedEstimateZones = await db.insert(estimateZones).values(sampleEstimateZones).returning();
-    console.log(`Inserted ${insertedEstimateZones.length} estimate zones`);
-
     // Seed estimate items
     const sampleEstimateItems = [
-      { estimateId: insertedEstimates[0].id, zoneId: insertedEstimateZones[0].id, partId: insertedParts[0].id, partName: insertedParts[0].name, partPrice: insertedParts[0].price, quantity: 8, laborHours: "4.00", totalPrice: "148.00" },
-      { estimateId: insertedEstimates[0].id, zoneId: insertedEstimateZones[1].id, partId: insertedParts[1].id, partName: insertedParts[1].name, partPrice: insertedParts[1].price, quantity: 6, laborHours: "4.50", totalPrice: "256.50" },
-      { estimateId: insertedEstimates[1].id, zoneId: insertedEstimateZones[2].id, partId: insertedParts[3].id, partName: insertedParts[3].name, partPrice: insertedParts[3].price, quantity: 2, laborHours: "4.00", totalPrice: "378.00" },
+      { estimateId: insertedEstimates[0].id, description: "Front Yard sprinkler heads", partId: insertedParts[0].id, partName: insertedParts[0].name, partPrice: insertedParts[0].price, quantity: 8, laborHours: "4.00", totalPrice: "148.00", sortOrder: 0 },
+      { estimateId: insertedEstimates[0].id, description: "Back Yard rotors", partId: insertedParts[1].id, partName: insertedParts[1].name, partPrice: insertedParts[1].price, quantity: 6, laborHours: "4.50", totalPrice: "256.50", sortOrder: 1 },
+      { estimateId: insertedEstimates[1].id, description: "Commercial controller", partId: insertedParts[3].id, partName: insertedParts[3].name, partPrice: insertedParts[3].price, quantity: 2, laborHours: "4.00", totalPrice: "378.00", sortOrder: 0 },
     ];
 
     const insertedEstimateItems = await db.insert(estimateItems).values(sampleEstimateItems).returning();

@@ -6,7 +6,6 @@ import {
   assemblies,
   assemblyParts,
   estimates, 
-  estimateZones,
   estimateItems,
   propertyZones,
   zones,
@@ -43,7 +42,6 @@ import {
   type Assembly,
   type AssemblyPart, 
   type Estimate, 
-  type EstimateZone,
   type EstimateItem,
   type PropertyZone,
   type Zone,
@@ -77,7 +75,6 @@ import {
   type InsertAssembly,
   type InsertAssemblyPart, 
   type InsertEstimate, 
-  type InsertEstimateZone,
   type InsertEstimateItem,
   type InsertPropertyZone,
   type InsertZone,
@@ -104,7 +101,6 @@ import {
   type InsertPartMaterial,
   type InsertPartFittingType,
   type EstimateWithItems,
-  type EstimateWithZones,
   type PropertyZoneWithZones,
   type FieldWorkSessionWithItems,
   type InvoiceWithItems,
@@ -240,15 +236,14 @@ export interface IStorage {
 
   // Estimates
   getEstimates(): Promise<Estimate[]>;
-  getEstimate(id: number): Promise<EstimateWithZones | undefined>;
-  createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones>;
+  getEstimate(id: number): Promise<EstimateWithItems | undefined>;
+  createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
-  updateEstimateWithZones(id: number, estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones>;
+  updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   deleteEstimate(id: number): Promise<boolean>;
 
   // Estimate Items
   getEstimateItems(estimateId: number): Promise<EstimateItem[]>;
-  getEstimateZones(estimateId: number): Promise<EstimateZone[]>;
   
   // Dashboard Stats
   getDashboardStats(): Promise<{
@@ -307,7 +302,7 @@ export interface IStorage {
   getWorkOrdersByStatus(status: string): Promise<WorkOrder[]>;
   getWorkOrdersByEstimate(estimateId: number): Promise<WorkOrder[]>;
   getWorkOrder(id: number): Promise<WorkOrder | undefined>;
-  createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder>;
+  createWorkOrder(workOrder: InsertWorkOrder, estimateItems?: EstimateItem[]): Promise<WorkOrder>;
   createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder>;
   updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
@@ -1245,7 +1240,6 @@ export class DatabaseStorage implements IStorage {
     // Recalculate totals for each estimate to ensure accuracy
     const estimatesWithCalculatedTotals = await Promise.all(
       estimatesList.map(async (estimate) => {
-        const zones = await db.select().from(estimateZones).where(eq(estimateZones.estimateId, estimate.id));
         const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimate.id));
         
         let partsSubtotal = 0;
@@ -1275,72 +1269,53 @@ export class DatabaseStorage implements IStorage {
     return estimatesWithCalculatedTotals;
   }
 
-  async getEstimate(id: number): Promise<EstimateWithZones | undefined> {
+  async getEstimate(id: number): Promise<EstimateWithItems | undefined> {
     const [estimate] = await db.select().from(estimates).where(eq(estimates.id, id));
     if (!estimate) return undefined;
 
-    const estimateZonesList = await db.select().from(estimateZones).where(eq(estimateZones.estimateId, id));
-    const estimateItemsList = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, id));
-
-    const zones = estimateZonesList.map(zone => ({
-      ...zone,
-      items: estimateItemsList.filter(item => item.zoneId === zone.id)
-    }));
+    const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, id)).orderBy(estimateItems.sortOrder);
 
     // Recalculate totals to ensure accuracy
     let partsSubtotal = 0;
     let totalLaborHours = 0;
-    
-    estimateItemsList.forEach(item => {
+
+    items.forEach(item => {
       const itemTotal = parseFloat(String(item.totalPrice));
       const itemLaborHours = parseFloat(String(item.laborHours));
       partsSubtotal += itemTotal;
       totalLaborHours += itemLaborHours;
     });
-    
-    const laborRate = parseFloat(String(estimate.laborRate));
 
+    const laborRate = parseFloat(String(estimate.laborRate));
     const laborSubtotal = totalLaborHours * laborRate;
     const totalAmount = partsSubtotal + laborSubtotal;
 
-    const estimateWithCalculatedTotals = {
+    return {
       ...estimate,
       partsSubtotal: partsSubtotal.toFixed(2),
       laborSubtotal: laborSubtotal.toFixed(2),
-      totalAmount: totalAmount.toFixed(2)
+      totalAmount: totalAmount.toFixed(2),
+      items,
     };
-
-    return { ...estimateWithCalculatedTotals, zones };
   }
 
-  async createEstimate(estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones> {
-    // Generate a unique estimate number if not provided
+  async createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
     const estimateNumber = `EST-${Date.now()}`;
     const estimateWithNumber = { ...estimate, estimateNumber };
-    const [newEstimate] = await db.insert(estimates).values([estimateWithNumber]).returning();
-    
-    const createdZones = [];
-    for (const zone of zones) {
-      const { items, ...zoneData } = zone;
-      const [createdZone] = await db.insert(estimateZones).values({
-        ...zoneData,
-        estimateId: newEstimate.id
-      }).returning();
-
-      const createdItems = [];
-      for (const item of items) {
-        const [createdItem] = await db.insert(estimateItems).values({
+    return await db.transaction(async (tx) => {
+      const [newEstimate] = await tx.insert(estimates).values([estimateWithNumber]).returning();
+      const createdItems: EstimateItem[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const [createdItem] = await tx.insert(estimateItems).values({
           ...item,
           estimateId: newEstimate.id,
-          zoneId: createdZone.id
+          sortOrder: item.sortOrder ?? i,
         }).returning();
         createdItems.push(createdItem);
       }
-
-      createdZones.push({ ...createdZone, items: createdItems });
-    }
-
-    return { ...newEstimate, zones: createdZones };
+      return { ...newEstimate, items: createdItems };
+    });
   }
 
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {
@@ -1348,37 +1323,25 @@ export class DatabaseStorage implements IStorage {
     return updatedEstimate || undefined;
   }
 
-  async updateEstimateWithZones(id: number, estimate: InsertEstimate, zones: (InsertEstimateZone & { items: InsertEstimateItem[] })[]): Promise<EstimateWithZones> {
-    // Update the estimate
-    const [updatedEstimate] = await db.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
-    
-    // Delete existing zones and items for this estimate
-    await db.delete(estimateItems).where(eq(estimateItems.estimateId, id));
-    await db.delete(estimateZones).where(eq(estimateZones.estimateId, id));
-    
-    // Create new zones and items
-    const createdZones = [];
-    for (const zone of zones) {
-      const { items, ...zoneData } = zone;
-      const [createdZone] = await db.insert(estimateZones).values({
-        ...zoneData,
-        estimateId: id
-      }).returning();
-
-      const createdItems = [];
-      for (const item of items) {
-        const [createdItem] = await db.insert(estimateItems).values({
+  async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
+    return await db.transaction(async (tx) => {
+      const [updatedEstimate] = await tx.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
+      if (!updatedEstimate) {
+        throw new Error(`Estimate ${id} not found`);
+      }
+      await tx.delete(estimateItems).where(eq(estimateItems.estimateId, id));
+      const createdItems: EstimateItem[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const [createdItem] = await tx.insert(estimateItems).values({
           ...item,
           estimateId: id,
-          zoneId: createdZone.id
+          sortOrder: item.sortOrder ?? i,
         }).returning();
         createdItems.push(createdItem);
       }
-
-      createdZones.push({ ...createdZone, items: createdItems });
-    }
-
-    return { ...updatedEstimate, zones: createdZones };
+      return { ...updatedEstimate, items: createdItems };
+    });
   }
 
   async deleteEstimate(id: number): Promise<boolean> {
@@ -1387,11 +1350,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEstimateItems(estimateId: number): Promise<EstimateItem[]> {
-    return await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimateId));
-  }
-
-  async getEstimateZones(estimateId: number): Promise<EstimateZone[]> {
-    return await db.select().from(estimateZones).where(eq(estimateZones.estimateId, estimateId)).orderBy(estimateZones.sortOrder);
+    return await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimateId)).orderBy(estimateItems.sortOrder);
   }
 
   // Property Zones
@@ -2035,33 +1994,28 @@ export class DatabaseStorage implements IStorage {
     return workOrder || undefined;
   }
 
-  async createWorkOrder(workOrder: InsertWorkOrder, estimateZones?: (EstimateZone & { items: EstimateItem[] })[]): Promise<WorkOrder> {
-    // Generate work order number
+  async createWorkOrder(workOrder: InsertWorkOrder, estimateItemsList?: EstimateItem[]): Promise<WorkOrder> {
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    
+
     const [newWorkOrder] = await db.insert(workOrders).values([{
       ...workOrder,
       workOrderNumber,
     }]).returning();
 
-    // Copy estimate items to work order items if provided
-    if (estimateZones && estimateZones.length > 0) {
-      for (const zone of estimateZones) {
-        for (const item of zone.items) {
-          await db.insert(workOrderItems).values([{
-            workOrderId: newWorkOrder.id,
-            zoneId: zone.id,
-            partId: item.partId,
-            partName: item.partName,
-            partPrice: item.partPrice,
-            quantity: item.quantity,
-            laborHours: item.laborHours,
-            totalPrice: item.totalPrice,
-          }]);
-        }
+    if (estimateItemsList && estimateItemsList.length > 0) {
+      for (const item of estimateItemsList) {
+        await db.insert(workOrderItems).values([{
+          workOrderId: newWorkOrder.id,
+          partId: item.partId,
+          partName: item.partName,
+          partPrice: item.partPrice,
+          quantity: item.quantity,
+          laborHours: item.laborHours,
+          totalPrice: item.totalPrice,
+        }]);
       }
     }
-    
+
     return newWorkOrder;
   }
 
@@ -2106,26 +2060,22 @@ export class DatabaseStorage implements IStorage {
       partsSubtotal: estimate.partsSubtotal,
       estimatedTotal: estimate.totalAmount, // Original estimate total for comparison
       totalAmount: estimate.totalAmount,
-      totalItems: estimate.zones?.reduce((sum, zone) => sum + zone.items.length, 0) || 0,
+      totalItems: estimate.items?.length || 0,
     };
 
     const [newWorkOrder] = await db.insert(workOrders).values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData)).returning();
 
-    // Copy estimate items to work order items
-    if (estimate.zones) {
-      for (const zone of estimate.zones) {
-        for (const item of zone.items) {
-          await db.insert(workOrderItems).values({
-            workOrderId: newWorkOrder.id,
-            zoneId: zone.id,
-            partId: item.partId,
-            partName: item.partName,
-            partPrice: item.partPrice,
-            quantity: item.quantity,
-            laborHours: item.laborHours,
-            totalPrice: item.totalPrice,
-          });
-        }
+    if (estimate.items) {
+      for (const item of estimate.items) {
+        await db.insert(workOrderItems).values({
+          workOrderId: newWorkOrder.id,
+          partId: item.partId,
+          partName: item.partName,
+          partPrice: item.partPrice,
+          quantity: item.quantity,
+          laborHours: item.laborHours,
+          totalPrice: item.totalPrice,
+        });
       }
     }
 

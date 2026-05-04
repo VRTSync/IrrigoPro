@@ -492,6 +492,7 @@ export default function Estimates() {
             setEditEstimateId(null);
           }
         }}
+        estimateId={editEstimateId}
       />
 
       {/* Estimate Detail Modal */}

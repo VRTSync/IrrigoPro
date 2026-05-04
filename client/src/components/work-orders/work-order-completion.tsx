@@ -131,11 +131,6 @@ export function WorkOrderCompletion({
     queryKey: ["/api/work-orders", workOrder.id, "items"],
   });
 
-  const { data: estimateZones } = useQuery({
-    queryKey: ["/api/estimates", workOrder.estimateId, "zones"],
-    enabled: !!workOrder.estimateId,
-  });
-
   const form = useForm<WorkOrderCompletionData>({
     resolver: zodResolver(workOrderCompletionSchema),
     defaultValues: {
@@ -147,10 +142,9 @@ export function WorkOrderCompletion({
 
   // Pre-fill form with estimate data when available
   useEffect(() => {
-    if (Array.isArray(workOrderItems) && Array.isArray(estimateZones) && workOrder.estimateId && usedParts.length === 0) {
-      // Pre-fill used parts from work order items
+    if (Array.isArray(workOrderItems) && workOrder.estimateId && usedParts.length === 0) {
       const prefilledParts: UsedPart[] = workOrderItems.map((item: any) => ({
-        id: Date.now() + Math.random(), // Unique ID for state management
+        id: Date.now() + Math.random(),
         partId: item.partId,
         partName: item.partName,
         partPrice: item.partPrice,
@@ -158,28 +152,25 @@ export function WorkOrderCompletion({
         totalCost: parseFloat(item.totalPrice),
         source: 'estimate' as const,
       }));
-      
+
       setUsedParts(prefilledParts);
 
-      // Calculate estimated total hours from all items
-      const estimatedHours = workOrderItems.reduce((total: number, item: any) => 
+      const estimatedHours = workOrderItems.reduce((total: number, item: any) =>
         total + (parseFloat(item.laborHours) * item.quantity), 0
       );
 
-      // Create work summary from zone descriptions
-      const workDescriptions = estimateZones
-        .filter((zone: any) => zone.workDescription)
-        .map((zone: any) => `${zone.zoneName}: ${zone.workDescription}`)
+      const workDescriptions = workOrderItems
+        .map((item: any) => item.description || item.partName)
+        .filter(Boolean)
         .join('\n');
 
-      // Pre-fill form fields
       form.reset({
         workSummary: workDescriptions || "Work completed as per estimate",
         customerNotes: "Work completed according to estimate specifications",
-        totalHours: Math.max(estimatedHours, 0.1), // Ensure minimum 0.1 hours
+        totalHours: Math.max(estimatedHours, 0.1),
       });
     }
-  }, [workOrderItems, estimateZones, workOrder.estimateId, form, usedParts.length]);
+  }, [workOrderItems, workOrder.estimateId, form, usedParts.length]);
 
   const completeWorkOrderMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -364,22 +355,21 @@ export function WorkOrderCompletion({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Work Plan Reference Section - Shows estimated work for field techs */}
-        {workOrder.estimateId && Array.isArray(estimateZones) && estimateZones.length > 0 && !showSummary && (
+        {workOrder.estimateId && Array.isArray(workOrderItems) && workOrderItems.length > 0 && !showSummary && (
           <div className="border-b border-gray-200 bg-blue-50 p-4">
             <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
               <Activity className="w-4 h-4" />
               Planned Work (Based on Estimate #{workOrder.estimateId})
             </h3>
             <div className="space-y-2">
-              {estimateZones.slice(0, 3).map((zone: any) => (
-                <div key={zone.id} className="text-xs text-blue-800">
-                  <span className="font-medium">{zone.zoneName}:</span> {zone.workDescription || "Work as estimated"}
+              {workOrderItems.slice(0, 3).map((item: any) => (
+                <div key={item.id} className="text-xs text-blue-800">
+                  <span className="font-medium">{item.description || item.partName}:</span> {item.quantity} × ${item.partPrice}
                 </div>
               ))}
-              {estimateZones.length > 3 && (
+              {workOrderItems.length > 3 && (
                 <div className="text-xs text-blue-600 italic">
-                  +{estimateZones.length - 3} more zones...
+                  +{workOrderItems.length - 3} more items...
                 </div>
               )}
             </div>

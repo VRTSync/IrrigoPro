@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { EnhancedEstimateModal } from "@/components/estimates/enhanced-estimate-modal";
+import { EstimateModal } from "@/components/estimates/estimate-modal";
 import type { Estimate } from "@shared/schema";
 
 interface EstimatesManagerProps {
@@ -15,6 +15,7 @@ interface EstimatesManagerProps {
 
 export function EstimatesManager({ onBack }: EstimatesManagerProps) {
   const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -128,7 +129,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                     </div>
                     
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
                         <Eye className="w-4 h-4 mr-2" />
                         View
                       </Button>
@@ -156,10 +157,14 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
         )}
       </div>
 
-      {/* Enhanced Estimate Modal */}
-      <EnhancedEstimateModal
+      {/* Estimate Modal */}
+      <EstimateModal
         open={showEstimateModal}
-        onOpenChange={setShowEstimateModal}
+        onOpenChange={(open) => {
+          setShowEstimateModal(open);
+          if (!open) setEditEstimateId(null);
+        }}
+        estimateId={editEstimateId}
       />
     </div>
   );
