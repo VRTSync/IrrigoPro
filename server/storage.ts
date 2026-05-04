@@ -34,6 +34,8 @@ import {
   partSizes,
   partMaterials,
   partFittingTypes,
+  pricingAuditEvents,
+  type PricingAuditEvent,
   type Company,
   type User,
   type Customer, 
@@ -471,6 +473,17 @@ export interface IStorage {
       reason: string;
     }>;
   }>;
+
+  // Pricing audit events (Task #212) — read-only history of automatic
+  // reprice actions, scoped per parent (billing sheet, work order, invoice).
+  // When `companyId` is provided, results are additionally filtered to that
+  // company so a manager from one company cannot read another company's events
+  // even if the route-level scoping is bypassed.
+  getPricingAuditEvents(
+    source: 'billing_sheet' | 'work_order' | 'invoice',
+    parentId: number,
+    companyId?: number | null,
+  ): Promise<PricingAuditEvent[]>;
 
   // Manual Part Reviews
   getManualPartReviews(companyId: number): Promise<ManualPartReview[]>;
@@ -2603,6 +2616,15 @@ export class DatabaseStorage implements IStorage {
     // `notes`). Audit lines now live only in `[AUDIT]` console logs.
     const actor = options.performedByName ?? (options.performedByUserId ? `user#${options.performedByUserId}` : 'admin');
 
+    // Task #212: resolve actor user once. If the id doesn't reference a real
+    // user (test fixtures, deleted accounts), null it out so the FK insert
+    // into pricing_audit_events doesn't blow up the whole repair transaction.
+    let effectiveActorUserId: number | null = options.performedByUserId ?? null;
+    if (effectiveActorUserId != null) {
+      const u = await this.getUser(effectiveActorUserId).catch(() => null);
+      if (!u) effectiveActorUserId = null;
+    }
+
     type ZeroPriceRow = typeof allBad[number];
     for (const rows of Array.from(byParent.values()) as ZeroPriceRow[][]) {
       const sample = rows[0];
@@ -2670,6 +2692,26 @@ export class DatabaseStorage implements IStorage {
                 totalAmount: trueTotal.toFixed(2),
               })
               .where(eq(billingSheets.id, sheetId));
+            // Task #212: structured audit event so managers can see this in
+            // the History panel on the billing-sheet detail view.
+            await tx.insert(pricingAuditEvents).values({
+              companyId: companyId ?? null,
+              source: 'billing_sheet',
+              parentId: sheetId,
+              parentNumber: sheet.billingNumber,
+              kind: 'catalog_reprice',
+              delta: parentDifference.toFixed(2),
+              itemCount: rows.length,
+              actorUserId: effectiveActorUserId,
+              actorName: options.performedByName ?? null,
+              details: {
+                oldPartsSubtotal: oldPartsSubtotal.toFixed(2),
+                newPartsSubtotal: truePartsSubtotal.toFixed(2),
+                oldTotalAmount: oldTotalAmount.toFixed(2),
+                newTotalAmount: trueTotal.toFixed(2),
+                items: updatedItems,
+              },
+            });
             console.log(
               `[AUDIT] billing_sheet_repriced billingSheetId=${sheetId} billingNumber=${sheet.billingNumber} ` +
               `itemCount=${rows.length} delta=${parentDifference.toFixed(2)} ` +
@@ -2736,6 +2778,24 @@ export class DatabaseStorage implements IStorage {
             // Task #210: do NOT write the audit note into work_orders.notes.
             // The [AUDIT] log line below preserves the audit trail in server logs.
             await tx.update(workOrders).set(updates).where(eq(workOrders.id, workOrderId));
+            // Task #212: structured audit event for the History panel.
+            await tx.insert(pricingAuditEvents).values({
+              companyId: companyId ?? null,
+              source: 'work_order',
+              parentId: workOrderId,
+              parentNumber: wo.workOrderNumber,
+              kind: 'catalog_reprice',
+              delta: parentDifference.toFixed(2),
+              itemCount: rows.length,
+              actorUserId: effectiveActorUserId,
+              actorName: options.performedByName ?? null,
+              details: {
+                oldPartsSubtotal: oldPartsSubtotal.toFixed(2),
+                newTotalPartsCost: truePartsCost.toFixed(2),
+                oldTotalAmount: oldTotalAmount.toFixed(2),
+                items: updatedItems,
+              },
+            });
             console.log(
               `[AUDIT] work_order_repriced workOrderId=${workOrderId} workOrderNumber=${wo.workOrderNumber} ` +
               `itemCount=${rows.length} delta=${parentDifference.toFixed(2)} ` +
@@ -2945,6 +3005,13 @@ export class DatabaseStorage implements IStorage {
     // `notes`). Audit lines now live only in `[AUDIT]` console logs.
     const actor = options.performedByName ?? (options.performedByUserId ? `user#${options.performedByUserId}` : 'admin');
 
+    // Task #212: resolve actor user once (see repriceBillingSheetItems).
+    let effectiveActorUserId: number | null = options.performedByUserId ?? null;
+    if (effectiveActorUserId != null) {
+      const u = await this.getUser(effectiveActorUserId).catch(() => null);
+      if (!u) effectiveActorUserId = null;
+    }
+
     // De-duplicate: last classification wins for a given (source, parentId)
     const wantMap = new Map<string, 'standard' | 'emergency'>();
     for (const s of selection) {
@@ -3030,13 +3097,39 @@ export class DatabaseStorage implements IStorage {
         if (!options.dryRun) {
           // Task #210: do NOT write the audit note into billing_sheets.notes.
           // The [AUDIT] log line below preserves the audit trail in server logs.
-          await db.update(billingSheets)
-            .set({
-              laborRate: newRate.toFixed(2),
-              laborSubtotal: newLaborSubtotal.toFixed(2),
-              totalAmount: newTotalAmount.toFixed(2),
-            })
-            .where(eq(billingSheets.id, parentId));
+          // Task #212: write the structured audit event in the same transaction
+          // as the rate update so the History panel can never disagree with
+          // what was applied.
+          await db.transaction(async (tx) => {
+            await tx.update(billingSheets)
+              .set({
+                laborRate: newRate.toFixed(2),
+                laborSubtotal: newLaborSubtotal.toFixed(2),
+                totalAmount: newTotalAmount.toFixed(2),
+              })
+              .where(eq(billingSheets.id, parentId));
+            await tx.insert(pricingAuditEvents).values({
+              companyId: companyId ?? null,
+              source: 'billing_sheet',
+              parentId,
+              parentNumber: sheet.billingNumber,
+              kind: 'labor_rate_reprice',
+              delta: delta.toFixed(2),
+              itemCount: 0,
+              actorUserId: effectiveActorUserId,
+              actorName: options.performedByName ?? null,
+              details: {
+                classification,
+                oldLaborRate: oldRate.toFixed(2),
+                newLaborRate: newRate.toFixed(2),
+                oldLaborSubtotal: oldLaborSubtotal.toFixed(2),
+                newLaborSubtotal: newLaborSubtotal.toFixed(2),
+                oldTotalAmount: oldTotalAmount.toFixed(2),
+                newTotalAmount: newTotalAmount.toFixed(2),
+                totalHours: totalHours.toFixed(2),
+              },
+            });
+          });
           console.log(
             `[AUDIT] billing_sheet_labor_repriced billingSheetId=${parentId} billingNumber=${sheet.billingNumber} ` +
             `classification=${classification} oldRate=${oldRate.toFixed(2)} newRate=${newRate.toFixed(2)} ` +
@@ -3116,14 +3209,38 @@ export class DatabaseStorage implements IStorage {
         if (!options.dryRun) {
           // Task #210: do NOT write the audit note into work_orders.notes.
           // The [AUDIT] log line below preserves the audit trail in server logs.
-          await db.update(workOrders)
-            .set({
-              laborRate: newRate.toFixed(2),
-              appliedLaborRate: newRate.toFixed(2),
-              laborSubtotal: newLaborSubtotal.toFixed(2),
-              totalAmount: newTotalAmount.toFixed(2),
-            })
-            .where(eq(workOrders.id, parentId));
+          // Task #212: write the structured audit event in the same transaction.
+          await db.transaction(async (tx) => {
+            await tx.update(workOrders)
+              .set({
+                laborRate: newRate.toFixed(2),
+                appliedLaborRate: newRate.toFixed(2),
+                laborSubtotal: newLaborSubtotal.toFixed(2),
+                totalAmount: newTotalAmount.toFixed(2),
+              })
+              .where(eq(workOrders.id, parentId));
+            await tx.insert(pricingAuditEvents).values({
+              companyId: companyId ?? null,
+              source: 'work_order',
+              parentId,
+              parentNumber: wo.workOrderNumber,
+              kind: 'labor_rate_reprice',
+              delta: delta.toFixed(2),
+              itemCount: 0,
+              actorUserId: effectiveActorUserId,
+              actorName: options.performedByName ?? null,
+              details: {
+                classification,
+                oldLaborRate: oldRate.toFixed(2),
+                newLaborRate: newRate.toFixed(2),
+                oldLaborSubtotal: oldLaborSubtotal.toFixed(2),
+                newLaborSubtotal: newLaborSubtotal.toFixed(2),
+                oldTotalAmount: oldTotalAmount.toFixed(2),
+                newTotalAmount: newTotalAmount.toFixed(2),
+                totalHours: totalHours.toFixed(2),
+              },
+            });
+          });
           console.log(
             `[AUDIT] work_order_labor_repriced workOrderId=${parentId} workOrderNumber=${wo.workOrderNumber} ` +
             `classification=${classification} oldRate=${oldRate.toFixed(2)} newRate=${newRate.toFixed(2)} ` +
@@ -3142,6 +3259,30 @@ export class DatabaseStorage implements IStorage {
     };
   }
   // ─── /Labor Rate Mismatch audit ─────────────────────────────────────────────
+
+  // ─── Pricing audit events (Task #212) ──────────────────────────────────────
+  async getPricingAuditEvents(
+    source: 'billing_sheet' | 'work_order' | 'invoice',
+    parentId: number,
+    companyId?: number | null,
+  ): Promise<PricingAuditEvent[]> {
+    const conditions = [
+      eq(pricingAuditEvents.source, source),
+      eq(pricingAuditEvents.parentId, parentId),
+    ];
+    // Hard company scoping: when companyId is provided, only return rows that
+    // belong to that company. Rows with NULL companyId are NOT exposed under a
+    // scoped read — that prevents legacy/unscoped events from leaking across
+    // company boundaries.
+    if (companyId != null) {
+      conditions.push(eq(pricingAuditEvents.companyId, companyId));
+    }
+    return await db.select()
+      .from(pricingAuditEvents)
+      .where(and(...conditions))
+      .orderBy(desc(pricingAuditEvents.createdAt));
+  }
+  // ─── /Pricing audit events ─────────────────────────────────────────────────
 
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {

@@ -29,6 +29,8 @@ import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { preparePhotoForUpload } from "@/lib/photo-prep";
+import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
+import { History } from "lucide-react";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -150,6 +152,14 @@ export function CompletedWorkDetailModal({
   const userRole = parsedUser?.role ?? "";
   const userId = parsedUser?.id;
   const canSeePricing = showPricing !== undefined ? showPricing : userRole !== "field_tech";
+  // Aligned with the server allowlist for the pricing-audit-events endpoints
+  // so non-manager roles never see a stray 403 panel.
+  const canSeeRepriceHistory = [
+    "super_admin",
+    "company_admin",
+    "billing_manager",
+    "irrigation_manager",
+  ].includes(userRole);
 
   const bs = type === "billing_sheet" ? (data as BillingSheet) : null;
 
@@ -796,6 +806,19 @@ export function CompletedWorkDetailModal({
                     <span className="text-xl font-bold text-green-700">{currency(totalAmount)}</span>
                   </div>
                 </div>
+              </SectionCard>
+            )}
+
+            {/* Reprice History (Task #212) — managers/admins only.
+                 Aligned with the server allowlist (super_admin,
+                 company_admin, billing_manager, irrigation_manager). */}
+            {canSeeRepriceHistory && (
+              <SectionCard title="Reprice History" icon={<History className="w-4 h-4" />}>
+                <PricingAuditHistory
+                  source={isWorkOrder ? 'work_order' : 'billing_sheet'}
+                  parentId={id}
+                  enabled={open}
+                />
               </SectionCard>
             )}
           </div>

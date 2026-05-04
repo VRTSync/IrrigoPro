@@ -9304,6 +9304,97 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
   // ─── /Labor Rate Mismatch audit ───────────────────────────────────────────
 
+  // ─── Pricing audit event history (Task #212) ─────────────────────────────
+  // Read-only endpoint that returns the structured history of automatic
+  // reprice events for a given billing sheet or work order. Visible to
+  // managers and admins only — field techs cannot see pricing data anywhere
+  // in the app and so are explicitly blocked here too. Mirrors the auth
+  // shape used by the /admin/* audit endpoints above.
+  function isPricingHistoryViewer(role: string | null): boolean {
+    return role === 'company_admin'
+      || role === 'super_admin'
+      || role === 'billing_manager'
+      || role === 'irrigation_manager';
+  }
+
+  async function pricingHistoryHandler(
+    req: any,
+    res: any,
+    source: 'billing_sheet' | 'work_order',
+  ) {
+    try {
+      const role: string | null = (req.authenticatedUserRole as string) ?? null;
+      if (!isPricingHistoryViewer(role)) {
+        return res.status(403).json({
+          message: "Access denied. Manager or admin role required to view pricing history.",
+        });
+      }
+      const parentId = parseInt(req.params.id);
+      if (!Number.isFinite(parentId)) {
+        return res.status(400).json({ message: "Invalid id" });
+      }
+
+      // Scope the lookup to the user's company so a manager from company A
+      // cannot read events for a parent owned by company B.
+      const scopeCompanyId: number | null = typeof req.authenticatedUserCompanyId === 'number'
+        ? req.authenticatedUserCompanyId
+        : null;
+      if (role !== 'super_admin') {
+        // Non-super-admin callers MUST have a company on their session.
+        if (scopeCompanyId == null) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+        if (source === 'billing_sheet') {
+          const sheet = await storage.getBillingSheetById(parentId);
+          if (!sheet) return res.status(404).json({ message: "Billing sheet not found" });
+          // If the sheet has no customer linkage, ownership cannot be proven —
+          // deny rather than fall through to an unscoped read.
+          if (!sheet.customerId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+          const cust = await storage.getCustomer(sheet.customerId);
+          if (!cust || cust.companyId !== scopeCompanyId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+        } else {
+          const wo = await storage.getWorkOrder(parentId);
+          if (!wo) return res.status(404).json({ message: "Work order not found" });
+          if (!wo.customerId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+          const cust = await storage.getCustomer(wo.customerId);
+          if (!cust || cust.companyId !== scopeCompanyId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+        }
+      }
+
+      // Defense-in-depth: also pass the company filter into the data layer so
+      // a missed route guard can never leak cross-company events.
+      const events = await storage.getPricingAuditEvents(
+        source,
+        parentId,
+        role === 'super_admin' ? null : scopeCompanyId,
+      );
+      res.json({ source, parentId, count: events.length, events });
+    } catch (error) {
+      console.error(`[pricing-audit-history:${source}] failed:`, error);
+      res.status(500).json({ message: "Failed to load pricing audit history" });
+    }
+  }
+
+  app.get(
+    "/api/billing-sheets/:id/pricing-audit-events",
+    requireAuthentication,
+    async (req: any, res) => pricingHistoryHandler(req, res, 'billing_sheet'),
+  );
+  app.get(
+    "/api/work-orders/:id/pricing-audit-events",
+    requireAuthentication,
+    async (req: any, res) => pricingHistoryHandler(req, res, 'work_order'),
+  );
+  // ─── /Pricing audit event history ────────────────────────────────────────
+
   // Billing Sheet routes
   app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {
     try {

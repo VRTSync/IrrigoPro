@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -902,6 +902,36 @@ export type BillingSheetWithItems = BillingSheet & {
 export type AssemblyWithParts = Assembly & {
   parts: (AssemblyPart & { part: Part })[];
 };
+
+// Pricing audit events (Task #212) — one row per automatic reprice action
+// performed by the catalog $0-price audit (Task #168) or the labor-rate
+// mismatch audit (Task #200). Task #210 removed the audit text that used to
+// be appended to billing_sheets.notes / work_orders.notes (because it was
+// leaking into the customer-facing PDF). This structured table restores the
+// in-app history for managers without touching customer-facing fields.
+export const pricingAuditEvents = pgTable("pricing_audit_events", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
+  source: text("source").notNull(), // 'billing_sheet' | 'work_order' | 'invoice'
+  parentId: integer("parent_id").notNull(),
+  parentNumber: text("parent_number"), // billing/work-order/invoice number snapshot
+  kind: text("kind").notNull(), // 'catalog_reprice' | 'labor_rate_reprice'
+  delta: decimal("delta", { precision: 14, scale: 2 }).notNull(), // signed change to total amount
+  itemCount: integer("item_count").notNull().default(0),
+  actorUserId: integer("actor_user_id").references(() => users.id),
+  actorName: text("actor_name"), // snapshot of who performed the action
+  details: jsonb("details"), // optional structured payload (per-item breakdown, rate changes, etc.)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  parentLookupIdx: index("pricing_audit_events_parent_idx").on(table.source, table.parentId),
+}));
+
+export const insertPricingAuditEventSchema = createInsertSchema(pricingAuditEvents).omit({
+  id: true,
+  createdAt: true,
+});
+export type PricingAuditEvent = typeof pricingAuditEvents.$inferSelect;
+export type InsertPricingAuditEvent = z.infer<typeof insertPricingAuditEventSchema>;
 
 // Internal migration-tracking table — must be declared here so drizzle-kit
 // does not treat it as an unknown table and attempt to drop it during db:push.

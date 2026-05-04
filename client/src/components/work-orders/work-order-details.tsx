@@ -42,8 +42,10 @@ import {
   Activity,
   Camera,
   DollarSign,
+  History,
   X,
 } from "lucide-react";
+import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@shared/schema";
@@ -842,6 +844,29 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                       <p className="text-gray-700 bg-blue-50 p-3 rounded-lg border border-blue-200">{workOrder.notes}</p>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Reprice History (Task #212) — managers/admins only.
+                 Aligned with the server allowlist (super_admin,
+                 company_admin, billing_manager, irrigation_manager) so
+                 unauthorized roles never see a stray 403 panel. */}
+            {currentUser?.role && [
+              'super_admin',
+              'company_admin',
+              'billing_manager',
+              'irrigation_manager',
+            ].includes(currentUser.role) && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <History className="w-5 h-5 text-blue-600" />
+                    Reprice History
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <PricingAuditHistory source="work_order" parentId={workOrder.id} />
                 </CardContent>
               </Card>
             )}
