@@ -79,8 +79,3 @@ IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` fie
 - **SMS Service**: Twilio
 - **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
 - **PDF Generation**: Puppeteer.
-
-## Repository Hygiene
-- The `uploads/` directory is runtime-only storage for field-tech photos and is intentionally never committed. It is listed in `.gitignore`; only `uploads/.gitkeep` is tracked so the directory exists on fresh clones. Do not `git add` anything else under `uploads/`.
-- `.env` and `.env.*` files (including `.env.security`) are likewise ignored and must never be committed. Use `.env.example` as the template.
-- Historical note: prior commits did contain `uploads/photo_*` blobs (~44 MB of customer iPhone photos) and a stale `.env.security`. Those paths were untracked via `git rm --cached`, but a full history purge with `git filter-repo` (operator-run, coordinated with the team to re-clone) is required to actually shrink `.git/` and remove the blobs from clones. See `docs/git-history-purge.md` for the runbook.
