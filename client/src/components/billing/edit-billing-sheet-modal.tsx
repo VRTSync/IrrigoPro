@@ -517,6 +517,11 @@ export function EditBillingSheetModal({ billingSheet, open, onClose, onSuccess }
             <div className={isReadOnly ? "pointer-events-auto select-auto opacity-100" : ""}>
               <SectionCard title={`Photos (${editablePhotos.length})`} icon={<Camera className="w-4 h-4" />}>
                 <div className="space-y-3">
+                  {(isReadOnly || billingSheet.status === 'approved_passed_to_billing') && billingSheet.status !== 'cancelled' && (
+                    <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                      This ticket is locked, but you can still add or remove photos.
+                    </div>
+                  )}
                   {editablePhotos.length > 0 && (
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                       {editablePhotos.map((photo, idx) => (

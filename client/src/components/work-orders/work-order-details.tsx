@@ -761,6 +761,11 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {(isBilledWorkOrder || workOrder.status === 'approved_passed_to_billing') && workOrder.status !== 'cancelled' && canEditPhotos && (
+                    <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                      This ticket is locked, but you can still add or remove photos.
+                    </div>
+                  )}
                   {canEditPhotos && workOrder.status !== 'cancelled' && (
                     <FileUpload
                       type="photo"
