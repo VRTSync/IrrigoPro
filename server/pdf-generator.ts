@@ -4,8 +4,9 @@ import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import type { PdfViewModel, PdfBrandColors } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
+import sharp from 'sharp';
 import { ObjectStorageService } from './objectStorage';
-import { mediumPath } from './photo-pipeline';
+import { thumbPath } from './photo-pipeline';
 import {
   FAILED_PHOTO_SENTINEL,
   fetchLogoAsBase64,
@@ -21,9 +22,28 @@ export { fetchLogoAsBase64 };
 
 const _objectStorageService = new ObjectStorageService();
 
+const PDF_PHOTO_MAX_DIM = 300;
+const PDF_PHOTO_QUALITY = 60;
+
+export async function compressForPdf(input: Buffer): Promise<Buffer> {
+  return sharp(input, { failOn: 'none' })
+    .rotate()
+    .resize({
+      width: PDF_PHOTO_MAX_DIM,
+      height: PDF_PHOTO_MAX_DIM,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: PDF_PHOTO_QUALITY, mozjpeg: true })
+    .toBuffer();
+}
+
 /**
  * Fetch a photo as a data URI, loading directly from object storage (GCS) or local disk.
  * Avoids going through the authenticated HTTP route for server-side PDF generation.
+ *
+ * Photos are compressed to ~300px / JPEG q60 before base64-encoding so that
+ * invoice detail PDFs stay well under email attachment limits.
  */
 async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<string> {
   const PHOTO_LOAD_TIMEOUT_MS = 8000;
@@ -43,7 +63,8 @@ async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<st
       const mimeType = contentType.split(';')[0].trim().toLowerCase();
       if (!mimeType.startsWith('image/')) return FAILED_PHOTO_SENTINEL;
       const arrayBuffer = await response.arrayBuffer();
-      return `data:${mimeType};base64,${Buffer.from(arrayBuffer).toString('base64')}`;
+      const compressed = await compressForPdf(Buffer.from(arrayBuffer));
+      return `data:image/jpeg;base64,${compressed.toString('base64')}`;
     }
 
     // Normalize path: strip leading /uploads/ for legacy paths
@@ -54,7 +75,8 @@ async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<st
       const localPath = join('./uploads', safeName);
       if (existsSync(localPath)) {
         const data = readFileSync(localPath);
-        return `data:image/jpeg;base64,${data.toString('base64')}`;
+        const compressed = await compressForPdf(data);
+        return `data:image/jpeg;base64,${compressed.toString('base64')}`;
       }
       return FAILED_PHOTO_SENTINEL;
     }
@@ -64,12 +86,12 @@ async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<st
       gcsKey = gcsKey.replace('/api/photos/', '');
     }
 
-    // Prefer the medium variant (~1200px JPEG) so the embedded image is
+    // Prefer the thumb variant (~400px JPEG) so the embedded image is
     // small enough to keep monthly report PDFs under email attachment
     // limits. Fall back to the base path for legacy photos that have not
     // been backfilled yet.
-    const mediumKey = mediumPath(gcsKey);
-    let file = await _objectStorageService.searchPhotoObject(mediumKey);
+    const thumbKey = thumbPath(gcsKey);
+    let file = await _objectStorageService.searchPhotoObject(thumbKey);
     if (!file) file = await _objectStorageService.searchPhotoObject(gcsKey);
     if (!file) return FAILED_PHOTO_SENTINEL;
 
@@ -86,7 +108,8 @@ async function fetchPhotoAsDataUri(photoPath: string, _port: number): Promise<st
       stream.on('error', reject);
     });
     const buffer = Buffer.concat(chunks);
-    return `data:${mimeType};base64,${buffer.toString('base64')}`;
+    const compressed = await compressForPdf(buffer);
+    return `data:image/jpeg;base64,${compressed.toString('base64')}`;
   } catch {
     return FAILED_PHOTO_SENTINEL;
   }
