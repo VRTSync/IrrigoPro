@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, type CSSProperties } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,181 +15,9 @@ interface LoginCredentials {
   password: string;
 }
 
-type CSSVarStyle = CSSProperties & Record<string, string | number>;
-
-interface BlobSpec {
-  id: number;
-  topPct: number;
-  leftPct: number;
-  size: number;
-  color: string;
-  duration: number;
-  delay: number;
-  parallax: number;
-}
-
-interface RippleSpec {
-  id: number;
-  leftPct: number;
-  topPct: number;
-  size: number;
-  duration: number;
-  delay: number;
-}
-
-interface RingParticle {
-  id: number;
-  x: number;
-  y: number;
-  size: number;
-}
-
-function WaterBackground() {
-  const isMobile =
-    typeof window !== "undefined" &&
-    window.matchMedia("(max-width: 640px)").matches;
-  const prefersReducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const ringRef = useRef<HTMLDivElement>(null);
-  const blobRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const mouseRef = useRef<{ x: number; y: number; active: boolean }>({
-    x: 0,
-    y: 0,
-    active: false,
-  });
-  const ringPosRef = useRef<{ x: number; y: number }>({ x: -9999, y: -9999 });
-  const rafRef = useRef<number | null>(null);
-  const ringRafRef = useRef<number | null>(null);
-
-  const blobs: BlobSpec[] = useMemo(() => {
-    // Subtle low-opacity tints so the page reads as near-white with a hint of blue
-    const palette = [
-      "rgba(186,230,253,0.35)",
-      "rgba(147,197,253,0.30)",
-      "rgba(165,243,252,0.28)",
-      "rgba(224,242,254,0.45)",
-      "rgba(255,255,255,0.55)",
-    ];
-    const count = isMobile ? 3 : 5;
-    return Array.from({ length: count }).map((_, i) => ({
-      id: i,
-      topPct: 10 + ((i * 37) % 70),
-      leftPct: 5 + ((i * 53) % 80),
-      size: 460 + ((i * 137) % 360),
-      color: palette[i % palette.length],
-      duration: 18 + i * 3,
-      delay: -i * 4,
-      parallax: 18 + (i % 3) * 8,
-    }));
-  }, [isMobile]);
-
-  const ripples: RippleSpec[] = useMemo(() => {
-    const count = isMobile ? 4 : 7;
-    return Array.from({ length: count }).map((_, i) => ({
-      id: i,
-      leftPct: (i * 73 + 11) % 100,
-      topPct: (i * 41 + 23) % 100,
-      size: 80 + ((i * 37) % 120),
-      duration: 6 + ((i * 1.3) % 4),
-      delay: -((i * 1.9) % 8),
-    }));
-  }, [isMobile]);
-
-  // Antigravity-style ring of water droplets that orbits the cursor
-  const ringRadius = isMobile ? 95 : 130;
-  const ringParticles: RingParticle[] = useMemo(() => {
-    const count = isMobile ? 40 : 72;
-    return Array.from({ length: count }).map((_, i) => {
-      const angle = (i / count) * Math.PI * 2;
-      const radiusJitter = ((i * 17) % 9) - 4; // -4..4px
-      const r = ringRadius + radiusJitter;
-      const x = Math.cos(angle) * r;
-      const y = Math.sin(angle) * r;
-      const size = 7 + ((i * 13) % 5); // 7..11px
-      return { id: i, x, y, size };
-    });
-  }, [isMobile, ringRadius]);
-
-  useEffect(() => {
-    if (prefersReducedMotion) return;
-    const el = containerRef.current;
-    if (!el) return;
-
-    const apply = () => {
-      rafRef.current = null;
-      const rect = el.getBoundingClientRect();
-      const { x: mx, y: my, active } = mouseRef.current;
-
-      // Blobs: gentle parallax toward cursor
-      blobRefs.current.forEach((node, i) => {
-        if (!node) return;
-        const spec = blobs[i];
-        if (!spec) return;
-        const dx = active ? ((mx - rect.left - rect.width / 2) / rect.width) * spec.parallax : 0;
-        const dy = active ? ((my - rect.top - rect.height / 2) / rect.height) * spec.parallax : 0;
-        node.style.setProperty("--mx", `${dx}px`);
-        node.style.setProperty("--my", `${dy}px`);
-      });
-    };
-
-    const schedule = () => {
-      if (rafRef.current != null) return;
-      rafRef.current = requestAnimationFrame(apply);
-    };
-
-    // Continuous loop: lerp the ring toward the cursor for smooth follow
-    const ringTick = () => {
-      const ring = ringRef.current;
-      const target = mouseRef.current;
-      const cur = ringPosRef.current;
-      const k = 0.18;
-      cur.x += (target.x - cur.x) * k;
-      cur.y += (target.y - cur.y) * k;
-      if (ring) {
-        ring.style.setProperty("--mx", `${cur.x}px`);
-        ring.style.setProperty("--my", `${cur.y}px`);
-      }
-      ringRafRef.current = requestAnimationFrame(ringTick);
-    };
-    ringRafRef.current = requestAnimationFrame(ringTick);
-
-    const onMove = (e: PointerEvent) => {
-      mouseRef.current.x = e.clientX;
-      mouseRef.current.y = e.clientY;
-      // First time we see the cursor, snap the ring directly under it
-      if (!mouseRef.current.active) {
-        ringPosRef.current.x = e.clientX;
-        ringPosRef.current.y = e.clientY;
-      }
-      mouseRef.current.active = true;
-      if (ringRef.current) ringRef.current.style.opacity = "1";
-      schedule();
-    };
-    const onLeave = () => {
-      mouseRef.current.active = false;
-      if (ringRef.current) ringRef.current.style.opacity = "0";
-      schedule();
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerleave", onLeave);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerleave", onLeave);
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      if (ringRafRef.current != null) cancelAnimationFrame(ringRafRef.current);
-    };
-  }, [blobs, prefersReducedMotion]);
-
+function StaticBackdrop() {
   return (
-    <div
-      ref={containerRef}
-      aria-hidden
-      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
-    >
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
       {/* Near-white base with a faint blue tint */}
       <div
         className="absolute inset-0"
@@ -198,173 +26,151 @@ function WaterBackground() {
             "radial-gradient(140% 100% at 50% 0%, #ffffff 0%, #f5fbff 40%, #eaf6ff 75%, #dceffd 100%)",
         }}
       />
-
-      {/* Aurora blobs */}
-      <div className="absolute inset-0">
-        {blobs.map((b, i) => {
-          const style: CSSVarStyle = {
-            top: `${b.topPct}%`,
-            left: `${b.leftPct}%`,
-            width: b.size,
-            height: b.size,
-            background: `radial-gradient(circle at 30% 30%, ${b.color}, transparent 65%)`,
-            filter: "blur(70px)",
-            animationDuration: `${b.duration}s`,
-            animationDelay: `${b.delay}s`,
-            willChange: "transform, opacity",
-            "--mx": "0px",
-            "--my": "0px",
-          };
-          return (
-            <div
-              key={b.id}
-              ref={(node) => {
-                blobRefs.current[i] = node;
-              }}
-              className="absolute rounded-full wb-blob"
-              style={style}
-            />
-          );
-        })}
-      </div>
-
-      {/* Ripples */}
-      <div className="absolute inset-0">
-        {ripples.map((r) => (
-          <div
-            key={r.id}
-            className="absolute wb-ripple"
-            style={{
-              left: `${r.leftPct}%`,
-              top: `${r.topPct}%`,
-              width: r.size,
-              height: r.size,
-              marginLeft: -r.size / 2,
-              marginTop: -r.size / 2,
-              animationDuration: `${r.duration}s`,
-              animationDelay: `${r.delay}s`,
-            }}
-          />
-        ))}
-      </div>
-
+      {/* Faint blue aurora blobs (static) */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: [
+            "radial-gradient(520px 420px at 18% 22%, rgba(186,230,253,0.45), transparent 65%)",
+            "radial-gradient(620px 500px at 82% 30%, rgba(147,197,253,0.38), transparent 65%)",
+            "radial-gradient(680px 540px at 30% 82%, rgba(165,243,252,0.32), transparent 65%)",
+            "radial-gradient(560px 460px at 78% 78%, rgba(224,242,254,0.55), transparent 65%)",
+          ].join(","),
+          filter: "blur(40px)",
+        }}
+      />
       {/* Soft sky vignette at the edges */}
       <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_50%,rgba(255,255,255,0)_55%,rgba(186,230,253,0.18)_100%)]" />
-
-      {/* Antigravity-style ring of water droplets that follows the cursor.
-          Position is fixed so it works no matter where the cursor is. */}
-      <div
-        ref={ringRef}
-        className="ag-ring-wrap fixed left-0 top-0 pointer-events-none"
-        style={{ opacity: 0 }}
-      >
-        <div className="ag-ring-spin">
-          {ringParticles.map((p) => (
-            <div
-              key={p.id}
-              className="ag-particle"
-              style={{
-                width: p.size,
-                height: p.size * 1.15,
-                transform: `translate3d(${p.x - p.size / 2}px, ${p.y - (p.size * 1.15) / 2}px, 0)`,
-              }}
-            >
-              <span className="ag-particle-shine" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes wb-blob-float {
-          0%   { transform: translate3d(var(--mx,0px), var(--my,0px), 0) scale(1); opacity: 0.85; }
-          50%  { transform: translate3d(calc(var(--mx,0px) + 40px), calc(var(--my,0px) - 30px), 0) scale(1.12); opacity: 1; }
-          100% { transform: translate3d(var(--mx,0px), var(--my,0px), 0) scale(1); opacity: 0.85; }
-        }
-        .wb-blob {
-          animation-name: wb-blob-float;
-          animation-iteration-count: infinite;
-          animation-timing-function: ease-in-out;
-          transition: transform 0.4s ease-out;
-        }
-
-        @keyframes wb-ripple-pulse {
-          0%   { transform: scale(0.05); opacity: 0; }
-          15%  { opacity: 0.85; }
-          100% { transform: scale(1); opacity: 0; }
-        }
-        .wb-ripple {
-          border-radius: 50%;
-          border: 1.5px solid rgba(125,211,252,0.55);
-          box-shadow:
-            inset 0 0 14px rgba(186,230,253,0.45),
-            0 0 22px rgba(147,197,253,0.30);
-          transform: scale(0.05);
-          opacity: 0;
-          animation-name: wb-ripple-pulse;
-          animation-iteration-count: infinite;
-          animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-          will-change: transform, opacity;
-        }
-
-        /* Antigravity ring */
-        .ag-ring-wrap {
-          /* CSS vars are written by JS */
-          transform: translate3d(var(--mx, -9999px), var(--my, -9999px), 0);
-          transition: opacity 0.35s ease;
-          will-change: transform, opacity;
-        }
-        .ag-ring-spin {
-          position: relative;
-          width: 0;
-          height: 0;
-          animation: ag-ring-rotate 14s linear infinite;
-          transform-origin: 0 0;
-        }
-        @keyframes ag-ring-rotate {
-          from { transform: rotate(0deg); }
-          to   { transform: rotate(360deg); }
-        }
-        .ag-particle {
-          position: absolute;
-          left: 0;
-          top: 0;
-          border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-          background: radial-gradient(circle at 35% 30%,
-            rgba(255,255,255,0.95) 0%,
-            rgba(219,234,254,0.7) 30%,
-            rgba(96,165,250,0.7) 70%,
-            rgba(37,99,235,0.85) 100%);
-          border: 1px solid rgba(59,130,246,0.4);
-          box-shadow:
-            inset 0 -2px 4px rgba(255,255,255,0.7),
-            inset 0 2px 3px rgba(255,255,255,0.55),
-            0 4px 12px rgba(59,130,246,0.30),
-            0 1px 4px rgba(37,99,235,0.20);
-        }
-        .ag-particle-shine {
-          position: absolute;
-          top: 16%;
-          left: 26%;
-          width: 28%;
-          height: 22%;
-          border-radius: 50%;
-          background: rgba(255,255,255,0.98);
-          filter: blur(0.5px);
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .wb-blob {
-            animation: none !important;
-            transition: none !important;
-          }
-          .wb-ripple,
-          .ag-ring-wrap {
-            display: none !important;
-          }
-        }
-      `}</style>
     </div>
+  );
+}
+
+function RingParticleField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const isMobile = window.matchMedia("(max-width: 640px)").matches;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+
+    const resize = () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    // Pre-build particle positions on a ring (band of small dots)
+    const ringRadius = isMobile ? 80 : 120;
+    const bandWidth = isMobile ? 14 : 22;
+    const count = isMobile ? 90 : 220;
+    type P = { angle: number; radius: number; size: number; alpha: number };
+    const particles: P[] = [];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = ringRadius + (Math.random() - 0.5) * bandWidth * 2;
+      const size = 0.8 + Math.random() * 1.7;
+      const alpha = 0.35 + Math.random() * 0.55;
+      particles.push({ angle, radius, size, alpha });
+    }
+
+    const target = { x: width / 2, y: height / 2, active: false };
+    const pos = { x: width / 2, y: height / 2 };
+    let displayOpacity = 0;
+    let targetOpacity = 0;
+    let rotation = 0;
+    let lastTs = performance.now();
+    let raf = 0;
+
+    const onMove = (e: PointerEvent) => {
+      target.x = e.clientX;
+      target.y = e.clientY;
+      if (!target.active) {
+        pos.x = e.clientX;
+        pos.y = e.clientY;
+      }
+      target.active = true;
+      targetOpacity = 1;
+    };
+    const onLeave = () => {
+      target.active = false;
+      targetOpacity = 0;
+    };
+    const onEnter = () => {
+      targetOpacity = 1;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerleave", onLeave);
+    window.addEventListener("pointerenter", onEnter);
+
+    const tick = (ts: number) => {
+      const dt = Math.min(50, ts - lastTs);
+      lastTs = ts;
+
+      // Smooth follow (inertia)
+      const k = 1 - Math.pow(1 - 0.18, dt / 16.67);
+      pos.x += (target.x - pos.x) * k;
+      pos.y += (target.y - pos.y) * k;
+
+      // Slow rotation
+      rotation += (dt / 1000) * 0.35;
+
+      // Opacity ease
+      displayOpacity += (targetOpacity - displayOpacity) * Math.min(1, dt / 220);
+
+      ctx.clearRect(0, 0, width, height);
+
+      if (displayOpacity > 0.01) {
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+        ctx.rotate(rotation);
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const px = Math.cos(p.angle) * p.radius;
+          const py = Math.sin(p.angle) * p.radius;
+          ctx.beginPath();
+          ctx.arc(px, py, p.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(59,130,246,${(p.alpha * displayOpacity).toFixed(3)})`;
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerleave", onLeave);
+      window.removeEventListener("pointerenter", onEnter);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      className="pointer-events-none fixed inset-0 z-[1]"
+    />
   );
 }
 
@@ -437,7 +243,8 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-[#f5fbff] text-slate-900 flex flex-col">
-      <WaterBackground />
+      <StaticBackdrop />
+      <RingParticleField />
 
       <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-5 md:p-8">
         <Card className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-sky-100 shadow-[0_20px_60px_-15px_rgba(59,130,246,0.25)] text-slate-900 rounded-3xl">
