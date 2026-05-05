@@ -1621,7 +1621,7 @@ function FindingSheet({
               <div data-testid="finding-sheet-photos">
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-sm font-medium">Photos</div>
-                  {zoneRecordId && (
+                  {(zoneRecordId || (isOfflineQueueEnabled() && zoneRecordClientId)) && (
                     <PhotoCaptureButton
                       wetCheckId={wetCheckId}
                       zoneRecordId={null}
@@ -1634,7 +1634,7 @@ function FindingSheet({
                 </div>
                 {pendingPhotos.length === 0 ? (
                   <div className="text-xs text-gray-500">
-                    {zoneRecordId
+                    {(zoneRecordId || (isOfflineQueueEnabled() && zoneRecordClientId))
                       ? "No photos yet. Photos picked here attach automatically when you save."
                       : "Pick a zone before adding photos."}
                   </div>
@@ -1689,7 +1689,7 @@ function FindingSheet({
           <Button
             className="w-full"
             size="lg"
-            disabled={saveMut.isPending || (mode === "create" && !zoneRecordId)}
+            disabled={saveMut.isPending || (mode === "create" && !zoneRecordId && !(isOfflineQueueEnabled() && zoneRecordClientId))}
             onClick={() => saveMut.mutate()}
             data-testid="finding-save"
           >
