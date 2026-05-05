@@ -55,11 +55,21 @@ export default function AdminWetChecksPage() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  type Blocker = {
+    kind: "billing_sheet" | "estimate" | "work_order";
+    id: number;
+    displayNumber: string | null;
+    invoiceId: number | null;
+    invoiceNumber: string | null;
+  };
   const [pendingDelete, setPendingDelete] = useState<AdminWetCheckRow | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [conflictBlockers, setConflictBlockers] = useState<Blocker[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
-  const [bulkConflictIds, setBulkConflictIds] = useState<Set<number>>(new Set());
+  const [bulkBlockedIds, setBulkBlockedIds] = useState<Set<number>>(new Set());
+  type BulkBlockedDetail = { id: number; message: string; blockers: Blocker[] };
+  const [bulkBlockedDetails, setBulkBlockedDetails] = useState<BulkBlockedDetail[]>([]);
 
   const queryKey = useMemo(
     () => ["/api/wet-checks/admin", statusFilter] as const,
@@ -102,7 +112,7 @@ export default function AdminWetChecksPage() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-    setBulkConflictIds(prev => {
+    setBulkBlockedIds(prev => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
       next.delete(id);
@@ -124,7 +134,20 @@ export default function AdminWetChecksPage() {
 
   const clearSelection = () => {
     setSelectedIds(new Set());
-    setBulkConflictIds(new Set());
+    setBulkBlockedIds(new Set());
+    setBulkBlockedDetails([]);
+  };
+
+  const blockerLineLabel = (b: Blocker) => {
+    const kindLabel =
+      b.kind === "billing_sheet" ? "Billing sheet"
+      : b.kind === "estimate" ? "Estimate"
+      : "Work order";
+    const recordLabel = b.displayNumber ?? `#${b.id}`;
+    const invoiceLabel = b.invoiceNumber
+      ? `Invoice ${b.invoiceNumber}`
+      : (b.invoiceId != null ? `Invoice #${b.invoiceId}` : "an invoice");
+    return `${kindLabel} ${recordLabel} → ${invoiceLabel}`;
   };
 
   const deleteMutation = useMutation({
@@ -132,9 +155,13 @@ export default function AdminWetChecksPage() {
       return await apiRequest(`/api/wet-checks/${id}`, "DELETE");
     },
     onSuccess: () => {
-      toast({ title: "Wet check deleted", description: "All zones, findings and photos were removed." });
+      toast({
+        title: "Wet check deleted",
+        description: "Zones, findings, photos, and any downstream billing sheets, estimates, or work orders were removed.",
+      });
       setPendingDelete(null);
       setConflictMessage(null);
+      setConflictBlockers([]);
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/admin"] });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/pending-review"] });
@@ -143,7 +170,20 @@ export default function AdminWetChecksPage() {
       const message = err instanceof Error ? err.message : String(err);
       // 409 → keep dialog open and surface inline; everything else dismisses.
       if (/^409:/.test(message)) {
-        setConflictMessage(parseApiError(err, "Cannot delete: one or more findings have already been routed."));
+        // apiRequest serializes 4xx/5xx as `${status}: ${jsonBody}`.
+        // Pull the JSON portion to extract the structured blockers list.
+        const jsonPart = message.replace(/^409:\s*/, "");
+        let parsedMessage: string | null = null;
+        let parsedBlockers: Blocker[] = [];
+        try {
+          const body = JSON.parse(jsonPart);
+          if (body && typeof body.message === "string") parsedMessage = body.message;
+          if (Array.isArray(body?.blockers)) parsedBlockers = body.blockers as Blocker[];
+        } catch {
+          // Fall through to parseApiError below.
+        }
+        setConflictMessage(parsedMessage ?? parseApiError(err, "Cannot delete: a downstream record is on an invoice."));
+        setConflictBlockers(parsedBlockers);
         return;
       }
       toast({
@@ -153,18 +193,19 @@ export default function AdminWetChecksPage() {
       });
       setPendingDelete(null);
       setConflictMessage(null);
+      setConflictBlockers([]);
     },
   });
 
   type BulkOutcome = {
     id: number;
-    status: 'deleted' | 'conflict' | 'not_found' | 'error';
+    status: 'deleted' | 'blocked' | 'not_found' | 'error';
     message?: string;
-    routedFindingIds?: number[];
+    blockers?: Blocker[];
   };
   type BulkResponse = {
     results: BulkOutcome[];
-    summary: { requested: number; deleted: number; conflict: number; notFound: number; failed: number };
+    summary: { requested: number; deleted: number; blocked: number; notFound: number; failed: number };
   };
 
   const bulkDeleteMutation = useMutation<BulkResponse, unknown, number[]>({
@@ -173,21 +214,32 @@ export default function AdminWetChecksPage() {
     },
     onSuccess: (data) => {
       const { summary, results } = data;
-      const conflictIds = new Set(results.filter(r => r.status === 'conflict').map(r => r.id));
+      const blockedIds = new Set(results.filter(r => r.status === 'blocked').map(r => r.id));
       const remaining = new Set<number>();
       for (const r of results) {
         if (r.status !== 'deleted' && r.status !== 'not_found') remaining.add(r.id);
       }
       setSelectedIds(remaining);
-      setBulkConflictIds(conflictIds);
+      setBulkBlockedIds(blockedIds);
+      // Capture the structured per-id blocker details from the server so we
+      // can render them under the bulk toolbar (matches single-delete UX).
+      setBulkBlockedDetails(
+        results
+          .filter(r => r.status === 'blocked')
+          .map(r => ({
+            id: r.id,
+            message: r.message ?? "Cannot delete: a downstream record is on an invoice.",
+            blockers: Array.isArray(r.blockers) ? r.blockers : [],
+          })),
+      );
       setShowBulkConfirm(false);
 
       const parts: string[] = [`${summary.deleted} deleted`];
-      if (summary.conflict > 0) parts.push(`${summary.conflict} blocked (already routed)`);
+      if (summary.blocked > 0) parts.push(`${summary.blocked} blocked (on invoice)`);
       if (summary.notFound > 0) parts.push(`${summary.notFound} not found`);
       if (summary.failed > 0) parts.push(`${summary.failed} failed`);
 
-      const hasProblem = summary.conflict + summary.failed > 0;
+      const hasProblem = summary.blocked + summary.failed > 0;
       toast({
         title: hasProblem ? "Bulk delete finished with issues" : "Wet checks deleted",
         description: parts.join(" · "),
@@ -253,9 +305,9 @@ export default function AdminWetChecksPage() {
           <span className="text-sm font-medium text-blue-700" data-testid="text-bulk-selected-count">
             {selectedIds.size} selected
           </span>
-          {bulkConflictIds.size > 0 && (
+          {bulkBlockedIds.size > 0 && (
             <span className="text-xs text-red-700" data-testid="text-bulk-conflict-count">
-              {bulkConflictIds.size} could not be deleted (findings already routed)
+              {bulkBlockedIds.size} could not be deleted (downstream record on invoice)
             </span>
           )}
           <Button
@@ -277,6 +329,48 @@ export default function AdminWetChecksPage() {
             <Trash2 className="w-3 h-3 mr-1" />
             Delete {selectedIds.size} Selected
           </Button>
+        </div>
+      )}
+
+      {bulkBlockedDetails.length > 0 && (
+        <div
+          className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 space-y-2"
+          data-testid="bulk-blocked-details"
+        >
+          <div className="font-medium">
+            {bulkBlockedDetails.length} wet check{bulkBlockedDetails.length === 1 ? "" : "s"} blocked from delete
+          </div>
+          <ul className="space-y-2">
+            {bulkBlockedDetails.map((d) => (
+              <li
+                key={d.id}
+                className="rounded border border-red-100 bg-white px-3 py-2"
+                data-testid={`bulk-blocked-${d.id}`}
+              >
+                <div className="text-xs font-medium text-red-700">
+                  Wet check #{d.id}
+                </div>
+                <div className="text-xs text-gray-700" data-testid={`bulk-blocked-message-${d.id}`}>
+                  {d.message}
+                </div>
+                {d.blockers.length > 0 && (
+                  <ul
+                    className="mt-1 list-disc list-inside text-xs text-gray-700"
+                    data-testid={`bulk-blocked-list-${d.id}`}
+                  >
+                    {d.blockers.map((b, i) => (
+                      <li
+                        key={`${b.kind}-${b.id}-${i}`}
+                        data-testid={`bulk-blocker-${d.id}-${b.kind}-${b.id}`}
+                      >
+                        {blockerLineLabel(b)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -307,7 +401,7 @@ export default function AdminWetChecksPage() {
             <Card
               key={row.id}
               data-testid={`card-wet-check-${row.id}`}
-              className={bulkConflictIds.has(row.id) ? "border-red-300" : undefined}
+              className={bulkBlockedIds.has(row.id) ? "border-red-300" : undefined}
             >
               <CardContent className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex-shrink-0 self-start sm:self-center pt-1">
@@ -346,7 +440,7 @@ export default function AdminWetChecksPage() {
                     size="sm"
                     variant="outline"
                     className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => { setConflictMessage(null); setPendingDelete(row); }}
+                    onClick={() => { setConflictMessage(null); setConflictBlockers([]); setPendingDelete(row); }}
                     data-testid={`button-delete-${row.id}`}
                   >
                     <Trash2 className="h-3 w-3 mr-1" /> Delete
@@ -364,6 +458,7 @@ export default function AdminWetChecksPage() {
           if (!open) {
             setPendingDelete(null);
             setConflictMessage(null);
+            setConflictBlockers([]);
           }
         }}
       >
@@ -377,17 +472,27 @@ export default function AdminWetChecksPage() {
                   <span className="font-medium">{pendingDelete.customerName}</span>{" "}
                   (started {fmtDate(pendingDelete.startedAt)}), including{" "}
                   {pendingDelete.zoneRecordCount} zone records, {pendingDelete.findingCount} findings,
-                  and {pendingDelete.photoCount} photos. This action cannot be undone.
+                  and {pendingDelete.photoCount} photos, plus any billing sheets, estimates, or work
+                  orders that were produced from its findings. This action cannot be undone.
                 </>
               ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {conflictMessage && (
             <div
-              className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+              className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 space-y-1"
               data-testid="alert-delete-conflict"
             >
-              {conflictMessage}
+              <div>{conflictMessage}</div>
+              {conflictBlockers.length > 0 && (
+                <ul className="list-disc list-inside text-xs" data-testid="list-delete-blockers">
+                  {conflictBlockers.map((b, i) => (
+                    <li key={`${b.kind}-${b.id}-${i}`} data-testid={`blocker-${b.kind}-${b.id}`}>
+                      {blockerLineLabel(b)}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
           <AlertDialogFooter>
@@ -418,9 +523,9 @@ export default function AdminWetChecksPage() {
             <AlertDialogTitle>Delete {selectedIds.size} wet check{selectedIds.size === 1 ? "" : "s"}?</AlertDialogTitle>
             <AlertDialogDescription>
               This permanently deletes the selected wet checks, including their zone records,
-              findings, and photos. Wet checks whose findings have already been routed to a
-              billing sheet, estimate, or work order will be skipped and remain selected so
-              you can review them.
+              findings, and photos, plus any billing sheets, estimates, or work orders that
+              were produced from their findings. Wet checks whose downstream records are
+              already on an invoice will be skipped and remain selected so you can review them.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

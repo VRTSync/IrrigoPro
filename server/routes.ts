@@ -1,7 +1,7 @@
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage, WetCheckAlreadyRoutedError, ControllerHasZonesError, BillingSheetInvoicedError } from "./storage";
+import { storage, WetCheckHasInvoicedRecordsError, ControllerHasZonesError, BillingSheetInvoicedError } from "./storage";
 import type { InsertInvoice } from "@shared/schema";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -11483,9 +11483,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
     type Outcome = {
       id: number;
-      status: 'deleted' | 'conflict' | 'not_found' | 'error';
+      status: 'deleted' | 'blocked' | 'not_found' | 'error';
       message?: string;
-      routedFindingIds?: number[];
+      blockers?: WetCheckHasInvoicedRecordsError['blockers'];
     };
     const results: Outcome[] = [];
     for (const id of validIds) {
@@ -11493,12 +11493,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const ok = await storage.deleteWetCheck(id, cid);
         results.push({ id, status: ok ? 'deleted' : 'not_found' });
       } catch (e: any) {
-        if (e instanceof WetCheckAlreadyRoutedError) {
+        if (e instanceof WetCheckHasInvoicedRecordsError) {
           results.push({
             id,
-            status: 'conflict',
-            message: "One or more findings have already been routed to a billing sheet, estimate, or work order.",
-            routedFindingIds: e.routedFindingIds,
+            status: 'blocked',
+            message: e.message,
+            blockers: e.blockers,
           });
         } else {
           const msg = e?.message ?? 'Failed';
@@ -11510,7 +11510,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const summary = {
       requested: validIds.length,
       deleted: results.filter(r => r.status === 'deleted').length,
-      conflict: results.filter(r => r.status === 'conflict').length,
+      blocked: results.filter(r => r.status === 'blocked').length,
       notFound: results.filter(r => r.status === 'not_found').length,
       failed: results.filter(r => r.status === 'error').length,
     };
@@ -11535,10 +11535,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!ok) return res.status(404).json({ message: "Not found" });
       res.json({ ok });
     } catch (e: any) {
-      if (e instanceof WetCheckAlreadyRoutedError) {
+      if (e instanceof WetCheckHasInvoicedRecordsError) {
         return res.status(409).json({
-          message: "Cannot delete: one or more findings have already been routed to a billing sheet, estimate, or work order.",
-          routedFindingIds: e.routedFindingIds,
+          message: e.message,
+          blockers: e.blockers,
         });
       }
       const msg = e?.message ?? "Failed";

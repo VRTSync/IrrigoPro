@@ -155,6 +155,38 @@ export class WetCheckAlreadyRoutedError extends Error {
   }
 }
 
+// Thrown by deleteWetCheck when one or more downstream records produced
+// from the wet check's findings (billing sheets, estimates, work orders,
+// or work orders chained off a routed estimate) are already attached to
+// an invoice. The route layer maps this to HTTP 409 with a structured
+// `blockers` list so the UI can render an actionable message instead of
+// silently swallowing the conflict.
+export type WetCheckInvoiceBlocker = {
+  kind: "billing_sheet" | "estimate" | "work_order";
+  id: number;
+  displayNumber: string | null;
+  invoiceId: number | null;
+  invoiceNumber: string | null;
+};
+export class WetCheckHasInvoicedRecordsError extends Error {
+  blockers: WetCheckInvoiceBlocker[];
+  constructor(wetCheckId: number, blockers: WetCheckInvoiceBlocker[]) {
+    const parts = blockers.map((b) => {
+      const kindLabel =
+        b.kind === "billing_sheet" ? "billing sheet"
+        : b.kind === "estimate" ? "estimate"
+        : "work order";
+      const recordLabel = b.displayNumber ?? `#${b.id}`;
+      const invoiceLabel = b.invoiceNumber ?? (b.invoiceId != null ? `#${b.invoiceId}` : "an invoice");
+      return `${kindLabel} ${recordLabel} is on invoice ${invoiceLabel}`;
+    });
+    const summary = parts.length > 0 ? parts.join("; ") : "downstream record is on an invoice";
+    super(`Cannot delete wet check #${wetCheckId}: ${summary}. Remove it from the invoice first.`);
+    this.name = "WetCheckHasInvoicedRecordsError";
+    this.blockers = blockers;
+  }
+}
+
 // Thrown by deleteBillingSheet when the sheet has already been pushed onto
 // an invoice (either via billing_sheets.invoiceId or via invoice_items rows
 // pointing at it). Surface mapped to HTTP 409 by the route layer so the UI
@@ -633,8 +665,10 @@ export interface IStorage {
     photoCount: number;
   }>>;
   // Hard-deletes a wet check and all of its child rows (zone records,
-  // findings, photos). Refuses with WetCheckAlreadyRoutedError if any
-  // finding has been routed to a billing sheet, estimate or work order.
+  // findings, photos), plus any downstream records produced from its
+  // findings (billing sheets, estimates, work orders, and their items).
+  // Refuses with WetCheckHasInvoicedRecordsError if any of those
+  // downstream records is already attached to an invoice.
   deleteWetCheck(id: number, companyId: number): Promise<boolean>;
   listWetChecksPendingReview(companyId: number): Promise<Array<WetCheck & {
     findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
@@ -4880,48 +4914,224 @@ export class DatabaseStorage implements IStorage {
   async deleteWetCheck(id: number, companyId: number): Promise<boolean> {
     // Scope-check first so a cross-company id leaks no information.
     await this.assertWetCheckBelongsToCompany(id, companyId);
-    // Refuse if any finding has been routed downstream. Once a finding
-    // points at a billing sheet, estimate or work order, deleting the
-    // wet check would orphan that downstream record's source-of-truth.
-    const routed = await db.select({ id: wetCheckFindings.id })
-      .from(wetCheckFindings)
-      .where(and(
-        eq(wetCheckFindings.wetCheckId, id),
-        or(
-          sql`${wetCheckFindings.billingSheetId} IS NOT NULL`,
-          sql`${wetCheckFindings.estimateId} IS NOT NULL`,
-          sql`${wetCheckFindings.workOrderId} IS NOT NULL`,
-        ),
-      ));
-    if (routed.length > 0) {
-      throw new WetCheckAlreadyRoutedError(routed.map(r => r.id));
-    }
-    // Snapshot every photo URL so the object-storage cleanup pass below
-    // has a stable list even after the rows are gone. Done before the
-    // transaction so a transient storage failure can't roll back the DB.
-    const photoRows = await db.select({ url: wetCheckPhotos.url })
-      .from(wetCheckPhotos).where(eq(wetCheckPhotos.wetCheckId, id));
 
-    // Single transaction: explicitly clean up children in dependency order
-    // and then the wet_checks row. Cascades on the FKs would do most of
-    // this on their own, but doing it explicitly makes the cleanup
-    // contract auditable.
+    // Gather every downstream record produced from this wet check's
+    // findings. A finding may route to one of {billing sheet, estimate,
+    // work order}. A routed estimate may further have been converted
+    // into its own work order (estimates.workOrderId), which is also
+    // part of the wet check's downstream chain — we must consider it
+    // for both the invoice block and the cascade delete.
+    const findings = await db.select({
+      billingSheetId: wetCheckFindings.billingSheetId,
+      estimateId: wetCheckFindings.estimateId,
+      workOrderId: wetCheckFindings.workOrderId,
+    }).from(wetCheckFindings).where(eq(wetCheckFindings.wetCheckId, id));
+    const billingSheetIds = Array.from(new Set(
+      findings.map(f => f.billingSheetId).filter((v): v is number => v != null)));
+    const directEstimateIds = Array.from(new Set(
+      findings.map(f => f.estimateId).filter((v): v is number => v != null)));
+    const directWorkOrderIds = new Set<number>(
+      findings.map(f => f.workOrderId).filter((v): v is number => v != null));
+
+    // Pull estimate rows so we can a) know each estimate's display number
+    // for blocker messages and b) discover any work order chained off a
+    // routed estimate.
+    const estimateRows = directEstimateIds.length > 0
+      ? await db.select({
+          id: estimates.id,
+          estimateNumber: estimates.estimateNumber,
+          workOrderId: estimates.workOrderId,
+        }).from(estimates).where(inArray(estimates.id, directEstimateIds))
+      : [];
+    for (const e of estimateRows) {
+      if (e.workOrderId != null) directWorkOrderIds.add(e.workOrderId);
+    }
+    const workOrderIds = Array.from(directWorkOrderIds);
+
+    // Resolve invoice linkage for each downstream record. Mirrors the
+    // checks deleteBillingSheet runs (billing_sheets.invoiceId or any
+    // invoice_items.billingSheetId), with the equivalent for work
+    // orders (work_orders.invoiceId or invoice_items.workOrderId).
+    //
+    // NOTE on `kind: "estimate"` blockers: estimates have no invoiceId
+    // column and `invoice_items` has no estimateId column (see shared/
+    // schema.ts). The only path an estimate row can reach an invoice is
+    // via the work order it was converted into (estimates.workOrderId).
+    // That work order is already promoted into `workOrderIds` above and
+    // covered by the work-order block below, so we never emit a
+    // `kind: "estimate"` blocker. The route + UI accept "estimate" in the
+    // contract for forward-compat (e.g. if a direct estimate→invoice link
+    // is ever added), but today this branch is intentionally empty.
+    const blockers: WetCheckInvoiceBlocker[] = [];
+
+    // Billing sheet blockers
+    const bsRows = billingSheetIds.length > 0
+      ? await db.select({
+          id: billingSheets.id,
+          billingNumber: billingSheets.billingNumber,
+          invoiceId: billingSheets.invoiceId,
+        }).from(billingSheets).where(inArray(billingSheets.id, billingSheetIds))
+      : [];
+    const bsItemRows = billingSheetIds.length > 0
+      ? await db.select({
+          billingSheetId: invoiceItems.billingSheetId,
+          invoiceId: invoiceItems.invoiceId,
+        }).from(invoiceItems).where(inArray(invoiceItems.billingSheetId, billingSheetIds))
+      : [];
+    const bsItemInvoiceByBs = new Map<number, number | null>();
+    for (const r of bsItemRows) {
+      if (r.billingSheetId == null) continue;
+      if (!bsItemInvoiceByBs.has(r.billingSheetId)) {
+        bsItemInvoiceByBs.set(r.billingSheetId, r.invoiceId ?? null);
+      }
+    }
+    for (const bs of bsRows) {
+      const linkedInvoiceId = bs.invoiceId ?? bsItemInvoiceByBs.get(bs.id) ?? null;
+      if (linkedInvoiceId == null && !bsItemInvoiceByBs.has(bs.id)) continue;
+      // Either invoiceId set, or there is at least one matching invoice_item
+      let invoiceNumber: string | null = null;
+      if (linkedInvoiceId != null) {
+        const [inv] = await db.select({ invoiceNumber: invoices.invoiceNumber })
+          .from(invoices).where(eq(invoices.id, linkedInvoiceId));
+        invoiceNumber = inv?.invoiceNumber ?? null;
+      }
+      blockers.push({
+        kind: "billing_sheet",
+        id: bs.id,
+        displayNumber: bs.billingNumber ?? null,
+        invoiceId: linkedInvoiceId,
+        invoiceNumber,
+      });
+    }
+
+    // Work order blockers (covers both directly-routed work orders and
+    // work orders chained off a routed estimate).
+    const woRows = workOrderIds.length > 0
+      ? await db.select({
+          id: workOrders.id,
+          workOrderNumber: workOrders.workOrderNumber,
+          invoiceId: workOrders.invoiceId,
+        }).from(workOrders).where(inArray(workOrders.id, workOrderIds))
+      : [];
+    const woItemRows = workOrderIds.length > 0
+      ? await db.select({
+          workOrderId: invoiceItems.workOrderId,
+          invoiceId: invoiceItems.invoiceId,
+        }).from(invoiceItems).where(inArray(invoiceItems.workOrderId, workOrderIds))
+      : [];
+    const woItemInvoiceByWo = new Map<number, number | null>();
+    for (const r of woItemRows) {
+      if (r.workOrderId == null) continue;
+      if (!woItemInvoiceByWo.has(r.workOrderId)) {
+        woItemInvoiceByWo.set(r.workOrderId, r.invoiceId ?? null);
+      }
+    }
+    for (const wo of woRows) {
+      const linkedInvoiceId = wo.invoiceId ?? woItemInvoiceByWo.get(wo.id) ?? null;
+      if (linkedInvoiceId == null && !woItemInvoiceByWo.has(wo.id)) continue;
+      let invoiceNumber: string | null = null;
+      if (linkedInvoiceId != null) {
+        const [inv] = await db.select({ invoiceNumber: invoices.invoiceNumber })
+          .from(invoices).where(eq(invoices.id, linkedInvoiceId));
+        invoiceNumber = inv?.invoiceNumber ?? null;
+      }
+      blockers.push({
+        kind: "work_order",
+        id: wo.id,
+        displayNumber: wo.workOrderNumber ?? null,
+        invoiceId: linkedInvoiceId,
+        invoiceNumber,
+      });
+    }
+
+    if (blockers.length > 0) {
+      // Sort for stable, predictable message ordering (kind then id).
+      blockers.sort((a, b) => a.kind.localeCompare(b.kind) || a.id - b.id);
+      throw new WetCheckHasInvoicedRecordsError(id, blockers);
+    }
+
+    // Snapshot every photo URL across the wet check AND every downstream
+    // record we are about to delete, so the object-storage cleanup pass
+    // below has a stable list even after the rows are gone. Done before
+    // the transaction so a transient storage failure can't roll back the
+    // DB.
+    const wcPhotoRows = await db.select({ url: wetCheckPhotos.url })
+      .from(wetCheckPhotos).where(eq(wetCheckPhotos.wetCheckId, id));
+    const downstreamPhotoUrls: string[] = [];
+    if (billingSheetIds.length > 0) {
+      const rows = await db.select({ photos: billingSheets.photos })
+        .from(billingSheets).where(inArray(billingSheets.id, billingSheetIds));
+      for (const r of rows) for (const u of (r.photos ?? [])) if (u) downstreamPhotoUrls.push(u);
+    }
+    if (estimateRows.length > 0) {
+      const rows = await db.select({ photos: estimates.photos, attachments: estimates.attachments })
+        .from(estimates).where(inArray(estimates.id, estimateRows.map(e => e.id)));
+      for (const r of rows) {
+        for (const u of (r.photos ?? [])) if (u) downstreamPhotoUrls.push(u);
+        for (const u of (r.attachments ?? [])) if (u) downstreamPhotoUrls.push(u);
+      }
+    }
+    if (workOrderIds.length > 0) {
+      const rows = await db.select({ photos: workOrders.photos, attachments: workOrders.attachments })
+        .from(workOrders).where(inArray(workOrders.id, workOrderIds));
+      for (const r of rows) {
+        for (const u of (r.photos ?? [])) if (u) downstreamPhotoUrls.push(u);
+        for (const u of (r.attachments ?? [])) if (u) downstreamPhotoUrls.push(u);
+      }
+    }
+
+    // Single transaction so a partial cascade can't strand orphan rows.
+    // Order matters because of FKs:
+    //   1. Wet-check children whose FKs point AT the downstream records
+    //      (wet_check_photos.findingId, wet_check_findings.{billingSheetId,
+    //      estimateId, workOrderId}, wet_check_zone_records). We delete
+    //      these first so removing the downstream rows below can't trip
+    //      a wet-check-side FK.
+    //   2. Work-order children → work orders. Done before estimates because
+    //      work_orders.estimateId references estimates.
+    //   3. Estimate children → estimates.
+    //   4. Billing-sheet children → billing sheets.
+    //   5. Wet check row itself.
     const ok = await db.transaction(async (tx) => {
       await tx.delete(wetCheckPhotos).where(eq(wetCheckPhotos.wetCheckId, id));
       await tx.delete(wetCheckFindings).where(eq(wetCheckFindings.wetCheckId, id));
       await tx.delete(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.wetCheckId, id));
+
+      if (workOrderIds.length > 0) {
+        await tx.delete(workOrderItems).where(inArray(workOrderItems.workOrderId, workOrderIds));
+        await tx.delete(workOrders).where(inArray(workOrders.id, workOrderIds));
+      }
+      if (estimateRows.length > 0) {
+        const estIds = estimateRows.map(e => e.id);
+        await tx.delete(estimateItems).where(inArray(estimateItems.estimateId, estIds));
+        // quickbooks_sync.estimateId is ON DELETE CASCADE, so no explicit
+        // delete needed here — it falls away with the estimate row.
+        await tx.delete(estimates).where(inArray(estimates.id, estIds));
+      }
+      if (billingSheetIds.length > 0) {
+        await tx.delete(manualPartReviews)
+          .where(inArray(manualPartReviews.billingSheetId, billingSheetIds));
+        await tx.delete(billingSheetItems)
+          .where(inArray(billingSheetItems.billingSheetId, billingSheetIds));
+        await tx.delete(billingSheets).where(inArray(billingSheets.id, billingSheetIds));
+      }
+
       const result = await tx.delete(wetChecks)
         .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
       return (result.rowCount ?? 0) > 0;
     });
 
-    if (ok && photoRows.length > 0) {
+    if (ok) {
       // Best-effort blob cleanup (thumb / medium / original / heic-cache /
-      // base) for every photo attached to the deleted wet check. Failures
-      // are logged inside deletePhotoBlobs and never bubble up — the DB
-      // is already consistent at this point.
-      const objectStorage = new ObjectStorageService();
-      await Promise.all(photoRows.map(p => objectStorage.deletePhotoBlobs(p.url)));
+      // base) for every photo attached to the deleted wet check AND every
+      // photo on the deleted downstream records. Failures are logged
+      // inside deletePhotoBlobs and never bubble up — the DB is already
+      // consistent at this point.
+      const allUrls = [...wcPhotoRows.map(p => p.url), ...downstreamPhotoUrls].filter(Boolean);
+      if (allUrls.length > 0) {
+        const objectStorage = new ObjectStorageService();
+        await Promise.all(allUrls.map(u => objectStorage.deletePhotoBlobs(u)));
+      }
     }
     return ok;
   }
