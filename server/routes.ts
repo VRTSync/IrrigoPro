@@ -362,6 +362,30 @@ const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
   next();
 };
 
+// Middleware gating estimate approval / customer-delivery routes.
+// Slice 7 — only billing roles (billing_manager, company_admin, super_admin)
+// can internally approve, reject, or send estimates to customers.
+const requireEstimateApprovalAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+  if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'super_admin') {
+    return res.status(403).json({
+      message: "Access denied. Estimate approval and customer delivery are restricted to billing managers and administrators.",
+    });
+  }
+  next();
+};
+
+// Cross-company ownership guard for estimate approval routes. Returns
+// 404 (not 403) when an estimate belongs to a different company so callers
+// cannot probe for existence. super_admin bypasses the check.
+function estimateOwnershipMatches(req: any, estimateCompanyId: number | null | undefined): boolean {
+  const userRole = req.authenticatedUserRole;
+  if (userRole === 'super_admin') return true;
+  const userCompanyId = req.authenticatedUserCompanyId;
+  if (!userCompanyId || !estimateCompanyId) return false;
+  return Number(userCompanyId) === Number(estimateCompanyId);
+}
+
 // Middleware for billing/invoice PDF access (billing_manager and company_admin only)
 const requireBillingAccess = (req: any, res: any, next: any) => {
   // Use the authenticated user role set by requireAuthentication middleware
@@ -4708,6 +4732,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // IMPORTANT: register before "/api/estimates/:id" so Express does not
+  // route "pending-approval" through the :id handler.
+  app.get("/api/estimates/pending-approval", requireAuthentication, requireEstimateApprovalAccess, async (req, res) => {
+    try {
+      const userRole = req.authenticatedUserRole;
+      const userCompanyId = req.authenticatedUserCompanyId;
+      // super_admin can see across companies; everyone else is scoped to
+      // their own company. Refuse if a non-super_admin somehow lacks one.
+      let scopeCompanyId: number | null;
+      if (userRole === 'super_admin') {
+        scopeCompanyId = null;
+      } else {
+        if (!userCompanyId) {
+          return res.status(400).json({ message: "Missing company context" });
+        }
+        scopeCompanyId = Number(userCompanyId);
+      }
+      const pending = await storage.getEstimatesPendingApproval(scopeCompanyId);
+      res.json(pending);
+    } catch (error) {
+      console.error('Error fetching pending estimates:', error);
+      res.status(500).json({ message: "Failed to fetch pending estimates" });
+    }
+  });
+
   app.get("/api/estimates/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -4729,6 +4778,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/estimates", requireAuthentication, async (req, res) => {
     try {
       const parsed = createEstimateWithItemsSchema.parse(req.body);
+      // Defence-in-depth: regardless of what the client sends, every new
+      // estimate enters the manager review queue. A malicious or buggy
+      // client cannot bypass the queue by submitting `sent_to_customer`.
+      (parsed.estimate as { internalStatus?: string }).internalStatus = 'pending_approval';
       // Single sanctioned entry point — same service the wet-check
       // conversion engine calls — so the two flows can never drift in
       // pricing semantics or downstream side effects.
@@ -6081,13 +6134,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Estimate approval workflow
-  app.post("/api/estimates/:id/approve", async (req, res) => {
+  app.post("/api/estimates/:id/approve", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid estimate ID" });
+      }
+      const existing = await storage.getEstimate(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (!estimateOwnershipMatches(req, existing.companyId)) {
+        return res.status(404).json({ message: "Estimate not found" });
       }
       const estimate = await storage.updateEstimate(id, { 
         status: "approved", 
@@ -6103,13 +6163,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  app.post("/api/estimates/:id/reject", async (req, res) => {
+  app.post("/api/estimates/:id/reject", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid estimate ID" });
+      }
+      const existing = await storage.getEstimate(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (!estimateOwnershipMatches(req, existing.companyId)) {
+        return res.status(404).json({ message: "Estimate not found" });
       }
       const estimate = await storage.updateEstimate(id, { 
         status: "rejected", 
@@ -6125,8 +6192,35 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Internal approval — flips the internal review track from
+  // `pending_approval` to `approved_internal`. Does NOT touch the
+  // customer-facing `status`, send an email, or create a work order.
+  app.patch("/api/estimates/:id/internal-approve", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
+      const estimate = await storage.getEstimate(id);
+      if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (estimate.internalStatus !== "pending_approval") {
+        return res.status(400).json({ message: "Only estimates pending internal review can be internally approved" });
+      }
+      const updated = await storage.updateEstimate(id, { internalStatus: "approved_internal" } as any);
+      res.json({ message: "Estimate internally approved", estimate: updated });
+    } catch (error) {
+      console.error('Internal approve error:', error);
+      res.status(500).json({ message: "Failed to internally approve estimate" });
+    }
+  });
+
   // Approve estimate
-  app.patch("/api/estimates/:id/approve", async (req, res) => {
+  app.patch("/api/estimates/:id/approve", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -6136,6 +6230,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
         return res.status(404).json({ message: "Estimate not found" });
       }
       if (estimate.status !== "pending") {
@@ -6185,7 +6282,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Reject estimate
-  app.patch("/api/estimates/:id/reject", async (req, res) => {
+  app.patch("/api/estimates/:id/reject", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -6195,6 +6292,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
         return res.status(404).json({ message: "Estimate not found" });
       }
       if (estimate.status !== "pending") {
@@ -6214,15 +6314,30 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Send approval email to customer
-  app.post("/api/estimates/:id/send-approval-email", requireAuthentication, async (req, res) => {
+  app.post("/api/estimates/:id/send-approval-email", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
         return res.status(404).json({ message: "Estimate not found" });
       }
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
       if (estimate.status !== "pending") {
         return res.status(400).json({ message: "Only pending estimates can have approval emails sent" });
+      }
+      // Allow sending from either the queue's pre-approval state
+      // (one-click "Approve & Send") or after internal approval
+      // (two-step). Reject if it has already been sent.
+      if (estimate.internalStatus === "sent_to_customer") {
+        return res.status(400).json({ message: "Estimate has already been sent to the customer" });
+      }
+      if (
+        estimate.internalStatus !== "pending_approval" &&
+        estimate.internalStatus !== "approved_internal"
+      ) {
+        return res.status(400).json({ message: "Estimate is not in a sendable internal state" });
       }
 
       // Generate secure approval token with 30-day expiration
@@ -6231,12 +6346,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const tokenExpiresAt = new Date();
       tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30); // Token expires in 30 days
       
-      // Update estimate with approval token, expiration, and sent timestamp
+      // Update estimate with approval token, expiration, and sent timestamp.
+      // Also flip the internal review track to `sent_to_customer` so the
+      // estimate disappears from the manager review queue.
       await storage.updateEstimate(id, {
         approvalToken,
         tokenExpiresAt,
-        approvalSentAt: new Date()
-      });
+        approvalSentAt: new Date(),
+        internalStatus: "sent_to_customer",
+      } as any);
 
       // Get estimate with items for email
       const estimateWithItems = await storage.getEstimate(id);

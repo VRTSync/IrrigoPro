@@ -1,6 +1,5 @@
 # IrrigoPro
-
-IrrigoPro is a full-stack business management system for irrigation companies, streamlining operations from estimates to billing.
+A full-stack business management system for irrigation companies, streamlining operations from estimates to billing.
 
 ## Run & Operate
 - **Run Dev Server**: `npm run dev`
@@ -23,22 +22,22 @@ IrrigoPro is a full-stack business management system for irrigation companies, s
 - `drizzle/`: Drizzle ORM migrations.
 - `server/db/schema.ts`: Database schema.
 - `server/routes.ts`: API route definitions and middleware.
-- `client/src/components/ui/`: shadcn/ui components.
 - `client/src/styles/tailwind.css`: Main Tailwind CSS.
 
 ## Architecture decisions
-- **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side via `applyPricingVisibility()` in `server/routes.ts`.
+- **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side.
 - **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
 - **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout.
-- **Independent Parts Management**: Parts catalog operates independently from QuickBooks for robust inventory control.
+- **Independent Parts Management**: Parts catalog operates independently from QuickBooks.
+- **IrrigoPro Display Name (`irrigoName`)**: A separate, prominent customer field for internal recognition.
 - **KML for Site Maps**: KML import is used for interactive irrigation maps.
-- **IrrigoPro Display Name (`irrigoName`)**: A separate customer field (`irrigo_name` in DB) for internal recognition, defaulting to the official customer name, and prominently displayed throughout the app.
 - **Monthly Invoice Consolidation**: All customer work consolidated into single QuickBooks invoices with tax-free totals.
-- **Phone-Based User Login**: New team members use their phone number as their login username, with email being optional.
+- **Phone-Based User Login**: New team members use their phone number as their login username.
 - **Offline Photo Capture**: Wet check photos compress and persist as Blobs in IndexedDB, uploading through a mutation queue.
 
 ## Product
-- Manages estimates, customer approval, work orders, invoicing, and billing sheets with granular role-based access control.
+- Manages estimates, customer approval, work orders, invoicing, and billing sheets.
+- Granular role-based access control for financial data, site maps, QuickBooks, customer management, work orders/billing sheets, and estimate approval.
 - Interactive site maps with KML import, controller management, and live GPS tracking.
 - Token-based customer email approval for estimates.
 - Database-driven and PWA push notifications.
@@ -64,7 +63,7 @@ Site Map Access Control: Site map viewing (read-only) is available to company ad
 Customer Management Permissions: Role-based access control for customer management. Billing managers can view all customers and edit existing customer details (name, address, contact info, etc.) but cannot create new customers, delete customers, or access the integrations tab. Irrigation managers and field technicians have strict view-only access. Only company admin and super admin users have full privileges including creation, deletion, integrations access, and property notes editing. Frontend UI shows Edit button for billing_manager in the customer list and customer profile, but not Delete, Add Customer, or Integrations tab.
 Production Security: All debug console.log statements removed from customer creation flow. Authentication uses session-based user lookup instead of localStorage for production compatibility. Form validation properly handles missing user data with graceful fallbacks.
 QuickBooks Access Restrictions: Complete QuickBooks access removal implemented for irrigation managers and field technicians. All QuickBooks API endpoints protected with role-based middleware, QuickBooks tab removed from estimates page for restricted roles, and backend routes return 403 access denied errors for unauthorized access attempts. Only company administrators, super administrators, and billing managers have QuickBooks integration access.
-Work Order and Billing Sheet Management: Company administrators and billing managers have full edit and delete permissions for work orders and billing sheets. Backend API routes are protected with role-based middleware (requireWorkOrderBillingAccess) ensuring only authorized users can modify or delete these critical business documents. Frontend UI provides Edit and Delete buttons for authorized roles with confirmation dialogs for destructive actions. Billing managers can edit work orders and billing sheets directly from the customer billing review page. EditWorkOrderModal and EditBillingSheetModal are fully redesigned to mirror the CompletedWorkDetailModal view layout — same gradient header, same section cards (Location, Job Info, Time & Labor, Parts & Materials, Photos, Notes, Financial Summary) — but with editable inputs instead of static text. Parts list editing uses a dedicated EditPartsModal sub-modal (client/src/components/billing/edit-parts-modal.tsx) that reuses the PartsSearchModal for library search (search/SKU/popular parts) and allows inline qty/price editing and row removal. Financial totals auto-calculate live as fields are edited.
+Work Order and Billing Sheet Management: Company administrators and billing managers have full edit and delete permissions for work orders and billing sheets. Backend API routes are protected with role-based middleware (requireWorkOrderBillingAccess) ensuring only authorized users can modify or delete these critical business documents. Frontend UI provides Edit and Delete buttons for authorized roles with confirmation dialogs for destructive actions. Billing managers can edit work orders and billing sheets directly from the customer billing review page. EditWorkOrderModal and EditBillingSheetModal are fully redesigned to mirror the CompletedWorkDetailModal view layout — same gradient header, same section cards (Location, Job Info, Time & Labor, Parts & Materials, Photos, Financial Summary) — but with editable inputs instead of static text. Parts list editing uses a dedicated EditPartsModal sub-modal (client/src/components/billing/edit-parts-modal.tsx) that reuses the PartsSearchModal for library search (search/SKU/popular parts) and allows inline qty/price editing and row removal. Financial totals auto-calculate live as fields are edited.
 Parts Catalog Access: Billing managers and irrigation managers have comprehensive parts catalog access with full CRUD permissions. This includes viewing all parts with pricing information, creating and editing individual parts, advanced filtering and search, and QuickBooks integration for parts sync. Bulk import functionality is restricted to company administrators and super administrators only. Additionally, irrigation managers have access to both the full Parts Catalog and a simplified Parts List view through a dropdown navigation menu, providing flexibility for different use cases. The parts catalog provides extensive inventory management capabilities for all management-level personnel while maintaining appropriate permission controls.
 Work Order & Billing Sheet Photo Uploads: Photos can be attached during work order and billing sheet creation via the FileUpload component. Uploaded photos are stored in the `photos` array field (text[]) and displayed in the Photos section of the detail view for all statuses. Add/remove of photos AFTER creation is supported in the work order detail view AND in the billing sheet view modal (CompletedWorkDetailModal) via the "Add Photos" button and an "X" remove overlay (with a confirmation dialog). Allowed roles for post-creation photo edits: company_admin, super_admin, irrigation_manager, billing_manager (full access on any record), and field_tech (only on work orders assigned to them, and only on billing sheets they created). Edits are blocked once a record is billed/invoiced or cancelled. Photo changes save immediately via PATCH /api/work-orders/:id and PATCH /api/billing-sheets/:id. The middleware `requireWorkOrderUpdateAccess` and `requireBillingSheetUpdateAccess` allows a photos-only payload (single key `photos: string[]`) from field techs scoped to ownership/assignment, in addition to their existing status-only paths. Important fix: previously, photos uploaded during billing sheet creation were silently dropped because the `onSubmit` handler in standalone-billing-sheet.tsx did not include the `uploadedPhotos` state in its submission payload — this is now fixed for both new sheets and manager edits.
 Work Order Editing: Full work order editing available for irrigation managers and admins (company_admin, super_admin) on non-completed/non-cancelled work orders. An "Edit" button in the work order detail header opens the EditWorkOrderModal with all editable fields: project name, description, project address, location notes, scheduled date, priority, technician assignment, special instructions, and internal notes. Changes saved via PATCH /api/work-orders/:id. Field techs and billing managers do not see the edit button. Customer assignment and work order items are not editable through this form.
@@ -72,6 +71,7 @@ Work Order Assignment: The assignment dropdown on work orders includes both irri
 Location Picker Enhancements: The LocationPicker component features a live GPS tracking dot (pulsing blue circle) that continuously shows the user's real-time position on the map. A "Use My Location" button snaps the work location pin to the user's GPS coordinates with reverse geocoding. The map automatically re-centers when the customer/community selection changes using `map.flyTo()` for smooth transitions.
 
 ## Gotchas
+- Offline sync UI is in `client/src/components/offline/sync-ui.tsx` and gated by `VITE_OFFLINE_SYNC_UI`. Conflict/error toasts are in `conflict-toast-bridge.tsx`.
 - Field technicians cannot see any pricing information; this is enforced at the API level via `applyPricingVisibility()`.
 - Photos uploaded to billing sheets require the `uploadedPhotos` state in the submission payload for new sheets and manager edits to prevent silent dropping.
 - Estimates automatically create work orders upon approval; manual work order creation is for direct billing only.

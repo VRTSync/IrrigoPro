@@ -34,6 +34,7 @@ import LaborRates from "@/pages/labor-rates";
 import AdminCustomers from "@/pages/admin-customers";
 import AdminControllers from "@/pages/admin-controllers";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
+import EstimatesPendingApproval from "@/pages/estimates-pending-approval";
 
 import UserProfile from "@/pages/user-profile";
 import LicenseAgreement from "@/pages/license-agreement";
@@ -138,6 +139,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/quickbooks" component={QuickBooksPage} />
           <Route path="/invoices" component={InvoicesPage} />
           <Route path="/parts-pending-approval" component={PartsPendingApproval} />
+          <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
           <Route path="/parts" component={PartsCatalog} />
           <Route path="/parts-settings" component={PartsSettings} />
           <Route path="/labor-rates" component={LaborRates} />

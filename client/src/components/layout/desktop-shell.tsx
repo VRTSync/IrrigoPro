@@ -62,7 +62,7 @@ import type {
   NavLeaf,
   NavBadgeMap,
 } from "./nav-config";
-import type { Part, ManualPartReview } from "@shared/schema";
+import type { Part, ManualPartReview, Estimate } from "@shared/schema";
 
 const SIDEBAR_STORAGE_KEY = "irrigopro_desktop_sidebar_open";
 const SHELL_HINT_SEEN_KEY = "irrigopro_desktop_shell_seen";
@@ -117,10 +117,16 @@ function useNavBadges(enabled: boolean): NavBadgeMap {
     enabled,
     refetchInterval: 60000,
   });
+  const { data: pendingEstimates = [] } = useQuery<Estimate[]>({
+    queryKey: ["/api/estimates/pending-approval"],
+    enabled,
+    refetchInterval: 60000,
+  });
   return {
     partsPendingApproval:
       (pendingParts?.length || 0) + (pendingReviews?.length || 0),
     wetCheckReviews: wetCheckPending?.length || 0,
+    estimatesPendingApproval: pendingEstimates?.length || 0,
   };
 }
 

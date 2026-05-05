@@ -340,6 +340,10 @@ export const estimates = pgTable("estimates", {
   createdByUserId: integer("created_by_user_id").references(() => users.id), // User who created
   estimateDate: timestamp("estimate_date").defaultNow().notNull(), // Date of estimate creation
   status: text("status").notNull().default("pending"), // pending, approved, rejected, expired
+  // Internal review track (separate from customer-facing `status`).
+  // Allowed values for Slice 7: pending_approval, approved_internal, sent_to_customer.
+  // Reserved for future slices: needs_revision, draft.
+  internalStatus: text("internal_status").notNull().default("pending_approval"),
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),

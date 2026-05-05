@@ -65,8 +65,15 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
   const laborSubtotal = totalLaborHours * laborRate;
   const totalAmount = partsSubtotal + laborSubtotal;
 
+  // Default the internal review track to "pending_approval" so callers
+  // (POST /api/estimates and the wet-check conversion engine) consistently
+  // route every new estimate through the manager review queue.
+  const internalStatus =
+    (input.estimate as { internalStatus?: string | null }).internalStatus ?? "pending_approval";
+
   const estimate: InsertEstimate = {
     ...input.estimate,
+    internalStatus,
     estimateDate: input.estimate.estimateDate
       ? new Date(input.estimate.estimateDate as string | number | Date)
       : new Date(),

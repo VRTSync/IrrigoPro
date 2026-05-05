@@ -179,6 +179,18 @@ async function runStartupMigrations() {
       ALTER TABLE estimates
         ADD COLUMN IF NOT EXISTS applied_labor_rate DECIMAL(10, 2)
     `);
+    await pool.query(`
+      ALTER TABLE estimates
+        ADD COLUMN IF NOT EXISTS internal_status TEXT NOT NULL DEFAULT 'pending_approval'
+    `);
+    // estimate_items: legacy DBs may have zone_id but not description/sort_order
+    // (Drizzle schema dropped zone scaffolding for flat line items in Slice 1).
+    await pool.query(`
+      ALTER TABLE estimate_items
+        ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0,
+        ALTER COLUMN zone_id DROP NOT NULL
+    `);
     logger.info('Startup migration: ensured billing_sheets/estimates.applied_labor_rate columns exist', 'Server Startup');
   } catch (err) {
     logger.error('Startup migration: billing_sheets/estimates.applied_labor_rate column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');

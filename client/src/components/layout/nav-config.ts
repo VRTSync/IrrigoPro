@@ -18,7 +18,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavBadgeKey = "partsPendingApproval" | "wetCheckReviews";
+export type NavBadgeKey =
+  | "partsPendingApproval"
+  | "wetCheckReviews"
+  | "estimatesPendingApproval";
 
 export type NavBadgeMap = Partial<Record<NavBadgeKey, number>>;
 
@@ -100,6 +103,13 @@ export const billingManagerNav: NavConfig = {
         { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
         {
           type: "leaf",
+          label: "Estimates Pending Approval",
+          path: "/estimates/pending-approval",
+          icon: ShieldCheck,
+          badgeKey: "estimatesPendingApproval",
+        },
+        {
+          type: "leaf",
           label: "Wet Check Reviews",
           path: "/wet-checks/pending-review",
           icon: ShieldCheck,
@@ -147,6 +157,13 @@ export const companyAdminNav: NavConfig = {
       items: [
         { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
         { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
+        {
+          type: "leaf",
+          label: "Estimates Pending Approval",
+          path: "/estimates/pending-approval",
+          icon: ShieldCheck,
+          badgeKey: "estimatesPendingApproval",
+        },
         { type: "leaf", label: "Wet Checks", path: "/wet-checks/admin", icon: Droplets },
         {
           type: "leaf",

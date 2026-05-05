@@ -343,6 +343,7 @@ export interface IStorage {
 
   // Estimates
   getEstimates(): Promise<Estimate[]>;
+  getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]>;
   getEstimate(id: number): Promise<EstimateWithItems | undefined>;
   createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
@@ -1554,6 +1555,48 @@ export class DatabaseStorage implements IStorage {
       })
     );
     
+    return estimatesWithCalculatedTotals;
+  }
+
+  // Manager review queue. Mirrors getEstimates per-row recompute, but
+  // filters to estimates whose internal review track is still
+  // `pending_approval`. When `companyId` is non-null (the normal case for
+  // billing_manager / company_admin), restricts to that company. `null`
+  // is reserved for super_admin global access.
+  async getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]> {
+    const whereClause = companyId === null
+      ? eq(estimates.internalStatus, "pending_approval")
+      : and(eq(estimates.internalStatus, "pending_approval"), eq(estimates.companyId, companyId));
+    const estimatesList = await db
+      .select()
+      .from(estimates)
+      .where(whereClause as any)
+      .orderBy(desc(estimates.createdAt));
+
+    const estimatesWithCalculatedTotals = await Promise.all(
+      estimatesList.map(async (estimate) => {
+        const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimate.id));
+
+        let partsSubtotal = 0;
+        let totalLaborHours = 0;
+        items.forEach(item => {
+          partsSubtotal += parseFloat(String(item.totalPrice));
+          totalLaborHours += parseFloat(String(item.laborHours));
+        });
+
+        const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+        const laborSubtotal = totalLaborHours * laborRate;
+        const totalAmount = partsSubtotal + laborSubtotal;
+
+        return {
+          ...estimate,
+          partsSubtotal: partsSubtotal.toFixed(2),
+          laborSubtotal: laborSubtotal.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
+        };
+      })
+    );
+
     return estimatesWithCalculatedTotals;
   }
 

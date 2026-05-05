@@ -10,7 +10,7 @@ import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150
 import { useState, useEffect } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
-import type { Part, ManualPartReview } from "@shared/schema";
+import type { Part, ManualPartReview, Estimate } from "@shared/schema";
 
 type NavDropdownItem = {
   path: string;
@@ -54,6 +54,16 @@ export default function Navigation() {
     refetchInterval: 60000,
   });
   const pendingApprovalCount = (pendingParts?.length || 0) + (pendingReviews?.length || 0);
+
+  // Slice 7: estimates awaiting manager review. Surfaced as a badge on the
+  // Operations dropdown for company_admin and the Billing dropdown for
+  // billing_manager so reviewers can see at a glance there is work to do.
+  const { data: pendingEstimates = [] } = useQuery<Estimate[]>({
+    queryKey: ["/api/estimates/pending-approval"],
+    enabled: userRole === 'billing_manager' || userRole === 'company_admin',
+    refetchInterval: 60000,
+  });
+  const pendingEstimateCount = pendingEstimates?.length || 0;
 
   // Fetch company profile to get company logo
   const { data: company } = useQuery({
@@ -119,6 +129,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/work-orders", label: "Work Orders", icon: Wrench },
               { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
+              { path: "/estimates/pending-approval", label: "Estimates Pending Approval", icon: ShieldCheck, badge: pendingEstimateCount > 0 ? pendingEstimateCount : undefined },
               { path: "/wet-checks/admin", label: "Wet Checks", icon: Droplets },
             ]
           },
@@ -226,6 +237,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
               { path: "/billing/command-center", label: "Command Center", icon: ClipboardList },
+              { path: "/estimates/pending-approval", label: "Estimates Pending Approval", icon: ShieldCheck, badge: pendingEstimateCount > 0 ? pendingEstimateCount : undefined },
             ]
           },
           { path: "/", label: "Home", icon: Home, isCenter: true },

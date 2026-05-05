@@ -45,6 +45,7 @@ import CustomerProfile from "@/pages/customer-profile";
 import EstimateApproval from "@/pages/estimate-approval";
 import PartsSettings from "@/pages/parts-settings";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
+import EstimatesPendingApproval from "@/pages/estimates-pending-approval";
 import BillingDashboard from "@/pages/billing-dashboard";
 import InvoicesPage from "@/pages/invoices";
 import WetChecksPage from "@/pages/wet-checks";
@@ -268,6 +269,7 @@ function Router() {
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/parts-settings" component={PartsSettings} />
                 <Route path="/parts-pending-approval" component={PartsPendingApproval} />
+                <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/invoices" component={InvoicesPage} />
                 <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
@@ -373,6 +375,7 @@ function Router() {
               <Route path="/login" component={Login} />
               <Route path="/field-portal" component={FieldPortal} />
               {/* Redirect estimates and work-orders to operations page */}
+              <Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />
               <Route path="/estimates" component={Operations} />
               <Route path="/work-orders" component={Operations} />
               <Route component={NotFound} />

@@ -136,6 +136,22 @@ export default function Estimates() {
     }
   };
 
+  // Slice 7: separate, manager-internal review track. Lives alongside the
+  // customer-facing `status` so managers can see at a glance which estimates
+  // are still waiting in their review queue versus already out the door.
+  const getInternalStatusBadge = (internalStatus?: string | null) => {
+    switch (internalStatus) {
+      case 'pending_approval':
+        return <Badge className="bg-orange-100 text-orange-800 border-orange-200">Awaiting Review</Badge>;
+      case 'approved_internal':
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Internally Approved</Badge>;
+      case 'sent_to_customer':
+        return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Sent to Customer</Badge>;
+      default:
+        return null;
+    }
+  };
+
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString('en-US', {
       month: 'short',
@@ -252,7 +268,12 @@ export default function Estimates() {
                                     <td className="px-6 py-4 whitespace-nowrap">
                                       <div className="text-sm font-medium text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</div>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(estimate.status)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="flex flex-col gap-1">
+                                        {getStatusBadge(estimate.status)}
+                                        {getInternalStatusBadge((estimate as any).internalStatus)}
+                                      </div>
+                                    </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(estimate.createdAt)}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                       <div className="flex items-center space-x-2 justify-end">
@@ -297,7 +318,10 @@ export default function Estimates() {
                                 <div className="bg-blue-50 p-2 rounded-lg mr-3"><FileText className="w-5 h-5 text-blue-600" /></div>
                                 <div className="text-sm font-semibold text-gray-900">{estimate.estimateNumber}</div>
                               </div>
-                              {getStatusBadge(estimate.status)}
+                              <div className="flex flex-col items-end gap-1">
+                                {getStatusBadge(estimate.status)}
+                                {getInternalStatusBadge((estimate as any).internalStatus)}
+                              </div>
                             </div>
                             <div className="space-y-2">
                               <div>
@@ -400,7 +424,12 @@ export default function Estimates() {
                                     <td className="px-6 py-4 whitespace-nowrap">
                                       <div className="text-sm font-medium text-gray-900">{formatCurrency(parseFloat(estimate.totalAmount))}</div>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(estimate.status)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <div className="flex flex-col gap-1">
+                                        {getStatusBadge(estimate.status)}
+                                        {getInternalStatusBadge((estimate as any).internalStatus)}
+                                      </div>
+                                    </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(estimate.createdAt)}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                       <div className="flex items-center space-x-2 justify-end">
@@ -446,7 +475,10 @@ export default function Estimates() {
                                 <div className="bg-gray-100 p-2 rounded-lg mr-3"><FileText className="w-5 h-5 text-gray-500" /></div>
                                 <div className="text-sm font-semibold text-gray-900">{estimate.estimateNumber}</div>
                               </div>
-                              {getStatusBadge(estimate.status)}
+                              <div className="flex flex-col items-end gap-1">
+                                {getStatusBadge(estimate.status)}
+                                {getInternalStatusBadge((estimate as any).internalStatus)}
+                              </div>
                             </div>
                             <div className="space-y-2">
                               <div>
