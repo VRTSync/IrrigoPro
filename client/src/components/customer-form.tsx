@@ -21,7 +21,7 @@ import type { Customer, User } from "@shared/schema";
 const customerFormSchema = insertCustomerSchema.extend({
   companyId: z.number().min(1, "Company ID is required"),
   irrigoName: z.string().optional(),
-  totalControllers: z.coerce.number().min(1, "Must have at least 1 controller").max(10, "Maximum 10 controllers").default(1),
+  totalControllers: z.coerce.number().min(1, "Must have at least 1 controller").max(26, "Maximum 26 controllers").default(1),
   contractType: z.enum(["standard", "premium", "commercial", "residential"]).default("standard"),
   laborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("45.00"),
   emergencyLaborRate: z.string().regex(/^\d+(\.\d{1,2})?$/, "Must be a valid number").default("125.00"),
@@ -337,7 +337,7 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                               <SelectValue placeholder="Select number of controllers" />
                             </SelectTrigger>
                             <SelectContent>
-                              {Array.from({ length: 10 }, (_, i) => (
+                              {Array.from({ length: 26 }, (_, i) => (
                                 <SelectItem key={i + 1} value={(i + 1).toString()}>
                                   {i + 1} Controller{i + 1 > 1 ? 's' : ''}
                                 </SelectItem>

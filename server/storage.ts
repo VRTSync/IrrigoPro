@@ -625,34 +625,45 @@ export interface IStorage {
   reorderIssueTypeConfigs(companyId: number, orderedIds: number[]): Promise<IssueTypeConfig[]>;
   getPartsByIssueType(companyId: number, issueType: string, customerId?: number | null): Promise<{ parts: Part[]; recentPartIds: number[] }>;
   listPropertyControllers(companyId: number, customerId: number): Promise<PropertyController[]>;
-  ensurePropertyControllers(companyId: number, customerId: number, count: number): Promise<PropertyController[]>;
+  ensurePropertyControllers(
+    companyId: number,
+    customerId: number,
+    count: number,
+    branchName?: string | null,
+  ): Promise<PropertyController[]>;
   updatePropertyController(
     companyId: number,
     customerId: number,
     letter: string,
     patch: { zoneCount?: number; notes?: string },
+    branchName?: string | null,
   ): Promise<PropertyController | undefined>;
   upsertPropertyController(
     companyId: number,
     customerId: number,
     letter: string,
     values: { zoneCount: number; notes?: string },
+    branchName?: string | null,
   ): Promise<PropertyController>;
-  // Admin: company-wide overview of active customers and their controller letters
-  // (with each controller's current zoneCount). Excludes customers hidden from billing.
+  // Admin: company-wide overview of active customers and their controller
+  // letters (with each controller's current zoneCount), grouped per
+  // branch. The customer-level bucket (NULL branch) appears as
+  // `branchName: null`. Excludes customers hidden from billing.
   listCustomerControllersOverview(companyId: number): Promise<Array<{
     customer: Customer;
-    controllers: PropertyController[];
+    branches: Array<{ branchName: string | null; controllers: PropertyController[] }>;
   }>>;
-  // Admin: reconcile property_controllers rows so they match `count` (1-10).
-  // Updates customers.totalControllers as well. When shrinking, refuses to
-  // delete controllers whose zoneCount > 0 unless `confirmDeleteWithZones`
-  // is true. Returns the updated controller list and the new customer record.
+  // Admin: reconcile property_controllers rows so they match `count` (1-26).
+  // Updates customers.totalControllers as well (only when branchName is null,
+  // i.e. customer-level edits). When shrinking, refuses to delete controllers
+  // whose zoneCount > 0 unless `confirmDeleteWithZones` is true. Scoped to
+  // the given branch (NULL == customer-level / "no branch"). Returns the
+  // updated controller list for that branch and the new customer record.
   setCustomerControllerCount(
     companyId: number,
     customerId: number,
     count: number,
-    opts?: { confirmDeleteWithZones?: boolean },
+    opts?: { confirmDeleteWithZones?: boolean; branchName?: string | null },
   ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }>;
 
   listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]>;
@@ -4698,9 +4709,35 @@ export class DatabaseStorage implements IStorage {
       .orderBy(propertyControllers.controllerLetter);
   }
 
-  async ensurePropertyControllers(companyId: number, customerId: number, count: number): Promise<PropertyController[]> {
-    const existing = await this.listPropertyControllers(companyId, customerId);
-    const haveLetters = new Set(existing.map(c => c.controllerLetter));
+  // Branch-name normalizer: a non-empty string is a real branch label;
+  // anything else (undefined, null, "") collapses to NULL = "no branch /
+  // customer-level" bucket. Centralized so every read/write path sees the
+  // same convention.
+  private branchKey(branchName?: string | null): string | null {
+    if (typeof branchName !== "string") return null;
+    const trimmed = branchName.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+
+  // Drizzle helper: equality predicate that treats NULL and NULL as a match
+  // (matching our COALESCE-based unique index). Postgres' `=` would return
+  // NULL on either side being NULL.
+  private branchEq(branchName: string | null) {
+    return branchName === null
+      ? sql`${propertyControllers.branchName} IS NULL`
+      : eq(propertyControllers.branchName, branchName);
+  }
+
+  async ensurePropertyControllers(
+    companyId: number,
+    customerId: number,
+    count: number,
+    branchName?: string | null,
+  ): Promise<PropertyController[]> {
+    const branch = this.branchKey(branchName);
+    const all = await this.listPropertyControllers(companyId, customerId);
+    const inBranch = all.filter(c => (c.branchName ?? null) === branch);
+    const haveLetters = new Set(inBranch.map(c => c.controllerLetter));
     const needed: string[] = [];
     for (let i = 0; i < count; i++) {
       const letter = String.fromCharCode("A".charCodeAt(0) + i);
@@ -4708,10 +4745,17 @@ export class DatabaseStorage implements IStorage {
     }
     if (needed.length > 0) {
       await db.insert(propertyControllers)
-        .values(needed.map(letter => ({ companyId, customerId, controllerLetter: letter, zoneCount: 100 })))
+        .values(needed.map(letter => ({
+          companyId,
+          customerId,
+          branchName: branch,
+          controllerLetter: letter,
+          zoneCount: 100,
+        })))
         .onConflictDoNothing();
     }
-    return await this.listPropertyControllers(companyId, customerId);
+    const refreshed = await this.listPropertyControllers(companyId, customerId);
+    return refreshed.filter(c => (c.branchName ?? null) === branch);
   }
 
   async upsertPropertyController(
@@ -4719,28 +4763,38 @@ export class DatabaseStorage implements IStorage {
     customerId: number,
     letter: string,
     values: { zoneCount: number; notes?: string },
+    branchName?: string | null,
   ): Promise<PropertyController> {
-    // Insert just the requested controller letter (no bulk seeding of A..N).
-    // On conflict — i.e. the row already exists — update only the supplied
-    // fields so totals/notes stay in sync.
-    const [row] = await db.insert(propertyControllers)
+    // Try update first (scoped to this branch). If no row exists yet for
+    // this (customer, branch, letter), insert one. The composite-with-
+    // COALESCE unique index makes Drizzle's onConflictDoUpdate awkward, so
+    // we do the update-then-insert dance manually.
+    const branch = this.branchKey(branchName);
+    const [updated] = await db.update(propertyControllers)
+      .set({
+        zoneCount: values.zoneCount,
+        ...(values.notes !== undefined ? { notes: values.notes } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(propertyControllers.companyId, companyId),
+        eq(propertyControllers.customerId, customerId),
+        eq(propertyControllers.controllerLetter, letter),
+        this.branchEq(branch),
+      ))
+      .returning();
+    if (updated) return updated;
+    const [inserted] = await db.insert(propertyControllers)
       .values({
         companyId,
         customerId,
+        branchName: branch,
         controllerLetter: letter,
         zoneCount: values.zoneCount,
         notes: values.notes,
       })
-      .onConflictDoUpdate({
-        target: [propertyControllers.customerId, propertyControllers.controllerLetter],
-        set: {
-          zoneCount: values.zoneCount,
-          ...(values.notes !== undefined ? { notes: values.notes } : {}),
-          updatedAt: new Date(),
-        },
-      })
       .returning();
-    return row;
+    return inserted;
   }
 
   async updatePropertyController(
@@ -4748,13 +4802,16 @@ export class DatabaseStorage implements IStorage {
     customerId: number,
     letter: string,
     patch: { zoneCount?: number; notes?: string },
+    branchName?: string | null,
   ): Promise<PropertyController | undefined> {
+    const branch = this.branchKey(branchName);
     const [updated] = await db.update(propertyControllers)
       .set({ ...patch, updatedAt: new Date() })
       .where(and(
         eq(propertyControllers.companyId, companyId),
         eq(propertyControllers.customerId, customerId),
         eq(propertyControllers.controllerLetter, letter),
+        this.branchEq(branch),
       ))
       .returning();
     if (!updated) return undefined;
@@ -4763,7 +4820,13 @@ export class DatabaseStorage implements IStorage {
     // the new count as not_applicable on every in-progress wet check for this
     // property/controller — including ones already marked YES/NO. Spec: zones
     // that don't exist on the controller cannot remain "checked".
-    if (typeof patch.zoneCount === "number") {
+    //
+    // Per task #312: wet-check capture is customer-level only (no per-branch
+    // wet checks yet). A branch-scoped controller edit must NOT touch the
+    // customer-level wet-check zone records, otherwise editing a named
+    // branch could corrupt an in-progress customer wet check that is keyed
+    // off the customer-level (NULL branch) controllers.
+    if (typeof patch.zoneCount === "number" && branch === null) {
       const newCount = patch.zoneCount;
       const inProgressIds = await db.select({ id: wetChecks.id }).from(wetChecks)
         .where(and(
@@ -4787,7 +4850,7 @@ export class DatabaseStorage implements IStorage {
 
   async listCustomerControllersOverview(companyId: number): Promise<Array<{
     customer: Customer;
-    controllers: PropertyController[];
+    branches: Array<{ branchName: string | null; controllers: PropertyController[] }>;
   }>> {
     const custs = await db.select().from(customers)
       .where(and(
@@ -4796,38 +4859,94 @@ export class DatabaseStorage implements IStorage {
       ))
       .orderBy(customers.name);
     if (custs.length === 0) return [];
+    // First pass: seed any declared branch that doesn't yet have a row in
+    // property_controllers. Per task #312, a freshly added branch should
+    // appear with one controller (A) at the default zone count so the admin
+    // sees a sensible starting state and can immediately bump the count.
+    {
+      const existingPairs = await db.select({
+        customerId: propertyControllers.customerId,
+        branchName: propertyControllers.branchName,
+      }).from(propertyControllers)
+        .where(and(
+          eq(propertyControllers.companyId, companyId),
+          inArray(propertyControllers.customerId, custs.map(c => c.id)),
+        ));
+      const seenByCustomer = new Map<number, Set<string>>();
+      for (const p of existingPairs) {
+        const set = seenByCustomer.get(p.customerId) ?? new Set<string>();
+        set.add(p.branchName ?? "");
+        seenByCustomer.set(p.customerId, set);
+      }
+      for (const c of custs) {
+        const declared = (c.branches ?? []).filter((b): b is string => typeof b === "string" && b.length > 0);
+        if (declared.length === 0) continue;
+        const seen = seenByCustomer.get(c.id) ?? new Set<string>();
+        for (const branchName of declared) {
+          if (!seen.has(branchName)) {
+            await this.ensurePropertyControllers(companyId, c.id, 1, branchName);
+          }
+        }
+      }
+    }
     const ctrls = await db.select().from(propertyControllers)
       .where(and(
         eq(propertyControllers.companyId, companyId),
         inArray(propertyControllers.customerId, custs.map(c => c.id)),
       ))
       .orderBy(propertyControllers.controllerLetter);
-    const byCust = new Map<number, PropertyController[]>();
+    // Group: customerId -> (branchKey -> rows). Use "" as a stable Map key
+    // for the NULL branch and convert back to null on the way out.
+    const byCust = new Map<number, Map<string, PropertyController[]>>();
     for (const c of ctrls) {
-      const arr = byCust.get(c.customerId) ?? [];
+      const branchKey = c.branchName ?? "";
+      let perBranch = byCust.get(c.customerId);
+      if (!perBranch) { perBranch = new Map(); byCust.set(c.customerId, perBranch); }
+      const arr = perBranch.get(branchKey) ?? [];
       arr.push(c);
-      byCust.set(c.customerId, arr);
+      perBranch.set(branchKey, arr);
     }
-    return custs.map(customer => ({
-      customer,
-      controllers: byCust.get(customer.id) ?? [],
-    }));
+    return custs.map(customer => {
+      const perBranch = byCust.get(customer.id) ?? new Map<string, PropertyController[]>();
+      const declaredBranches = (customer.branches ?? []).filter((b): b is string => typeof b === "string" && b.length > 0);
+      // Always include the customer-level (NULL) bucket if it has rows OR
+      // the customer has no declared branches at all (so the page renders
+      // the original single-row UX). For branch customers, also include a
+      // row per declared branch even if empty so the admin can fill it in.
+      const orderedBranches: Array<{ branchName: string | null; controllers: PropertyController[] }> = [];
+      const customerLevelRows = perBranch.get("") ?? [];
+      if (customerLevelRows.length > 0 || declaredBranches.length === 0) {
+        orderedBranches.push({ branchName: null, controllers: customerLevelRows });
+      }
+      for (const b of declaredBranches) {
+        orderedBranches.push({ branchName: b, controllers: perBranch.get(b) ?? [] });
+      }
+      // Per task #312: only branches currently declared on the customer
+      // record (plus the customer-level NULL bucket) are shown. Rows in
+      // property_controllers tied to a branch that has been removed from
+      // customers.branches are intentionally hidden here so deleting a
+      // branch on the customer profile makes the matching sub-row
+      // disappear from this admin page.
+      return { customer, branches: orderedBranches };
+    });
   }
 
   async setCustomerControllerCount(
     companyId: number,
     customerId: number,
     count: number,
-    opts?: { confirmDeleteWithZones?: boolean },
+    opts?: { confirmDeleteWithZones?: boolean; branchName?: string | null },
   ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }> {
-    if (!Number.isInteger(count) || count < 1 || count > 10) {
-      throw new Error("Controller count must be between 1 and 10");
+    if (!Number.isInteger(count) || count < 1 || count > 26) {
+      throw new Error("Controller count must be between 1 and 26");
     }
+    const branch = this.branchKey(opts?.branchName);
     const [customer] = await db.select().from(customers)
       .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)));
     if (!customer) throw new Error("Customer not found");
 
-    const existing = await this.listPropertyControllers(companyId, customerId);
+    const allExisting = await this.listPropertyControllers(companyId, customerId);
+    const existing = allExisting.filter(c => (c.branchName ?? null) === branch);
     // Determine which letters belong to the new size and which fall outside.
     const keepLetters = new Set<string>();
     for (let i = 0; i < count; i++) {
@@ -4844,36 +4963,50 @@ export class DatabaseStorage implements IStorage {
       // Mirror the shrink behaviour from updatePropertyController: mark zone
       // records on in-progress wet checks for the removed letters as not
       // applicable so the field UI doesn't keep checking phantom controllers.
-      const inProgressIds = await db.select({ id: wetChecks.id }).from(wetChecks)
-        .where(and(
-          eq(wetChecks.companyId, companyId),
-          eq(wetChecks.customerId, customerId),
-          eq(wetChecks.status, "in_progress"),
-        ));
-      const ids = inProgressIds.map(r => r.id);
-      if (ids.length > 0) {
-        await db.update(wetCheckZoneRecords)
-          .set({ status: "not_applicable" })
+      // Wet-check capture is still customer-level (per task scope), so we
+      // only do this for the customer-level (NULL) branch — branch-level
+      // edits don't affect any wet-check zone records yet.
+      if (branch === null) {
+        const inProgressIds = await db.select({ id: wetChecks.id }).from(wetChecks)
           .where(and(
-            inArray(wetCheckZoneRecords.wetCheckId, ids),
-            inArray(wetCheckZoneRecords.controllerLetter, removedLetters),
+            eq(wetChecks.companyId, companyId),
+            eq(wetChecks.customerId, customerId),
+            eq(wetChecks.status, "in_progress"),
           ));
+        const ids = inProgressIds.map(r => r.id);
+        if (ids.length > 0) {
+          await db.update(wetCheckZoneRecords)
+            .set({ status: "not_applicable" })
+            .where(and(
+              inArray(wetCheckZoneRecords.wetCheckId, ids),
+              inArray(wetCheckZoneRecords.controllerLetter, removedLetters),
+            ));
+        }
       }
       await db.delete(propertyControllers).where(and(
         eq(propertyControllers.companyId, companyId),
         eq(propertyControllers.customerId, customerId),
+        this.branchEq(branch),
         inArray(propertyControllers.controllerLetter, removedLetters),
       ));
     }
 
     // Add any missing letters up to the new count (default zoneCount = 100).
-    await this.ensurePropertyControllers(companyId, customerId, count);
+    await this.ensurePropertyControllers(companyId, customerId, count, branch);
 
-    const [updatedCustomer] = await db.update(customers)
-      .set({ totalControllers: count })
-      .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)))
-      .returning();
-    const controllers = await this.listPropertyControllers(companyId, customerId);
+    // customers.totalControllers is a customer-level field; only mirror the
+    // count there for customer-level edits. Branch counts live solely on
+    // the property_controllers rows.
+    let updatedCustomer: Customer | undefined;
+    if (branch === null) {
+      const [u] = await db.update(customers)
+        .set({ totalControllers: count })
+        .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)))
+        .returning();
+      updatedCustomer = u;
+    }
+    const refreshed = await this.listPropertyControllers(companyId, customerId);
+    const controllers = refreshed.filter(c => (c.branchName ?? null) === branch);
     return { customer: updatedCustomer ?? customer, controllers, removedLetters };
   }
 

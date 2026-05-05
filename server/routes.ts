@@ -11382,8 +11382,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const cid = requireCompanyId(req, res); if (!cid) return;
     const customerId = parseInt(req.params.customerId);
     try {
+      // Customer-level endpoint: only return the NULL-branch bucket.
+      // Per task #312, this endpoint feeds the customer-facing irrigation
+      // system card and the wet-check capture flow — both of which are
+      // customer-scoped and would otherwise see duplicate letters once a
+      // customer has branch-scoped controller rows. Branch data is served
+      // exclusively via /api/admin/customer-controllers.
       const rows = await storage.listPropertyControllers(cid, customerId);
-      res.json(rows);
+      res.json(rows.filter(r => (r.branchName ?? null) === null));
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
@@ -11607,7 +11613,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(200).json(existing);
       }
 
-      const numControllers = Math.max(1, Math.min(10, Number(customer.totalControllers ?? 1)));
+      const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
       await storage.ensurePropertyControllers(cid, body.customerId, numControllers);
 
       const wc = await storage.createWetCheck({
@@ -11630,7 +11636,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   const wetCheckPatchBody = z.object({
     weather: z.string().nullish(),
     notes: z.string().nullish(),
-    numControllers: z.coerce.number().int().min(1).max(10).optional(),
+    numControllers: z.coerce.number().int().min(1).max(26).optional(),
   }).partial();
 
   app.patch("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
@@ -12035,8 +12041,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   const setControllerCountBody = z.object({
-    count: z.coerce.number().int().min(1).max(10),
+    count: z.coerce.number().int().min(1).max(26),
     confirmDeleteWithZones: z.boolean().optional(),
+    // Optional branch label. Empty / missing == customer-level (NULL).
+    branchName: z.string().nullish(),
   }).strict();
 
   app.put("/api/admin/customers/:customerId/controllers", requireAuthentication, async (req, res) => {
@@ -12049,13 +12057,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const result = await storage.setCustomerControllerCount(cid, customerId, parsed.data.count, {
         confirmDeleteWithZones: parsed.data.confirmDeleteWithZones,
+        branchName: parsed.data.branchName ?? null,
       });
-      res.json(result);
+      res.json({ ...result, branchName: parsed.data.branchName ?? null });
     } catch (e: any) {
       if (e instanceof ControllerHasZonesError) {
         return res.status(409).json({
           message: `Removing controllers ${e.letters.join(", ")} would discard their zones. Confirm to proceed.`,
           letters: e.letters,
+          branchName: parsed.data.branchName ?? null,
           requiresConfirmation: true,
         });
       }
@@ -12067,6 +12077,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   const setZoneCountBody = z.object({
     zoneCount: z.coerce.number().int().min(0).max(200),
+    branchName: z.string().nullish(),
   }).strict();
 
   app.put(
@@ -12078,13 +12089,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const customerId = parseInt(req.params.customerId);
       const letter = String(req.params.letter || "").toUpperCase();
       if (Number.isNaN(customerId)) return res.status(400).json({ message: "Invalid customerId" });
-      if (!/^[A-J]$/.test(letter)) return res.status(400).json({ message: "Invalid controller letter" });
+      if (!/^[A-Z]$/.test(letter)) return res.status(400).json({ message: "Invalid controller letter" });
       const parsed = setZoneCountBody.safeParse(req.body ?? {});
       if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
       try {
-        const updated = await storage.updatePropertyController(cid, customerId, letter, {
-          zoneCount: parsed.data.zoneCount,
-        });
+        const updated = await storage.updatePropertyController(
+          cid,
+          customerId,
+          letter,
+          { zoneCount: parsed.data.zoneCount },
+          parsed.data.branchName ?? null,
+        );
         if (!updated) return res.status(404).json({ message: "Controller not found" });
         res.json(updated);
       } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }

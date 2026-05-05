@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Customer, PropertyController } from "@shared/schema";
 
 const DEFAULT_ZONE_COUNT = 12;
-const MAX_CONTROLLERS = 10;
+const MAX_CONTROLLERS = 26;
 const MIN_CONTROLLERS = 1;
 const MIN_ZONES = 1;
 const MAX_ZONES = 100;

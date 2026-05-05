@@ -1,7 +1,9 @@
 # IrrigoPro
+
 A full-stack business management system for irrigation companies, streamlining operations from estimates to billing.
 
 ## Run & Operate
+
 - **Run Dev Server**: `npm run dev`
 - **Build**: `npm run build`
 - **Typecheck**: `npm run typecheck`
@@ -10,6 +12,7 @@ A full-stack business management system for irrigation companies, streamlining o
 - **Required Env Vars**: `DATABASE_URL`, `POSTMARK_API_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `QB_CLIENT_ID`, `QB_CLIENT_SECRET`, `QB_WEBHOOK_TOKEN`, `QB_REDIRECT_URI`
 
 ## Stack
+
 - **Frontend**: React (TypeScript, Vite, shadcn/ui, Tailwind CSS), TanStack React Query, Wouter, React Hook Form (Zod)
 - **Backend**: Node.js (Express.js), TypeScript
 - **Database**: PostgreSQL (Neon Database)
@@ -17,36 +20,40 @@ A full-stack business management system for irrigation companies, streamlining o
 - **Authentication**: Session-based, TOTP MFA, email verification, phone-based login
 
 ## Where things live
+
 - `client/`: Frontend application
 - `server/`: Backend API and logic
 - `drizzle/`: Drizzle ORM migrations
 - `server/db/schema.ts`: Database schema
-- `server/routes.ts`: API route definitions and middleware
+- `server/routes.ts`: API route definitions
 - `client/src/components/ui/`: shadcn/ui components
 - `client/src/styles/tailwind.css`: Main Tailwind CSS
 
 ## Architecture decisions
-- **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side via `applyPricingVisibility()`.
-- **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
-- **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout.
+
+- **Role-based Pricing Visibility**: Financial data is stripped from API responses for field technicians at the server level.
+- **Server-side Pricing Enforcement**: Catalog pricing for line items is enforced server-side for accuracy.
+- **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout for improved user experience.
 - **Independent Parts Management**: Parts catalog operates independently from QuickBooks for robust inventory control.
-- **KML for Site Maps**: KML import is used for interactive irrigation maps.
-- **IrrigoPro Display Name (`irrigoName`)**: A separate customer field for internal recognition, defaulting to the official customer name, and shown as the primary name everywhere.
-- **Monthly Invoice Consolidation**: All customer work consolidated into single QuickBooks invoices with tax-free totals.
-- **Phone-Based User Login**: New team members use their phone number as their username; phone field is required for new users.
+- **KML for Site Maps**: KML import is used for interactive irrigation maps, providing detailed site visualization.
+- **IrrigoPro Display Name (`irrigoName`)**: A separate customer field for internal recognition, prominently displayed.
 
 ## Product
+
 - Manages estimates, customer approval, work orders, invoicing, and billing sheets.
 - Granular role-based access control for pricing, site maps, QuickBooks, customer management, and work orders/billing sheets.
 - Interactive site maps with KML import, controller management, and live GPS tracking.
-- Token-based customer email approval for estimates and PWA push notifications.
+- Token-based customer email approval for estimates.
+- Database-driven and PWA push notifications.
 - Secure authentication with MFA and phone number-based login.
-- External Work Order API for CRM integration and photo uploads.
+- External Work Order API for CRM integration.
+- Photo uploads for work orders and billing sheets with role-based editing.
 - Authoritative pricing and auditing for catalog items and labor rates.
-- Animated loading skeletons for enhanced user experience.
-- Location Picker with live GPS tracking.
+- Location picker with live GPS tracking and "Use My Location" functionality.
+- Comprehensive parts catalog access with CRUD permissions for billing and irrigation managers.
 
 ## User preferences
+
 Preferred communication style: Simple, everyday language.
 Site Map Display Preferences: Default display mode set to solid markers with zone/controller identifiers in the center, enhanced popups with detailed information. Maintain original styling and functionality unless explicitly requested to change.
 App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details.
@@ -71,12 +78,14 @@ Work Order Assignment: The assignment dropdown on work orders includes both irri
 IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` field (stored in the database as `irrigo_name`) that is the name shown to all IrrigoPro users throughout the app — intended to be a property name or nickname the field team recognizes. It defaults to the official customer name on creation and auto-fills from the customer name when adding new customers. Displayed as the primary name everywhere (customer list, profile, billing, site maps, customer selector). Official name shown as a faint subtitle only when it differs. In the customer form, the field is highlighted with a green bordered box, green badge labeled "Irrigo Facing", and a Tag icon so it is unmistakable. Search across all views matches both irrigoName and official name.
 
 ## Gotchas
+
 - Field technicians cannot see any pricing information; this is enforced at the API level.
 - Photos uploaded to billing sheets require the `uploadedPhotos` state in the submission payload for new sheets and manager edits.
 - Estimates automatically create work orders upon approval; manual work order creation is for direct billing only.
 - Company admin users have limited direct access to estimates and work orders pages; they view through modals.
 
 ## Pointers
+
 - **React Query Docs**: _Populate as you build_
 - **Drizzle ORM Docs**: _Populate as you build_
 - **Tailwind CSS Docs**: _Populate as you build_

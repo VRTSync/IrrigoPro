@@ -57,7 +57,7 @@ export const customers = pgTable("customers", {
   phone: text("phone"),
   address: text("address"),
   // Irrigation system details
-  totalControllers: integer("total_controllers").default(1), // Number of controllers (1-10)
+  totalControllers: integer("total_controllers").default(1), // Number of controllers (1-26)
   // Contract-based billing rates
   contractType: text("contract_type").default("standard"), // standard, premium, commercial, residential
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).default("45.00"),
@@ -973,6 +973,11 @@ export const propertyControllers = pgTable("property_controllers", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").references(() => companies.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
+  // Optional branch scope for customers with multiple locations
+  // (customers.branches). NULL means "no branch / customer-level" — the
+  // bucket every existing row falls into. Per-branch rows are keyed by
+  // (customerId, branchName, controllerLetter); see uniq index below.
+  branchName: text("branch_name"),
   controllerLetter: text("controller_letter").notNull(),
   zoneCount: integer("zone_count").notNull().default(100),
   notes: text("notes"),
@@ -981,7 +986,12 @@ export const propertyControllers = pgTable("property_controllers", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
-  uniqCustomerLetter: uniqueIndex("uniq_property_ctrl").on(table.customerId, table.controllerLetter),
+  // Unique by (customer, branch, letter). NULL branch is normalized to
+  // empty string in the index expression so Postgres treats two NULL
+  // branches at the same letter as a conflict (rather than allowing
+  // duplicates, which is the default NULL-distinct behavior).
+  uniqCustomerLetter: uniqueIndex("uniq_property_ctrl_branch")
+    .on(table.customerId, sql`COALESCE(${table.branchName}, '')`, table.controllerLetter),
 }));
 
 // Issue type catalog — drives the field-UI preset grid and the per-issue

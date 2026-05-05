@@ -1379,6 +1379,7 @@ async function runStartupMigrations() {
         id SERIAL PRIMARY KEY,
         company_id INTEGER NOT NULL REFERENCES companies(id),
         customer_id INTEGER NOT NULL REFERENCES customers(id),
+        branch_name TEXT,
         controller_letter TEXT NOT NULL,
         zone_count INTEGER NOT NULL DEFAULT 100,
         notes TEXT,
@@ -1386,8 +1387,10 @@ async function runStartupMigrations() {
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS uniq_property_ctrl
-        ON property_controllers (customer_id, controller_letter);
+      ALTER TABLE property_controllers ADD COLUMN IF NOT EXISTS branch_name TEXT;
+      DROP INDEX IF EXISTS uniq_property_ctrl;
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_property_ctrl_branch
+        ON property_controllers (customer_id, COALESCE(branch_name, ''), controller_letter);
 
       CREATE TABLE IF NOT EXISTS issue_type_configs (
         id SERIAL PRIMARY KEY,
