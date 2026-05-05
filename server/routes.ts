@@ -11636,14 +11636,46 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!parsed.success) return res.status(400).json({ message: "Invalid body", errors: parsed.error.flatten() });
     }
     try {
-      const updated = await storage.submitWetCheck(parseInt(req.params.id), cid);
-      if (!updated) return res.status(404).json({ message: "Not found" });
-      res.json(updated);
+      const result = await storage.submitWetCheck(parseInt(req.params.id), cid);
+      if (!result) return res.status(404).json({ message: "Not found" });
+      // Spread wetCheck so legacy clients that read fields directly off the
+      // response (status, submittedAt, etc.) keep working; the new
+      // billingSheetId / autoBilledCount / pendingCount surface alongside.
+      res.json({
+        ...result.wetCheck,
+        billingSheetId: result.billingSheetId,
+        autoBilledCount: result.autoBilledCount,
+        pendingCount: result.pendingCount,
+      });
     } catch (e: any) {
       const msg = e?.message ?? "Failed";
       const status = /zero zones checked/.test(msg) ? 400 : 500;
       res.status(status).json({ message: msg });
     }
+  });
+
+  // Slice 3 — Server-authoritative WET_CHECK_AUTO_BILL flag readout. The
+  // field UI and manager review consult this to decide whether to use
+  // the auto-billing flow (preview + confirm modal + sticky chips +
+  // banner) or fall back to the Slice 2 plain-submit / status-only
+  // queue behavior. Public to all authenticated users so any role that
+  // touches a wet check (tech, billing, admin) gets a consistent view.
+  app.get("/api/config/wet-check-auto-bill", requireAuthentication, async (_req, res) => {
+    res.json({ enabled: process.env.WET_CHECK_AUTO_BILL !== "false" });
+  });
+
+  // Slice 3 — Tech-driven auto-billing: dry-run preview the field UI uses
+  // to populate the submit-confirm modal. Computes the same totals the
+  // auto-bill path will persist without writes; returns zeros when the
+  // WET_CHECK_AUTO_BILL feature flag is off.
+  app.post("/api/wet-checks/:id/submit-preview", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const preview = await storage.previewWetCheckSubmit(parseInt(req.params.id), cid);
+      if (!preview) return res.status(404).json({ message: "Not found" });
+      res.json(preview);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
   const zoneRecordBody = z.object({

@@ -415,6 +415,16 @@ function WetCheckReviewDetail({ id }: { id: number }) {
     onError: (e: Error) => toast({ title: "Convert failed", description: e?.message, variant: "destructive" }),
   });
 
+  // Slice 3 — server-authoritative WET_CHECK_AUTO_BILL flag. When OFF,
+  // the manager review must restore the Slice 2 layout exactly: no
+  // split sections, no auto-billed banner, no legacy banner, no
+  // actionable filtering — just the original combined list.
+  const { data: autoBillCfg } = useQuery<{ enabled: boolean }>({
+    queryKey: ["/api/config/wet-check-auto-bill"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const autoBillUiEnabled = autoBillCfg?.enabled ?? true;
+
   const findings = useMemo(() => {
     if (!wc) return [];
     return wc.zoneRecords.flatMap(zr => zr.findings.map(f => ({ f, zr })));
@@ -447,11 +457,20 @@ function WetCheckReviewDetail({ id }: { id: number }) {
   const billingTotal = eligible
     .filter(({ f }) => f.resolution === "repaired_in_field")
     .reduce((s, { f }) => s + lineTotal(f, customerLaborRate), 0);
-  // Total estimated billable across all monetised buckets (repaired-in-field
-  // billing sheet + sent-to-estimate). Documented and deferred do not flow
-  // to immediate revenue.
-  const totalBillable = eligible
-    .filter(({ f }) => f.resolution === "repaired_in_field" || f.resolution === "sent_to_estimate")
+  // Wet-check-level total billable: spec requires this to reflect the
+  // full picture, not just routed-but-unconverted rows. Includes
+  //   • auto-billed (already converted, linked to a billing sheet),
+  //   • routed-to-estimate / repaired-in-field eligible rows, AND
+  //   • pending rows (projected revenue if the manager routes them to
+  //     a monetised bucket).
+  // Documented-only and deferred-to-WO findings still don't flow to
+  // immediate revenue and are excluded.
+  const totalBillable = findings
+    .filter(({ f }) =>
+      f.resolution === "repaired_in_field" ||
+      f.resolution === "sent_to_estimate" ||
+      f.resolution === "pending",
+    )
     .reduce((s, { f }) => s + lineTotal(f, customerLaborRate), 0);
 
   // Group photos by findingId for quick lookup in the row component.
@@ -538,47 +557,141 @@ function WetCheckReviewDetail({ id }: { id: number }) {
         </CardContent>
       </Card>
 
-      {zoneFindingsSorted.length === 0 ? (
-        <Card><CardContent className="py-6 text-center text-gray-500 text-sm">
-          No findings on this wet check.
-        </CardContent></Card>
-      ) : (
-        zoneFindingsSorted.map(({ zr, findings: fs }) => (
-          <Card key={zr.id}>
+      {(() => {
+        // Slice 3 — auto-billed read-only section. Tech-driven findings
+        // that already flowed to a billing sheet on submit are surfaced
+        // here so the manager knows the pricing is locked and only the
+        // remaining pending findings below need a routing decision.
+        // Gated by WET_CHECK_AUTO_BILL so flag-off restores Slice 2
+        // layout (single combined list, no split sections, no banners).
+        if (!autoBillUiEnabled) return null;
+        const autoBilled = findings.filter(({ f }) =>
+          f.resolution === "repaired_in_field" && f.billingSheetId != null,
+        );
+        if (autoBilled.length === 0) return null;
+        const bsId = autoBilled[0].f.billingSheetId;
+        const total = autoBilled.reduce((s, { f }) => s + lineTotal(f, customerLaborRate), 0);
+        return (
+          <Card className="border-green-200 bg-green-50/50" data-testid="auto-billed-section">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">
-                Zone {zr.controllerLetter}{zr.zoneNumber}
-                <Badge variant="outline" className="ml-2">{zr.status}</Badge>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-700" />
+                Auto-billed by tech (read-only)
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {fs.map(f => (
-                <FindingRow
-                  key={f.id}
-                  finding={f}
-                  zone={zr}
-                  photos={photosByFinding.get(f.id) ?? []}
-                  parts={parts}
-                  customerLaborRate={customerLaborRate}
-                  scheduledDate={scheduledDates[f.id] ?? null}
-                  onSetScheduled={(fid, iso) =>
-                    setScheduledDates(prev => ({ ...prev, [fid]: iso }))
-                  }
-                  readOnly={isReadOnly}
-                  // Lock pricing only on the wet-check-wide `approved`
-                  // pre-conversion gate. Once a wet check is in
-                  // `partially_converted`, the per-finding `isConverted`
-                  // check inside FindingRow already disables editing for
-                  // already-converted rows; remaining unconverted findings
-                  // must stay editable so the manager can re-route/reprice
-                  // them before re-running convert.
-                  pricingLocked={wc.status === "approved"}
-                />
-              ))}
+            <CardContent className="text-sm space-y-2">
+              <div data-testid="auto-billed-summary">
+                {autoBilled.length} finding(s) marked complete in the field — already on{" "}
+                {bsId ? <Link className="text-blue-600 underline" href={`/billing-sheets?openSheet=${bsId}`}>billing sheet #{bsId}</Link> : "a billing sheet"}.
+              </div>
+              <div className="text-xs text-gray-600">
+                Total: ${total.toFixed(2)}. Pricing is locked.
+              </div>
+              <ul className="space-y-1 pt-1" data-testid="auto-billed-list">
+                {autoBilled.map(({ f, zr }) => (
+                  <li key={f.id} className="flex items-center justify-between text-xs border-t pt-1" data-testid={`auto-billed-row-${f.id}`}>
+                    <span>
+                      Zone {zr.controllerLetter}{zr.zoneNumber} · {f.partName ?? f.issueType} × {Number(f.quantity ?? 0)}
+                    </span>
+                    <span className="text-gray-600">${lineTotal(f, customerLaborRate).toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
             </CardContent>
           </Card>
-        ))
-      )}
+        );
+      })()}
+
+      {(() => {
+        // Legacy "Mark Complete" findings created before WET_CHECK_AUTO_BILL
+        // was on (or submitted while the flag was off): repaired_in_field
+        // resolution but no billing sheet yet. Surface the spec-mandated
+        // deprecation banner so the manager re-runs convert to finalize.
+        // Gated by the auto-bill UI flag so flag-off doesn't change the
+        // Slice 2 layout.
+        if (!autoBillUiEnabled) return null;
+        const legacyRepaired = findings.filter(({ f }) =>
+          f.resolution === "repaired_in_field" &&
+          f.billingSheetId == null &&
+          f.convertedAt == null,
+        );
+        if (legacyRepaired.length === 0) return null;
+        return (
+          <Card className="border-amber-200 bg-amber-50/50" data-testid="legacy-repaired-banner">
+            <CardContent className="py-3 text-sm flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-700 mt-0.5" />
+              <div>
+                This wet check was submitted under the old workflow. Run convert to finalize.
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {(() => {
+        // Pending-only actionable section: hide the auto-billed rows so
+        // the manager focuses on what still needs a decision. Anything
+        // not auto-billed (pending or other resolutions awaiting convert)
+        // stays here. Gated by the auto-bill UI flag — flag-off restores
+        // the Slice 2 single combined list with no per-row filtering.
+        // The per-row FindingRow's own isConverted disable still applies
+        // to already-routed rows in either mode.
+        const actionableByZone = autoBillUiEnabled
+          ? zoneFindingsSorted
+              .map(({ zr, findings: fs }) => ({
+                zr,
+                findings: fs.filter(f => !(f.resolution === "repaired_in_field" && f.billingSheetId != null)),
+              }))
+              .filter(z => z.findings.length > 0)
+          : zoneFindingsSorted;
+        if (zoneFindingsSorted.length === 0) {
+          return (
+            <Card><CardContent className="py-6 text-center text-gray-500 text-sm">
+              No findings on this wet check.
+            </CardContent></Card>
+          );
+        }
+        if (actionableByZone.length === 0) {
+          return (
+            <Card data-testid="actionable-empty"><CardContent className="py-6 text-center text-gray-500 text-sm">
+              All findings have been routed. Nothing left to decide.
+            </CardContent></Card>
+          );
+        }
+        return (
+          <div className="space-y-3" data-testid="actionable-section">
+            <h2 className="text-base font-semibold">Pending findings — needs decision</h2>
+            {actionableByZone.map(({ zr, findings: fs }) => (
+              <Card key={zr.id}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">
+                    Zone {zr.controllerLetter}{zr.zoneNumber}
+                    <Badge variant="outline" className="ml-2">{zr.status}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {fs.map(f => (
+                    <FindingRow
+                      key={f.id}
+                      finding={f}
+                      zone={zr}
+                      photos={photosByFinding.get(f.id) ?? []}
+                      parts={parts}
+                      customerLaborRate={customerLaborRate}
+                      scheduledDate={scheduledDates[f.id] ?? null}
+                      onSetScheduled={(fid, iso) =>
+                        setScheduledDates(prev => ({ ...prev, [fid]: iso }))
+                      }
+                      readOnly={isReadOnly}
+                      pricingLocked={wc.status === "approved"}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="sticky bottom-0 bg-white border-t py-3 flex items-center justify-between gap-3">
         <div className="text-xs text-gray-500">
@@ -611,11 +724,19 @@ function WetCheckReviewDetail({ id }: { id: number }) {
               }
               convertMut.mutate();
             }}
+            // Disabled when nothing remains to act on — neither pending
+            // findings awaiting routing nor routed-but-unconverted
+            // findings. Spec wording is "disable when nothing pending
+            // remains"; we keep the practical OR-with-eligible so the
+            // manager can still close out a wet check whose findings
+            // have all been routed but not yet converted.
             disabled={!canConvert}
             data-testid="btn-convert"
           >
             {convertMut.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
-            Convert ({eligible.length})
+            {autoBillUiEnabled
+              ? `Convert Pending Findings (${eligible.length})`
+              : `Convert to Billing Sheet (${eligible.length})`}
           </Button>
         </div>
       </div>

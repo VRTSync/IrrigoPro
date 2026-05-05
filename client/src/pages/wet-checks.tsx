@@ -8,9 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
-import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil } from "lucide-react";
+import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil, AlertTriangle } from "lucide-react";
 import type {
   Customer,
   WorkOrder,
@@ -380,12 +381,56 @@ function WetCheckDetail({ id }: { id: number }) {
     enabled: !!wc?.customerId,
   });
 
+  // Submit-confirm modal pulls a server-computed preview of what will be
+  // auto-billed vs. left for the manager queue, so the tech sees exact
+  // dollars before committing. The same preview shape is returned by
+  // /submit so the success toast can echo what actually happened.
+  type SubmitPreview = {
+    autoBillEnabled: boolean;
+    autoBilledCount: number;
+    autoBilledPartsTotal: string;
+    autoBilledLaborTotal: string;
+    autoBilledGrandTotal: string;
+    pendingCount: number;
+    pendingByGroup: { quick_fix: number; advanced: number; zone_issue: number };
+  };
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [preview, setPreview] = useState<SubmitPreview | null>(null);
+
+  // Slice 3 — server-authoritative WET_CHECK_AUTO_BILL flag. When OFF,
+  // the field UI must fall back to the Slice 2 plain-submit flow (no
+  // preview modal, no chip rail, no auto-bill messaging).
+  const { data: autoBillCfg } = useQuery<{ enabled: boolean }>({
+    queryKey: ["/api/config/wet-check-auto-bill"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const autoBillEnabled = autoBillCfg?.enabled ?? true;
+
+  const previewMut = useMutation({
+    mutationFn: (): Promise<SubmitPreview> =>
+      apiRequest(`/api/wet-checks/${id}/submit-preview`, "POST", {}),
+    onSuccess: (p) => {
+      setPreview(p);
+      setConfirmOpen(true);
+    },
+    onError: (e: any) =>
+      toast({ title: "Could not preview submit", description: e?.message, variant: "destructive" }),
+  });
+
   const submitMut = useMutation({
-    mutationFn: () => apiRequest(`/api/wet-checks/${id}/submit`, "POST", {}),
-    onSuccess: () => {
-      toast({ title: "Submitted", description: "Wet check sent for manager review." });
+    mutationFn: (): Promise<{ status: string; billingSheetId: number | null; autoBilledCount: number; pendingCount: number }> =>
+      apiRequest(`/api/wet-checks/${id}/submit`, "POST", {}),
+    onSuccess: (res) => {
+      const parts: string[] = [];
+      if (res.autoBilledCount > 0) {
+        parts.push(`${res.autoBilledCount} finding(s) auto-billed${res.billingSheetId ? ` (BS #${res.billingSheetId})` : ""}`);
+      }
+      if (res.pendingCount > 0) parts.push(`${res.pendingCount} pending → manager`);
+      if (res.pendingCount === 0 && res.autoBilledCount === 0) parts.push("No findings to bill");
+      toast({ title: "Submitted", description: parts.join(" · ") });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
+      setConfirmOpen(false);
       navigate("/wet-checks");
     },
     onError: (e: any) => toast({ title: "Failed to submit", description: e?.message, variant: "destructive" }),
@@ -464,11 +509,52 @@ function WetCheckDetail({ id }: { id: number }) {
 
   // Top-level: controllers grid + wet-check level photos
   const wetCheckLevelPhotos = wc.photos.filter(p => !p.zoneRecordId && !p.findingId);
+  // Status chip counts so the tech sees at-a-glance what they're about to
+  // submit: how many findings are already complete (will auto-bill) vs.
+  // still pending a manager decision, plus skipped zones.
+  const allFindings = wc.zoneRecords.flatMap(z => z.findings);
+  const completeCount = allFindings.filter(f => f.resolution === "repaired_in_field").length;
+  const pendingFindingCount = allFindings.filter(f => f.resolution === "pending").length;
+  const naCount = wc.zoneRecords.filter(z => z.status === "not_applicable").length;
   return (
     <div className="max-w-3xl mx-auto py-4 space-y-4">
       <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
         <ChevronLeft className="w-4 h-4 mr-1" /> All Wet Checks
       </Button>
+      {/* Sticky chip — keeps the complete / pending / skipped tally
+          visible while the tech scrolls through controllers, so they
+          always know what the submit-confirm modal will say. Tapping a
+          chip scrolls to the matching findings group below the
+          controllers grid. Hidden entirely when auto-billing is off so
+          the Slice 2 submit experience is restored verbatim. */}
+      {!isReadOnly && autoBillEnabled && (
+        <div
+          className="sticky top-2 z-20 flex flex-wrap items-center gap-1.5 bg-white/90 backdrop-blur border rounded px-2 py-1.5"
+          data-testid="status-chip-row"
+        >
+          <button
+            type="button"
+            onClick={() => document.getElementById("findings-group-complete")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            data-testid="chip-complete"
+          >
+            <Badge variant="default">✓ Complete · {completeCount}</Badge>
+          </button>
+          <button
+            type="button"
+            onClick={() => document.getElementById("findings-group-pending")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            data-testid="chip-pending"
+          >
+            <Badge variant="secondary">Needs decision · {pendingFindingCount}</Badge>
+          </button>
+          <button
+            type="button"
+            onClick={() => document.getElementById("findings-group-na")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            data-testid="chip-na"
+          >
+            <Badge variant="outline">N/A · {naCount}</Badge>
+          </button>
+        </div>
+      )}
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
@@ -519,17 +605,188 @@ function WetCheckDetail({ id }: { id: number }) {
         })}
       </div>
 
+      {!isReadOnly && autoBillEnabled && (
+        <FindingsByResolution
+          findings={allFindings}
+          zoneRecords={wc.zoneRecords}
+        />
+      )}
+
       {!isReadOnly && (
         <Button
           className="w-full"
           size="lg"
-          onClick={() => submitMut.mutate()}
-          disabled={submitMut.isPending}
+          onClick={() => {
+            // Flag-off → restore Slice 2 plain-submit (no preview, no
+            // confirm modal). The server enforces the same gate, so
+            // this is purely a UX fallback for the tech.
+            if (!autoBillEnabled) {
+              submitMut.mutate();
+              return;
+            }
+            previewMut.mutate();
+          }}
+          disabled={previewMut.isPending || submitMut.isPending}
           data-testid="btn-submit-wet-check"
         >
-          {submitMut.isPending ? <Loader2 className="animate-spin" /> : "Submit for Review"}
+          {(previewMut.isPending || submitMut.isPending) ? <Loader2 className="animate-spin" /> : "Submit for Review"}
         </Button>
       )}
+
+      {/* Submit-confirm modal — surfaces the server's preview of what
+          will be auto-billed and what will land in the manager queue
+          before the tech commits. */}
+      <Dialog open={confirmOpen} onOpenChange={(o) => { if (!o && !submitMut.isPending) setConfirmOpen(false); }}>
+        <DialogContent data-testid="submit-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>Submit wet check?</DialogTitle>
+            <DialogDescription>
+              {preview && preview.autoBilledCount === 0 && preview.pendingCount === 0
+                ? "No findings recorded — this wet check will be marked complete."
+                : "Review what happens next, then confirm."}
+            </DialogDescription>
+          </DialogHeader>
+          {preview && (
+            <div className="space-y-3 text-sm">
+              {preview.autoBillEnabled ? (
+                <div className="border rounded p-3" data-testid="preview-auto-billed">
+                  <div className="font-medium flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    Auto-billed now
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    {preview.autoBilledCount} finding(s) marked complete · Parts ${preview.autoBilledPartsTotal} · Labor ${preview.autoBilledLaborTotal}
+                  </div>
+                  <div className="font-semibold mt-1" data-testid="preview-grand-total">
+                    Total: ${preview.autoBilledGrandTotal}
+                  </div>
+                </div>
+              ) : (
+                <div className="border rounded p-3 bg-amber-50 border-amber-200" data-testid="preview-auto-bill-disabled">
+                  <div className="font-medium flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                    Auto-billing disabled
+                  </div>
+                  <div className="text-xs text-gray-700 mt-1">
+                    All findings (including ones marked complete) will be sent to the manager queue for routing.
+                  </div>
+                </div>
+              )}
+              {preview.pendingCount > 0 && (
+                <div className="border rounded p-3" data-testid="preview-pending">
+                  <div className="font-medium flex items-center gap-2">
+                    <Wrench className="w-4 h-4 text-amber-600" />
+                    Pending — sent to manager
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    {preview.pendingCount} finding(s) need a routing decision
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1 flex gap-3">
+                    <span>Quick fix · {preview.pendingByGroup.quick_fix}</span>
+                    <span>Advanced · {preview.pendingByGroup.advanced}</span>
+                    <span>Zone · {preview.pendingByGroup.zone_issue}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={submitMut.isPending}
+              data-testid="btn-submit-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => submitMut.mutate()}
+              disabled={submitMut.isPending}
+              data-testid="btn-submit-confirm"
+            >
+              {submitMut.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+              {preview && preview.autoBillEnabled && preview.autoBilledCount > 0
+                ? "Submit & Bill"
+                : "Submit"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// Slice 3 — Per-resolution findings summary the sticky chips scroll to.
+// Groups findings into Complete (auto-billed on submit), Pending (need a
+// manager decision), and lists N/A zones, so the tech can audit what
+// each chip count represents before committing the submit.
+function FindingsByResolution({
+  findings,
+  zoneRecords,
+}: {
+  findings: WetCheckFinding[];
+  zoneRecords: WetCheckZoneRecord[];
+}) {
+  const complete = findings.filter(f => f.resolution === "repaired_in_field");
+  const pending = findings.filter(f => f.resolution === "pending");
+  const naZones = zoneRecords.filter(z => z.status === "not_applicable");
+  const zoneById = new Map(zoneRecords.map(z => [z.id, z]));
+  const label = (f: WetCheckFinding) => {
+    const zr = zoneById.get(f.zoneRecordId);
+    const loc = zr ? `Zone ${zr.controllerLetter}${zr.zoneNumber}` : `Finding #${f.id}`;
+    return `${loc} · ${f.partName ?? f.issueType} × ${Number(f.quantity ?? 0)}`;
+  };
+  return (
+    <div className="space-y-3" data-testid="findings-by-resolution">
+      <Card id="findings-group-complete">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-600" />
+            Complete · {complete.length}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs">
+          {complete.length === 0
+            ? <div className="text-gray-500">Nothing marked complete yet.</div>
+            : <ul className="space-y-1" data-testid="group-complete-list">
+                {complete.map(f => <li key={f.id} data-testid={`group-complete-row-${f.id}`}>{label(f)}</li>)}
+              </ul>}
+        </CardContent>
+      </Card>
+      <Card id="findings-group-pending">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Wrench className="w-4 h-4 text-amber-600" />
+            Needs decision · {pending.length}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs">
+          {pending.length === 0
+            ? <div className="text-gray-500">No pending findings.</div>
+            : <ul className="space-y-1" data-testid="group-pending-list">
+                {pending.map(f => <li key={f.id} data-testid={`group-pending-row-${f.id}`}>{label(f)}</li>)}
+              </ul>}
+        </CardContent>
+      </Card>
+      <Card id="findings-group-na">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <MinusCircle className="w-4 h-4 text-gray-500" />
+            N/A · {naZones.length}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs">
+          {naZones.length === 0
+            ? <div className="text-gray-500">No N/A zones.</div>
+            : <div className="flex flex-wrap gap-1" data-testid="group-na-list">
+                {naZones.map(z => (
+                  <Badge key={z.id} variant="outline" data-testid={`group-na-zone-${z.controllerLetter}${z.zoneNumber}`}>
+                    {z.controllerLetter}{z.zoneNumber}
+                  </Badge>
+                ))}
+              </div>}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -626,6 +883,13 @@ function ZoneScreen({
 }) {
   const { toast } = useToast();
   const [findingSheet, setFindingSheet] = useState<FindingSheetState>({ open: false });
+  // Slice 3 — flag-gated copy. With auto-bill OFF, we drop the
+  // "auto-bills on submit" badge so the field UX matches Slice 2.
+  const { data: autoBillCfg } = useQuery<{ enabled: boolean }>({
+    queryKey: ["/api/config/wet-check-auto-bill"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const autoBillEnabled = autoBillCfg?.enabled ?? true;
 
   const setStatus = useMutation({
     mutationFn: (status: "checked_ok" | "checked_with_issues" | "not_applicable") =>
@@ -774,7 +1038,9 @@ function ZoneScreen({
                     </div>
                     {f.notes && <div className="text-xs italic">{f.notes}</div>}
                     {f.resolution === "repaired_in_field" && (
-                      <Badge variant="secondary" className="mt-1">Repaired in field</Badge>
+                      <Badge variant="secondary" className="mt-1" data-testid={`finding-complete-badge-${f.id}`}>
+                        {autoBillEnabled ? "Complete · auto-bills on submit" : "Complete"}
+                      </Badge>
                     )}
                   </div>
                   {!readOnly && f.resolution === "pending" && (
@@ -867,6 +1133,14 @@ function FindingSheet({
 
   const { data: configs = [] } = useQuery<IssueTypeConfig[]>({ queryKey: ["/api/wet-checks/issue-types"], enabled: open });
   const cfg = configs.find(c => c.issueType === issueType);
+  // Slice 3 — flag-gated helper text on the Mark Complete toggle. With
+  // auto-bill OFF, we restore the Slice 2 wording so the tech isn't
+  // told an auto-bill will happen when none will.
+  const { data: autoBillCfg } = useQuery<{ enabled: boolean }>({
+    queryKey: ["/api/config/wet-check-auto-bill"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const autoBillEnabled = autoBillCfg?.enabled ?? true;
 
   useEffect(() => {
     if (!open) return;
@@ -1126,14 +1400,21 @@ function FindingSheet({
             )
           )}
 
-          <label className="flex items-center gap-2 text-sm" data-testid="finding-repaired-toggle">
+          <label className="flex items-start gap-2 text-sm" data-testid="finding-repaired-toggle">
             <input
               type="checkbox"
               checked={repairedInField}
               onChange={(e) => setRepairedInField(e.target.checked)}
-              className="h-4 w-4"
+              className="h-4 w-4 mt-0.5"
             />
-            Repaired in field — no follow-up needed
+            <span>
+              <span className="font-medium">Mark Complete</span>
+              <span className="block text-xs text-gray-500">
+                {autoBillEnabled
+                  ? "Will auto-bill on submit. Leave unchecked to send to the manager for routing."
+                  : "Mark this finding as repaired in the field. Leave unchecked to send to the manager for routing."}
+              </span>
+            </span>
           </label>
 
           <Button

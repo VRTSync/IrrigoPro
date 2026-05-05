@@ -670,6 +670,7 @@ export interface IStorage {
   // Refuses with WetCheckHasInvoicedRecordsError if any of those
   // downstream records is already attached to an invoice.
   deleteWetCheck(id: number, companyId: number): Promise<boolean>;
+
   listWetChecksPendingReview(companyId: number): Promise<Array<WetCheck & {
     findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
     totalBillable: string;
@@ -689,7 +690,24 @@ export interface IStorage {
   findActiveWetCheck(companyId: number, customerId: number, technicianId: number): Promise<WetCheck | undefined>;
   createWetCheck(insert: InsertWetCheck): Promise<WetCheck>;
   updateWetCheck(id: number, companyId: number, patch: Partial<InsertWetCheck>): Promise<WetCheck | undefined>;
-  submitWetCheck(id: number, companyId: number): Promise<WetCheck | undefined>;
+  submitWetCheck(id: number, companyId: number): Promise<{
+    wetCheck: WetCheck;
+    billingSheetId: number | null;
+    autoBilledCount: number;
+    pendingCount: number;
+  } | undefined>;
+  // Dry-run pricing preview for the submit-confirm modal. Computes the
+  // exact same totals the auto-bill path would persist, without writes.
+  // `autoBillEnabled` reflects WET_CHECK_AUTO_BILL so the UI can gate.
+  previewWetCheckSubmit(id: number, companyId: number): Promise<{
+    autoBillEnabled: boolean;
+    autoBilledCount: number;
+    autoBilledPartsTotal: string;
+    autoBilledLaborTotal: string;
+    autoBilledGrandTotal: string;
+    pendingCount: number;
+    pendingByGroup: { quick_fix: number; advanced: number; zone_issue: number };
+  } | undefined>;
 
   upsertWetCheckZoneRecord(
     wetCheckId: number,
@@ -5146,10 +5164,14 @@ export class DatabaseStorage implements IStorage {
     totalBillable: string;
     customerLaborRate: string;
   }>> {
-    // Queue includes any wet check still awaiting full conversion: freshly
-    // submitted, manager-approved (pricing locked but not yet converted),
-    // or partially_converted (some findings routed, others still pending).
-    // Excludes "in_progress" (tech still working) and "converted" (done).
+    // Queue is status-based by default (Slice 2 behavior). With Slice 3's
+    // WET_CHECK_AUTO_BILL flag ON we additionally narrow the result to
+    // wet checks that have at least one finding still needing manager
+    // attention (resolution=pending OR a non-pending finding without a
+    // convertedAt stamp), so all-auto-billed wet checks correctly drop
+    // out of the queue. With the flag OFF we restore the original
+    // status-only filter so flag-off behavior is identical to Slice 2.
+    const autoBillEnabled = process.env.WET_CHECK_AUTO_BILL !== "false";
     const wcs = await db.select().from(wetChecks).where(and(
       eq(wetChecks.companyId, companyId),
       inArray(wetChecks.status, ["submitted", "approved", "partially_converted"]),
@@ -5158,7 +5180,24 @@ export class DatabaseStorage implements IStorage {
     const ids = wcs.map(w => w.id);
     const findings = await db.select().from(wetCheckFindings)
       .where(inArray(wetCheckFindings.wetCheckId, ids));
-    const customerIds = Array.from(new Set(wcs.map(w => w.customerId)));
+    let filteredWcs = wcs;
+    if (autoBillEnabled) {
+      const needsAttention = (f: WetCheckFinding) =>
+        f.resolution === "pending" || f.convertedAt == null;
+      const needsAttentionByWc = new Map<number, boolean>();
+      for (const f of findings) {
+        if (needsAttention(f)) needsAttentionByWc.set(f.wetCheckId, true);
+      }
+      // Spec wording: queue membership requires "at least one finding
+      // where (resolution=pending OR convertedAt IS NULL)". Zero-finding
+      // wet checks therefore drop off the queue; with no findings to
+      // route, there's nothing for the manager to act on.
+      filteredWcs = wcs.filter(w => needsAttentionByWc.get(w.id) === true);
+      if (filteredWcs.length === 0) return [];
+    }
+    // Reuse the already-fetched findings; just narrow the customer
+    // resolution to the surviving wet checks.
+    const customerIds = Array.from(new Set(filteredWcs.map(w => w.customerId)));
     const custs = await db.select().from(customers).where(inArray(customers.id, customerIds));
     const rateByCustomer = new Map<number, number>();
     for (const c of custs) rateByCustomer.set(c.id, parseFloat(String(c.laborRate ?? "45")));
@@ -5170,7 +5209,7 @@ export class DatabaseStorage implements IStorage {
       findingsByWc.set(f.wetCheckId, arr);
     }
 
-    return wcs.map(wc => {
+    return filteredWcs.map(wc => {
       const fs = findingsByWc.get(wc.id) ?? [];
       const counts = { quick_fix: 0, advanced: 0, zone_issue: 0, total: fs.length };
       const rate = rateByCustomer.get(wc.customerId) ?? 45;
@@ -5282,70 +5321,323 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async submitWetCheck(id: number, companyId: number): Promise<WetCheck | undefined> {
-    const wc = await this.assertWetCheckBelongsToCompany(id, companyId);
+  async submitWetCheck(id: number, companyId: number): Promise<{
+    wetCheck: WetCheck;
+    billingSheetId: number | null;
+    autoBilledCount: number;
+    pendingCount: number;
+  } | undefined> {
+    const wc0 = await this.assertWetCheckBelongsToCompany(id, companyId);
 
-    // Idempotency: re-submitting an already-submitted wet check is a no-op
-    // and returns the existing record. POST /submit accepts an optional
-    // clientId for offline retries; status-based dedupe is sufficient since
-    // a wet check can only be submitted once.
-    if (wc.status === "submitted") return wc;
-
-    // Submit guard: at least one zone must have been actively checked
-    // (YES or NO). N/A and not_checked alone do not count.
-    const [{ activeCount }] = await db.select({
-      activeCount: sql<number>`COUNT(*)::int`,
-    }).from(wetCheckZoneRecords).where(and(
-      eq(wetCheckZoneRecords.wetCheckId, id),
-      inArray(wetCheckZoneRecords.status, ["checked_ok", "checked_with_issues"]),
-    ));
-    if (Number(activeCount ?? 0) === 0) {
-      throw new Error("Cannot submit a wet check with zero zones checked");
+    // Idempotency: re-submitting a wet check that's already been processed
+    // is a no-op. POST /submit accepts an optional clientId for offline
+    // retries; status-based dedupe covers all post-submit states because
+    // a wet check can only legitimately leave in_progress once via submit.
+    if (wc0.status !== "in_progress") {
+      const fs = await db.select().from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckId, id));
+      const priorBsId = fs.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
+      const pendingCount = fs.filter(f => f.resolution === "pending").length;
+      return { wetCheck: wc0, billingSheetId: priorBsId, autoBilledCount: 0, pendingCount };
     }
 
-    // Auto-mark any existing 'not_checked' zone records as not_applicable.
-    await db.update(wetCheckZoneRecords)
-      .set({ status: "not_applicable" })
-      .where(and(eq(wetCheckZoneRecords.wetCheckId, id), eq(wetCheckZoneRecords.status, "not_checked")));
+    return await db.transaction(async (tx) => {
+      const [wc] = await tx.select().from(wetChecks)
+        .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
+      if (!wc) throw new Error(`Wet check ${id} not found for company ${companyId}`);
 
-    // Implicit N/A: for every (controller letter × zoneNumber 1..zoneCount)
-    // pair that has NO zone record on this wet check, insert one as N/A so
-    // the manager review sees an explicit row for every zone in scope.
-    const ctrls = await db.select().from(propertyControllers).where(and(
-      eq(propertyControllers.companyId, companyId),
-      eq(propertyControllers.customerId, wc.customerId),
-    ));
-    const existing = await db.select({
-      letter: wetCheckZoneRecords.controllerLetter,
-      zone: wetCheckZoneRecords.zoneNumber,
-    }).from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.wetCheckId, id));
-    const seen = new Set(existing.map(r => `${r.letter}#${r.zone}`));
-    const toInsert: InsertWetCheckZoneRecord[] = [];
-    const expectedLetters: string[] = Array.from({ length: wc.numControllers }, (_, i) =>
-      String.fromCharCode("A".charCodeAt(0) + i),
-    );
-    for (const letter of expectedLetters) {
-      const ctrl = ctrls.find(c => c.controllerLetter === letter);
-      const zoneCount = ctrl?.zoneCount ?? 100;
-      for (let z = 1; z <= zoneCount; z++) {
-        if (!seen.has(`${letter}#${z}`)) {
-          toInsert.push({
-            wetCheckId: id,
-            controllerLetter: letter,
-            zoneNumber: z,
-            status: "not_applicable",
-          } as InsertWetCheckZoneRecord);
+      // Submit guard: at least one zone must have been actively checked
+      // (YES or NO). N/A and not_checked alone do not count.
+      const [{ activeCount }] = await tx.select({
+        activeCount: sql<number>`COUNT(*)::int`,
+      }).from(wetCheckZoneRecords).where(and(
+        eq(wetCheckZoneRecords.wetCheckId, id),
+        inArray(wetCheckZoneRecords.status, ["checked_ok", "checked_with_issues"]),
+      ));
+      if (Number(activeCount ?? 0) === 0) {
+        throw new Error("Cannot submit a wet check with zero zones checked");
+      }
+
+      // Auto-mark any existing 'not_checked' zone records as not_applicable.
+      await tx.update(wetCheckZoneRecords)
+        .set({ status: "not_applicable" })
+        .where(and(eq(wetCheckZoneRecords.wetCheckId, id), eq(wetCheckZoneRecords.status, "not_checked")));
+
+      // Implicit N/A: for every (controller letter × zoneNumber 1..zoneCount)
+      // pair that has NO zone record on this wet check, insert one as N/A so
+      // the manager review sees an explicit row for every zone in scope.
+      const ctrls = await tx.select().from(propertyControllers).where(and(
+        eq(propertyControllers.companyId, companyId),
+        eq(propertyControllers.customerId, wc.customerId),
+      ));
+      const existing = await tx.select({
+        letter: wetCheckZoneRecords.controllerLetter,
+        zone: wetCheckZoneRecords.zoneNumber,
+      }).from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.wetCheckId, id));
+      const seen = new Set(existing.map(r => `${r.letter}#${r.zone}`));
+      const toInsert: InsertWetCheckZoneRecord[] = [];
+      const expectedLetters: string[] = Array.from({ length: wc.numControllers }, (_, i) =>
+        String.fromCharCode("A".charCodeAt(0) + i),
+      );
+      for (const letter of expectedLetters) {
+        const ctrl = ctrls.find(c => c.controllerLetter === letter);
+        const zoneCount = ctrl?.zoneCount ?? 100;
+        for (let z = 1; z <= zoneCount; z++) {
+          if (!seen.has(`${letter}#${z}`)) {
+            toInsert.push({
+              wetCheckId: id,
+              controllerLetter: letter,
+              zoneNumber: z,
+              status: "not_applicable",
+            } as InsertWetCheckZoneRecord);
+          }
         }
       }
+      if (toInsert.length > 0) {
+        await tx.insert(wetCheckZoneRecords).values(toInsert).onConflictDoNothing();
+      }
+
+      // Slice 3 — Tech-driven auto-billing on submit (gated by
+      // WET_CHECK_AUTO_BILL feature flag, default ON). Findings the tech
+      // marked "Mark Complete" (resolution=repaired_in_field) auto-flow
+      // into a billing sheet inside this same submit transaction. Wet
+      // checks with no remaining pending findings skip the manager queue
+      // entirely (status=converted). Mixed wet checks land in the queue
+      // with the auto-billed slice already locked and only the pending
+      // findings actionable.
+      const autoBillEnabled = process.env.WET_CHECK_AUTO_BILL !== "false";
+
+      const allFindings = await tx.select().from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckId, id));
+      const repaired = allFindings.filter(f =>
+        f.resolution === "repaired_in_field" &&
+        f.convertedAt == null &&
+        f.billingSheetId == null,
+      );
+      const pendingCount = allFindings.filter(f => f.resolution === "pending").length;
+
+      const now = new Date();
+      let billingSheetId: number | null = null;
+      let autoBilledCount = 0;
+
+      if (autoBillEnabled && repaired.length > 0) {
+        const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
+        if (!cust) throw new Error(`Customer ${wc.customerId} not found`);
+        const laborRate = parseFloat(String(cust.laborRate ?? "45.00"));
+        billingSheetId = await this._writeRepairedInFieldBilling(
+          tx, wc, laborRate, repaired, /* priorBsId */ null, now,
+        );
+        autoBilledCount = repaired.length;
+      }
+
+      // Determine final status. With WET_CHECK_AUTO_BILL OFF, mirror
+      // Slice 2 exactly: every submit lands in 'submitted' regardless of
+      // findings shape (no skip-the-queue, no auto-conversion, even when
+      // there are zero findings). With the flag ON, status is driven by
+      // the post-write convertedAt stamps (auto-bill counts the
+      // repaired_in_field findings as converted), so all-converted →
+      // 'converted', partial → 'partially_converted', none → 'submitted'.
+      let newStatus: "submitted" | "partially_converted" | "converted";
+      if (!autoBillEnabled) {
+        newStatus = "submitted";
+      } else {
+        const finalFindings = await tx.select().from(wetCheckFindings)
+          .where(eq(wetCheckFindings.wetCheckId, id));
+        const totalFindings = finalFindings.length;
+        const convertedFindings = finalFindings.filter(f => f.convertedAt != null).length;
+        const remainingFindings = totalFindings - convertedFindings;
+        if (totalFindings === 0 || remainingFindings === 0) {
+          newStatus = "converted";
+        } else if (convertedFindings > 0) {
+          newStatus = "partially_converted";
+        } else {
+          newStatus = "submitted";
+        }
+      }
+
+      const [updated] = await tx.update(wetChecks).set({
+        status: newStatus,
+        submittedAt: now,
+        fullyConvertedAt: newStatus === "converted" ? now : null,
+        updatedAt: now,
+      }).where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId))).returning();
+
+      return { wetCheck: updated, billingSheetId, autoBilledCount, pendingCount };
+    });
+  }
+
+  async previewWetCheckSubmit(id: number, companyId: number): Promise<{
+    autoBillEnabled: boolean;
+    autoBilledCount: number;
+    autoBilledPartsTotal: string;
+    autoBilledLaborTotal: string;
+    autoBilledGrandTotal: string;
+    pendingCount: number;
+    pendingByGroup: { quick_fix: number; advanced: number; zone_issue: number };
+  } | undefined> {
+    const wc = await this.assertWetCheckBelongsToCompany(id, companyId);
+    const autoBillEnabled = process.env.WET_CHECK_AUTO_BILL !== "false";
+    const [cust] = await db.select().from(customers).where(eq(customers.id, wc.customerId));
+    const laborRate = parseFloat(String(cust?.laborRate ?? "45.00"));
+    const findings = await db.select().from(wetCheckFindings)
+      .where(eq(wetCheckFindings.wetCheckId, id));
+
+    const repaired = findings.filter(f =>
+      f.resolution === "repaired_in_field" &&
+      f.convertedAt == null &&
+      f.billingSheetId == null,
+    );
+    let partsTotal = 0;
+    let laborTotal = 0;
+    if (autoBillEnabled) {
+      for (const f of repaired) {
+        const qty = Number(f.quantity ?? 0);
+        const partPrice = parseFloat(String(f.partPrice ?? "0"));
+        const laborHours = parseFloat(String(f.laborHours ?? "0"));
+        partsTotal += partPrice * qty;
+        laborTotal += laborHours * laborRate;
+      }
     }
-    if (toInsert.length > 0) {
-      await db.insert(wetCheckZoneRecords).values(toInsert).onConflictDoNothing();
+    const pendingByGroup = { quick_fix: 0, advanced: 0, zone_issue: 0 };
+    let pendingCount = 0;
+    for (const f of findings) {
+      if (f.resolution !== "pending") continue;
+      pendingCount++;
+      const g = (f.issueGroup as keyof typeof pendingByGroup) ?? "advanced";
+      if (g === "quick_fix" || g === "advanced" || g === "zone_issue") {
+        pendingByGroup[g]++;
+      }
+    }
+    return {
+      autoBillEnabled,
+      autoBilledCount: autoBillEnabled ? repaired.length : 0,
+      autoBilledPartsTotal: partsTotal.toFixed(2),
+      autoBilledLaborTotal: laborTotal.toFixed(2),
+      autoBilledGrandTotal: (partsTotal + laborTotal).toFixed(2),
+      pendingCount,
+      pendingByGroup,
+    };
+  }
+
+  // Writes the "repaired in field" billing sheet for a wet check inside an
+  // existing transaction. Shared by submitWetCheck (Slice 3 auto-bill) and
+  // convertWetCheck (manager-driven conversion). Honours the prior-sheet
+  // snapshot rate so previously billed lines are never repriced when the
+  // customer's labor rate changes between partial-conversion runs. Stamps
+  // findings with billingSheetId + convertedAt and returns the sheet id.
+  private async _writeRepairedInFieldBilling(
+    tx: DbExecutor,
+    wc: WetCheck,
+    customerLaborRate: number,
+    repaired: WetCheckFinding[],
+    priorBsId: number | null,
+    now: Date,
+  ): Promise<number> {
+    // Slice 3 — guard required billing inputs BEFORE writing anything.
+    // Any "Mark Complete" finding missing the bits needed to produce a
+    // valid billing line must abort the whole submit so the surrounding
+    // transaction rolls back. Spec calls out the missing-part case
+    // explicitly; we extend the same guard to non-positive quantity
+    // (qty * price would zero the line) and negative labor hours.
+    for (const f of repaired) {
+      if (f.partId == null) {
+        throw new Error(
+          `Cannot auto-bill finding ${f.id}: marked complete but has no part assigned. ` +
+          `Add a part before submitting, or leave Mark Complete unchecked to route to the manager.`,
+        );
+      }
+      const qty = Number(f.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new Error(`Cannot auto-bill finding ${f.id}: quantity must be > 0 (got ${f.quantity}).`);
+      }
+      const laborHours = parseFloat(String(f.laborHours ?? "0"));
+      if (!Number.isFinite(laborHours) || laborHours < 0) {
+        throw new Error(`Cannot auto-bill finding ${f.id}: laborHours must be >= 0 (got ${f.laborHours}).`);
+      }
+    }
+    const lines = repaired.map(f => {
+      const qty = Number(f.quantity);
+      const partPrice = parseFloat(String(f.partPrice ?? "0"));
+      const laborHours = parseFloat(String(f.laborHours ?? "0"));
+      const partsTotal = partPrice * qty;
+      return { qty, partPrice, laborHours, partsTotal };
+    });
+    const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
+    const newLaborHours = lines.reduce((s, l) => s + l.laborHours, 0);
+
+    let bsId: number;
+    if (priorBsId != null) {
+      // Append to existing wet-check billing sheet and recompute totals
+      // from (existing items + new items). The labor rate used here is
+      // the SNAPSHOT (`appliedLaborRate`) stored on the existing sheet,
+      // NOT the live customer rate — previously converted findings must
+      // never be repriced if the customer's labor rate changes between
+      // partial-conversion runs.
+      const [priorBs] = await tx.select().from(billingSheets)
+        .where(eq(billingSheets.id, priorBsId));
+      const snapshotRate = parseFloat(String(priorBs?.appliedLaborRate ?? priorBs?.laborRate ?? customerLaborRate));
+      const existingItems = await tx.select().from(billingSheetItems)
+        .where(eq(billingSheetItems.billingSheetId, priorBsId));
+      const existingPartsSubtotal = existingItems.reduce(
+        (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
+      const existingLaborHours = existingItems.reduce(
+        (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
+      const totalLaborHours = existingLaborHours + newLaborHours;
+      const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
+      const laborSubtotal = totalLaborHours * snapshotRate;
+      const total = partsSubtotal + laborSubtotal;
+      await tx.update(billingSheets).set({
+        totalHours: totalLaborHours.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        partsSubtotal: partsSubtotal.toFixed(2),
+        totalAmount: total.toFixed(2),
+      }).where(eq(billingSheets.id, priorBsId));
+      bsId = priorBsId;
+    } else {
+      const laborSubtotal = newLaborHours * customerLaborRate;
+      const total = newPartsSubtotal + laborSubtotal;
+      const billingNumber = `BS-WC-${wc.id}-${Date.now()}`;
+      const [bs] = await tx.insert(billingSheets).values({
+        billingNumber,
+        customerId: wc.customerId,
+        customerName: wc.customerName,
+        propertyAddress: wc.propertyAddress ?? "",
+        workDate: wc.submittedAt ?? now,
+        technicianName: wc.technicianName,
+        technicianId: wc.technicianId,
+        workDescription: `Wet check repairs (#${wc.id})`,
+        status: "submitted",
+        totalHours: newLaborHours.toFixed(2),
+        laborRate: customerLaborRate.toFixed(2),
+        laborSubtotal: laborSubtotal.toFixed(2),
+        partsSubtotal: newPartsSubtotal.toFixed(2),
+        totalAmount: total.toFixed(2),
+        appliedLaborRate: customerLaborRate.toFixed(2),
+      } as typeof billingSheets.$inferInsert).returning();
+      bsId = bs.id;
     }
 
-    return await this.updateWetCheck(id, companyId, {
-      status: "submitted",
-      submittedAt: new Date(),
-    } as Partial<InsertWetCheck>);
+    for (let i = 0; i < repaired.length; i++) {
+      const f = repaired[i];
+      const l = lines[i];
+      await tx.insert(billingSheetItems).values({
+        billingSheetId: bsId,
+        partId: f.partId,
+        partName: f.partName ?? f.issueType,
+        partDescription: f.notes ?? null,
+        quantity: l.qty.toFixed(2),
+        unitPrice: l.partPrice.toFixed(2),
+        totalPrice: l.partsTotal.toFixed(2),
+        laborHours: l.laborHours.toFixed(2),
+        notes: f.notes ?? null,
+      });
+      await tx.update(wetCheckFindings).set({
+        billingSheetId: bsId,
+        convertedAt: now,
+        updatedAt: now,
+      }).where(eq(wetCheckFindings.id, f.id));
+    }
+    return bsId;
   }
 
   private async assertWetCheckBelongsToCompany(wetCheckId: number, companyId: number): Promise<WetCheck> {
@@ -5716,85 +6008,13 @@ export class DatabaseStorage implements IStorage {
       let estimateId: number | null = priorEstId;
       let workOrderId: number | null = priorWoId;
 
-      // 1) Repaired-in-field → at most one billing sheet per wet check
+      // 1) Repaired-in-field → at most one billing sheet per wet check.
+      // Shared helper with submitWetCheck (Slice 3 auto-bill) keeps both
+      // paths writing identical billing-sheet shapes.
       if (repaired.length > 0) {
-        const lines = repaired.map(calc);
-        const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
-        const newLaborHours = lines.reduce((s, l) => s + l.laborHours, 0);
-
-        let bsId: number;
-        if (priorBsId != null) {
-          // Append to existing wet-check billing sheet and recompute totals
-          // from (existing items + new items). The labor rate used here is
-          // the SNAPSHOT (`appliedLaborRate`) stored on the existing sheet,
-          // NOT the live customer rate — previously converted findings must
-          // never be repriced if the customer's labor rate changes between
-          // partial-conversion runs.
-          const [priorBs] = await tx.select().from(billingSheets)
-            .where(eq(billingSheets.id, priorBsId));
-          const snapshotRate = parseFloat(String(priorBs?.appliedLaborRate ?? priorBs?.laborRate ?? laborRate));
-          const existingItems = await tx.select().from(billingSheetItems)
-            .where(eq(billingSheetItems.billingSheetId, priorBsId));
-          const existingPartsSubtotal = existingItems.reduce(
-            (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
-          const existingLaborHours = existingItems.reduce(
-            (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
-          const totalLaborHours = existingLaborHours + newLaborHours;
-          const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
-          const laborSubtotal = totalLaborHours * snapshotRate;
-          const total = partsSubtotal + laborSubtotal;
-          await tx.update(billingSheets).set({
-            totalHours: totalLaborHours.toFixed(2),
-            laborSubtotal: laborSubtotal.toFixed(2),
-            partsSubtotal: partsSubtotal.toFixed(2),
-            totalAmount: total.toFixed(2),
-          }).where(eq(billingSheets.id, priorBsId));
-          bsId = priorBsId;
-        } else {
-          const laborSubtotal = newLaborHours * laborRate;
-          const total = newPartsSubtotal + laborSubtotal;
-          const billingNumber = `BS-WC-${id}-${Date.now()}`;
-          const [bs] = await tx.insert(billingSheets).values({
-            billingNumber,
-            customerId: wc.customerId,
-            customerName: wc.customerName,
-            propertyAddress: wc.propertyAddress ?? "",
-            workDate: wc.submittedAt ?? now,
-            technicianName: wc.technicianName,
-            technicianId: wc.technicianId,
-            workDescription: `Wet check repairs (#${id})`,
-            status: "submitted",
-            totalHours: newLaborHours.toFixed(2),
-            laborRate: laborRate.toFixed(2),
-            laborSubtotal: laborSubtotal.toFixed(2),
-            partsSubtotal: newPartsSubtotal.toFixed(2),
-            totalAmount: total.toFixed(2),
-            appliedLaborRate: laborRate.toFixed(2),
-          } as typeof billingSheets.$inferInsert).returning();
-          bsId = bs.id;
-        }
-        billingSheetId = bsId;
-
-        for (let i = 0; i < repaired.length; i++) {
-          const f = repaired[i];
-          const l = lines[i];
-          await tx.insert(billingSheetItems).values({
-            billingSheetId: bsId,
-            partId: f.partId,
-            partName: f.partName ?? f.issueType,
-            partDescription: f.notes ?? null,
-            quantity: l.qty.toFixed(2),
-            unitPrice: l.partPrice.toFixed(2),
-            totalPrice: l.partsTotal.toFixed(2),
-            laborHours: l.laborHours.toFixed(2),
-            notes: f.notes ?? null,
-          });
-          await tx.update(wetCheckFindings).set({
-            billingSheetId: bsId,
-            convertedAt: now,
-            updatedAt: now,
-          }).where(eq(wetCheckFindings.id, f.id));
-        }
+        billingSheetId = await this._writeRepairedInFieldBilling(
+          tx, wc, laborRate, repaired, priorBsId, now,
+        );
       }
 
       // 2) Sent-to-estimate → at most one estimate per wet check
