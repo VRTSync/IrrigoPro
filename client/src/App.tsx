@@ -60,6 +60,7 @@ import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
 import { billingManagerNav } from "@/components/layout/nav-config";
+import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
 
 
 function RedirectToCommandCenter() {
@@ -171,6 +172,7 @@ function Router() {
             </div>
             <PoweredByFooter />
           </div>
+          <ServiceWorkerUpdatePrompt />
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>
@@ -366,7 +368,12 @@ function Router() {
 }
 
 function App() {
-  return <Router />;
+  return (
+    <>
+      <ServiceWorkerRegistration />
+      <Router />
+    </>
+  );
 }
 
 export default App;

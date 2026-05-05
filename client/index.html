@@ -17,18 +17,11 @@
     <meta name="theme-color" content="#3B82F6" />
     <meta name="msapplication-TileColor" content="#3B82F6" />
     
-    <!-- Service Worker registration -->
-    <script>
-      // Register service worker if supported
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(function(registration) {
-          console.log('Service Worker registered:', registration);
-        }).catch(function(error) {
-          console.log('Service Worker registration failed:', error);
-        });
-      }
-    </script>
-    
+    <!-- Service worker is registered from client/src/lib/registerSW.ts so it
+         can be gated behind the OFFLINE_SERVICE_WORKER feature flag and only
+         mount the "New version available" prompt under the field-tech layout.
+         The vite-plugin-pwa build emits the SW from client/src/sw.ts. -->
+
     <title>IrrigoPro</title>
   </head>
   <body>

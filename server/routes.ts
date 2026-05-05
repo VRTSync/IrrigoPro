@@ -722,6 +722,25 @@ import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
+  // Tiny heartbeat used by the offline service worker / sync engine to
+  // distinguish "no signal" from "online but slow". Intentionally
+  // unauthenticated and dependency-free so a service worker fetch from
+  // a freshly-launched offline-then-online tab can confirm connectivity
+  // without paying session/DB cost. Slice 4A — task #297.
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  // Slice 4A feature flag exposure. The offline service worker is gated
+  // by the build-time VITE_OFFLINE_SERVICE_WORKER env var on the client,
+  // but a server-side reflection is provided so future slices (4B mutation
+  // queue) can read the same flag without a rebuild. Defaults to enabled.
+  app.get("/api/config/offline-service-worker", (_req, res) => {
+    const raw = process.env.OFFLINE_SERVICE_WORKER;
+    const enabled = raw === undefined ? true : raw !== "false" && raw !== "0";
+    res.json({ enabled });
+  });
+
   // Serve company logo images directly (binary response)
   app.get("/api/company-logo/:logoId", async (req, res) => {
     const logoId = req.params.logoId;
