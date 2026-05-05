@@ -793,6 +793,8 @@ function ZoneScreen({
         zoneRecordId={zoneRecord?.id ?? null}
         wetCheckId={wetCheckId}
         customerId={customerId}
+        photos={photos}
+        readOnly={readOnly}
       />
     </div>
   );
@@ -806,12 +808,16 @@ function FindingSheet({
   zoneRecordId,
   wetCheckId,
   customerId,
+  photos,
+  readOnly,
 }: {
   state: FindingSheetState;
   onClose: () => void;
   zoneRecordId: number | null;
   wetCheckId: number;
   customerId: number;
+  photos: WetCheckPhoto[];
+  readOnly: boolean;
 }) {
   const { toast } = useToast();
   const open = state.open;
@@ -976,6 +982,38 @@ function FindingSheet({
             <div className="text-sm font-medium mb-1">Notes</div>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} data-testid="finding-notes" />
           </div>
+
+          {editing && (
+            <div data-testid="finding-sheet-photos">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium">Photos</div>
+                {!readOnly && editing.resolution === "pending" && (
+                  <PhotoCaptureButton
+                    wetCheckId={wetCheckId}
+                    zoneRecordId={zoneRecordId}
+                    findingId={editing.id}
+                  />
+                )}
+              </div>
+              {(() => {
+                const fp = photos.filter(p => p.findingId === editing.id);
+                if (fp.length === 0) {
+                  return <div className="text-xs text-gray-500">No photos yet.</div>;
+                }
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {fp.map(p => (
+                      <PhotoThumb
+                        key={p.id}
+                        photo={p}
+                        canDelete={!readOnly && editing.resolution === "pending"}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm" data-testid="finding-repaired-toggle">
             <input
