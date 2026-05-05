@@ -280,19 +280,24 @@ describe("Invoice PDF reflects photos added after invoicing (Task #196)", () => 
       `Photos-only PATCH on cached-PDF sheet failed: ${JSON.stringify(patch.body)}`,
     );
 
-    // Real regeneration call — exercises the production invalidation logic.
+    // Task #224: the photos PATCH itself now auto-invalidates the cached
+    // byproduct row, so by the time we get here the cached row is already
+    // gone — confirm that, then regenerate to produce a fresh one.
+    const postPatchCached = await storage.getInvoicePdfByInvoiceId(invoiceId);
+    assert.equal(
+      postPatchCached,
+      undefined,
+      `Cached PDF byproduct row should have been auto-invalidated by the photos PATCH (still found id=${postPatchCached?.id ?? 'n/a'}, was id=${cachedId})`,
+    );
+
+    // Real regeneration call — exercises the production save path.
     lastCapturedViewModel = null;
     const before = captureCount;
-    const { result, previousId } = await regenerateInvoicePdf(invoiceId);
+    const { result } = await regenerateInvoicePdf(invoiceId);
     assert.equal(
       result.success,
       true,
       `generateAndSaveInvoicePdf failed during cache test: ${JSON.stringify(result)}`,
-    );
-    assert.equal(
-      previousId,
-      cachedId,
-      "Regeneration must observe (and invalidate) the cached byproduct row",
     );
     assert.equal(
       captureCount,
@@ -324,6 +329,55 @@ describe("Invoice PDF reflects photos added after invoicing (Task #196)", () => 
     assert.ok(
       renderedPhotos.includes("https://example.com/added-after-cache-1.jpg"),
       "Newly added photo (after the cached PDF was created) must be in the regenerated view-model",
+    );
+  });
+
+  test("PATCHing photos onto an invoiced billing sheet auto-invalidates the cached invoice_pdfs row (Task #224)", async () => {
+    // Make sure a cached byproduct row exists going in. Earlier tests already
+    // produced one, but be defensive in case ordering ever changes.
+    let cached = await storage.getInvoicePdfByInvoiceId(invoiceId);
+    if (!cached) {
+      const { result } = await regenerateInvoicePdf(invoiceId);
+      assert.equal(result.success, true, `Setup regeneration failed: ${JSON.stringify(result)}`);
+      cached = await storage.getInvoicePdfByInvoiceId(invoiceId);
+    }
+    assert.ok(cached, "A cached invoice_pdfs row must exist before the auto-invalidation test");
+    const cachedId = cached.id;
+
+    // Field tech backfills another photo — this is the trigger that should
+    // automatically clear the cached PDF (no manual regenerate call).
+    const sheetNow = await storage.getBillingSheetById(sheetId);
+    const photosAfter = [
+      ...(sheetNow.photos || []),
+      `https://example.com/auto-invalidate-${Date.now()}.jpg`,
+    ];
+    const patch = await api(
+      "PATCH",
+      `/api/billing-sheets/${sheetId}`,
+      { photos: photosAfter },
+      FIELD_TECH_HEADERS,
+    );
+    assert.equal(
+      patch.status,
+      200,
+      `Photos-only PATCH on invoiced sheet failed: ${JSON.stringify(patch.body)}`,
+    );
+
+    // The cached byproduct row must have been deleted as part of the same
+    // request — without anyone hitting the regenerate endpoint.
+    const afterPatch = await storage.getInvoicePdfByInvoiceId(invoiceId);
+    assert.equal(
+      afterPatch,
+      undefined,
+      `Cached invoice_pdfs row should have been auto-invalidated by the photos PATCH (still found id=${afterPatch?.id ?? 'n/a'}, was id=${cachedId})`,
+    );
+
+    // And confirming the underlying photo write actually landed.
+    const refreshed = await storage.getBillingSheetById(sheetId);
+    assert.deepEqual(
+      refreshed.photos,
+      photosAfter,
+      "Photos PATCH should have persisted the new photo set",
     );
   });
 

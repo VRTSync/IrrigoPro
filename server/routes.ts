@@ -7853,7 +7853,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!billingSheet) {
         return res.status(404).json({ message: "Billing sheet not found" });
       }
-      
+
+      // Task #224 — when photos change on a billing sheet that's already linked
+      // to an invoice, invalidate the cached invoice_pdfs row so the next view,
+      // download, or send regenerates a fresh PDF that includes the new photos.
+      if (
+        billingSheetData.photos !== undefined &&
+        existingBsForLockCheck?.invoiceId
+      ) {
+        const cachedInvoicePdf = await storage.getInvoicePdfByInvoiceId(existingBsForLockCheck.invoiceId);
+        if (cachedInvoicePdf) {
+          await db.delete(invoicePdfs).where(eq(invoicePdfs.id, cachedInvoicePdf.id));
+          console.log(
+            `[AUDIT] invoice_pdf_invalidated reason=billing_sheet_photos_patch ` +
+            `billingSheetId=${id} invoiceId=${existingBsForLockCheck.invoiceId} cachedPdfId=${cachedInvoicePdf.id}`
+          );
+        }
+      }
+
       // Handle items if provided — atomically replace items AND resync partsSubtotal/totalAmount in one transaction
       if (items && Array.isArray(items)) {
         const countBefore = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
@@ -8706,6 +8723,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrder = await storage.getWorkOrder(id);
         if (!workOrder) {
           return res.status(404).json({ message: "Work order not found" });
+        }
+      }
+
+      // Task #224 — when photos change on a work order that's already linked
+      // to an invoice, invalidate the cached invoice_pdfs row so the next view,
+      // download, or send regenerates a fresh PDF that includes the new photos.
+      if (
+        workOrderData.photos !== undefined &&
+        existingForLockCheck?.invoiceId
+      ) {
+        const cachedInvoicePdf = await storage.getInvoicePdfByInvoiceId(existingForLockCheck.invoiceId);
+        if (cachedInvoicePdf) {
+          await db.delete(invoicePdfs).where(eq(invoicePdfs.id, cachedInvoicePdf.id));
+          console.log(
+            `[AUDIT] invoice_pdf_invalidated reason=work_order_photos_patch ` +
+            `workOrderId=${id} invoiceId=${existingForLockCheck.invoiceId} cachedPdfId=${cachedInvoicePdf.id}`
+          );
         }
       }
 
