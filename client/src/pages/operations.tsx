@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, FileText, Wrench, ClipboardList, Calendar, DollarSign, User, MapPin, Users, CheckCircle, Clock } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
-import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
@@ -397,9 +397,9 @@ export default function Operations() {
         )}
       </div>
 
-      {/* Estimate Modal */}
-      <EstimateModal 
-        open={estimateModalOpen} 
+      {/* Estimate Wizard */}
+      <EstimateWizard
+        open={estimateModalOpen}
         onOpenChange={setEstimateModalOpen}
       />
 

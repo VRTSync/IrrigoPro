@@ -28,6 +28,7 @@ A full-stack business management system for irrigation companies, streamlining o
 - **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side.
 - **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
 - **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout.
+- **Estimate Wizard**: New/edit estimates use a 3-step wizard (Customer & Project → Line Items → Review & Send) at `client/src/components/estimates/estimate-wizard.tsx` with steps under `client/src/components/estimates/wizard/`. Per-unit labor hours are stored in editor state and multiplied by qty when serializing the API payload (line `laborHours = perUnit × qty`).
 - **Independent Parts Management**: Parts catalog operates independently from QuickBooks.
 - **IrrigoPro Display Name (`irrigoName`)**: A separate, prominent customer field for internal recognition.
 - **KML for Site Maps**: KML import is used for interactive irrigation maps.

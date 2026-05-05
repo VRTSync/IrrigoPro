@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -366,8 +366,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Estimate Modal */}
-      <EstimateModal
+      {/* Estimate Wizard */}
+      <EstimateWizard
         open={showEstimateModal}
         onOpenChange={setShowEstimateModal}
       />

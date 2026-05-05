@@ -9,7 +9,7 @@ import { FAB } from "@/components/ui/fab";
 import { ActionSheet, ActionSheetItem, ActionSheetSection } from "@/components/ui/action-sheet";
 import { FileText, Wrench, Receipt, AlertCircle, CheckCircle2, ClipboardCheck, User, ExternalLink, Droplets } from "lucide-react";
 import { useState } from "react";
-import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
@@ -508,7 +508,7 @@ export default function ManagerDashboard() {
       </ActionSheet>
 
       {/* Modals */}
-      <EstimateModal
+      <EstimateWizard
         open={showEstimateModal}
         onOpenChange={(open) => {
           setShowEstimateModal(open);

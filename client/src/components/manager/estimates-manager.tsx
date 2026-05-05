@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { EstimateModal } from "@/components/estimates/estimate-modal";
+import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import type { Estimate } from "@shared/schema";
 
 interface EstimatesManagerProps {
@@ -157,8 +157,8 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
         )}
       </div>
 
-      {/* Estimate Modal */}
-      <EstimateModal
+      {/* Estimate Wizard */}
+      <EstimateWizard
         open={showEstimateModal}
         onOpenChange={(open) => {
           setShowEstimateModal(open);
