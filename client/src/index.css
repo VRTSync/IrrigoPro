@@ -78,6 +78,29 @@
   --ring: 199 89% 48%;
 }
 
+/* Brand-blue sidebar theme — scoped to admin/billing shell */
+.sidebar-brand-blue {
+  --sidebar-background: 200 95% 32%;
+  --sidebar-foreground: 0 0% 100%;
+  --sidebar-primary: 0 0% 100%;
+  --sidebar-primary-foreground: 200 95% 25%;
+  --sidebar-accent: 199 89% 48%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 200 80% 24%;
+  --sidebar-ring: 199 92% 70%;
+}
+
+.dark .sidebar-brand-blue {
+  --sidebar-background: 200 95% 16%;
+  --sidebar-foreground: 210 40% 98%;
+  --sidebar-primary: 210 40% 98%;
+  --sidebar-primary-foreground: 200 95% 12%;
+  --sidebar-accent: 199 89% 38%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 200 80% 12%;
+  --sidebar-ring: 199 92% 60%;
+}
+
 @layer base {
   * {
     @apply border-border;

@@ -193,6 +193,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
             navConfig={navConfig}
             badges={badges}
             user={user}
+            userRole={userRole}
           />
         </div>
         <SidebarInset className="min-h-screen pb-20 lg:pb-0">
@@ -341,18 +342,25 @@ function DesktopSidebar({
   navConfig,
   badges,
   user,
+  userRole,
 }: {
   navConfig: NavConfig;
   badges: NavBadgeMap;
   user: SessionUser;
+  userRole?: string;
 }) {
   const [location] = useLocation();
   const activePath = useMemo(
     () => pickActiveLeafPath(navConfig, location),
     [navConfig, location],
   );
+  const brandThemed =
+    userRole === "company_admin" || userRole === "billing_manager";
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar
+      collapsible="icon"
+      className={brandThemed ? "sidebar-brand-blue" : undefined}
+    >
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
           <img
@@ -360,7 +368,11 @@ function DesktopSidebar({
             alt="IrrigoPro"
             className="h-8 w-8 object-contain shrink-0"
           />
-          <span className="text-base font-semibold text-gray-900 group-data-[collapsible=icon]:hidden">
+          <span
+            className={`text-base font-semibold group-data-[collapsible=icon]:hidden ${
+              brandThemed ? "text-sidebar-foreground" : "text-gray-900"
+            }`}
+          >
             IrrigoPro
           </span>
         </div>
@@ -376,7 +388,7 @@ function DesktopSidebar({
         ))}
       </SidebarContent>
       <SidebarFooter>
-        <SidebarUserMenu user={user} />
+        <SidebarUserMenu user={user} brandThemed={brandThemed} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -528,7 +540,13 @@ function NestedGroupItem({
   );
 }
 
-function SidebarUserMenu({ user }: { user: SessionUser }) {
+function SidebarUserMenu({
+  user,
+  brandThemed,
+}: {
+  user: SessionUser;
+  brandThemed: boolean;
+}) {
   const initials = user.name?.charAt(0) || "U";
   const roleLabel = (user.role || "").replace(/_/g, " ");
   return (
@@ -538,7 +556,13 @@ function SidebarUserMenu({ user }: { user: SessionUser }) {
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton size="lg" tooltip={user.name || "Account"}>
               <Avatar className="h-8 w-8 rounded-md">
-                <AvatarFallback className="bg-primary text-white rounded-md">
+                <AvatarFallback
+                  className={`rounded-md ${
+                    brandThemed
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "bg-primary text-white"
+                  }`}
+                >
                   {initials}
                 </AvatarFallback>
               </Avatar>
@@ -546,7 +570,11 @@ function SidebarUserMenu({ user }: { user: SessionUser }) {
                 <span className="text-sm font-medium truncate">
                   {user.name}
                 </span>
-                <span className="text-xs text-gray-500 capitalize truncate">
+                <span
+                  className={`text-xs capitalize truncate ${
+                    brandThemed ? "text-sidebar-foreground/70" : "text-gray-500"
+                  }`}
+                >
                   {roleLabel}
                 </span>
               </div>
