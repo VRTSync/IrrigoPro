@@ -1,0 +1,414 @@
+# Slice 6 — Desktop Shell + Left-Rail Navigation
+
+**Date:** 2026-05-05
+**Status:** Draft for Replit implementation
+**Decisions locked:**
+- The mobile-first navigation (top header + fixed bottom 5-slot bar) **stays exactly as-is for field techs and irrigation managers**. This slice only changes the desktop chrome for `company_admin` and `billing_manager`.
+- At `≥ lg` (1024px), those two roles get a **collapsible left-rail sidebar** plus a **TopStrip** (sidebar trigger + breadcrumb + page-actions slot + notifications).
+- At `< lg`, those two roles still see the **existing mobile chrome** (`<Navigation />`) — unchanged. The split is purely chrome; the route tree is shared.
+- Sidebar is collapsible to an icon-only rail. **Default open at first visit.** Collapsed state persists to `safeStorage` under key `irrigopro_desktop_sidebar_open`.
+- Top strip has breadcrumb + page title + a `<PageActions>` portal slot. **No Cmd+K command palette in v1** — fast-follow.
+- Company Admin gets sidebar links to **everything** they currently have routed (this includes Parts Pending Approval, which today is routed but hidden from the nav — close that gap).
+- Billing Manager gets a new sidebar link to **Wet Check Pending Review** (today routed but hidden from nav). Billing Manager **also gets Wet Check Issue Types** as a Settings entry — add the route to `App.tsx`.
+- The Reports group (audit + missing-photo pages) is **a nested collapsible sub-section under Billing** for both roles, not a top-level group.
+- Active-state highlighting uses **longest-prefix wins** — when on `/work-orders/missing-photos`, only the deepest matching leaf highlights, not both `Work Orders` and `Missing Photos – Work Orders`.
+- The shadcn `Sidebar` primitive at `client/src/components/ui/sidebar.tsx` is the component foundation. **Do not rebuild it**; reuse its `Sidebar / SidebarProvider / SidebarMenu*` family.
+
+**Depends on:** nothing — this is a pure UI/chrome change. No schema, no API, no data work.
+
+**Roadmap note:** Cmd+K command palette is the obvious fast-follow once this lands; both roles touch enough screens that typing-to-jump is high-leverage. Out of scope for this slice.
+
+---
+
+## Executive Summary
+
+Today the Company Admin and Billing Manager roles use the same mobile-first navigation as field techs: a top bar at desktop breakpoints with five dropdowns and a fixed bottom 5-slot bar at mobile. That works for techs, who have five screens. It strains for these two roles — the company admin's `Admin` dropdown alone holds seven items, the `Operations` dropdown is two-deep, and several routed pages (Parts Pending Approval, Wet Check Pending Review, audit reports) never made it into the nav at all. The result is a hover-and-hunt experience that's actively making the app feel less professional than it is.
+
+This slice introduces a **second navigation chrome** — a collapsible left-rail sidebar plus a top strip — that activates only at `≥ lg` and only for these two roles. Everyone else is untouched. The mobile layout for the two affected roles also stays as-is; a billing manager on their phone in the field still gets the bottom nav. The result is a single app that feels native on the device the user happens to be on: phone-style chrome on a phone, desktop-style chrome on a laptop.
+
+**Slice 6 ships when:** a Company Admin or Billing Manager opening IrrigoPro in a desktop browser sees a collapsible left rail with grouped navigation matching the spec below; the top strip shows a breadcrumb of the current page; collapsing the rail to icons persists across reloads; every routed page in the role is reachable via the rail (closing two pre-existing gaps); on the same browser at narrower widths the existing mobile chrome appears unchanged; the field tech / irrigation manager / super admin experience is byte-identical to today.
+
+---
+
+## Implementation Slicing
+
+The slice ships across **three sub-slices**. Each is independently shippable, reviewable, and rollback-able. Suggested order is 6A → 6B → 6C.
+
+### Sub-slice 6A — Foundation + Company Admin
+
+**Scope:**
+- New file `client/src/components/layout/nav-config.ts` exporting `companyAdminNav: NavConfig` (data, not JSX) using the structure below. Define types `NavConfig`, `NavItem`, `NavLeaf`, `NavGroup`, `NavBadgeKey`, `NavBadgeMap`. Top-level entries are a mix of leaves (Dashboard) and groups (Operations, Customers, Billing, Parts, Settings). Groups can contain leaves or one level of nested groups (Reports under Billing). Badges are declarative via a `badgeKey` field on the leaf (`partsPendingApproval`, `wetCheckReviews`).
+- New file `client/src/components/layout/route-meta.ts` exporting `resolveRouteMeta(location: string, config: NavConfig): { title: string; breadcrumb: { label: string; path?: string }[] }`. The function walks the nav config to find a matching leaf, prepends its parent group chain as breadcrumb segments, and falls back to a small list of regex patterns for non-nav routes (customer profile, customer site maps, wet-check review detail, user profile, switch user, license/privacy pages). Final fallback humanizes the last path segment.
+- New file `client/src/components/layout/desktop-shell.tsx` exporting:
+  - `DesktopShell({ navConfig, children })` — the layout wrapper. Composes `SidebarProvider` + `Sidebar` + `SidebarInset`. Inside `SidebarInset`: a `<div className="lg:hidden">` rendering the existing `<Navigation />` (so mobile chrome is unchanged), the desktop `<TopStrip />` (which is `hidden lg:flex` internally), the `<main>` content area, and `<PoweredByFooter />`.
+  - `PageActions` — React component that portals its children into a slot in the TopStrip via a context that holds an `HTMLDivElement` ref. `PageActions` renders nothing on viewports without the TopStrip (mobile) by short-circuiting when the context value is null.
+  - Internal `TopStrip` — sticky header with `SidebarTrigger`, vertical divider, breadcrumb (computed from `resolveRouteMeta`), an `ml-auto` flex with the actions portal slot first then `<NotificationSystem />` (only rendered when `user.id` is a number).
+  - Internal sidebar rendering: header with IrrigoPro logo + name (name hides at `group-data-[collapsible=icon]`), content with one `SidebarGroup` per top-level config entry, footer with a `SidebarUserMenu` (avatar + name + role, opens dropdown with My Account / Switch User / Logout), and a `SidebarRail` for click-to-toggle.
+  - Sidebar rendering wraps `<Sidebar>` in `<div className="hidden lg:contents">` so the rail is hidden below `lg` (the shadcn primitive's own `md:` breakpoint isn't enough — we want sidebar at `lg+` only).
+  - Use `SidebarProvider` in **controlled mode** (pass both `open` and `onOpenChange`) backed by local state initialized from `safeGet(SIDEBAR_OPEN_KEY)` and synced back via `safeSet`. shadcn's built-in cookie persistence is write-only on the client and won't restore on reload — own the persistence.
+- Active-state matching: implement `pickActiveLeafPath(config, location): string | null` that returns the **longest** path among all leaves whose path matches the current location (exact match or `location.startsWith(itemPath + "/")`, with `/` matched only by exact `/`). Pass that single `activePath` down to leaf components and have each compute `active = activePath === leaf.path`. This prevents both `/work-orders` and `/work-orders/missing-photos` from highlighting at the same time.
+- Group expand/collapse: top-level groups always render their items (no collapse — flat headers like the shadcn pattern). Nested groups (only Reports today) wrap their items in `<Collapsible>` with auto-open when any descendant is the active path, plus a `defaultOpen` flag honored when nothing matches.
+- Wire `DesktopShell` into `client/src/components/company-admin-app.tsx`: replace the existing `<div ...>` + `<Navigation />` + content wrapper with `<DesktopShell navConfig={companyAdminNav}>{<Switch>...routes...</Switch>}</DesktopShell>`. Remove the standalone `<PoweredByFooter />` (DesktopShell renders it). **Add the missing `/invoices` route** to the Company Admin Switch (import `InvoicesPage from "@/pages/invoices"`).
+
+**Ships when:**
+- Logging in as Company Admin in a `≥ lg` viewport shows the left rail with the structure below, the IrrigoPro logo at the top, the user menu at the bottom, and a top strip with breadcrumb.
+- Clicking the SidebarTrigger in the top strip collapses the rail to icons; tooltips appear on icon hover; clicking again expands it.
+- Reloading the page restores the previous collapsed state.
+- Every link in the rail navigates correctly. Parts Pending Approval is reachable. The new `/invoices` route renders the InvoicesPage.
+- Resizing the viewport to `< lg` smoothly switches to the existing mobile chrome (top header + bottom 5-slot bar) with no layout glitch. The bottom-nav-active item logic continues to work.
+- Field tech, irrigation manager, super admin sessions look and behave **exactly** as before this slice (visual parity).
+
+**Dependencies:** none.
+
+### Sub-slice 6B — Billing Manager rollout
+
+**Scope:**
+- Extend `nav-config.ts` with `billingManagerNav: NavConfig` per the structure below.
+- Wire `DesktopShell` into the `user.role === "billing_manager"` block of `client/src/App.tsx`: replace the existing `<div ...>` + `<Navigation />` + content wrapper with `<DesktopShell navConfig={billingManagerNav}>{<Switch>...routes...</Switch>}</DesktopShell>`. `Toaster` stays a sibling, outside DesktopShell, exactly like today.
+- **Add the `/admin/issue-types` route** to the Billing Manager Switch (the `AdminIssueTypesPage` import already exists in `App.tsx`). This makes the new "Wet Check Issue Types" Settings entry actually reachable.
+- **Add the `/wet-checks/admin` and `/wet-checks/pending-review` linkage** for Billing Manager. The `pending-review` route is already wired; `Wet Check Reviews` becomes the new sidebar entry that opens it.
+
+**Ships when:**
+- Logging in as Billing Manager in a `≥ lg` viewport shows the left rail with the Billing-first ordering, breadcrumb works, all routes reachable.
+- The new Wet Check Reviews link in the sidebar opens `/wet-checks/pending-review` and the page renders.
+- The Wet Check Issue Types entry under Settings opens `/admin/issue-types` and the page renders.
+- The Parts Pending Approval link continues to show its red badge when there are pending parts.
+- A new badge on Wet Check Reviews shows count when there are pending wet-check reviews (see Data and API below).
+- Resizing to `< lg` falls back to the existing mobile chrome unchanged.
+
+**Dependencies:** 6A (the shell + types must exist).
+
+### Sub-slice 6C — Polish
+
+**Scope:**
+- Verify accessibility: rail toggle has an accessible label, breadcrumb has `aria-label="Breadcrumb"`, every nav link is keyboard-focusable in tab order, focus styles visible on the rail.
+- Verify the SidebarRail (the thin click strip on the rail's outer edge) toggles the sidebar with cursor `e-resize` / `w-resize` per shadcn defaults.
+- Verify Cmd+B / Ctrl+B keyboard shortcut toggles the rail (this is a built-in shadcn behavior — confirm it works after our controlled-mode wrapping).
+- One-time onboarding hint on first sidebar open per user: `localStorage["irrigopro_desktop_shell_seen"]`. If unset, show a small dismissable popover anchored to the SidebarTrigger reading "Press Cmd+B (Ctrl+B on Windows) to collapse the rail." Set the key on dismiss.
+- Confirm visual parity with the existing brand: the `irrigoProLogo` uses the same asset as the existing Navigation; the user-menu avatar uses the same `bg-primary text-white` initial pattern; padding/spacing matches the mobile chrome aesthetic.
+- Mobile-on-desktop edge case: at the `md`–`lg` transition (768–1023 px) the shadcn primitive thinks it's "desktop" but our wrapper hides it. Verify nothing leaks (no orphan Sheet drawer, no stray rail) and the mobile chrome shows.
+- Lighthouse accessibility audit pass (≥ 95) on a Company Admin desktop session.
+
+**Ships when:** the polish list above is each verified manually or in a quick test, plus the Lighthouse number.
+
+**Dependencies:** 6A and 6B in place.
+
+### What to send Replit per sub-slice
+
+For each sub-slice, hand Replit:
+- The relevant section above (scope + ships-when).
+- The full Slice 6 spec for design context.
+- Permission to read `client/src/components/ui/sidebar.tsx` (the shadcn primitive) end-to-end — its API surface drives the implementation.
+- The list of routes accessible to each role (Routing table below).
+
+The spec is the single source of truth; if Replit hits an ambiguity, surface the question rather than guessing.
+
+---
+
+## Why Now
+
+Three reasons.
+
+**The two roles outgrew the chrome.** Company Admin's `Admin` dropdown holds seven items today; `Operations` is a dropdown of dropdowns; the `Billing` dropdown only exposes two of the four billing surfaces. Billing Manager has six top-level dropdowns and only one of them (`Billing`) is multi-level. Both flow charts have outgrown the horizontal real estate, and dropdowns at this density are slow even for users who know the app.
+
+**Routed pages are unreachable.** Parts Pending Approval is routed for Company Admin and the nav even fetches the badge count for it, but the link itself isn't in any dropdown. Billing Manager has Wet Check Pending Review routed but hidden. The audit pages (zero-price, labor-rate, missing-photos) are routed for both roles but never linked. Closing these gaps is overdue.
+
+**The desktop format is a force multiplier for everything else.** Once a left rail and a top strip exist, every page can pin a primary action ("New Work Order") to the strip. Every page can drop a breadcrumb without re-implementing it. Adding a Cmd+K palette later becomes trivial because the route metadata already exists. The chrome change pays itself back across the rest of the roadmap.
+
+---
+
+## Design Principles
+
+The same principles that govern the rest of the app — minimum chrome, sentence case, generous whitespace — apply here. A few specific to this slice:
+
+**One nav surface per breakpoint, not two.** At any given viewport width, the user sees either the desktop chrome or the mobile chrome — never both, never overlapping, never two competing places to look. The CSS does the switching; React renders one tree.
+
+**Field tech is the canary.** If a field tech's experience changes by even one pixel after this slice, something is wrong. The split is keyed on `user.role`, and the mobile chrome under `<DesktopShell>` is rendered by inserting the existing `<Navigation />` inside an `lg:hidden` wrapper — exactly the same component that ships today. We aren't recreating mobile; we're just adding a desktop sibling.
+
+**The rail is grouped, not flat.** The two affected roles each have 15+ destinations. A flat list of 15+ links is unreadable at a glance. Group labels are uppercase eyebrow text (`SidebarGroupLabel`'s default style), each group is a contiguous block, and the visual hierarchy is: Dashboard → daily work → record-keeping → setup. Order matters: Operations comes before Billing for the admin (do the work, then get paid); Billing comes before Operations for the billing manager (their day starts with money).
+
+**Active state is exactly one item.** Longest-prefix wins. When on `/work-orders/missing-photos`, the only highlighted item is `Missing Photos – Work Orders`. The `Operations` group label still appears as the breadcrumb root in the top strip (so the user sees their location), but the `Work Orders` leaf in Operations is **not** also highlighted.
+
+**Collapsed sidebar shows tooltips.** When the rail is collapsed to icons, hovering an icon shows the label as a tooltip on the right side. shadcn's `SidebarMenuButton` accepts `tooltip={leaf.label}` for this; pass it on every leaf.
+
+**Breadcrumb is a path, not a back-button.** Each segment except the last is a link to the parent path (group label is non-linkable; the leaf-level segment is the current page and is unstyled-as-link). On `/billing-sheets/zero-price-audit` the breadcrumb reads `Billing › Reports › Zero Price Audit`.
+
+**Color and density match the existing app.** The shadcn `Sidebar` ships with a `bg-sidebar` token that maps to a near-white in this app. Use it. Don't introduce a new accent. Badges on Parts Pending Approval and Wet Check Reviews use the existing `destructive` variant so they read the same as everywhere else.
+
+---
+
+## Sidebar Configuration
+
+Both configs are arrays of `NavItem` (a leaf or a group). Replit should build the data structures exactly as below — order matters, badges matter, group label exact wording matters. Icons are `lucide-react` exports.
+
+### Company Admin sidebar (`companyAdminNav`)
+
+```
+Dashboard                                 (LayoutDashboard)        →  /
+
+OPERATIONS                                (ClipboardList) defaultOpen:true
+  Work Orders                             (Wrench)                 →  /work-orders
+  Billing Sheets                          (FileSpreadsheet)        →  /billing-sheets
+  Wet Checks                              (Droplets)               →  /wet-checks/admin
+  Wet Check Reviews                       (ShieldCheck)            →  /wet-checks/pending-review
+                                                                       badge: wetCheckReviews
+
+CUSTOMERS                                 (Users)
+  Customers                               (Users)                  →  /customers
+  All Customers                           (Users)                  →  /admin/customers
+  Site Maps                               (MapIcon)                →  /site-maps
+  Controllers & Zones                     (Cpu)                    →  /admin/controllers
+
+BILLING                                   (DollarSign)
+  Billing Dashboard                       (LayoutDashboard)        →  /billing/dashboard
+  Command Center                          (ClipboardList)          →  /billing/command-center
+  Invoices                                (Receipt)                →  /invoices
+  Reports                                 (BarChart3) [collapsible nested group]
+    Zero Price Audit                      (AlertCircle)            →  /billing-sheets/zero-price-audit
+    Labor Rate Audit                      (AlertCircle)            →  /billing-sheets/labor-rate-audit
+    Missing Photos – Billing              (AlertCircle)            →  /billing-sheets/missing-photos
+    Missing Photos – Work Orders          (AlertCircle)            →  /work-orders/missing-photos
+
+PARTS                                     (Package)
+  Parts Catalog                           (Package)                →  /parts
+  Parts Pending Approval                  (ShieldCheck)            →  /parts-pending-approval
+                                                                       badge: partsPendingApproval
+  Parts Settings                          (Settings)               →  /parts-settings
+
+SETTINGS                                  (Settings)
+  Team                                    (Users)                  →  /users
+  Company Profile                         (Building)               →  /company-profile
+  QuickBooks                              (Calculator)             →  /quickbooks
+  Labor Rates                             (Banknote)               →  /labor-rates
+  Wet Check Issue Types                   (Droplets)               →  /admin/issue-types
+```
+
+### Billing Manager sidebar (`billingManagerNav`)
+
+```
+Dashboard                                 (LayoutDashboard)        →  /
+
+BILLING                                   (DollarSign) defaultOpen:true
+  Billing Dashboard                       (LayoutDashboard)        →  /billing/dashboard
+  Command Center                          (ClipboardList)          →  /billing/command-center
+  Billing Sheets                          (FileSpreadsheet)        →  /billing-sheets
+  Invoices                                (Receipt)                →  /invoices
+  Reports                                 (BarChart3) [collapsible nested group]
+    Zero Price Audit                      (AlertCircle)            →  /billing-sheets/zero-price-audit
+    Labor Rate Audit                      (AlertCircle)            →  /billing-sheets/labor-rate-audit
+    Missing Photos – Billing              (AlertCircle)            →  /billing-sheets/missing-photos
+    Missing Photos – Work Orders          (AlertCircle)            →  /work-orders/missing-photos
+
+OPERATIONS                                (ClipboardList)
+  Work Orders                             (Wrench)                 →  /work-orders
+  Wet Check Reviews                       (ShieldCheck)            →  /wet-checks/pending-review
+                                                                       badge: wetCheckReviews
+
+Customers                                 (Users)                  →  /customers       [top-level leaf]
+
+PARTS                                     (Package)
+  Parts Catalog                           (Package)                →  /parts
+  Parts Pending Approval                  (ShieldCheck)            →  /parts-pending-approval
+                                                                       badge: partsPendingApproval
+  Parts Settings                          (Settings)               →  /parts-settings
+
+SETTINGS                                  (Settings)
+  QuickBooks                              (Calculator)             →  /quickbooks
+  Wet Check Issue Types                   (Droplets)               →  /admin/issue-types
+```
+
+The Reports nested group inside Billing is shared between both roles. Pull it into a constant in `nav-config.ts` and reference it from both arrays so the audit links can't drift between roles.
+
+---
+
+## Routing Table
+
+The sidebar is the source of truth for the route list each role exposes. Routes that aren't in the sidebar but still need to be in the role's `<Switch>` (because pages link to them or wouter falls through):
+
+| Path | Page component | Reason it's not in the rail |
+|---|---|---|
+| `/customers/:id/profile` | `CustomerProfile` | Drill-down from Customers list |
+| `/customers/:customerId/site-maps` | `CustomerSiteMapsPage` | Drill-down from a customer |
+| `/wet-checks/:id/review` | `WetCheckReviewPage` | Drill-down from Reviews list |
+| `/wet-checks` and `/wet-checks/:id` | `WetChecksPage` | Field-tech-style detail |
+| `/customer-billing` | redirect to `/billing/command-center` | Backwards compat |
+| `/operations` | `Operations` (Company Admin only) | Hub page; reachable from dashboard |
+| `/admin` | `AdminDashboard` (Company Admin only) | Alias for `/` |
+| `/user-profile`, `/switch-user`, `/license-agreement`, `/privacy-policy`, `/login` | various | Reached from user menu / footer |
+| `/forgot-password`, `/reset-password`, `/field-portal` | various (Company Admin only) | Cross-role landing pages |
+| `/estimates` | `Operations` (Company Admin only) | Redirects to operations hub |
+
+After this slice, the **two new routes** to add are:
+
+- **`/invoices` to `client/src/components/company-admin-app.tsx`** — `import InvoicesPage from "@/pages/invoices"` then `<Route path="/invoices" component={InvoicesPage} />`.
+- **`/admin/issue-types` to the `billing_manager` block in `client/src/App.tsx`** — the `AdminIssueTypesPage` import already exists; just add the `<Route ...>`.
+
+Audit pages (`/billing-sheets/zero-price-audit`, `/billing-sheets/labor-rate-audit`, `/billing-sheets/missing-photos`, `/work-orders/missing-photos`) are already routed for both roles. This slice **only adds links** to them; the `<Route>` entries already exist.
+
+---
+
+## Component Structure
+
+```
+client/src/components/layout/
+├── nav-config.ts          (NEW — types + companyAdminNav + billingManagerNav)
+├── route-meta.ts          (NEW — resolveRouteMeta() with extras list)
+├── desktop-shell.tsx      (NEW — DesktopShell, PageActions, internal TopStrip + sidebar)
+├── navigation.tsx         (UNCHANGED — existing mobile chrome, kept as-is)
+└── powered-by-footer.tsx  (UNCHANGED — rendered by DesktopShell at lg+, by old wrapper at <lg)
+```
+
+The shadcn primitive at `client/src/components/ui/sidebar.tsx` provides every visual building block: `SidebarProvider`, `Sidebar`, `SidebarTrigger`, `SidebarRail`, `SidebarInset`, `SidebarHeader`, `SidebarContent`, `SidebarFooter`, `SidebarGroup`, `SidebarGroupLabel`, `SidebarGroupContent`, `SidebarMenu`, `SidebarMenuItem`, `SidebarMenuButton` (accepts `tooltip` and `isActive`), `SidebarMenuBadge`, `SidebarMenuSub`, `SidebarMenuSubItem`, `SidebarMenuSubButton`. **Do not redefine any of these.** Read the file once before starting; the sidebar pattern in this app is well-established.
+
+The `<Collapsible>` wrapper for the Reports nested group comes from `client/src/components/ui/collapsible.tsx`. Auto-open it when any descendant is the active path; otherwise honor `defaultOpen`. An effect-based open-on-active-change is fine: `useEffect(() => { if (hasActive) setOpen(true) }, [hasActive])`.
+
+The user menu in the sidebar footer mirrors the dropdown in the existing top bar — same items (My Account, Switch User, Logout), same `safeRemove("user")` + `window.location.href = "/login"` on logout. Render it via `DropdownMenu` anchored to a `SidebarMenuButton size="lg"` with the avatar, name, email layout (shadcn's `data-[state=open]:bg-sidebar-accent` pattern is correct here).
+
+Logo behavior: the IrrigoPro logo (`@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png` — same import path the existing `Navigation` uses) sits in `SidebarHeader` next to the wordmark. The wordmark hides when collapsed via `group-data-[collapsible=icon]:hidden`.
+
+---
+
+## Active State, Breadcrumb, and PageActions
+
+**Active state.** Implement two helpers in `desktop-shell.tsx`:
+
+```
+function pathMatches(itemPath, location) {
+  if (itemPath === "/") return location === "/";
+  if (location === itemPath) return true;
+  return location.startsWith(itemPath + "/");
+}
+
+function pickActiveLeafPath(config, location) {
+  const matches = walk all leaves and collect those where pathMatches(leaf.path, location);
+  if (matches.length === 0) return null;
+  return matches.reduce((a, b) => a.path.length >= b.path.length ? a : b).path;
+}
+```
+
+Pass `activePath` (computed once via `useMemo` from `useLocation()` and the config) down into every leaf. A leaf is active iff `activePath === leaf.path`. A group is "active" iff any descendant leaf has `activePath === leaf.path` — used to drive auto-expand on the Reports nested group.
+
+**Breadcrumb.** `resolveRouteMeta(location, config)` returns `{ title, breadcrumb: [{label, path?}, ...] }`. Walk the config to find a leaf whose path matches `location` exactly (after trimming a trailing slash); return its parent group chain (group labels, no `path`) followed by the leaf itself (with `path`). For routes not in the config, match against a small ordered list of regex patterns:
+
+- `/^\/customers\/[^/]+\/profile$/` → `[Customers, "Customers" → /customers, "Profile"]` title `Customer Profile`
+- `/^\/customers\/[^/]+\/site-maps$/` → `[Customers, "Customers" → /customers, "Site Maps"]` title `Customer Site Maps`
+- `/^\/wet-checks\/[^/]+\/review$/` → `[Operations, "Wet Check Reviews" → /wet-checks/pending-review, "Review"]` title `Wet Check Review`
+- `/^\/wet-checks\/[^/]+$/` → `[Operations, "Wet Checks"]` title `Wet Check`
+- `/^\/wet-checks$/` → `[Operations, "Wet Checks"]` title `Wet Checks`
+- `/^\/user-profile$/` → `[My Account]` title `My Account`
+- `/^\/switch-user$/` → `[Switch User]` title `Switch User`
+- `/^\/license-agreement$/` → `[License Agreement]` title `License Agreement`
+- `/^\/privacy-policy$/` → `[Privacy Policy]` title `Privacy Policy`
+- `/^\/operations$/` → `[Operations]` title `Operations`
+- `/^\/admin$/` → `[Dashboard]` title `Dashboard`
+
+Final fallback: humanize the last path segment (`split("/")` filter empty, take last, replace dashes with spaces, title-case).
+
+**PageActions.** Provide via context the current `HTMLDivElement` ref of the actions-slot div in TopStrip. The `PageActions` component reads context, returns `null` if context is null (mobile, or before TopStrip mounts), otherwise `createPortal(children, target)`. The actions div sits in TopStrip's `ml-auto` flex group, before `<NotificationSystem />`. Pages adopt it later, page by page — out of scope for this slice apart from the slot existing.
+
+---
+
+## Persistence
+
+Sidebar collapsed state goes to `safeStorage` (the existing wrapper around `localStorage` that falls back to `sessionStorage` for Safari Private Browsing). Key: `irrigopro_desktop_sidebar_open`. Initial state defaults to `true` on first visit. Read once in a `useState` initializer; write on every change via `onOpenChange`. Use shadcn's `SidebarProvider` in **controlled mode** (pass both `open` and `onOpenChange`); its built-in cookie persistence is write-only on the client and won't restore on reload.
+
+The one-time onboarding hint key (Sub-slice 6C) is `safeStorage` key `irrigopro_desktop_shell_seen` storing `"true"` once dismissed. If absent on first sidebar open, render the popover; on dismiss set the key.
+
+---
+
+## Data and API
+
+**No new endpoints.** The badge counts come from existing queries:
+
+- `GET /api/parts/pending-approval` (array; existing) → drives the `partsPendingApproval` badge. The existing `Navigation` uses this; the new shell duplicates the same `useQuery` (same `queryKey`) so the cache is shared and updates propagate.
+- `GET /api/manual-part-reviews` (array; existing) → counted and added to `partsPendingApproval` (Navigation already does this).
+- `GET /api/wet-checks/pending-review` (array; existing — used by `wet-check-review.tsx`, `manager-dashboard.tsx`, `admin-dashboard.tsx`) → drives the `wetCheckReviews` badge.
+
+Encapsulate fetching in a `useNavBadges(enabled: boolean)` hook inside `desktop-shell.tsx` returning a `NavBadgeMap`. Enable it only for `company_admin` and `billing_manager`. `refetchInterval: 60000` matches the cadence of the existing Navigation.
+
+The `NotificationSystem` component requires a numeric `userId`. If `user.id` isn't a number (e.g., `safeGet("user")` returned an empty object), don't render it — the existing top bar rendering doesn't check, but the strict type and the user-coming-from-localStorage shape make a guard worth adding.
+
+---
+
+## Responsive Behavior
+
+**`< lg` (under 1024 px):** the existing `<Navigation />` renders inside an `lg:hidden` wrapper inside `<SidebarInset>`. Since the sidebar wrapper is `hidden lg:contents`, it has `display: none` here — both the inline desktop sidebar branch and the mobile-Sheet branch of the shadcn primitive render zero pixels. Bottom 5-slot bar and mobile top header behave exactly as today.
+
+**`lg` and up (1024 px and wider):** the wrapper switches to `display: contents`, allowing `<Sidebar>` to slot into the `SidebarProvider` flex layout as a peer of `<SidebarInset>`. The `<div className="lg:hidden">` around `<Navigation />` hides it. The `<TopStrip>` (which is `hidden lg:flex` on its root `<header>`) becomes visible. Content fills the remaining space.
+
+The `lg:contents` Tailwind utility is included in v3.4 (the project uses 3.4.17). No config changes needed.
+
+**No tablet breakpoint.** Between 768 and 1023 px (md but not lg), the user sees the mobile chrome. This is deliberate — the rail at narrower widths is cramped, and a manager opening the app on an iPad in landscape (1024+) gets the desktop chrome anyway.
+
+---
+
+## Accessibility
+
+- `SidebarTrigger` already has `<span className="sr-only">Toggle Sidebar</span>` — keep it.
+- The breadcrumb `<nav>` has `aria-label="Breadcrumb"`.
+- Every nav link is a real anchor (via `Link` + `asChild`). Keyboard tab order flows: SidebarTrigger → breadcrumb links → page content → sidebar links (the rail comes last in DOM order, which is fine for sighted users; screen readers can use the landmarks: `<aside>` for the rail, `<main>` for content, `<header>` for the strip).
+- `SidebarMenuButton` exposes `tooltip` for collapsed-rail labels — pass `tooltip={leaf.label}` on every leaf so screen readers and hover users both get text.
+- Color is never the only signal: badges have a number; active state has a background fill and an `data-active="true"` attribute alongside its color.
+- 4.5:1 contrast on all text — the shadcn `bg-sidebar` / `text-sidebar-foreground` pair clears this; verify after first render and adjust if any custom color slips below.
+- Cmd+B / Ctrl+B keyboard shortcut is built into `SidebarProvider`; verify it still fires when the provider is in controlled mode (it should — shadcn calls `setOpen` which calls our `setOpenProp`).
+
+---
+
+## Migration
+
+**No data migration.** No schema, no API, no storage shape changes besides one new `safeStorage` key.
+
+**Old chrome behavior:** untouched. The existing `<Navigation />` still ships and still renders for field tech, irrigation manager, super admin at all breakpoints, and for company admin / billing manager at `< lg`. The only "change" to `<Navigation />` is that it's now wrapped in an `lg:hidden` div for the two roles using the new shell — a CSS change, not a behavior change.
+
+**Feature flag:** not necessary. The split is keyed by `user.role` and viewport width. Rollback is trivial — revert `desktop-shell.tsx` import + the wiring in `company-admin-app.tsx` and the `billing_manager` block of `App.tsx`. Two files, three diffs.
+
+---
+
+## Risks and Rollback
+
+**Risk: shadcn Sidebar's internal `useIsMobile` (768 px breakpoint) renders a Sheet drawer between 0–767 px.** Our wrapper is `hidden lg:contents`, so the Sheet renders into a `display: none` parent. At < 768 the Sheet would render via portal if `openMobile` were ever set true — but `openMobile` only flips when the SidebarTrigger is clicked, and the SidebarTrigger only renders in TopStrip which is `hidden lg:flex`. Net: no leaked Sheet. Verify in 6C.
+
+**Risk: the `peer` selector relationship that shadcn relies on might break with our wrapper.** Looking at the primitive, `peer` is used only for `SidebarRail` styling (which lives inside Sidebar's outer div) and for SidebarMenuBadge sizing (scoped within MenuItem). Neither requires Sidebar to be a top-level sibling of SidebarInset. Variant `inset` would have used peer-data on SidebarInset; we use variant `sidebar` (default), which doesn't.
+
+**Risk: a sub-slice ships and breaks the build because TypeScript can't see a path alias.** The project uses `@/` (mapped in `tsconfig.json` and `vite.config.ts`) and `@assets/` (mapped in `vite.config.ts` only). The existing `Navigation` imports the logo via `@assets/...`; do the same. No new path aliases.
+
+**Risk: a routed page that's only reachable via the sidebar is broken in production.** Each new sidebar entry should be visited at least once in the test pass for each role. Specifically: Parts Pending Approval (Company Admin), Wet Check Reviews (both), Wet Check Issue Types (Billing Manager — new route), all four Reports leaves (both), Invoices (Company Admin — new route).
+
+**Rollback path:** revert the three new files plus the four lines of route additions. The app returns to its current navigation. No data side effects.
+
+---
+
+## Success Criteria
+
+Slice 6 ships when:
+
+1. A Company Admin in a `≥ lg` viewport sees a left-rail sidebar matching the spec exactly: groups in the right order, leaves in the right order, icons rendering, badges firing on Parts Pending Approval and Wet Check Reviews when counts > 0.
+2. A Billing Manager in a `≥ lg` viewport sees the Billing-first sidebar matching the spec, with Wet Check Reviews and Wet Check Issue Types reachable.
+3. The collapsible rail toggles via the SidebarTrigger button, the SidebarRail outer click strip, and Cmd+B / Ctrl+B. Collapsed state persists across reloads. Tooltips appear on icon hover when collapsed.
+4. The top strip shows a correct breadcrumb on every routed page accessible to each role — including the four audit pages, customer profile drill-downs, and wet-check review detail.
+5. At `< lg`, both roles see the existing mobile chrome (`<Navigation />`) unchanged. No layout shift, no double-rendering, no orphan Sheet drawer at any width.
+6. Field tech, irrigation manager, super admin see the **identical** experience as before this slice.
+7. The `<PageActions>` portal renders nothing when no page provides actions, and no page renders into it broken (this slice doesn't add page-level usages — that's downstream — but the slot exists and a smoke test of the API works).
+8. Lighthouse accessibility audit ≥ 95 on a Company Admin desktop session.
+9. The two new routes (`/invoices` for Company Admin, `/admin/issue-types` for Billing Manager) load without 404.
+
+---
+
+## What This Unblocks
+
+- **Page-level toolbar actions.** Once `<PageActions>` exists, every page can stop reinventing a header bar and start dropping a "New X" button into the strip.
+- **Cmd+K command palette.** The route metadata in `route-meta.ts` is exactly what a palette consumes — title, breadcrumb chain, path. A palette is a one-day add once this lands.
+- **Per-role dashboard surfaces.** A Billing Manager dashboard with KPI tiles for "DSO", "Pending Approvals", "Today's Invoices" becomes the natural fill for the now-spacious main content area at desktop widths.
+- **A real Settings landing page.** Today the "Admin" dropdown items dump straight into deep pages. Once the rail surfaces a Settings group, the next step is a `/settings` index with cards summarizing each subsection — but that's a follow-up.
+
+---
+
+## Notes for Implementation
+
+- The route list per role is the authoritative answer to "what does this role see"; add or remove a route only if the list above changes.
+- Don't add Estimates, Field Tech, or Field Portal links to the rail — those are routed for compatibility but aren't nav destinations for these roles.
+- Don't refactor `<Navigation />`. Wrap it, don't change it. If you find yourself touching `client/src/components/layout/navigation.tsx`, stop and surface the question.
+- The Reports group is the only nested-collapsible in v1. Don't generalize to N levels of nesting; the data structure should support it but the UI only renders one level deep. A defensive fallback (render label only, no recursion) is sufficient if a third level ever appears.
+- Logo and brand assets reuse the existing imports — don't introduce new files in `attached_assets/`.
+- Names of helper functions and types in `nav-config.ts` and `desktop-shell.tsx` aren't exposed publicly; pick whatever reads well, but the **public exports** are exactly: `companyAdminNav`, `billingManagerNav`, types `NavConfig`, `NavItem`, `NavLeaf`, `NavGroup`, `NavBadgeKey`, `NavBadgeMap` (from `nav-config.ts`); `resolveRouteMeta`, types `RouteMeta`, `Breadcrumb` (from `route-meta.ts`); `DesktopShell`, `PageActions` (from `desktop-shell.tsx`).
+- Test in this order on every sub-slice: Company Admin desktop → Company Admin mobile (resize) → Billing Manager desktop → Billing Manager mobile → Field Tech (parity check) → Super Admin (parity check). Each pass takes about three minutes with a clear plan.
