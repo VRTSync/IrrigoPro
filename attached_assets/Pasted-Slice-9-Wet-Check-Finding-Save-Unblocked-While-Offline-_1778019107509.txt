@@ -1,0 +1,148 @@
+Slice 9 — Wet Check Finding Save Unblocked While Offline Queue Drains
+Date: 2026-05-05
+Status: Ready for Replit implementation
+Author: Field-tech bug triage
+Type: Bug fix (UI gate only — no schema, API, or storage changes)
+Estimated effort: 15–30 minutes
+Related: Builds on Slice 4 (Offline Support for Field Wet Checks) and Slice 2 (Wet Check System). Does not change any of the offline engine, mutation queue, mirror schema, or server endpoints. Pure UI fix in wet-checks.tsx.
+
+Executive Summary
+Field techs adding work needed to consecutive zones see intermittent failures: the Save Finding button works on one zone, is greyed out on the next, then works again if they wait a few seconds. The cause is a UI gate in FindingSheet (inside client/src/pages/wet-checks.tsx) that disables Save until the server zoneRecordId arrives. With the offline queue enabled (the default since Slice 4), a freshly tapped "Needs Work" zone exists in the IndexedDB mirror with a clientId only — the server id only appears once the queued zone_record.upsert mutation drains over the network. While the queue is still draining, the button is disabled even though the save mutation itself can already complete the operation by routing through offlineCreateFinding with the {{zr}} placeholder.
+Slice 9 ships when: the Save Finding button is enabled the moment a zone has been tapped "Needs Work" (online or offline), regardless of whether the server id has propagated back yet, and the related photo controls inside the FindingSheet stop disappearing during the same window.
+
+Why Now
+Multiple field techs have hit the issue. The symptom — "works on this zone, doesn't work on the next, works again if I wait" — is exactly the shape of a queue-drain race. It's a one-line gate change with no behavioral risk to online-only callers (offline queue disabled → behavior unchanged). The save logic itself already handles the clientId-only case correctly; only the disabled gate is wrong.
+
+Root Cause
+In client/src/pages/wet-checks.tsx, the FindingSheet component:
+
+Save Finding button (around line 1692) is disabled when zoneRecordId (server id) is null in create mode.
+Pre-save photo capture button (around line 1624) is hidden when zoneRecordId is null.
+Empty-state message (around line 1637) reads "Pick a zone before adding photos" when zoneRecordId is null.
+
+When the offline queue is enabled, setStatus.mutate("checked_with_issues") calls offlineUpsertZoneRecord, which writes a row to wetCheckZoneRecords in IndexedDB with clientId only and enqueues a zone_record.upsert mutation. The wet-check query invalidates and refetches immediately, the preset buttons render, but the zone record's id is still undefined until the queue drains. Tapping a preset opens FindingSheet → Save is greyed out.
+Inside saveMut.mutationFn for mode === "create", the offline branch is gated correctly:
+tsif (isOfflineQueueEnabled() && zoneRecordClientId) {
+  await offlineCreateFinding({
+    zoneRecordClientId,
+    zoneRecordId: zoneRecordId ?? undefined,
+    wetCheckId,
+    payload: { ...payload, issueType },
+    clientId: findingClientId,
+  });
+}
+offlineCreateFinding enqueues a finding.create mutation with {{zr}} → zoneRecordClientId placeholder, which the engine resolves to the server id when the parent zone_record.upsert drains. The save flow is correct end-to-end. Only the button disabled gate is wrong.
+
+Scope of Slice 9
+In Scope
+
+Update the Save Finding button's disabled prop in FindingSheet to accept zoneRecordClientId as sufficient when isOfflineQueueEnabled() is true.
+Update the pre-save photo capture button's visibility gate in FindingSheet (the one inside the !editing branch of the photo block) with the same condition.
+Update the empty-state message ("Pick a zone before adding photos.") with the same condition so it reads correctly when a zone has been picked but only has a clientId.
+No changes to saveMut.mutationFn, offlineCreateFinding, the offline engine, or any server-side code.
+
+Out of Scope
+
+Auto-invalidating React Query when the offline engine successfully drains a zone_record.upsert / finding.create / wet_check.create (separate future improvement — would close a class of "stale id" UI bugs but is not required for this fix).
+React key collisions on zoneRecord.findings.map(f => <div key={f.id} … />) when multiple findings exist with id === undefined (separate cleanup; switch to f.clientId ?? f.id).
+Anything related to wet-check submit, auto-bill, manager review, or photo upload internals.
+
+
+Implementation
+File: client/src/pages/wet-checks.tsx
+isOfflineQueueEnabled is already imported at line 33. No new imports needed.
+Change 1 — Save Finding button disabled gate (around line 1692)
+Replace:
+tsx<Button
+  className="w-full"
+  size="lg"
+  disabled={saveMut.isPending || (mode === "create" && !zoneRecordId)}
+  onClick={() => saveMut.mutate()}
+  data-testid="finding-save"
+>
+With:
+tsx<Button
+  className="w-full"
+  size="lg"
+  // Offline queue: a freshly tapped "Needs Work" zone lives in the IDB
+  // mirror with a clientId only until the queued zone_record.upsert
+  // drains. saveMut.mutationFn already routes through offlineCreateFinding
+  // (which uses {{zr}} → resolved at drain time), so the button only needs
+  // a clientId, not the server id.
+  disabled={
+    saveMut.isPending ||
+    (mode === "create" &&
+      !zoneRecordId &&
+      !(isOfflineQueueEnabled() && zoneRecordClientId))
+  }
+  onClick={() => saveMut.mutate()}
+  data-testid="finding-save"
+>
+Change 2 — Pre-save photo capture button visibility (around line 1624)
+Replace:
+tsx{zoneRecordId && (
+  <PhotoCaptureButton
+    wetCheckId={wetCheckId}
+    zoneRecordId={null}
+    findingId={null}
+    skipInvalidate
+    testIdSuffix="pending"
+    onUploaded={(photo) => setPendingPhotos(prev => [...prev, photo])}
+  />
+)}
+With:
+tsx{(zoneRecordId || (isOfflineQueueEnabled() && zoneRecordClientId)) && (
+  <PhotoCaptureButton
+    wetCheckId={wetCheckId}
+    zoneRecordId={null}
+    findingId={null}
+    skipInvalidate
+    testIdSuffix="pending"
+    onUploaded={(photo) => setPendingPhotos(prev => [...prev, photo])}
+  />
+)}
+Change 3 — Pre-save empty-state message (around line 1637)
+Replace:
+tsx{pendingPhotos.length === 0 ? (
+  <div className="text-xs text-gray-500">
+    {zoneRecordId
+      ? "No photos yet. Photos picked here attach automatically when you save."
+      : "Pick a zone before adding photos."}
+  </div>
+) : (
+With:
+tsx{pendingPhotos.length === 0 ? (
+  <div className="text-xs text-gray-500">
+    {(zoneRecordId || (isOfflineQueueEnabled() && zoneRecordClientId))
+      ? "No photos yet. Photos picked here attach automatically when you save."
+      : "Pick a zone before adding photos."}
+  </div>
+) : (
+
+Acceptance Criteria
+
+With the offline queue enabled (default), a tech can tap "Needs Work" on a zone, immediately tap a preset, fill out the FindingSheet, and tap Save Finding with no waiting required — the button is enabled the moment the zone-record exists in the IDB mirror.
+The pre-save photo capture button is visible the moment the zone is picked, regardless of whether the server zoneRecordId has propagated back.
+The "Pick a zone before adding photos" empty-state message no longer appears when a zone is selected but only has a clientId.
+Online-only mode (offline queue flag disabled) is unchanged — Save still requires zoneRecordId.
+Edit mode is unchanged — Save was never gated in edit mode.
+Repeated rapid use across multiple zones in a row produces no greyed-out Save button on any zone.
+
+
+Test Plan
+Manual (mobile, primary)
+
+Throttle the dev tools network to "Slow 3G" (or use airplane-mode toggle mid-flow).
+Open a wet check, drill into Controller A · Zone 1, tap Needs Work, tap a Quick Fix preset, fill out part/qty/hours, tap Save Finding. Verify it saves immediately.
+Back out, drill into Zone 2, tap Needs Work, tap a preset within ~1 second, verify Save is enabled and works. Repeat for Zones 3, 4, 5.
+Toggle airplane mode mid-flow (between tapping "Needs Work" and tapping the preset). Verify Save is still enabled and the finding queues offline.
+Re-enable network, verify findings sync and the server ids back-fill.
+
+Automated
+No new automated tests required — the existing offline replay tests in tests/offline-queue-replay.test.mjs already cover the queue-drain semantics this fix relies on. If a UI-level test is desired, add a Playwright/RTL case that mounts FindingSheet with zoneRecordId={null} + zoneRecordClientId="abc-…" and asserts the Save button is enabled when isOfflineQueueEnabled() returns true.
+
+Risk Assessment
+Low. Three local conditional changes inside one component. The save mutation logic, offline engine, mirror schema, and server endpoints are untouched. Online-only mode is unchanged. The offline path was already handling clientId-only zone records correctly in saveMut.mutationFn, offlineCreateFinding, and the engine's placeholder resolution — only the UI gates were lagging.
+
+Out-of-Scope Followup (Recommend a Separate Slice)
+The offline engine's applyServerIdToMirror writes the server-assigned id back to the IDB mirror but does not invalidate the React Query cache. Consider adding an engine.on("state", …) listener (e.g., in conflict-toast-bridge.tsx, which already mounts globally) that calls queryClient.invalidateQueries(["/api/wet-checks"]) when the pending/syncing count drops. This would make any future "stale id" UI bugs self-heal without per-component gates.

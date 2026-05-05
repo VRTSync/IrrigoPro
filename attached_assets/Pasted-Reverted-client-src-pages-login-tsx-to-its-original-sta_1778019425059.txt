@@ -1,4 +1,14 @@
-import { useState, useMemo, useRef, useEffect, type CSSProperties } from "react";
+Reverted client/src/pages/login.tsx to its original state. From here on I won't touch the project — Replit only.
+
+Replit prompt — light blue Antigravity-style ring of water droplets
+Replace the contents of client/src/pages/login.tsx with the version below. It changes the original page in three ways:
+
+Background — near-white with a faint blue tint instead of the saturated sky/blue gradient.
+Cursor effect — replaces the bobbing field of droplets with a Google-Antigravity-style ring of ~72 water droplets that smoothly follows the cursor and slowly rotates around it.
+Card — softer white-on-white card with a sky-blue border + subtle blue glow so it still pops on the lighter scene.
+
+All login logic (form, toasts, verification, redirects) is unchanged. Reduced-motion users still get a static fallback.
+tsximport { useState, useMemo, useRef, useEffect, type CSSProperties } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
