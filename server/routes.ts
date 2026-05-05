@@ -11374,21 +11374,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
-  // ─── Admin CRUD for issue type configs (Task #268, #277) ──────────────────
-  // company_admin, super_admin, and irrigation_manager — scoped to the
-  // caller's company. Irrigation managers manage the issue list their techs
-  // see in the field; field techs and billing managers remain locked out.
+  // ─── Admin CRUD for issue type configs (Task #268, #277, #336) ───────────
+  // company_admin, super_admin, irrigation_manager, and billing_manager —
+  // scoped to the caller's company. Managers manage the issue list their
+  // techs see in the field; field techs remain locked out.
   const requireIssueTypeAdminAccess = (req: any, res: any, next: any) => {
     const userRole = req.authenticatedUserRole;
     if (
       userRole === "company_admin" ||
       userRole === "irrigation_manager" ||
+      userRole === "billing_manager" ||
       userRole === "super_admin"
     ) {
       return next();
     }
     return res.status(403).json({
-      message: "Access denied. Only company administrators and irrigation managers can manage wet check issue types.",
+      message: "Access denied. Only company administrators, super administrators, irrigation managers, and billing managers can manage wet check issue types.",
     });
   };
 

@@ -56,7 +56,9 @@ export default function AdminIssueTypesPage() {
   })();
   const allowed =
     userRole === "company_admin" ||
-    userRole === "irrigation_manager";
+    userRole === "irrigation_manager" ||
+    userRole === "billing_manager" ||
+    userRole === "super_admin";
 
   const queryKey = ["/api/admin/issue-types"] as const;
 
