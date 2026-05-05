@@ -158,6 +158,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
           <Route path="/billing-sheets" component={BillingSheets} />
           <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
+          <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
           <Route path="/wet-checks/admin" component={AdminWetChecksPage} />
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
           <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />

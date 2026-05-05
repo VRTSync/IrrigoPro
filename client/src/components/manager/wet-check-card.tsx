@@ -40,7 +40,7 @@ export function WetCheckCard({ wc }: { wc: WetCheckCardData }) {
     !!submittedAt && Date.now() - submittedAt.getTime() > AGING_THRESHOLD_MS;
 
   return (
-    <Link href={`/wet-checks/${wc.id}/review`}>
+    <Link href={`/manager/wet-checks/${wc.id}`}>
       <Card
         className="cursor-pointer hover:shadow-md transition-shadow"
         data-testid={`manager-wc-card-${wc.id}`}

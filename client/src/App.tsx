@@ -204,6 +204,7 @@ function Router() {
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                 <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
+                <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/admin" component={AdminWetChecksPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
@@ -283,6 +284,7 @@ function Router() {
                 <Route path="/" component={SuperAdminDashboard} />
                 <Route path="/super-admin" component={SuperAdminDashboard} />
                 <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
+                <Route path="/manager/wet-checks/:id" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
