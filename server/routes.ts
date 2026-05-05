@@ -8498,6 +8498,37 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #187 — undo the "no photos needed" flag. Same role gate as the
+  // mark endpoint. Resets noPhotosNeeded + audit fields so the work order
+  // re-appears on the missing-photos report.
+  app.post("/api/work-orders/:id/no-photos-needed/clear", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole;
+      if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
+        return res.status(403).json({ message: "Access denied." });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid work order ID" });
+      }
+
+      const existing = await storage.getWorkOrder(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+
+      const updated = await storage.clearWorkOrderNoPhotosNeeded(id);
+      if (!updated) {
+        return res.status(404).json({ message: "Work order not found" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error('Error clearing no-photos-needed flag:', error);
+      res.status(500).json({ message: "Failed to clear flag" });
+    }
+  });
+
   app.get("/api/work-orders/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

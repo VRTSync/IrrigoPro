@@ -101,6 +101,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     queryKey: ["/api/users/field-techs"],
   });
 
+  // Task #187 — resolve the noPhotosNeededBy user id to a display name.
+  // Only fetched when there's actually an id to look up so we don't add
+  // an extra request for every work-order open.
+  const { data: allUsers } = useQuery<UserType[]>({
+    queryKey: ["/api/users"],
+    enabled: !!workOrder.noPhotosNeededBy,
+  });
+
   // Get work order items and zones for work plan display
   const { data: workOrderItems } = useQuery({
     queryKey: ["/api/work-orders", workOrder.id, "items"],
@@ -244,6 +252,33 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       });
     },
   });
+
+  // Task #187 — undo the "No Photos Needed" flag from the detail view.
+  const clearNoPhotosNeeded = useMutation({
+    mutationFn: async () => apiRequest(`/api/work-orders/${workOrder.id}/no-photos-needed/clear`, "POST"),
+    onSuccess: () => {
+      toast({ title: "Undone", description: "'No Photos Needed' flag has been cleared." });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders/missing-photos"] });
+      onUpdate();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message || "Failed to clear flag", variant: "destructive" });
+    },
+  });
+
+  const canManageNoPhotosNeeded =
+    currentUser?.role === 'company_admin' ||
+    currentUser?.role === 'super_admin' ||
+    currentUser?.role === 'irrigation_manager' ||
+    currentUser?.role === 'billing_manager';
+
+  const noPhotosNeededByName = (() => {
+    const id = workOrder.noPhotosNeededBy;
+    if (!id || !allUsers) return null;
+    const u = allUsers.find((user: UserType) => user.id === id);
+    return u ? (u.name || u.username) : null;
+  })();
 
   const handleConfirmRemovePhoto = () => {
     if (photoToRemove === null) return;
@@ -414,6 +449,31 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   <Badge className="bg-green-100 text-green-800 border-green-200">
                     From EST-{workOrder.estimateId}
                   </Badge>
+                )}
+                {workOrder.noPhotosNeeded && (
+                  <div className="flex items-center gap-2" data-testid="no-photos-needed-banner">
+                    <Badge className="bg-gray-200 text-gray-800 border-gray-300">
+                      No Photos Needed
+                      {workOrder.noPhotosNeededAt && (
+                        <span className="ml-1 font-normal">
+                          (marked by {noPhotosNeededByName || `user #${workOrder.noPhotosNeededBy}`} on{' '}
+                          {new Date(workOrder.noPhotosNeededAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})
+                        </span>
+                      )}
+                    </Badge>
+                    {canManageNoPhotosNeeded && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => clearNoPhotosNeeded.mutate()}
+                        disabled={clearNoPhotosNeeded.isPending}
+                        className="h-6 px-2 text-xs"
+                        data-testid="undo-no-photos-needed"
+                      >
+                        {clearNoPhotosNeeded.isPending ? "Undoing…" : "Undo"}
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="flex gap-2">

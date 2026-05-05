@@ -201,4 +201,55 @@ describe("Work orders 'no photos needed' (Task #185)", () => {
     const afterIds = (afterRes.body.workOrders || []).map((w) => w.id);
     assert.ok(afterIds.includes(woId), "Work order should still appear after a denied mark attempt");
   });
+
+  // Task #187 — undo / clear endpoint
+  test("Admin can clear the 'No Photos Needed' flag and the WO reappears on the report", async () => {
+    const woId = await createPastWorkOrder(customerId);
+
+    // Mark first
+    const markRes = await api("POST", `/api/work-orders/${woId}/no-photos-needed`);
+    assert.equal(markRes.status, 200);
+    assert.equal(markRes.body.noPhotosNeeded, true);
+
+    // Confirm it's gone from the report
+    const hiddenRes = await api("GET", "/api/work-orders/missing-photos");
+    assert.equal(hiddenRes.status, 200);
+    const hiddenIds = (hiddenRes.body.workOrders || []).map((w) => w.id);
+    assert.ok(!hiddenIds.includes(woId), "Marked work order should be hidden before clearing");
+
+    // Clear the flag
+    const clearRes = await api("POST", `/api/work-orders/${woId}/no-photos-needed/clear`);
+    assert.equal(clearRes.status, 200, `Clear request failed: ${JSON.stringify(clearRes.body)}`);
+    assert.equal(clearRes.body.noPhotosNeeded, false, "noPhotosNeeded should be false after clear");
+    assert.equal(clearRes.body.noPhotosNeededBy, null, "noPhotosNeededBy should be null after clear");
+    assert.equal(clearRes.body.noPhotosNeededAt, null, "noPhotosNeededAt should be null after clear");
+
+    // It should reappear on the report
+    const afterRes = await api("GET", "/api/work-orders/missing-photos");
+    assert.equal(afterRes.status, 200);
+    const afterIds = (afterRes.body.workOrders || []).map((w) => w.id);
+    assert.ok(afterIds.includes(woId), `Cleared work order ${woId} should reappear on the report. Got ids: ${afterIds.join(",")}`);
+  });
+
+  test("Field tech (unauthorized role) gets 403 when clearing", async () => {
+    const woId = await createPastWorkOrder(customerId);
+
+    // Mark with admin first
+    const markRes = await api("POST", `/api/work-orders/${woId}/no-photos-needed`);
+    assert.equal(markRes.status, 200);
+
+    // Field tech tries to clear
+    const clearRes = await api("POST", `/api/work-orders/${woId}/no-photos-needed/clear`, undefined, FIELD_TECH_HEADERS);
+    assert.equal(clearRes.status, 403, `Expected 403 for field_tech, got ${clearRes.status}: ${JSON.stringify(clearRes.body)}`);
+
+    // Flag must remain set
+    const woRes = await api("GET", `/api/work-orders/${woId}`);
+    assert.equal(woRes.status, 200);
+    assert.equal(woRes.body.noPhotosNeeded, true, "Flag should still be set after a denied clear attempt");
+  });
+
+  test("Clearing a non-existent work order returns 404", async () => {
+    const clearRes = await api("POST", `/api/work-orders/99999999/no-photos-needed/clear`);
+    assert.equal(clearRes.status, 404, `Expected 404 for missing WO, got ${clearRes.status}`);
+  });
 });

@@ -338,6 +338,9 @@ export interface IStorage {
   // Task #185 — flag a work order as not requiring photos so it disappears
   // from the missing-photos report. Stamps the acting user and timestamp.
   markWorkOrderNoPhotosNeeded(workOrderId: number, userId: number): Promise<WorkOrder | undefined>;
+  // Task #187 — undo the "no photos needed" flag, clearing the three audit
+  // fields so the work order can reappear on the missing-photos report.
+  clearWorkOrderNoPhotosNeeded(workOrderId: number): Promise<WorkOrder | undefined>;
   
   // Work Order Items
   getWorkOrderItems(workOrderId: number): Promise<WorkOrderItem[]>;
@@ -2311,6 +2314,18 @@ export class DatabaseStorage implements IStorage {
         noPhotosNeeded: true,
         noPhotosNeededBy: userId,
         noPhotosNeededAt: new Date(),
+      })
+      .where(eq(workOrders.id, workOrderId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async clearWorkOrderNoPhotosNeeded(workOrderId: number): Promise<WorkOrder | undefined> {
+    const [updated] = await db.update(workOrders)
+      .set({
+        noPhotosNeeded: false,
+        noPhotosNeededBy: null,
+        noPhotosNeededAt: null,
       })
       .where(eq(workOrders.id, workOrderId))
       .returning();
