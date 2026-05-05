@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
 import { ActionSheet, ActionSheetItem, ActionSheetSection } from "@/components/ui/action-sheet";
-import { FileText, Wrench, Receipt, AlertCircle, CheckCircle2, ClipboardCheck, User, ExternalLink } from "lucide-react";
+import { FileText, Wrench, Receipt, AlertCircle, CheckCircle2, ClipboardCheck, User, ExternalLink, Droplets } from "lucide-react";
 import { useState } from "react";
 import { EstimateModal } from "@/components/estimates/estimate-modal";
 import { WorkOrderForm } from "@/components/work-orders/work-order-form";
@@ -91,6 +91,15 @@ export default function ManagerDashboard() {
   const { data: billingSheets = [], isLoading: bsLoading } = useQuery<BillingSheet[]>({
     queryKey: ["/api/billing-sheets"],
   });
+
+  // Count of submitted wet checks awaiting first manager review. Backed by
+  // the same /pending-review aggregate that powers the inbox so the tile
+  // count and the inbox row count stay in sync without a second source of
+  // truth.
+  const { data: pendingWetChecks = [] } = useQuery<unknown[]>({
+    queryKey: ["/api/wet-checks/pending-review"],
+  });
+  const pendingWetCheckCount = pendingWetChecks.length;
 
   const isLoading = woLoading || bsLoading;
 
@@ -188,6 +197,32 @@ export default function ManagerDashboard() {
             </button>
           </div>
         )}
+
+        {/* Wet Checks Pending Review */}
+        <button
+          className={`w-full text-left rounded-xl p-4 border transition-colors flex items-center justify-between ${
+            pendingWetCheckCount > 0
+              ? "bg-cyan-50 border-cyan-200 hover:bg-cyan-100"
+              : "bg-slate-50 border-slate-100 hover:bg-slate-100"
+          }`}
+          onClick={() => setLocation("/wet-checks/pending-review")}
+          data-testid="tile-wet-checks-pending-review"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`p-2 rounded-lg shrink-0 ${pendingWetCheckCount > 0 ? "bg-cyan-100" : "bg-slate-100"}`}>
+              <Droplets className={`w-5 h-5 ${pendingWetCheckCount > 0 ? "text-cyan-700" : "text-slate-400"}`} />
+            </div>
+            <div className="min-w-0">
+              <div className={`text-xs font-medium uppercase tracking-wide ${pendingWetCheckCount > 0 ? "text-cyan-700" : "text-slate-500"}`}>
+                Wet Checks Pending Review
+              </div>
+              <div className={`text-2xl font-bold ${pendingWetCheckCount > 0 ? "text-cyan-800" : "text-slate-600"}`}>
+                {pendingWetCheckCount}
+              </div>
+            </div>
+          </div>
+          <ExternalLink className={`w-4 h-4 shrink-0 ${pendingWetCheckCount > 0 ? "text-cyan-600" : "text-slate-400"}`} />
+        </button>
 
         {/* Needs Your Attention */}
         <section id="needs-attention">
