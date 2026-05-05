@@ -4493,9 +4493,13 @@ export class DatabaseStorage implements IStorage {
     totalBillable: string;
     customerLaborRate: string;
   }>> {
+    // Queue includes any wet check still awaiting full conversion: freshly
+    // submitted, manager-approved (pricing locked but not yet converted),
+    // or partially_converted (some findings routed, others still pending).
+    // Excludes "in_progress" (tech still working) and "converted" (done).
     const wcs = await db.select().from(wetChecks).where(and(
       eq(wetChecks.companyId, companyId),
-      eq(wetChecks.status, "submitted"),
+      inArray(wetChecks.status, ["submitted", "approved", "partially_converted"]),
     )).orderBy(desc(wetChecks.submittedAt)).limit(200);
     if (wcs.length === 0) return [];
     const ids = wcs.map(w => w.id);

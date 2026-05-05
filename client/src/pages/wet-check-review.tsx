@@ -58,7 +58,9 @@ type PendingReviewRow = WetCheck & {
 
 function PendingReviewInbox() {
   const [, navigate] = useLocation();
-  // Inbox shows ONLY freshly-submitted wet checks awaiting first review.
+  // Inbox shows every wet check still awaiting full conversion:
+  // freshly-submitted, manager-approved (pricing locked, not yet converted),
+  // and partially_converted (some findings routed, others still pending).
   // The /pending-review aggregate endpoint includes per-row issueGroup
   // counts and a server-computed total estimated billable so the manager
   // can triage at a glance without opening every record.
@@ -117,7 +119,7 @@ function PendingReviewInbox() {
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
-                  <Badge variant="secondary">submitted</Badge>
+                  <Badge variant="secondary">{wc.status}</Badge>
                   <Badge
                     className="text-xs"
                     data-testid={`wc-row-${wc.id}-total-billable`}
