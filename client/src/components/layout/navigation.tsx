@@ -266,7 +266,7 @@ export default function Navigation() {
   return (
     <>
       {/* Desktop Navigation - Top */}
-      <nav className="hidden lg:block bg-white shadow-sm border-b border-gray-200">
+      <nav className="hidden lg:block bg-white shadow-sm border-b border-transparent relative after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/40 after:to-transparent">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo Button */}
@@ -283,7 +283,7 @@ export default function Navigation() {
             </div>
             
             {/* Navigation Items */}
-            <div className="flex items-center space-x-8">
+            <div className="flex items-center divide-x divide-gray-200/70">
               {(() => {
                 // Reorder items for desktop - Dashboard first, then others
                 const desktopNavItems = [...navItems];
@@ -294,60 +294,69 @@ export default function Navigation() {
                   desktopNavItems.unshift(dashboardItem);
                 }
                 
+                const activeTopClass = "bg-primary/10 text-primary font-semibold rounded-md shadow-sm ring-1 ring-primary/20 hover:bg-primary/15";
+                const inactiveTopClass = "text-gray-600 hover:text-primary hover:bg-primary/5 rounded-md";
+
                 return desktopNavItems.map((item) => {
+                  const wrapperClass = "px-3 first:pl-0 last:pr-0";
                   if (item.isDropdown && item.dropdownItems) {
                     // Check if any dropdown item is active
                     const isDropdownActive = item.dropdownItems.some(dropdownItem => isActive(dropdownItem.path));
                     
                     return (
-                      <DropdownMenu key={item.path}>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            className={`font-medium flex items-center space-x-1 ${
-                              isDropdownActive
-                                ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
-                                : "text-gray-500 hover:text-gray-700"
-                            }`}
-                          >
-                            <span>{item.label}</span>
-                            <ChevronDown className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent>
-                          {item.dropdownItems.map((dropdownItem: NavDropdownItem) => (
-                            <Link key={dropdownItem.path} href={dropdownItem.path}>
-                              <DropdownMenuItem className={`flex items-center space-x-2 ${
-                                isActive(dropdownItem.path) ? "bg-primary/10" : ""
-                              }`}>
-                                <dropdownItem.icon className="w-4 h-4" />
-                                <span>{dropdownItem.label}</span>
-                                {dropdownItem.badge && (
-                                  <Badge variant="destructive" className="ml-auto h-5 w-5 p-0 flex items-center justify-center text-xs">
-                                    {dropdownItem.badge > 99 ? "99+" : dropdownItem.badge}
-                                  </Badge>
-                                )}
-                              </DropdownMenuItem>
-                            </Link>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <div key={item.path} className={wrapperClass}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              className={`font-medium flex items-center space-x-1 transition-colors ${
+                                isDropdownActive ? activeTopClass : inactiveTopClass
+                              }`}
+                            >
+                              <span>{item.label}</span>
+                              <ChevronDown className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            {item.dropdownItems.map((dropdownItem: NavDropdownItem) => {
+                              const childActive = isActive(dropdownItem.path);
+                              return (
+                                <Link key={dropdownItem.path} href={dropdownItem.path}>
+                                  <DropdownMenuItem className={`flex items-center space-x-2 relative pl-4 ${
+                                    childActive
+                                      ? "bg-primary/10 text-primary font-semibold before:absolute before:left-0 before:top-1 before:bottom-1 before:w-1 before:rounded-r before:bg-primary focus:bg-primary/15"
+                                      : "hover:bg-primary/5"
+                                  }`}>
+                                    <dropdownItem.icon className="w-4 h-4" />
+                                    <span>{dropdownItem.label}</span>
+                                    {dropdownItem.badge && (
+                                      <Badge variant="destructive" className="ml-auto h-5 w-5 p-0 flex items-center justify-center text-xs">
+                                        {dropdownItem.badge > 99 ? "99+" : dropdownItem.badge}
+                                      </Badge>
+                                    )}
+                                  </DropdownMenuItem>
+                                </Link>
+                              );
+                            })}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     );
                   }
                   
                   return (
-                    <Link key={item.path} href={item.path}>
-                      <Button
-                        variant="ghost"
-                        className={`font-medium ${
-                          isActive(item.path)
-                            ? "text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
-                            : "text-gray-500 hover:text-gray-700"
-                        }`}
-                      >
-                        {item.label}
-                      </Button>
-                    </Link>
+                    <div key={item.path} className={wrapperClass}>
+                      <Link href={item.path}>
+                        <Button
+                          variant="ghost"
+                          className={`font-medium transition-colors ${
+                            isActive(item.path) ? activeTopClass : inactiveTopClass
+                          }`}
+                        >
+                          {item.label}
+                        </Button>
+                      </Link>
+                    </div>
                   );
                 });
               })()}
