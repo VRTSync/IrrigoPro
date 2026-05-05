@@ -2,6 +2,43 @@ import { useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { safeGet } from "@/utils/safeStorage";
+
+// Pick the right "back to list" destination for a wet check based on its
+// status and the current user's role. Stranding a company admin on the
+// pending-review list after they viewed an approved/converted record was
+// the original bug — this helper centralizes the decision so every entry
+// point into /wet-checks/:id/review is consistent.
+function listDestinationForWetCheck(status: string | undefined, role: string | undefined): { href: string; label: string } {
+  const isAdminWithAllList = role === "company_admin" || role === "super_admin";
+  if (status === "submitted") {
+    return { href: "/wet-checks/pending-review", label: "Pending Review" };
+  }
+  // Anything other than "submitted" — approved, partially_converted,
+  // converted, or unexpected — should land on a list that actually
+  // contains the wet check.
+  if (isAdminWithAllList) {
+    return { href: "/wet-checks/admin", label: "All Wet Checks" };
+  }
+  // Irrigation/billing managers don't have /wet-checks/admin; the closest
+  // list they can see is /wet-checks/pending-review for in-flight items
+  // and the field-tech /wet-checks page for everything else.
+  if (status && status !== "submitted" && status !== "approved" && status !== "partially_converted") {
+    return { href: "/wet-checks", label: "All Wet Checks" };
+  }
+  return { href: "/wet-checks/pending-review", label: "Pending Review" };
+}
+
+function getCurrentUserRole(): string | undefined {
+  const raw = safeGet("user");
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.role === "string" ? parsed.role : undefined;
+  } catch {
+    return undefined;
+  }
+}
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -453,9 +490,14 @@ function WetCheckReviewDetail({ id }: { id: number }) {
 
   return (
     <div className="max-w-4xl mx-auto py-4 space-y-4">
-      <Button variant="ghost" onClick={() => navigate("/wet-checks/pending-review")}>
-        <ChevronLeft className="w-4 h-4 mr-1" /> Pending Review
-      </Button>
+      {(() => {
+        const dest = listDestinationForWetCheck(wc.status, getCurrentUserRole());
+        return (
+          <Button variant="ghost" onClick={() => navigate(dest.href)} data-testid="btn-back-to-list">
+            <ChevronLeft className="w-4 h-4 mr-1" /> {dest.label}
+          </Button>
+        );
+      })()}
 
       <Card>
         <CardHeader>

@@ -27,6 +27,11 @@ export default function BillingSheets() {
   const [editingDraft, setEditingDraft] = useState<BillingSheet | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  // Single-delete confirm + the friendly server message when the sheet is
+  // already attached to an invoice (server returns 409 with a per-sheet
+  // "Can't delete: ... invoice #N" payload).
+  const [pendingDeleteSheet, setPendingDeleteSheet] = useState<BillingSheet | null>(null);
+  const [deleteBlockedMessage, setDeleteBlockedMessage] = useState<string | null>(null);
   const [activeExpanded, setActiveExpanded] = useState(true);
   const [completedExpanded, setCompletedExpanded] = useState(true);
   const [billedExpandedBS, setBilledExpandedBS] = useState(false);
@@ -188,7 +193,10 @@ export default function BillingSheets() {
 
 
 
-  // Delete billing sheet mutation
+  // Delete billing sheet mutation. A 409 means the server refused because
+  // the sheet is already on an invoice — we surface the server's message
+  // in the same AlertDialog instead of closing it, so the admin can see
+  // exactly which invoice is blocking the delete.
   const deleteBillingSheet = useMutation({
     mutationFn: async (billingSheetId: number) => {
       return apiRequest(`/api/billing-sheets/${billingSheetId}`, 'DELETE');
@@ -198,26 +206,54 @@ export default function BillingSheets() {
         title: "Billing Sheet Deleted",
         description: "Billing sheet has been successfully deleted",
       });
+      setPendingDeleteSheet(null);
+      setDeleteBlockedMessage(null);
       queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
     },
     onError: (error: any) => {
+      const msg: string = error?.message ?? "";
+      if (msg.startsWith("409:")) {
+        // parseApiError-style: extract the JSON body's "message" field if present.
+        const jsonStart = msg.indexOf("{");
+        let friendly = "Can't delete: this billing sheet is already on an invoice.";
+        if (jsonStart !== -1) {
+          try {
+            const parsed = JSON.parse(msg.slice(jsonStart));
+            if (parsed && typeof parsed.message === "string") friendly = parsed.message;
+          } catch {}
+        }
+        setDeleteBlockedMessage(friendly);
+        return;
+      }
       toast({
         title: "Error",
         description: error.message || "Failed to delete billing sheet",
         variant: "destructive",
       });
+      setPendingDeleteSheet(null);
     },
   });
 
-  // Bulk delete billing sheets mutation
+  // Bulk delete billing sheets mutation. The server returns per-id
+  // outcomes so we summarize "X deleted, Y blocked by an existing invoice".
   const bulkDeleteBillingSheets = useMutation({
     mutationFn: async (ids: number[]) => {
       return apiRequest('/api/billing-sheets/bulk', 'DELETE', { ids });
     },
     onSuccess: (data: any) => {
+      const deleted: number = data?.summary?.deleted ?? data?.deleted ?? 0;
+      const invoiced: number = data?.summary?.invoiced ?? 0;
+      const failed: number = data?.summary?.failed ?? 0;
+      const notFound: number = data?.summary?.notFound ?? 0;
+      const parts: string[] = [];
+      parts.push(`${deleted} billing sheet${deleted === 1 ? '' : 's'} deleted`);
+      if (invoiced > 0) parts.push(`${invoiced} blocked by an existing invoice`);
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (notFound > 0) parts.push(`${notFound} not found`);
       toast({
-        title: "Billing Sheets Deleted",
-        description: `${data?.deleted ?? 0} billing sheet(s) deleted successfully`,
+        title: invoiced > 0 || failed > 0 ? "Bulk Delete Finished" : "Billing Sheets Deleted",
+        description: parts.join(" · "),
+        variant: invoiced > 0 || failed > 0 ? "default" : undefined,
       });
       setSelectedIds(new Set());
       setShowBulkDeleteDialog(false);
@@ -656,7 +692,7 @@ export default function BillingSheets() {
                                 <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
                                   <Edit className="w-3 h-3 mr-1" />Edit
                                 </Button>
-                                <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
+                                <Button size="sm" variant="outline" onClick={() => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
                                   <Trash2 className="w-3 h-3 mr-1" />Delete
                                 </Button>
                               </div>
@@ -783,7 +819,7 @@ export default function BillingSheets() {
                                 <Button size="sm" variant="outline" onClick={() => setEditingDraft(sheet)} className="border-blue-300 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none">
                                   <Edit className="w-3 h-3 mr-1" />Edit
                                 </Button>
-                                <Button size="sm" variant="outline" onClick={() => { if (confirm(`Are you sure you want to delete billing sheet ${sheet.billingNumber}? This action cannot be undone.`)) { deleteBillingSheet.mutate(sheet.id); } }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
+                                <Button size="sm" variant="outline" onClick={() => { setDeleteBlockedMessage(null); setPendingDeleteSheet(sheet); }} className="border-red-300 text-red-600 hover:bg-red-50 flex-1 sm:flex-none">
                                   <Trash2 className="w-3 h-3 mr-1" />Delete
                                 </Button>
                               </div>
@@ -909,7 +945,7 @@ export default function BillingSheets() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {selectedIds.size} Billing Sheet{selectedIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete {selectedIds.size} billing sheet{selectedIds.size !== 1 ? 's' : ''}. This action cannot be undone.
+              This will permanently delete {selectedIds.size} billing sheet{selectedIds.size !== 1 ? 's' : ''}. Sheets that have already been pushed onto an invoice will be skipped and reported back. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -921,6 +957,62 @@ export default function BillingSheets() {
             >
               Delete {selectedIds.size} Billing Sheet{selectedIds.size !== 1 ? 's' : ''}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Single-delete confirm + post-attempt "blocked by invoice" message */}
+      <AlertDialog
+        open={!!pendingDeleteSheet}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeleteSheet(null);
+            setDeleteBlockedMessage(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteBlockedMessage
+                ? "Can't delete this billing sheet"
+                : `Delete billing sheet ${pendingDeleteSheet?.billingNumber ?? ""}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteBlockedMessage
+                ? deleteBlockedMessage
+                : "This will permanently delete the billing sheet and any audit links pointing to it. This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            {deleteBlockedMessage ? (
+              <AlertDialogAction
+                onClick={() => {
+                  setPendingDeleteSheet(null);
+                  setDeleteBlockedMessage(null);
+                }}
+              >
+                OK
+              </AlertDialogAction>
+            ) : (
+              <>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(e) => {
+                    // Prevent Radix from auto-closing the dialog on click; we
+                    // close it ourselves only after the mutation settles, so a
+                    // 409 "blocked by invoice" message can render in-place.
+                    e.preventDefault();
+                    if (pendingDeleteSheet) deleteBillingSheet.mutate(pendingDeleteSheet.id);
+                  }}
+                  className="bg-red-600 hover:bg-red-700"
+                  disabled={deleteBillingSheet.isPending}
+                  data-testid="confirm-delete-billing-sheet"
+                >
+                  Delete
+                </AlertDialogAction>
+              </>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

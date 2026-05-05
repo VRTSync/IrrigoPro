@@ -1,7 +1,7 @@
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage, WetCheckAlreadyRoutedError, ControllerHasZonesError } from "./storage";
+import { storage, WetCheckAlreadyRoutedError, ControllerHasZonesError, BillingSheetInvoicedError } from "./storage";
 import type { InsertInvoice } from "@shared/schema";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -8057,10 +8057,45 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (validIds.length === 0) {
         return res.status(400).json({ message: "No valid IDs provided" });
       }
+      // Mirror the wet-checks bulk-delete shape so the UI can summarize
+      // "X deleted, Y blocked by an existing invoice".
+      type Outcome = {
+        id: number;
+        status: 'deleted' | 'invoiced' | 'not_found' | 'error';
+        message?: string;
+        invoiceNumber?: string | null;
+        invoiceId?: number | null;
+      };
+      const results: Outcome[] = [];
       for (const id of validIds) {
-        await storage.deleteBillingSheet(id);
+        try {
+          const ok = await storage.deleteBillingSheet(id);
+          results.push({ id, status: ok ? 'deleted' : 'not_found' });
+        } catch (e: any) {
+          if (e instanceof BillingSheetInvoicedError) {
+            results.push({
+              id,
+              status: 'invoiced',
+              message: e.invoiceNumber
+                ? `Can't delete: this billing sheet is already on invoice #${e.invoiceNumber}.`
+                : `Can't delete: this billing sheet is already on an invoice.`,
+              invoiceNumber: e.invoiceNumber,
+              invoiceId: e.invoiceId,
+            });
+          } else {
+            console.error(e);
+            results.push({ id, status: 'error', message: e?.message ?? 'Failed' });
+          }
+        }
       }
-      res.json({ deleted: validIds.length });
+      const summary = {
+        requested: validIds.length,
+        deleted: results.filter(r => r.status === 'deleted').length,
+        invoiced: results.filter(r => r.status === 'invoiced').length,
+        notFound: results.filter(r => r.status === 'not_found').length,
+        failed: results.filter(r => r.status === 'error').length,
+      };
+      res.json({ results, summary, deleted: summary.deleted });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to bulk delete billing sheets" });
@@ -8070,9 +8105,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.delete("/api/billing-sheets/:id", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      await storage.deleteBillingSheet(id);
+      const ok = await storage.deleteBillingSheet(id);
+      if (!ok) return res.status(404).json({ message: "Billing sheet not found" });
       res.json({ message: "Billing sheet deleted successfully" });
-    } catch (error) {
+    } catch (error: any) {
+      if (error instanceof BillingSheetInvoicedError) {
+        return res.status(409).json({
+          message: error.invoiceNumber
+            ? `Can't delete: this billing sheet is already on invoice #${error.invoiceNumber}.`
+            : `Can't delete: this billing sheet is already on an invoice.`,
+          invoiceNumber: error.invoiceNumber,
+          invoiceId: error.invoiceId,
+        });
+      }
       console.error(error);
       res.status(500).json({ message: "Failed to delete billing sheet" });
     }

@@ -155,6 +155,25 @@ export class WetCheckAlreadyRoutedError extends Error {
   }
 }
 
+// Thrown by deleteBillingSheet when the sheet has already been pushed onto
+// an invoice (either via billing_sheets.invoiceId or via invoice_items rows
+// pointing at it). Surface mapped to HTTP 409 by the route layer so the UI
+// can show a friendly "already on invoice #..." message instead of a 500.
+export class BillingSheetInvoicedError extends Error {
+  invoiceNumber: string | null;
+  invoiceId: number | null;
+  constructor(invoiceId: number | null, invoiceNumber: string | null) {
+    super(
+      invoiceNumber
+        ? `Billing sheet is already on invoice #${invoiceNumber}`
+        : `Billing sheet is already on an invoice`,
+    );
+    this.name = "BillingSheetInvoicedError";
+    this.invoiceId = invoiceId;
+    this.invoiceNumber = invoiceNumber;
+  }
+}
+
 // Thrown by setCustomerControllerCount when the requested count would remove
 // one or more controllers that still have zoneCount > 0 and the caller did not
 // pass `confirmDeleteWithZones: true`. Surface mapped to HTTP 409 by routes.
@@ -2617,12 +2636,59 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteBillingSheet(id: number): Promise<boolean> {
-    // Delete items first
-    await db.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
-    
-    // Delete the billing sheet
-    const result = await db.delete(billingSheets).where(eq(billingSheets.id, id));
-    return (result.rowCount || 0) > 0;
+    // Refuse to delete a sheet that has already been pushed onto an
+    // invoice. Two ways a sheet can be "on an invoice":
+    //   1. billing_sheets.invoiceId is set (legacy single-invoice link), or
+    //   2. one or more invoice_items rows reference it (the current model).
+    // Either case would either orphan the invoice line items or strand
+    // the customer's invoice without a source-of-truth, so we surface a
+    // typed error that the route layer maps to a 409 with a friendly
+    // message instead of letting Postgres throw a FK violation.
+    const [sheet] = await db.select().from(billingSheets).where(eq(billingSheets.id, id));
+    if (!sheet) return false;
+    if (sheet.invoiceId != null) {
+      const [inv] = await db.select({ invoiceNumber: invoices.invoiceNumber })
+        .from(invoices)
+        .where(eq(invoices.id, sheet.invoiceId));
+      throw new BillingSheetInvoicedError(sheet.invoiceId, inv?.invoiceNumber ?? null);
+    }
+    const linkedItems = await db.select({
+      id: invoiceItems.id,
+      invoiceId: invoiceItems.invoiceId,
+    }).from(invoiceItems).where(eq(invoiceItems.billingSheetId, id)).limit(1);
+    if (linkedItems.length > 0) {
+      const linkedInvoiceId = linkedItems[0].invoiceId ?? null;
+      let invoiceNumber: string | null = null;
+      if (linkedInvoiceId != null) {
+        const [inv] = await db.select({ invoiceNumber: invoices.invoiceNumber })
+          .from(invoices)
+          .where(eq(invoices.id, linkedInvoiceId));
+        invoiceNumber = inv?.invoiceNumber ?? null;
+      }
+      throw new BillingSheetInvoicedError(linkedInvoiceId, invoiceNumber);
+    }
+
+    // Single transaction so a partial delete can't leave orphan rows
+    // pointing at a billing_sheets row that no longer exists. Order:
+    //   1. Null out wet_check_findings.billingSheetId (audit history is
+    //      preserved on the finding; only the routing pointer is cleared).
+    //   2. Delete manual_part_reviews (notNull FK; the review is per-sheet
+    //      so it has no meaning once the sheet is gone, mirroring how
+    //      billing_sheet_items get hard-deleted alongside the sheet).
+    //   3. Delete billing_sheet_items (existing behavior).
+    //   4. Delete the billing_sheets row.
+    // pricing_audit_events references sheets by (source, parentId) without
+    // a real FK, so it intentionally retains the audit trail after delete
+    // — same as deleteWorkOrder leaves it untouched.
+    return await db.transaction(async (tx) => {
+      await tx.update(wetCheckFindings)
+        .set({ billingSheetId: null })
+        .where(eq(wetCheckFindings.billingSheetId, id));
+      await tx.delete(manualPartReviews).where(eq(manualPartReviews.billingSheetId, id));
+      await tx.delete(billingSheetItems).where(eq(billingSheetItems.billingSheetId, id));
+      const result = await tx.delete(billingSheets).where(eq(billingSheets.id, id));
+      return (result.rowCount || 0) > 0;
+    });
   }
 
   async addBillingSheetItem(billingSheetId: number, item: InsertBillingSheetItem): Promise<BillingSheetItem> {
