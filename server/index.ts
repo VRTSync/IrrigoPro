@@ -1391,7 +1391,7 @@ async function runStartupMigrations() {
         id SERIAL PRIMARY KEY,
         company_id INTEGER NOT NULL REFERENCES companies(id),
         customer_id INTEGER NOT NULL REFERENCES customers(id),
-        branch_name TEXT,
+        branch_name TEXT NOT NULL DEFAULT '',
         controller_letter TEXT NOT NULL,
         zone_count INTEGER NOT NULL DEFAULT 100,
         notes TEXT,
@@ -1400,9 +1400,18 @@ async function runStartupMigrations() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
       ALTER TABLE property_controllers ADD COLUMN IF NOT EXISTS branch_name TEXT;
+      -- Backfill any pre-existing NULL branch rows so NOT NULL can apply,
+      -- then enforce DEFAULT '' / NOT NULL. Idempotent on re-run.
+      UPDATE property_controllers SET branch_name = '' WHERE branch_name IS NULL;
+      ALTER TABLE property_controllers ALTER COLUMN branch_name SET DEFAULT '';
+      ALTER TABLE property_controllers ALTER COLUMN branch_name SET NOT NULL;
       DROP INDEX IF EXISTS uniq_property_ctrl;
+      -- Drop any pre-existing version of the branch index (which may have
+      -- been created with a COALESCE expression and bad opclasses) so it
+      -- gets recreated cleanly as three plain typed columns.
+      DROP INDEX IF EXISTS uniq_property_ctrl_branch;
       CREATE UNIQUE INDEX IF NOT EXISTS uniq_property_ctrl_branch
-        ON property_controllers (customer_id, controller_letter, COALESCE(branch_name, ''));
+        ON property_controllers (customer_id, controller_letter, branch_name);
 
       CREATE TABLE IF NOT EXISTS issue_type_configs (
         id SERIAL PRIMARY KEY,

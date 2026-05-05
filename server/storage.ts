@@ -4752,23 +4752,22 @@ export class DatabaseStorage implements IStorage {
       .orderBy(propertyControllers.controllerLetter);
   }
 
-  // Branch-name normalizer: a non-empty string is a real branch label;
-  // anything else (undefined, null, "") collapses to NULL = "no branch /
-  // customer-level" bucket. Centralized so every read/write path sees the
-  // same convention.
-  private branchKey(branchName?: string | null): string | null {
-    if (typeof branchName !== "string") return null;
-    const trimmed = branchName.trim();
-    return trimmed.length === 0 ? null : trimmed;
+  // Normalize an external branchName (which may be undefined/null/string)
+  // into the storage-side string key. The customer-level bucket is the
+  // empty string ''. The DB column is NOT NULL DEFAULT '' so plain `=`
+  // semantics work for both customer-level and named-branch lookups.
+  // The public API still exposes `branchName: null` for the customer-level
+  // bucket (preserved at the response-mapping layer in
+  // listCustomerControllersOverview), so external callers are unaffected.
+  private branchKey(branchName?: string | null): string {
+    if (typeof branchName !== "string") return "";
+    return branchName.trim();
   }
 
-  // Drizzle helper: equality predicate that treats NULL and NULL as a match
-  // (matching our COALESCE-based unique index). Postgres' `=` would return
-  // NULL on either side being NULL.
-  private branchEq(branchName: string | null) {
-    return branchName === null
-      ? sql`${propertyControllers.branchName} IS NULL`
-      : eq(propertyControllers.branchName, branchName);
+  // Drizzle helper: equality predicate against the (NOT NULL) branch_name
+  // column. Plain `=` works for both customer-level ('') and named branches.
+  private branchEq(branchName: string) {
+    return eq(propertyControllers.branchName, branchName);
   }
 
   async ensurePropertyControllers(
@@ -4779,7 +4778,7 @@ export class DatabaseStorage implements IStorage {
   ): Promise<PropertyController[]> {
     const branch = this.branchKey(branchName);
     const all = await this.listPropertyControllers(companyId, customerId);
-    const inBranch = all.filter(c => (c.branchName ?? null) === branch);
+    const inBranch = all.filter(c => (c.branchName ?? "") === branch);
     const haveLetters = new Set(inBranch.map(c => c.controllerLetter));
     const needed: string[] = [];
     for (let i = 0; i < count; i++) {
@@ -4798,7 +4797,7 @@ export class DatabaseStorage implements IStorage {
         .onConflictDoNothing();
     }
     const refreshed = await this.listPropertyControllers(companyId, customerId);
-    return refreshed.filter(c => (c.branchName ?? null) === branch);
+    return refreshed.filter(c => (c.branchName ?? "") === branch);
   }
 
   async upsertPropertyController(
@@ -4869,7 +4868,7 @@ export class DatabaseStorage implements IStorage {
     // customer-level wet-check zone records, otherwise editing a named
     // branch could corrupt an in-progress customer wet check that is keyed
     // off the customer-level (NULL branch) controllers.
-    if (typeof patch.zoneCount === "number" && branch === null) {
+    if (typeof patch.zoneCount === "number" && branch === "") {
       const newCount = patch.zoneCount;
       const inProgressIds = await db.select({ id: wetChecks.id }).from(wetChecks)
         .where(and(
@@ -4989,7 +4988,7 @@ export class DatabaseStorage implements IStorage {
     if (!customer) throw new Error("Customer not found");
 
     const allExisting = await this.listPropertyControllers(companyId, customerId);
-    const existing = allExisting.filter(c => (c.branchName ?? null) === branch);
+    const existing = allExisting.filter(c => (c.branchName ?? "") === branch);
     // Determine which letters belong to the new size and which fall outside.
     const keepLetters = new Set<string>();
     for (let i = 0; i < count; i++) {
@@ -5009,7 +5008,7 @@ export class DatabaseStorage implements IStorage {
       // Wet-check capture is still customer-level (per task scope), so we
       // only do this for the customer-level (NULL) branch — branch-level
       // edits don't affect any wet-check zone records yet.
-      if (branch === null) {
+      if (branch === "") {
         const inProgressIds = await db.select({ id: wetChecks.id }).from(wetChecks)
           .where(and(
             eq(wetChecks.companyId, companyId),
@@ -5041,7 +5040,7 @@ export class DatabaseStorage implements IStorage {
     // count there for customer-level edits. Branch counts live solely on
     // the property_controllers rows.
     let updatedCustomer: Customer | undefined;
-    if (branch === null) {
+    if (branch === "") {
       const [u] = await db.update(customers)
         .set({ totalControllers: count })
         .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)))
@@ -5049,7 +5048,7 @@ export class DatabaseStorage implements IStorage {
       updatedCustomer = u;
     }
     const refreshed = await this.listPropertyControllers(companyId, customerId);
-    const controllers = refreshed.filter(c => (c.branchName ?? null) === branch);
+    const controllers = refreshed.filter(c => (c.branchName ?? "") === branch);
     return { customer: updatedCustomer ?? customer, controllers, removedLetters };
   }
 

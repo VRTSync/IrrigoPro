@@ -11507,7 +11507,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // customer has branch-scoped controller rows. Branch data is served
       // exclusively via /api/admin/customer-controllers.
       const rows = await storage.listPropertyControllers(cid, customerId);
-      res.json(rows.filter(r => (r.branchName ?? null) === null));
+      // Customer-level bucket is now stored as branch_name = '' (NOT NULL).
+      // Older rows that may still hold NULL during the in-flight migration
+      // are also treated as customer-level here.
+      res.json(rows.filter(r => (r.branchName ?? "") === ""));
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 

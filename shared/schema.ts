@@ -978,10 +978,14 @@ export const propertyControllers = pgTable("property_controllers", {
   companyId: integer("company_id").references(() => companies.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   // Optional branch scope for customers with multiple locations
-  // (customers.branches). NULL means "no branch / customer-level" — the
-  // bucket every existing row falls into. Per-branch rows are keyed by
-  // (customerId, branchName, controllerLetter); see uniq index below.
-  branchName: text("branch_name"),
+  // (customers.branches). The empty string "" means "no branch /
+  // customer-level" — the bucket every existing row originally fell into.
+  // Per-branch rows are keyed by (customerId, branchName, controllerLetter);
+  // see uniq index below. NOT NULL with a default of '' so the unique index
+  // can be three plain typed columns (no COALESCE expression). The public
+  // API contract still exposes the customer-level bucket as
+  // `branchName: null` — normalization happens at the storage boundary.
+  branchName: text("branch_name").notNull().default(""),
   controllerLetter: text("controller_letter").notNull(),
   zoneCount: integer("zone_count").notNull().default(100),
   notes: text("notes"),
@@ -990,19 +994,13 @@ export const propertyControllers = pgTable("property_controllers", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
-  // Unique by (customer, branch, letter). NULL branch is normalized to
-  // empty string in the index expression so Postgres treats two NULL
-  // branches at the same letter as a conflict (rather than allowing
-  // duplicates, which is the default NULL-distinct behavior).
-  // NOTE: column order matters for drizzle-kit's opclass inference. The raw
-  // SQL `COALESCE(...)` expression must come LAST — when it sits between two
-  // columns, drizzle-kit can mis-infer the next column's opclass (picking up
-  // int4_ops from customer_id instead of text_ops for controller_letter),
-  // which causes the generated migration to fail at index creation time.
-  // Uniqueness semantics are unchanged — a unique index is unique on the set
-  // of columns regardless of order.
+  // Unique by (customer, branch, letter). branch_name is NOT NULL DEFAULT ''
+  // so the customer-level bucket uses '' and Postgres treats duplicates as
+  // conflicts under normal `=` semantics — no COALESCE expression needed.
+  // Three plain typed columns means drizzle-kit's opclass inference can't
+  // mis-stamp `int4_ops` on a raw SQL fragment.
   uniqCustomerLetter: uniqueIndex("uniq_property_ctrl_branch")
-    .on(table.customerId, table.controllerLetter, sql`COALESCE(${table.branchName}, '')`),
+    .on(table.customerId, table.controllerLetter, table.branchName),
 }));
 
 // Issue type catalog — drives the field-UI preset grid and the per-issue
