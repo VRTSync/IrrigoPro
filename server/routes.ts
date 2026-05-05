@@ -11243,7 +11243,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // controller by letter, matching the spec's "get + patch at the same
   // collection path" contract.
   const propertyControllerPatchBody = z.object({
-    controllerLetter: z.string().min(1).transform(s => s.toUpperCase()),
+    controllerLetter: z.string().length(1).transform(s => s.toUpperCase())
+      .refine(s => s >= "A" && s <= "Z", "controllerLetter must be A-Z"),
     zoneCount: z.coerce.number().int().min(1).max(100).optional(),
     notes: z.string().nullish(),
   });
@@ -11255,11 +11256,29 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
     const { controllerLetter, zoneCount, notes } = parsed.data;
     try {
-      const updated = await storage.updatePropertyController(cid, customerId, controllerLetter, {
+      // Verify the customer belongs to the caller's company before any write.
+      // The update path is already company-scoped, but the upsert fallback
+      // would otherwise allow cross-tenant writes via a foreign customerId.
+      const owner = await storage.getCustomer(customerId);
+      if (!owner || owner.companyId !== cid) {
+        return res.status(404).json({ message: "Not found" });
+      }
+      // Try a normal update first so the wet-check shrink side-effect in
+      // updatePropertyController still fires for existing rows.
+      let updated = await storage.updatePropertyController(cid, customerId, controllerLetter, {
         zoneCount,
         notes: notes ?? undefined,
       });
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) {
+        // No row yet for this letter (typical for legacy customers or a
+        // freshly-bumped controller count). Upsert just this controller —
+        // do NOT bulk-seed A..N which would invent unrelated controllers.
+        if (zoneCount === undefined) return res.status(404).json({ message: "Not found" });
+        updated = await storage.upsertPropertyController(cid, customerId, controllerLetter, {
+          zoneCount,
+          notes: notes ?? undefined,
+        });
+      }
       res.json(updated);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });

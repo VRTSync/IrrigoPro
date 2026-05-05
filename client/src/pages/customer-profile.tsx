@@ -10,6 +10,7 @@ import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign
 import { Customer } from "@shared/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
+import { IrrigationSystemCard } from "@/components/customers/irrigation-system-card";
 
 export default function CustomerProfile() {
   const { id } = useParams();
@@ -38,6 +39,13 @@ export default function CustomerProfile() {
   });
 
   const isAdmin = userRole === "company_admin" || userRole === "super_admin";
+  // Irrigation diagram editing follows the same admin/manager gate that the
+  // server uses for customer edits (requireCustomerEditAccess), which includes
+  // billing managers in addition to admins.
+  const canEditIrrigation =
+    userRole === "company_admin" ||
+    userRole === "super_admin" ||
+    userRole === "billing_manager";
 
   const handleOpenPdf = (invoiceId: number, invoiceNumber: string, customerEmail: string) => {
     setSelectedPdfInvoice({ invoiceId, invoiceNumber, customerEmail });
@@ -255,6 +263,9 @@ export default function CustomerProfile() {
           )}
         </CardContent>
       </Card>
+
+      {/* Irrigation System diagram */}
+      <IrrigationSystemCard customer={customer} canEdit={canEditIrrigation} />
 
       {/* Invoices */}
       <Card>

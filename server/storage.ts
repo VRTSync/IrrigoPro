@@ -569,6 +569,12 @@ export interface IStorage {
     letter: string,
     patch: { zoneCount?: number; notes?: string },
   ): Promise<PropertyController | undefined>;
+  upsertPropertyController(
+    companyId: number,
+    customerId: number,
+    letter: string,
+    values: { zoneCount: number; notes?: string },
+  ): Promise<PropertyController>;
 
   listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]>;
   // Admin-only company-wide list with per-row aggregate counts (zone
@@ -4556,6 +4562,35 @@ export class DatabaseStorage implements IStorage {
         .onConflictDoNothing();
     }
     return await this.listPropertyControllers(companyId, customerId);
+  }
+
+  async upsertPropertyController(
+    companyId: number,
+    customerId: number,
+    letter: string,
+    values: { zoneCount: number; notes?: string },
+  ): Promise<PropertyController> {
+    // Insert just the requested controller letter (no bulk seeding of A..N).
+    // On conflict — i.e. the row already exists — update only the supplied
+    // fields so totals/notes stay in sync.
+    const [row] = await db.insert(propertyControllers)
+      .values({
+        companyId,
+        customerId,
+        controllerLetter: letter,
+        zoneCount: values.zoneCount,
+        notes: values.notes,
+      })
+      .onConflictDoUpdate({
+        target: [propertyControllers.customerId, propertyControllers.controllerLetter],
+        set: {
+          zoneCount: values.zoneCount,
+          ...(values.notes !== undefined ? { notes: values.notes } : {}),
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
   }
 
   async updatePropertyController(
