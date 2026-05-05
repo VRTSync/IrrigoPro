@@ -138,7 +138,6 @@ function PhotoCaptureButton({
         ref={inputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={onPick}
         data-testid={`photo-input-${suffix}`}

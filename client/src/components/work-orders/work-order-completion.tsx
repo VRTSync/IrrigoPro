@@ -844,7 +844,6 @@ export function WorkOrderCompletion({
                   type="photo"
                   label="Photos"
                   accept="image/*"
-                  capture="environment"
                   multiple={true}
                   files={photos.map(p => ({ url: p.url, fileName: p.fileName, originalName: p.originalName }))}
                   onFilesChange={(files) => setPhotos(files.map(f => ({ url: f.url, fileName: f.fileName, originalName: f.originalName })))}
