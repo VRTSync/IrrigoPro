@@ -1402,7 +1402,7 @@ async function runStartupMigrations() {
       ALTER TABLE property_controllers ADD COLUMN IF NOT EXISTS branch_name TEXT;
       DROP INDEX IF EXISTS uniq_property_ctrl;
       CREATE UNIQUE INDEX IF NOT EXISTS uniq_property_ctrl_branch
-        ON property_controllers (customer_id, COALESCE(branch_name, ''), controller_letter);
+        ON property_controllers (customer_id, controller_letter, COALESCE(branch_name, ''));
 
       CREATE TABLE IF NOT EXISTS issue_type_configs (
         id SERIAL PRIMARY KEY,

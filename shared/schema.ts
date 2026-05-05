@@ -994,8 +994,15 @@ export const propertyControllers = pgTable("property_controllers", {
   // empty string in the index expression so Postgres treats two NULL
   // branches at the same letter as a conflict (rather than allowing
   // duplicates, which is the default NULL-distinct behavior).
+  // NOTE: column order matters for drizzle-kit's opclass inference. The raw
+  // SQL `COALESCE(...)` expression must come LAST — when it sits between two
+  // columns, drizzle-kit can mis-infer the next column's opclass (picking up
+  // int4_ops from customer_id instead of text_ops for controller_letter),
+  // which causes the generated migration to fail at index creation time.
+  // Uniqueness semantics are unchanged — a unique index is unique on the set
+  // of columns regardless of order.
   uniqCustomerLetter: uniqueIndex("uniq_property_ctrl_branch")
-    .on(table.customerId, sql`COALESCE(${table.branchName}, '')`, table.controllerLetter),
+    .on(table.customerId, table.controllerLetter, sql`COALESCE(${table.branchName}, '')`),
 }));
 
 // Issue type catalog — drives the field-UI preset grid and the per-issue
