@@ -18,6 +18,8 @@ import BillingDashboard from "@/pages/billing-dashboard";
 import FieldTech from "@/pages/field-tech";
 import BillingSheets from "@/pages/billing-sheets";
 import WorkOrders from "@/pages/work-orders";
+import WetChecksPage from "@/pages/wet-checks";
+import WetCheckReviewPage from "@/pages/wet-check-review";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import MissingPhotosReport from "@/pages/missing-photos-report";
@@ -147,6 +149,10 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
           <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
           <Route path="/billing-sheets" component={BillingSheets} />
+          <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
+          <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
+          <Route path="/wet-checks" component={WetChecksPage} />
+          <Route path="/wet-checks/:id" component={WetChecksPage} />
           <Route path="/work-orders" component={WorkOrders} />
           <Route path="/user-profile" component={UserProfile} />
           <Route path="/switch-user" component={SwitchUser} />

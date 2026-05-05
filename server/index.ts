@@ -169,6 +169,21 @@ async function runStartupMigrations() {
     logger.error('Startup migration: work_orders.applied_labor_rate column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
   }
 
+  // applied_labor_rate snapshot mirrored onto billing_sheets and estimates.
+  try {
+    await pool.query(`
+      ALTER TABLE billing_sheets
+        ADD COLUMN IF NOT EXISTS applied_labor_rate DECIMAL(10, 2)
+    `);
+    await pool.query(`
+      ALTER TABLE estimates
+        ADD COLUMN IF NOT EXISTS applied_labor_rate DECIMAL(10, 2)
+    `);
+    logger.info('Startup migration: ensured billing_sheets/estimates.applied_labor_rate columns exist', 'Server Startup');
+  } catch (err) {
+    logger.error('Startup migration: billing_sheets/estimates.applied_labor_rate column error (non-fatal)', err instanceof Error ? err : new Error(String(err)), 'Server Startup');
+  }
+
   // Add manager approval gate columns to work_orders and billing_sheets
   try {
     await pool.query(`

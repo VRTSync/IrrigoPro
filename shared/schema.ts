@@ -197,6 +197,8 @@ export const billingSheets = pgTable("billing_sheets", {
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  // Snapshot of customer.laborRate at creation (mirrors work_orders).
+  appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
   // Invoice linkage - prevents double billing
   invoiceId: integer("invoice_id").references(() => invoices.id),
   billedAt: timestamp("billed_at"),
@@ -342,6 +344,8 @@ export const estimates = pgTable("estimates", {
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
+  // Snapshot of customer.laborRate at creation (mirrors work_orders).
+  appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
   approvalToken: text("approval_token"), // Secure token for email approval links

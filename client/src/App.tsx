@@ -46,6 +46,7 @@ import PartsPendingApproval from "@/pages/parts-pending-approval";
 import BillingDashboard from "@/pages/billing-dashboard";
 import InvoicesPage from "@/pages/invoices";
 import WetChecksPage from "@/pages/wet-checks";
+import WetCheckReviewPage from "@/pages/wet-check-review";
 
 import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
@@ -195,6 +196,8 @@ function Router() {
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
+                <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/switch-user" component={SwitchUser} />
@@ -235,6 +238,10 @@ function Router() {
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
+                <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
+                <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/parts-settings" component={PartsSettings} />
                 <Route path="/parts-pending-approval" component={PartsPendingApproval} />
@@ -267,6 +274,10 @@ function Router() {
               <Switch>
                 <Route path="/" component={SuperAdminDashboard} />
                 <Route path="/super-admin" component={SuperAdminDashboard} />
+                <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
+                <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
+                <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/user-manager" component={UserManager} />
                 <Route path="/switch-user" component={SwitchUser} />
@@ -316,6 +327,8 @@ function Router() {
               <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
               <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
               <Route path="/billing-sheets" component={BillingSheets} />
+              <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
+              <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
               <Route path="/wet-checks" component={WetChecksPage} />
               <Route path="/wet-checks/:id" component={WetChecksPage} />
               <Route path="/user-manager" component={UserManager} />

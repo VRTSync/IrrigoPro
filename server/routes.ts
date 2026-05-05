@@ -254,6 +254,7 @@ import {
   type InsertWetCheckZoneRecord,
 } from "@shared/schema";
 import { z } from "zod";
+import { processEstimatePayload } from "./estimate-payload";
 
 const createEstimateWithItemsSchema = z.object({
   estimate: insertEstimateSchema.extend({
@@ -4700,57 +4701,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  function processEstimatePayload(parsed: z.infer<typeof createEstimateWithItemsSchema>) {
-    const items = parsed.items.map((item, idx) => {
-      const quantity = item.quantity || 1;
-      const partPrice = parseFloat(String(item.partPrice ?? 0));
-      const laborHours = parseFloat(String(item.laborHours ?? 0));
-      const totalPrice = item.totalPrice !== undefined
-        ? parseFloat(String(item.totalPrice))
-        : partPrice * quantity;
-      return {
-        description: item.description ?? "",
-        partId: item.partId,
-        partName: item.partName,
-        partPrice: String(partPrice),
-        quantity,
-        laborHours: String(laborHours),
-        totalPrice: totalPrice.toFixed(2),
-        sortOrder: item.sortOrder ?? idx,
-      };
-    });
-
-    // laborHours on every line item is the per-line total (already multiplied
-    // by quantity on the client). Storage recompute, the email renderer, and
-    // the displayed totals all share this convention.
-    let partsSubtotal = 0;
-    let totalLaborHours = 0;
-    items.forEach(item => {
-      partsSubtotal += parseFloat(item.totalPrice);
-      totalLaborHours += parseFloat(item.laborHours);
-    });
-
-    const laborRate = parseFloat(String(parsed.estimate.laborRate));
-    const laborSubtotal = totalLaborHours * laborRate;
-    const totalAmount = partsSubtotal + laborSubtotal;
-
-    const estimate: InsertEstimate = {
-      ...parsed.estimate,
-      estimateDate: parsed.estimate.estimateDate ? new Date(parsed.estimate.estimateDate) : new Date(),
-      partsSubtotal: partsSubtotal.toFixed(2),
-      laborSubtotal: laborSubtotal.toFixed(2),
-      totalAmount: totalAmount.toFixed(2),
-      laborRate: String(parsed.estimate.laborRate),
-    };
-
-    return { estimate, items: items as InsertEstimateItem[] };
-  }
+  // processEstimatePayload is shared with the Wet Check conversion engine
+  // (server/storage.ts → convertWetCheck) so both code paths compute prices
+  // and totals identically. See server/estimate-payload.ts for details.
 
   app.post("/api/estimates", requireAuthentication, async (req, res) => {
     try {
       const parsed = createEstimateWithItemsSchema.parse(req.body);
-      const { estimate, items } = processEstimatePayload(parsed);
-      const newEstimate = await storage.createEstimate(estimate, items);
+      // Single sanctioned entry point — same service the wet-check
+      // conversion engine calls — so the two flows can never drift in
+      // pricing semantics or downstream side effects.
+      const newEstimate = await storage.createEstimateFromPayload(parsed);
       res.status(201).json(newEstimate);
     } catch (error) {
       console.error("Estimate creation error:", error);
@@ -10857,6 +10818,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   };
   const isFieldRole = (role: string | undefined) =>
     role === "field_tech" || role === "irrigation_manager" || role === "company_admin" || role === "super_admin" || role === "billing_manager";
+  // Manager-level routes (review / route / approve / convert) — explicitly
+  // exclude field_tech.
+  const isWetCheckManagerRole = (role: string | undefined) =>
+    role === "irrigation_manager" || role === "company_admin" || role === "super_admin" || role === "billing_manager";
 
   app.get("/api/wet-checks/issue-types", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
@@ -10908,6 +10873,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       });
       if (!updated) return res.status(404).json({ message: "Not found" });
       res.json(updated);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // Manager inbox aggregate: submitted wet checks with per-row issueGroup
+  // counts and total estimated billable. Backs the Pending Review summary
+  // chips in /wet-checks/pending-review.
+  app.get("/api/wet-checks/pending-review", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const rows = await storage.listWetChecksPendingReview(cid);
+      res.json(rows);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
@@ -11154,7 +11131,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.patch("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    // in_progress → field tech owns it; submitted/partially_converted →
+    // manager-only. Per-finding convertedAt/FK lock in storage prevents
+    // mutating an already-converted row even during partial-conversion.
+    const findingId = parseInt(req.params.id);
+    if (Number.isNaN(findingId)) return res.status(400).json({ message: "Invalid id" });
+    const role = req.authenticatedUserRole;
+    let wcStatus: string | null = null;
+    try {
+      wcStatus = await storage.getWetCheckStatusForFinding(findingId, cid);
+    } catch (e: any) {
+      return res.status(500).json({ message: e?.message ?? "Failed" });
+    }
+    if (wcStatus == null) return res.status(404).json({ message: "Not found" });
+    if (wcStatus === "in_progress") {
+      if (!isFieldRole(role)) return res.status(403).json({ message: "Forbidden" });
+    } else if (wcStatus === "submitted" || wcStatus === "partially_converted") {
+      if (!isWetCheckManagerRole(role)) return res.status(403).json({ message: "Forbidden" });
+    } else {
+      return res.status(409).json({ message: `Wet check is ${wcStatus}; finding pricing is locked` });
+    }
     const parsed = findingPatchBody.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
     const body = parsed.data;
@@ -11233,6 +11229,66 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const ok = await storage.deleteWetCheckPhoto(parseInt(req.params.id), cid);
       res.json({ ok });
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // ─── Manager review / routing / approve / convert ────────────────────────
+  app.post("/api/wet-checks/:id/approve", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const userId = req.authenticatedUserId;
+    if (!userId) return res.status(401).json({ message: "Authentication required" });
+    try {
+      const me = await storage.getUser(userId);
+      if (!me) return res.status(401).json({ message: "User not found" });
+      const updated = await storage.approveWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name });
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const findingRouteBody = z.object({
+    resolution: z.enum(["pending", "repaired_in_field", "sent_to_estimate", "deferred_to_work_order", "documented_only"]),
+  }).strict();
+
+  app.patch("/api/wet-checks/findings/:id/route", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const userId = req.authenticatedUserId;
+    if (!userId) return res.status(401).json({ message: "Authentication required" });
+    const parsed = findingRouteBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    try {
+      const me = await storage.getUser(userId);
+      if (!me) return res.status(401).json({ message: "User not found" });
+      const updated = await storage.routeWetCheckFinding(parseInt(req.params.id), cid, parsed.data.resolution, { id: me.id, name: me.name });
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const convertBody = z.object({
+    // Optional per-deferred-finding scheduled date map ({ findingId: ISO }).
+    scheduledDates: z.record(z.string(), z.string().nullable()).optional(),
+  }).strict();
+
+  app.post("/api/wet-checks/:id/convert", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const userId = req.authenticatedUserId;
+    if (!userId) return res.status(401).json({ message: "Authentication required" });
+    const parsed = convertBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const scheduledDates: Record<number, string | null> = {};
+    for (const [k, v] of Object.entries(parsed.data.scheduledDates ?? {})) {
+      const fid = parseInt(k);
+      if (!isNaN(fid)) scheduledDates[fid] = v;
+    }
+    try {
+      const me = await storage.getUser(userId);
+      if (!me) return res.status(401).json({ message: "User not found" });
+      const result = await storage.convertWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name }, scheduledDates);
+      res.json(result);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
 

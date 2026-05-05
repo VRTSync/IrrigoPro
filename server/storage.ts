@@ -129,6 +129,14 @@ import {
 import { db } from "./db";
 import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } from "drizzle-orm";
 import bcrypt from "bcrypt";
+import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
+
+// Executor accepted by storage helpers that may run inside a caller's
+// transaction. Both `db` and a Drizzle PgTransaction satisfy this
+// (insert/update/delete/select are interface-compatible); typing it as the
+// transaction parameter type keeps callers honest while still accepting
+// the top-level db handle.
+type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type DrizzlePartInsert = typeof parts.$inferInsert;
 type DrizzleWorkOrderInsert = typeof workOrders.$inferInsert;
@@ -529,6 +537,21 @@ export interface IStorage {
   ): Promise<PropertyController | undefined>;
 
   listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]>;
+  listWetChecksPendingReview(companyId: number): Promise<Array<WetCheck & {
+    findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
+    totalBillable: string;
+    customerLaborRate: string;
+  }>>;
+  // Cheap status lookup used by the route layer to choose role policy
+  // for a finding edit (tech vs manager) without a full join.
+  getWetCheckStatusForFinding(findingId: number, companyId: number): Promise<string | null>;
+  // Canonical estimate-creation service shared by POST /api/estimates
+  // and the wet-check conversion engine.
+  createEstimateFromPayload(
+    payload: EstimatePayloadInput,
+    executor?: DbExecutor,
+    explicitEstimateNumber?: string,
+  ): Promise<EstimateWithItems>;
   getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined>;
   findActiveWetCheck(companyId: number, customerId: number, technicianId: number): Promise<WetCheck | undefined>;
   createWetCheck(insert: InsertWetCheck): Promise<WetCheck>;
@@ -557,6 +580,29 @@ export interface IStorage {
     patch: Partial<InsertWetCheckFinding>,
   ): Promise<WetCheckFinding | undefined>;
   deleteWetCheckFinding(id: number, companyId: number): Promise<boolean>;
+
+  approveWetCheck(
+    id: number,
+    companyId: number,
+    manager: { id: number; name: string },
+  ): Promise<WetCheck | undefined>;
+  routeWetCheckFinding(
+    id: number,
+    companyId: number,
+    resolution: "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only",
+    manager: { id: number; name: string },
+  ): Promise<WetCheckFinding | undefined>;
+  convertWetCheck(
+    id: number,
+    companyId: number,
+    manager: { id: number; name: string },
+    scheduledDates?: Record<number, string | null>,
+  ): Promise<{
+    wetCheck: WetCheck;
+    billingSheetId: number | null;
+    estimateId: number | null;
+    workOrderId: number | null;
+  }>;
 
   attachWetCheckPhoto(
     wetCheckId: number,
@@ -1320,7 +1366,10 @@ export class DatabaseStorage implements IStorage {
           totalLaborHours += itemLaborHours;
         });
         
-        const laborRate = parseFloat(String(estimate.laborRate));
+        // Prefer the SNAPSHOT appliedLaborRate (locked at creation /
+        // conversion) over the mutable customer/estimate laborRate so
+        // downstream reads never reprice an estimate if rates change later.
+        const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
 
         const laborSubtotal = totalLaborHours * laborRate;
         const totalAmount = partsSubtotal + laborSubtotal;
@@ -1354,7 +1403,9 @@ export class DatabaseStorage implements IStorage {
       totalLaborHours += itemLaborHours;
     });
 
-    const laborRate = parseFloat(String(estimate.laborRate));
+    // Prefer SNAPSHOT appliedLaborRate so a converted estimate cannot be
+    // repriced after customer/estimate laborRate changes downstream.
+    const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
     const laborSubtotal = totalLaborHours * laborRate;
     const totalAmount = partsSubtotal + laborSubtotal;
 
@@ -1367,23 +1418,61 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Single sanctioned write path for an estimate + its items. Both the
+  // public createEstimate (with its own tx) and the wet-check conversion
+  // engine (which runs inside its own tx) call this so they share insert
+  // ordering, snapshot semantics, and any future side effects.
+  async _writeEstimateWithItems(
+    executor: DbExecutor,
+    estimate: InsertEstimate,
+    items: InsertEstimateItem[],
+    explicitEstimateNumber?: string,
+  ): Promise<EstimateWithItems> {
+    const estimateNumber = explicitEstimateNumber
+      ?? (estimate as { estimateNumber?: string }).estimateNumber
+      ?? `EST-${Date.now()}`;
+    const [newEstimate] = await executor
+      .insert(estimates)
+      .values([{ ...estimate, estimateNumber }])
+      .returning();
+    const createdItems: EstimateItem[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const [createdItem] = await executor.insert(estimateItems).values({
+        ...item,
+        estimateId: newEstimate.id,
+        sortOrder: item.sortOrder ?? i,
+      }).returning();
+      createdItems.push(createdItem);
+    }
+    return { ...newEstimate, items: createdItems };
+  }
+
   async createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
-    const estimateNumber = `EST-${Date.now()}`;
-    const estimateWithNumber = { ...estimate, estimateNumber };
-    return await db.transaction(async (tx) => {
-      const [newEstimate] = await tx.insert(estimates).values([estimateWithNumber]).returning();
-      const createdItems: EstimateItem[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const [createdItem] = await tx.insert(estimateItems).values({
-          ...item,
-          estimateId: newEstimate.id,
-          sortOrder: item.sortOrder ?? i,
-        }).returning();
-        createdItems.push(createdItem);
-      }
-      return { ...newEstimate, items: createdItems };
-    });
+    return await db.transaction(async (tx) => this._writeEstimateWithItems(tx, estimate, items));
+  }
+
+  // Canonical estimate-creation service. Identical to what POST
+  // /api/estimates does (parse → processEstimatePayload → write items),
+  // exposed as a single entry point so callers — the route handler AND
+  // the wet-check conversion engine — go through the same code path.
+  // When `executor` is provided, the writes happen inside the caller's
+  // transaction (used by convertWetCheck to keep BS+est+WO atomic);
+  // otherwise the helper opens its own tx via createEstimate.
+  async createEstimateFromPayload(
+    payload: EstimatePayloadInput,
+    executor?: DbExecutor,
+    explicitEstimateNumber?: string,
+  ): Promise<EstimateWithItems> {
+    const { estimate, items } = processEstimatePayload(payload);
+    if (executor) {
+      return this._writeEstimateWithItems(executor, estimate, items, explicitEstimateNumber);
+    }
+    if (explicitEstimateNumber) {
+      return await db.transaction(async (tx) =>
+        this._writeEstimateWithItems(tx, estimate, items, explicitEstimateNumber));
+    }
+    return this.createEstimate(estimate, items);
   }
 
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {
@@ -2062,29 +2151,49 @@ export class DatabaseStorage implements IStorage {
     return workOrder || undefined;
   }
 
+  // Shared writer for createWorkOrder and convertWetCheck's deferred path.
+  // Accepts an executor so callers can run inside a tx.
+  async _writeWorkOrderWithItems(
+    executor: DbExecutor,
+    workOrder: typeof workOrders.$inferInsert,
+    items: Array<{
+      partId?: number | null;
+      partName: string;
+      partPrice: string;
+      quantity: number;
+      laborHours: string;
+      totalPrice: string;
+    }>,
+  ): Promise<WorkOrder> {
+    const [newWorkOrder] = await executor.insert(workOrders).values([workOrder]).returning();
+    for (const item of items) {
+      await executor.insert(workOrderItems).values([{
+        workOrderId: newWorkOrder.id,
+        partId: item.partId ?? null,
+        partName: item.partName,
+        partPrice: item.partPrice,
+        quantity: item.quantity,
+        laborHours: item.laborHours,
+        totalPrice: item.totalPrice,
+      }]);
+    }
+    return newWorkOrder;
+  }
+
   async createWorkOrder(workOrder: InsertWorkOrder, estimateItemsList?: EstimateItem[]): Promise<WorkOrder> {
     const workOrderNumber = `WO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-    const [newWorkOrder] = await db.insert(workOrders).values([{
-      ...workOrder,
-      workOrderNumber,
-    }]).returning();
-
-    if (estimateItemsList && estimateItemsList.length > 0) {
-      for (const item of estimateItemsList) {
-        await db.insert(workOrderItems).values([{
-          workOrderId: newWorkOrder.id,
-          partId: item.partId,
-          partName: item.partName,
-          partPrice: item.partPrice,
-          quantity: item.quantity,
-          laborHours: item.laborHours,
-          totalPrice: item.totalPrice,
-        }]);
-      }
-    }
-
-    return newWorkOrder;
+    return this._writeWorkOrderWithItems(
+      db,
+      { ...workOrder, workOrderNumber } as typeof workOrders.$inferInsert,
+      (estimateItemsList ?? []).map(item => ({
+        partId: item.partId,
+        partName: item.partName,
+        partPrice: item.partPrice,
+        quantity: item.quantity,
+        laborHours: item.laborHours,
+        totalPrice: item.totalPrice,
+      })),
+    );
   }
 
   async createWorkOrderFromEstimate(estimateId: number): Promise<WorkOrder> {
@@ -4369,6 +4478,78 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(wetChecks).where(and(...conds)).orderBy(desc(wetChecks.startedAt)).limit(200);
   }
 
+  // Inbox aggregate for the manager review surface. Returns every
+  // 'submitted' wet check together with its findings-by-issueGroup count
+  // and a server-computed total estimated billable amount (using the
+  // customer's laborRate snapshot at read time). The UI uses this to
+  // render the per-row summary chips without doing N+1 fetches.
+  async listWetChecksPendingReview(companyId: number): Promise<Array<WetCheck & {
+    findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
+    totalBillable: string;
+    customerLaborRate: string;
+  }>> {
+    const wcs = await db.select().from(wetChecks).where(and(
+      eq(wetChecks.companyId, companyId),
+      eq(wetChecks.status, "submitted"),
+    )).orderBy(desc(wetChecks.submittedAt)).limit(200);
+    if (wcs.length === 0) return [];
+    const ids = wcs.map(w => w.id);
+    const findings = await db.select().from(wetCheckFindings)
+      .where(inArray(wetCheckFindings.wetCheckId, ids));
+    const customerIds = Array.from(new Set(wcs.map(w => w.customerId)));
+    const custs = await db.select().from(customers).where(inArray(customers.id, customerIds));
+    const rateByCustomer = new Map<number, number>();
+    for (const c of custs) rateByCustomer.set(c.id, parseFloat(String(c.laborRate ?? "45")));
+
+    const findingsByWc = new Map<number, WetCheckFinding[]>();
+    for (const f of findings) {
+      const arr = findingsByWc.get(f.wetCheckId) ?? [];
+      arr.push(f);
+      findingsByWc.set(f.wetCheckId, arr);
+    }
+
+    return wcs.map(wc => {
+      const fs = findingsByWc.get(wc.id) ?? [];
+      const counts = { quick_fix: 0, advanced: 0, zone_issue: 0, total: fs.length };
+      const rate = rateByCustomer.get(wc.customerId) ?? 45;
+      let billable = 0;
+      for (const f of fs) {
+        const g = (f.issueGroup as keyof typeof counts) ?? "advanced";
+        if (g === "quick_fix" || g === "advanced" || g === "zone_issue") counts[g]++;
+        // Total estimated billable spans the two monetised buckets:
+        // repaired_in_field (→ billing sheet) and sent_to_estimate.
+        // 'pending' findings are included so the manager can see the
+        // upper-bound shape of the visit before deciding routing.
+        const isMonetised =
+          f.resolution === "repaired_in_field" ||
+          f.resolution === "sent_to_estimate" ||
+          f.resolution === "pending";
+        if (!isMonetised) continue;
+        const partPrice = parseFloat(String(f.partPrice ?? 0));
+        const qty = Number(f.quantity ?? 0);
+        const laborHours = parseFloat(String(f.laborHours ?? 0));
+        billable += partPrice * qty + laborHours * rate;
+      }
+      return {
+        ...wc,
+        findingCounts: counts,
+        totalBillable: billable.toFixed(2),
+        customerLaborRate: rate.toFixed(2),
+      };
+    });
+  }
+
+  async getWetCheckStatusForFinding(findingId: number, companyId: number): Promise<string | null> {
+    const [row] = await db.select({ status: wetChecks.status })
+      .from(wetCheckFindings)
+      .innerJoin(wetChecks, eq(wetChecks.id, wetCheckFindings.wetCheckId))
+      .where(and(
+        eq(wetCheckFindings.id, findingId),
+        eq(wetChecks.companyId, companyId),
+      ));
+    return row?.status ?? null;
+  }
+
   async getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined> {
     const [wc] = await db.select().from(wetChecks)
       .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
@@ -4419,6 +4600,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateWetCheck(id: number, companyId: number, patch: Partial<InsertWetCheck>): Promise<WetCheck | undefined> {
+    // Internal callers (submitWetCheck → set status=submitted, approve, convert)
+    // also funnel through here, so we must NOT enforce the editable-by-tech
+    // guard when the patch is a system-managed status transition. Only block
+    // user-driven edits (e.g. notes/weather/numControllers) once the wet
+    // check has left in_progress.
+    const isStatusTransition =
+      patch.status !== undefined ||
+      patch.submittedAt !== undefined ||
+      patch.approvedAt !== undefined ||
+      patch.fullyConvertedAt !== undefined;
+    if (!isStatusTransition) {
+      await this.assertWetCheckEditableByTech(id, companyId);
+    }
     const [updated] = await db.update(wetChecks)
       .set({ ...patch, updatedAt: new Date() })
       .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)))
@@ -4499,12 +4693,36 @@ export class DatabaseStorage implements IStorage {
     return wc;
   }
 
+  // Approve-lock: tech-side edits are only permitted while the wet check is
+  // still in_progress. Once it is submitted (or beyond), only the manager
+  // routing/convert endpoints may mutate it. The single exception is
+  // updateWetCheckFinding, which uses assertFindingPriceEditable below to
+  // additionally allow manager pricing edits while the wet check is
+  // 'submitted' but not yet 'approved'.
+  private async assertWetCheckEditableByTech(wetCheckId: number, companyId: number): Promise<WetCheck> {
+    const wc = await this.assertWetCheckBelongsToCompany(wetCheckId, companyId);
+    if (wc.status !== "in_progress") {
+      throw new Error(`Wet check ${wetCheckId} is ${wc.status}; only in-progress wet checks can be edited`);
+    }
+    return wc;
+  }
+
+  // Wet-check-level edit window. Per-finding immutability for already-
+  // converted rows is enforced via the convertedAt/FK check below.
+  private async assertFindingPriceEditable(wetCheckId: number, companyId: number): Promise<WetCheck> {
+    const wc = await this.assertWetCheckBelongsToCompany(wetCheckId, companyId);
+    if (wc.status !== "in_progress" && wc.status !== "submitted" && wc.status !== "partially_converted") {
+      throw new Error(`Wet check ${wetCheckId} is ${wc.status}; finding pricing is locked`);
+    }
+    return wc;
+  }
+
   async upsertWetCheckZoneRecord(
     wetCheckId: number,
     companyId: number,
     insert: InsertWetCheckZoneRecord,
   ): Promise<WetCheckZoneRecord> {
-    await this.assertWetCheckBelongsToCompany(wetCheckId, companyId);
+    await this.assertWetCheckEditableByTech(wetCheckId, companyId);
     if (insert.clientId) {
       // Scope dedupe to this wet check (already verified to belong to this
       // company) so a colliding clientId from another tenant cannot return
@@ -4538,7 +4756,7 @@ export class DatabaseStorage implements IStorage {
   ): Promise<WetCheckZoneRecord | undefined> {
     const [zr] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, id));
     if (!zr) return undefined;
-    await this.assertWetCheckBelongsToCompany(zr.wetCheckId, companyId);
+    await this.assertWetCheckEditableByTech(zr.wetCheckId, companyId);
     const [updated] = await db.update(wetCheckZoneRecords).set(patch).where(eq(wetCheckZoneRecords.id, id)).returning();
     return updated;
   }
@@ -4550,7 +4768,7 @@ export class DatabaseStorage implements IStorage {
   ): Promise<WetCheckFinding> {
     const [zr] = await db.select().from(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.id, zoneRecordId));
     if (!zr) throw new Error(`Zone record ${zoneRecordId} not found`);
-    await this.assertWetCheckBelongsToCompany(zr.wetCheckId, companyId);
+    await this.assertWetCheckEditableByTech(zr.wetCheckId, companyId);
 
     if (insert.clientId) {
       // Scope dedupe to this zone record's wet check (already verified above
@@ -4606,9 +4824,20 @@ export class DatabaseStorage implements IStorage {
   ): Promise<WetCheckFinding | undefined> {
     const [f] = await db.select().from(wetCheckFindings).where(eq(wetCheckFindings.id, id));
     if (!f) return undefined;
-    await this.assertWetCheckBelongsToCompany(f.wetCheckId, companyId);
-    if (f.resolution !== "pending" && (patch.partId !== undefined || patch.quantity !== undefined || patch.laborHours !== undefined)) {
-      throw new Error(`Finding ${id} is already routed; pricing fields are immutable`);
+    // Editable while wet check is in_progress (tech) OR submitted (manager
+    // pricing/part swap during review). Beyond that — approved, partially
+    // or fully converted — pricing rows are frozen.
+    await this.assertFindingPriceEditable(f.wetCheckId, companyId);
+    const isConverted =
+      f.convertedAt != null ||
+      f.billingSheetId != null ||
+      f.estimateId != null ||
+      f.workOrderId != null;
+    if (isConverted) {
+      // Once converted, the entire finding row is sealed (not just pricing).
+      // Routing changes go through the separate /route endpoint which
+      // enforces its own immutability check.
+      throw new Error(`Finding ${id} is already converted; the row is immutable`);
     }
     // If a new partId is being set on the finding, verify it belongs to this
     // company AND server-authoritatively overwrite the snapshot fields so a
@@ -4631,7 +4860,7 @@ export class DatabaseStorage implements IStorage {
   async deleteWetCheckFinding(id: number, companyId: number): Promise<boolean> {
     const [f] = await db.select().from(wetCheckFindings).where(eq(wetCheckFindings.id, id));
     if (!f) return false;
-    await this.assertWetCheckBelongsToCompany(f.wetCheckId, companyId);
+    await this.assertWetCheckEditableByTech(f.wetCheckId, companyId);
     if (f.resolution !== "pending") return false;
     const result = await db.delete(wetCheckFindings).where(eq(wetCheckFindings.id, id));
     return (result.rowCount ?? 0) > 0;
@@ -4642,7 +4871,7 @@ export class DatabaseStorage implements IStorage {
     companyId: number,
     insert: Omit<InsertWetCheckPhoto, "wetCheckId">,
   ): Promise<WetCheckPhoto> {
-    await this.assertWetCheckBelongsToCompany(wetCheckId, companyId);
+    await this.assertWetCheckEditableByTech(wetCheckId, companyId);
     // Cross-record linkage validation: a photo's optional zoneRecordId /
     // findingId must belong to the SAME wet check, otherwise a client could
     // attach a photo to a record from a different visit (and tenant
@@ -4677,9 +4906,445 @@ export class DatabaseStorage implements IStorage {
   async deleteWetCheckPhoto(id: number, companyId: number): Promise<boolean> {
     const [p] = await db.select().from(wetCheckPhotos).where(eq(wetCheckPhotos.id, id));
     if (!p) return false;
-    await this.assertWetCheckBelongsToCompany(p.wetCheckId, companyId);
+    await this.assertWetCheckEditableByTech(p.wetCheckId, companyId);
     const result = await db.delete(wetCheckPhotos).where(eq(wetCheckPhotos.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async approveWetCheck(
+    id: number,
+    companyId: number,
+    manager: { id: number; name: string },
+  ): Promise<WetCheck | undefined> {
+    const wc = await this.assertWetCheckBelongsToCompany(id, companyId);
+    if (wc.status !== "submitted" && wc.status !== "approved") {
+      throw new Error(`Cannot approve wet check in status ${wc.status}`);
+    }
+    const [updated] = await db.update(wetChecks)
+      .set({
+        status: "approved",
+        approvedAt: wc.approvedAt ?? new Date(),
+        approvedBy: manager.id,
+        approvedByName: manager.name,
+        updatedAt: new Date(),
+      })
+      .where(eq(wetChecks.id, id))
+      .returning();
+    return updated;
+  }
+
+  async routeWetCheckFinding(
+    id: number,
+    companyId: number,
+    resolution: "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only",
+    manager: { id: number; name: string },
+  ): Promise<WetCheckFinding | undefined> {
+    const [f] = await db.select().from(wetCheckFindings).where(eq(wetCheckFindings.id, id));
+    if (!f) return undefined;
+    const wc = await this.assertWetCheckBelongsToCompany(f.wetCheckId, companyId);
+    // Manager routing only makes sense once the field tech has handed off
+    // (submitted / approved / partially_converted). Block in_progress so a
+    // race during tech edit cannot flip routing, and block converted so a
+    // fully-routed wet check stays sealed.
+    if (wc.status !== "submitted" && wc.status !== "approved" && wc.status !== "partially_converted") {
+      throw new Error(`Wet check ${f.wetCheckId} is ${wc.status}; routing is locked`);
+    }
+    // documented_only findings have convertedAt but no FK, so check both.
+    const isConverted =
+      f.convertedAt != null ||
+      f.billingSheetId != null ||
+      f.estimateId != null ||
+      f.workOrderId != null;
+    if (isConverted) {
+      throw new Error(`Finding ${id} is already converted; routing is immutable`);
+    }
+    const [updated] = await db.update(wetCheckFindings).set({
+      resolution,
+      resolutionDecidedAt: resolution === "pending" ? null : new Date(),
+      resolutionDecidedBy: resolution === "pending" ? null : manager.id,
+      updatedAt: new Date(),
+    }).where(eq(wetCheckFindings.id, id)).returning();
+    return updated;
+  }
+
+  async convertWetCheck(
+    id: number,
+    companyId: number,
+    manager: { id: number; name: string },
+    scheduledDates: Record<number, string | null> = {},
+  ): Promise<{
+    wetCheck: WetCheck;
+    billingSheetId: number | null;
+    estimateId: number | null;
+    workOrderId: number | null;
+  }> {
+    return await db.transaction(async (tx) => {
+      const [wc] = await tx.select().from(wetChecks)
+        .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
+      if (!wc) throw new Error(`Wet check ${id} not found for company ${companyId}`);
+      if (wc.status !== "submitted" && wc.status !== "approved" && wc.status !== "partially_converted") {
+        throw new Error(`Cannot convert wet check in status ${wc.status}`);
+      }
+      const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));
+      if (!cust) throw new Error(`Customer ${wc.customerId} not found`);
+      const laborRate = parseFloat(String(cust.laborRate ?? "45.00"));
+
+      const allFindings = await tx.select().from(wetCheckFindings)
+        .where(eq(wetCheckFindings.wetCheckId, id));
+      // Eligible = routed AND not already converted. documented_only rows
+      // have no FK so we must also gate on convertedAt or repeated converts
+      // would re-stamp/re-process them (idempotency bug).
+      const eligible = allFindings.filter(f =>
+        f.resolution !== "pending" &&
+        f.convertedAt == null &&
+        f.billingSheetId == null && f.estimateId == null && f.workOrderId == null,
+      );
+      const repaired = eligible.filter(f => f.resolution === "repaired_in_field");
+      const sentEst = eligible.filter(f => f.resolution === "sent_to_estimate");
+      const deferred = eligible.filter(f => f.resolution === "deferred_to_work_order");
+      const documented = eligible.filter(f => f.resolution === "documented_only");
+
+      const calc = (f: typeof allFindings[number]) => {
+        const qty = Number(f.quantity);
+        const partPrice = parseFloat(String(f.partPrice ?? "0"));
+        const laborHours = parseFloat(String(f.laborHours ?? "0"));
+        const partsTotal = partPrice * qty;
+        const laborTotal = laborHours * laborRate;
+        return { qty, partPrice, laborHours, partsTotal, laborTotal, lineTotal: partsTotal + laborTotal };
+      };
+
+      const now = new Date();
+      // Reuse destinations created on a prior partial conversion of THIS
+      // wet check so we satisfy the "at most one BS / one estimate / one WO
+      // per wet check lifecycle" invariant. Subsequent runs append items
+      // to the existing record and recompute its totals instead of
+      // creating a duplicate.
+      const priorBsId = allFindings.find(f => f.billingSheetId != null)?.billingSheetId ?? null;
+      const priorEstId = allFindings.find(f => f.estimateId != null)?.estimateId ?? null;
+      const priorWoId = allFindings.find(f => f.workOrderId != null)?.workOrderId ?? null;
+      let billingSheetId: number | null = priorBsId;
+      let estimateId: number | null = priorEstId;
+      let workOrderId: number | null = priorWoId;
+
+      // 1) Repaired-in-field → at most one billing sheet per wet check
+      if (repaired.length > 0) {
+        const lines = repaired.map(calc);
+        const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
+        const newLaborHours = lines.reduce((s, l) => s + l.laborHours, 0);
+
+        let bsId: number;
+        if (priorBsId != null) {
+          // Append to existing wet-check billing sheet and recompute totals
+          // from (existing items + new items). The labor rate used here is
+          // the SNAPSHOT (`appliedLaborRate`) stored on the existing sheet,
+          // NOT the live customer rate — previously converted findings must
+          // never be repriced if the customer's labor rate changes between
+          // partial-conversion runs.
+          const [priorBs] = await tx.select().from(billingSheets)
+            .where(eq(billingSheets.id, priorBsId));
+          const snapshotRate = parseFloat(String(priorBs?.appliedLaborRate ?? priorBs?.laborRate ?? laborRate));
+          const existingItems = await tx.select().from(billingSheetItems)
+            .where(eq(billingSheetItems.billingSheetId, priorBsId));
+          const existingPartsSubtotal = existingItems.reduce(
+            (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
+          const existingLaborHours = existingItems.reduce(
+            (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
+          const totalLaborHours = existingLaborHours + newLaborHours;
+          const partsSubtotal = existingPartsSubtotal + newPartsSubtotal;
+          const laborSubtotal = totalLaborHours * snapshotRate;
+          const total = partsSubtotal + laborSubtotal;
+          await tx.update(billingSheets).set({
+            totalHours: totalLaborHours.toFixed(2),
+            laborSubtotal: laborSubtotal.toFixed(2),
+            partsSubtotal: partsSubtotal.toFixed(2),
+            totalAmount: total.toFixed(2),
+          }).where(eq(billingSheets.id, priorBsId));
+          bsId = priorBsId;
+        } else {
+          const laborSubtotal = newLaborHours * laborRate;
+          const total = newPartsSubtotal + laborSubtotal;
+          const billingNumber = `BS-WC-${id}-${Date.now()}`;
+          const [bs] = await tx.insert(billingSheets).values({
+            billingNumber,
+            customerId: wc.customerId,
+            customerName: wc.customerName,
+            propertyAddress: wc.propertyAddress ?? "",
+            workDate: wc.submittedAt ?? now,
+            technicianName: wc.technicianName,
+            technicianId: wc.technicianId,
+            workDescription: `Wet check repairs (#${id})`,
+            status: "submitted",
+            totalHours: newLaborHours.toFixed(2),
+            laborRate: laborRate.toFixed(2),
+            laborSubtotal: laborSubtotal.toFixed(2),
+            partsSubtotal: newPartsSubtotal.toFixed(2),
+            totalAmount: total.toFixed(2),
+            appliedLaborRate: laborRate.toFixed(2),
+          } as typeof billingSheets.$inferInsert).returning();
+          bsId = bs.id;
+        }
+        billingSheetId = bsId;
+
+        for (let i = 0; i < repaired.length; i++) {
+          const f = repaired[i];
+          const l = lines[i];
+          await tx.insert(billingSheetItems).values({
+            billingSheetId: bsId,
+            partId: f.partId,
+            partName: f.partName ?? f.issueType,
+            partDescription: f.notes ?? null,
+            quantity: l.qty.toFixed(2),
+            unitPrice: l.partPrice.toFixed(2),
+            totalPrice: l.partsTotal.toFixed(2),
+            laborHours: l.laborHours.toFixed(2),
+            notes: f.notes ?? null,
+          });
+          await tx.update(wetCheckFindings).set({
+            billingSheetId: bsId,
+            convertedAt: now,
+            updatedAt: now,
+          }).where(eq(wetCheckFindings.id, f.id));
+        }
+      }
+
+      // 2) Sent-to-estimate → at most one estimate per wet check
+      if (sentEst.length > 0) {
+        for (const f of sentEst) {
+          if (!f.partId) {
+            throw new Error(`Finding ${f.id} cannot be sent to estimate without a part`);
+          }
+        }
+        let estId: number;
+        if (priorEstId != null) {
+          // Append items to the existing wet-check estimate, then recompute
+          // totals from (existing items + new items). Use the SNAPSHOT
+          // appliedLaborRate from the existing estimate so prior items
+          // are not repriced. estimate-item `totalPrice` is parts-only
+          // (partPrice * qty) per processEstimatePayload convention.
+          const [priorEst] = await tx.select().from(estimates)
+            .where(eq(estimates.id, priorEstId));
+          const snapshotRate = parseFloat(String(priorEst?.appliedLaborRate ?? priorEst?.laborRate ?? laborRate));
+          const existingItems = await tx.select().from(estimateItems)
+            .where(eq(estimateItems.estimateId, priorEstId));
+          let nextSort = existingItems.reduce((m, it) => Math.max(m, it.sortOrder ?? 0), -1) + 1;
+          for (const f of sentEst) {
+            const c = calc(f);
+            await tx.insert(estimateItems).values({
+              estimateId: priorEstId,
+              description: f.notes ?? f.issueType,
+              partId: f.partId as number,
+              partName: f.partName ?? f.issueType,
+              partPrice: c.partPrice.toFixed(2),
+              laborHours: c.laborHours.toFixed(2),
+              quantity: c.qty,
+              totalPrice: c.partsTotal.toFixed(2),
+              sortOrder: nextSort++,
+            } as typeof estimateItems.$inferInsert);
+          }
+          const allItems = await tx.select().from(estimateItems)
+            .where(eq(estimateItems.estimateId, priorEstId));
+          const partsSubtotal = allItems.reduce(
+            (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
+          const totalLaborHours = allItems.reduce(
+            (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
+          const laborSubtotal = totalLaborHours * snapshotRate;
+          const total = partsSubtotal + laborSubtotal;
+          await tx.update(estimates).set({
+            partsSubtotal: partsSubtotal.toFixed(2),
+            laborSubtotal: laborSubtotal.toFixed(2),
+            totalAmount: total.toFixed(2),
+            updatedAt: now,
+          }).where(eq(estimates.id, priorEstId));
+          estId = priorEstId;
+        } else {
+          // First-time creation goes through the SAME service POST
+          // /api/estimates uses, keeping any side effects in lock-step.
+          const estimateNumber = `EST-WC-${id}-${Date.now()}`;
+          const est = await this.createEstimateFromPayload({
+            estimate: {
+              companyId,
+              customerId: wc.customerId,
+              customerName: cust.name,
+              customerEmail: cust.email,
+              customerPhone: cust.phone ?? null,
+              projectName: `Wet check follow-up (#${id})`,
+              projectAddress: wc.propertyAddress ?? null,
+              createdBy: manager.name,
+              createdByUserId: manager.id,
+              estimateDate: now,
+              status: "pending",
+              laborRate: laborRate.toFixed(2),
+              appliedLaborRate: laborRate.toFixed(2),
+            } as EstimatePayloadInput["estimate"],
+            items: sentEst.map((f, idx) => {
+              const c = calc(f);
+              return {
+                description: f.notes ?? f.issueType,
+                partId: f.partId as number,
+                partName: f.partName ?? f.issueType,
+                partPrice: c.partPrice.toFixed(2),
+                // Finding labor is line-level (calc does not multiply by qty);
+                // estimate-item convention is also line-level.
+                laborHours: c.laborHours.toFixed(2),
+                quantity: c.qty,
+                sortOrder: idx,
+              };
+            }),
+          }, tx, estimateNumber);
+          estId = est.id;
+        }
+        estimateId = estId;
+        for (const f of sentEst) {
+          await tx.update(wetCheckFindings).set({
+            estimateId: estId,
+            convertedAt: now,
+            updatedAt: now,
+          }).where(eq(wetCheckFindings.id, f.id));
+        }
+      }
+
+      // 3) Deferred-to-work-order → at most one work order per wet check
+      if (deferred.length > 0) {
+        const lines = deferred.map(calc);
+        const newPartsSubtotal = lines.reduce((s, l) => s + l.partsTotal, 0);
+        const newLaborHours = lines.reduce((s, l) => s + l.laborHours, 0);
+        // Earliest manager-supplied scheduled date wins for the WO header.
+        let scheduled: Date | null = null;
+        for (const f of deferred) {
+          const raw = scheduledDates[f.id];
+          if (raw) {
+            const d = new Date(raw);
+            if (!isNaN(d.getTime()) && (!scheduled || d < scheduled)) scheduled = d;
+          }
+        }
+
+        let woId: number;
+        if (priorWoId != null) {
+          // Append items to the existing wet-check WO and recompute totals
+          // from the SNAPSHOT appliedLaborRate stored on that WO so prior
+          // items are not repriced. WO-item totalPrice mirrors estimate-
+          // item convention: parts-only (partPrice * qty).
+          const [priorWo] = await tx.select().from(workOrders)
+            .where(eq(workOrders.id, priorWoId));
+          const snapshotRate = parseFloat(String(priorWo?.appliedLaborRate ?? priorWo?.laborRate ?? laborRate));
+          const existingItems = await tx.select().from(workOrderItems)
+            .where(eq(workOrderItems.workOrderId, priorWoId));
+          for (let i = 0; i < deferred.length; i++) {
+            const f = deferred[i];
+            const l = lines[i];
+            await tx.insert(workOrderItems).values({
+              workOrderId: priorWoId,
+              partId: f.partId,
+              partName: f.partName ?? f.issueType,
+              partPrice: l.partPrice.toFixed(2),
+              quantity: l.qty,
+              laborHours: l.laborHours.toFixed(2),
+              totalPrice: l.partsTotal.toFixed(2),
+            });
+          }
+          const existingParts = existingItems.reduce(
+            (s, it) => s + parseFloat(String(it.totalPrice ?? "0")), 0);
+          const existingLaborHours = existingItems.reduce(
+            (s, it) => s + parseFloat(String(it.laborHours ?? "0")), 0);
+          const partsSubtotal = existingParts + newPartsSubtotal;
+          const totalLaborHours = existingLaborHours + newLaborHours;
+          const laborSubtotal = totalLaborHours * snapshotRate;
+          const total = partsSubtotal + laborSubtotal;
+          await tx.update(workOrders).set({
+            totalHours: totalLaborHours.toFixed(2),
+            laborSubtotal: laborSubtotal.toFixed(2),
+            partsSubtotal: partsSubtotal.toFixed(2),
+            totalAmount: total.toFixed(2),
+            totalItems: existingItems.length + deferred.length,
+            // Only move scheduledDate earlier — never push it later — so a
+            // follow-up conversion cannot delay work the manager already
+            // committed to. Pass-through if no prior date existed.
+            ...(scheduled && (!priorWo?.scheduledDate || scheduled < priorWo.scheduledDate)
+              ? { scheduledDate: scheduled }
+              : {}),
+          }).where(eq(workOrders.id, priorWoId));
+          woId = priorWoId;
+        } else {
+          const laborSubtotal = newLaborHours * laborRate;
+          const total = newPartsSubtotal + laborSubtotal;
+          const woNumber = `WO-WC-${id}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const wo = await this._writeWorkOrderWithItems(
+            tx,
+            {
+              workOrderNumber: woNumber,
+              customerId: wc.customerId,
+              customerName: cust.name,
+              customerEmail: cust.email,
+              customerPhone: cust.phone ?? null,
+              projectName: `Wet check deferred work (#${id})`,
+              projectAddress: wc.propertyAddress ?? null,
+              workType: "maintenance",
+              status: "pending",
+              priority: "medium",
+              scheduledDate: scheduled,
+              description: `Deferred from wet check #${id}`,
+              totalHours: newLaborHours.toFixed(2),
+              laborRate: laborRate.toFixed(2),
+              laborSubtotal: laborSubtotal.toFixed(2),
+              partsSubtotal: newPartsSubtotal.toFixed(2),
+              totalAmount: total.toFixed(2),
+              appliedLaborRate: laborRate.toFixed(2),
+              totalItems: deferred.length,
+            } as typeof workOrders.$inferInsert,
+            deferred.map((f, i) => {
+              const l = lines[i];
+              return {
+                partId: f.partId,
+                partName: f.partName ?? f.issueType,
+                partPrice: l.partPrice.toFixed(2),
+                quantity: l.qty,
+                laborHours: l.laborHours.toFixed(2),
+                // Parts-only line total per estimate/WO item convention
+                // (labor is captured at header from laborHours * applied rate).
+                totalPrice: l.partsTotal.toFixed(2),
+              };
+            }),
+          );
+          woId = wo.id;
+        }
+        workOrderId = woId;
+
+        for (const f of deferred) {
+          await tx.update(wetCheckFindings).set({
+            workOrderId: woId,
+            convertedAt: now,
+            updatedAt: now,
+          }).where(eq(wetCheckFindings.id, f.id));
+        }
+      }
+
+      // 4) Documented-only → stamp convertedAt only (no FK)
+      for (const f of documented) {
+        await tx.update(wetCheckFindings).set({
+          convertedAt: now,
+          updatedAt: now,
+        }).where(eq(wetCheckFindings.id, f.id));
+      }
+
+      // 5) Wet check status: partially_converted if any pending remain.
+      const stillPending = await tx.select({ id: wetCheckFindings.id })
+        .from(wetCheckFindings)
+        .where(and(
+          eq(wetCheckFindings.wetCheckId, id),
+          eq(wetCheckFindings.resolution, "pending"),
+        ));
+      const newStatus = stillPending.length > 0 ? "partially_converted" : "converted";
+      const [updated] = await tx.update(wetChecks).set({
+        status: newStatus,
+        fullyConvertedAt: stillPending.length > 0 ? null : now,
+        approvedAt: wc.approvedAt ?? now,
+        approvedBy: wc.approvedBy ?? manager.id,
+        approvedByName: wc.approvedByName ?? manager.name,
+        updatedAt: now,
+      }).where(eq(wetChecks.id, id)).returning();
+
+      return { wetCheck: updated, billingSheetId, estimateId, workOrderId };
+    });
   }
 }
 

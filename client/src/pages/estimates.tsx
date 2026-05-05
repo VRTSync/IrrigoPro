@@ -49,6 +49,21 @@ export default function Estimates() {
     }
   }, []);
 
+  // Deep-link support: ?openEstimate=<id> opens the estimate detail modal.
+  // Mirrors the openSheet/openWorkOrder pattern used by billing-sheets and
+  // work-orders so wet-check review can deep-link into a created estimate.
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("openEstimate");
+    if (!v) return;
+    const idNum = parseInt(v, 10);
+    if (!Number.isFinite(idNum)) return;
+    setSelectedEstimateId(idNum);
+    setShowDetailModal(true);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("openEstimate");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+
   const { data: estimates, isLoading } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates"],
   });
