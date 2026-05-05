@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
-import { Loader2, ChevronLeft, Search, CheckCircle2, XCircle, MinusCircle, Trash2, Camera, Pencil } from "lucide-react";
+import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil } from "lucide-react";
 import type {
   Customer,
   WorkOrder,
@@ -664,37 +664,49 @@ function ZoneScreen({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>Status: <Badge>{zoneRecord?.status ?? "not_checked"}</Badge></div>
+          <div>Status: <Badge>{
+            zoneRecord?.status === "checked_ok" ? "Ran OK" :
+            zoneRecord?.status === "checked_with_issues" ? "Needs Work" :
+            zoneRecord?.status === "not_applicable" ? "Skipped" :
+            "Not Checked"
+          }</Badge></div>
           {!readOnly && (
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                variant={zoneRecord?.status === "checked_ok" ? "default" : "outline"}
-                className={zoneRecord?.status === "checked_ok" ? "bg-green-600" : ""}
-                onClick={() => setStatus.mutate("checked_ok")}
-                disabled={setStatus.isPending}
-                data-testid="btn-zone-yes"
-              >
-                <CheckCircle2 className="w-4 h-4 mr-1" /> YES
-              </Button>
-              <Button
-                variant={zoneRecord?.status === "checked_with_issues" ? "default" : "outline"}
-                className={zoneRecord?.status === "checked_with_issues" ? "bg-red-600" : ""}
-                onClick={() => setStatus.mutate("checked_with_issues")}
-                disabled={setStatus.isPending}
-                data-testid="btn-zone-no"
-              >
-                <XCircle className="w-4 h-4 mr-1" /> NO
-              </Button>
-              <Button
-                variant={zoneRecord?.status === "not_applicable" ? "default" : "outline"}
-                className={zoneRecord?.status === "not_applicable" ? "bg-gray-500" : ""}
-                onClick={() => setStatus.mutate("not_applicable")}
-                disabled={setStatus.isPending}
-                data-testid="btn-zone-na"
-              >
-                <MinusCircle className="w-4 h-4 mr-1" /> N/A
-              </Button>
-            </div>
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  variant={zoneRecord?.status === "checked_ok" ? "default" : "outline"}
+                  className={zoneRecord?.status === "checked_ok" ? "bg-green-600" : ""}
+                  onClick={() => setStatus.mutate("checked_ok")}
+                  disabled={setStatus.isPending}
+                  data-testid="btn-zone-yes"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-1" /> Ran OK
+                </Button>
+                <Button
+                  variant={zoneRecord?.status === "checked_with_issues" ? "default" : "outline"}
+                  className={zoneRecord?.status === "checked_with_issues" ? "bg-red-600" : ""}
+                  onClick={() => setStatus.mutate("checked_with_issues")}
+                  disabled={setStatus.isPending}
+                  data-testid="btn-zone-no"
+                >
+                  <Wrench className="w-4 h-4 mr-1" /> Needs Work
+                </Button>
+                <Button
+                  variant={zoneRecord?.status === "not_applicable" ? "default" : "outline"}
+                  className={zoneRecord?.status === "not_applicable" ? "bg-gray-500" : ""}
+                  onClick={() => setStatus.mutate("not_applicable")}
+                  disabled={setStatus.isPending}
+                  data-testid="btn-zone-na"
+                >
+                  <MinusCircle className="w-4 h-4 mr-1" /> Skip / Not Applicable
+                </Button>
+              </div>
+              {(!zoneRecord || zoneRecord.status === "not_checked") && (
+                <div className="text-xs text-gray-500" data-testid="needs-work-helper">
+                  Tap <span className="font-semibold">Needs Work</span> to add parts, labor, and notes for this zone.
+                </div>
+              )}
+            </>
           )}
           {photos.length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1" data-testid="zone-photos">
@@ -707,7 +719,7 @@ function ZoneScreen({
       {/* Issue presets — grouped by Quick Fixes / Advanced / Zone Issues */}
       {zoneRecord && !readOnly && zoneRecord.status === "checked_with_issues" && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Add a finding</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Add work for this zone</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {(["quick_fix", "advanced", "zone_issue"] as const).map(group => {
               const groupItems = issueTypes.filter(i => i.issueGroup === group);
@@ -741,7 +753,7 @@ function ZoneScreen({
       {/* Existing findings */}
       {zoneRecord && zoneRecord.findings.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Findings on this zone</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Work added to this zone</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {zoneRecord.findings.map(f => (
               <div key={f.id} className="border rounded p-2" data-testid={`finding-${f.id}`}>
