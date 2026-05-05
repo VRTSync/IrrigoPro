@@ -47,6 +47,7 @@ export class SyncEngine {
   private pruneOlderThanMs: number;
   private authHeaders: () => Record<string, string>;
   private inFlight = new Set<string>();
+  private aborts = new Map<string, AbortController>();
   private online = true;
   private heartbeatTimer: any = null;
   private started = false;
@@ -140,6 +141,44 @@ export class SyncEngine {
     this.scheduleTick();
   }
 
+  // Slice 4D — UI-driven actions on individual queue entries.
+  //
+  // Snapshot of every queue entry, used by the queue view. Re-fetched on
+  // every engine state event by the consuming hook.
+  async listMutations(): Promise<QueuedMutation[]> {
+    const db = await this.ensureDB();
+    return await listAllMutations(db);
+  }
+
+  // Reset a failed mutation back to pending so the next tick will pick it
+  // up. Safe to call on any mutation; only failed entries are useful.
+  async retryMutation(id: string): Promise<void> {
+    const db = await this.ensureDB();
+    await updateMutation(db, id, {
+      status: "pending",
+      attemptCount: 0,
+      lastError: null,
+      lastAttemptAt: null,
+    });
+    await this.broadcastState();
+    this.scheduleTick();
+  }
+
+  // Remove a mutation from the queue. If it is currently in-flight, abort
+  // the fetch first; the dispatcher's catch block will see the abort but
+  // updateMutation against the deleted row is a no-op.
+  async cancelMutation(id: string): Promise<void> {
+    const db = await this.ensureDB();
+    const ac = this.aborts.get(id);
+    if (ac) {
+      try { ac.abort(); } catch { /* ignore */ }
+    }
+    await deleteMutation(db, id);
+    this.inFlight.delete(id);
+    this.aborts.delete(id);
+    await this.broadcastState();
+  }
+
   private scheduleTick(): void {
     if (this.tickScheduled) return;
     this.tickScheduled = true;
@@ -231,6 +270,8 @@ export class SyncEngine {
       return;
     }
 
+    const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+    if (ac) this.aborts.set(m.id, ac);
     try {
       const headers: Record<string, string> = {
         ...this.authHeaders(),
@@ -243,6 +284,7 @@ export class SyncEngine {
         headers,
         body: m.method === "DELETE" || body === undefined ? undefined : JSON.stringify(body),
         credentials: "include",
+        signal: ac?.signal,
       });
 
       // Any successful response is a heartbeat: we know we're online.
@@ -328,6 +370,7 @@ export class SyncEngine {
       setTimeout(() => this.scheduleTick(), wait);
     } finally {
       this.inFlight.delete(m.id);
+      this.aborts.delete(m.id);
     }
     // Chain the next dispatch immediately if there's room.
     if (this.online && this.inFlight.size < this.maxConcurrent) {
@@ -468,6 +511,17 @@ const FLAG_ENABLED =
 
 export function isOfflineQueueEnabled(): boolean {
   return FLAG_ENABLED;
+}
+
+// Slice 4D — Independent feature flag for the sync UI surface (badge,
+// queue view, offline strip, conflict toast). Defaults on. Flipping this
+// off hides the UI but keeps the queue draining in the background.
+const SYNC_UI_FLAG_ENABLED =
+  (typeof import.meta !== "undefined" &&
+    (import.meta as any).env?.VITE_OFFLINE_SYNC_UI !== "false");
+
+export function isOfflineSyncUIEnabled(): boolean {
+  return SYNC_UI_FLAG_ENABLED;
 }
 
 let singleton: SyncEngine | null = null;

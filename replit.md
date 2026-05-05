@@ -27,16 +27,17 @@ IrrigoPro is a full-stack business management system for irrigation companies, s
 - `client/src/styles/tailwind.css`: Main Tailwind CSS.
 
 ## Architecture decisions
-- **Role-based Pricing Visibility**: Field technicians never see pricing; financial data is stripped from API responses at the server level using `applyPricingVisibility()` in `server/routes.ts`.
-- **Server-side Pricing Enforcement**: Catalog pricing for line items is enforced server-side.
+- **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side via `applyPricingVisibility()` in `server/routes.ts`.
+- **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
 - **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout for improved user experience.
 - **Independent Parts Management**: Parts catalog operates independently from QuickBooks for robust inventory control.
 - **KML for Site Maps**: KML import is used for interactive irrigation maps.
 - **IrrigoPro Display Name (`irrigoName`)**: A separate customer field (`irrigo_name` in DB) for internal recognition, defaulting to the official customer name, and prominently displayed throughout the app.
+- **Monthly Invoice Consolidation**: All customer work consolidated into single QuickBooks invoices with tax-free totals.
+- **Phone-Based User Login**: New team members use their phone number as their login username, with email being optional.
 
 ## Product
 - Manages estimates, customer approval, work orders, invoicing, and billing sheets.
-- Monthly invoice consolidation into single, tax-free QuickBooks invoices.
 - Granular role-based access control for pricing, site maps, QuickBooks, customer management, work orders/billing sheets.
 - Interactive site maps with KML import, controller management, and live GPS tracking.
 - Token-based customer email approval for estimates.
@@ -70,11 +71,11 @@ Work Order & Billing Sheet Photo Uploads: Photos can be attached during work ord
 Work Order Editing: Full work order editing available for irrigation managers and admins (company_admin, super_admin) on non-completed/non-cancelled work orders. An "Edit" button in the work order detail header opens the EditWorkOrderModal with all editable fields: project name, description, project address, location notes, scheduled date, priority, technician assignment, special instructions, and internal notes. Changes saved via PATCH /api/work-orders/:id. Field techs and billing managers do not see the edit button. Customer assignment and work order items are not editable through this form.
 Work Order Assignment: The assignment dropdown on work orders includes both irrigation managers and field technicians, grouped by role (Managers / Field Techs). The `/api/users/field-techs` endpoint returns both `field_tech` and `irrigation_manager` active users. Reassignment in work order details also shows grouped managers and field techs.
 Location Picker Enhancements: The LocationPicker component features a live GPS tracking dot (pulsing blue circle) that continuously shows the user's real-time position on the map. A "Use My Location" button snaps the work location pin to the user's GPS coordinates with reverse geocoding. The map automatically re-centers when the customer/community selection changes using `map.flyTo()` for smooth transitions.
-Phone-Based User Login: New company team members use their phone number as their login username. The phone field is required when creating new users, and the username is automatically set to the phone number. Email is optional. Existing users with text-slug usernames are completely unaffected.
 IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` field (stored in the database as `irrigo_name`) that is the name shown to all IrrigoPro users throughout the app — intended to be a property name or nickname the field team recognizes. It defaults to the official customer name on creation and auto-fills from the customer name when adding new customers. Displayed as the primary name everywhere (customer list, profile, billing, site maps, customer selector). Official name shown as a faint subtitle only when it differs. In the customer form, the field is highlighted with a green bordered box, green badge labeled "Irrigo Facing", and a Tag icon so it is unmistakable. Search across all views matches both irrigoName and official name.
 
 ## Gotchas
-- Field technicians cannot see any pricing information; this is enforced at the API level.
+- Offline sync UI (badge, queue view, offline strip, photo progress) is in `client/src/components/offline/sync-ui.tsx` and gated by `VITE_OFFLINE_SYNC_UI`. Conflict/error toasts are in `conflict-toast-bridge.tsx`.
+- Field technicians cannot see any pricing information; this is enforced at the API level via `applyPricingVisibility()`.
 - Photos uploaded to billing sheets require the `uploadedPhotos` state in the submission payload for new sheets and manager edits.
 - Estimates automatically create work orders upon approval; manual work order creation is for direct billing only.
 - Company admin users have limited direct access to estimates and work orders pages; they view through modals.

@@ -72,3 +72,78 @@ arrives in 4B.
 - [ ] `curl https://<host>/api/health` returns `{ "ok": true }` with no
       auth required. This is what 4B's sync engine will poll.
 
+
+---
+
+## Slice 4D — Sync UI and conflict handling
+
+Goal: a field tech using the wet check screen can always tell at a
+glance whether their work has synced, see exactly what's queued, retry
+or cancel anything that failed, and notice when the server kept a
+different version because someone else got there first.
+
+### Setup
+
+1. Build with the offline flags on (defaults):
+   `npm run build && npm start`
+2. Sign in as a **field tech** user on the device under test.
+3. Open a wet check from the list to land on the detail screen.
+
+### Header sync badge
+
+- [ ] When everything has drained, the badge in the header reads
+      **"All synced"** with a green check icon.
+- [ ] Toggle the device offline (Airplane Mode) and add a finding —
+      the badge flips to **"Syncing… N"** with the spinner and the
+      pending count grows as you tap more buttons.
+- [ ] Force a 4xx (e.g. delete a finding twice in offline → online
+      → offline → online) — the badge flips to **"Sync errors (N)"**
+      in red. Tapping the badge in any of the three states opens the
+      queue view.
+
+### Queue view (bottom sheet)
+
+- [ ] The sheet groups entries into **Failed**, **Syncing**, and
+      **Recently completed** sections with counts and timestamps.
+- [ ] **Cancel** on a pending or failed entry removes it from the
+      queue and the badge counters update immediately.
+- [ ] **Cancel** on an in-flight entry aborts the network call and
+      removes the entry; no further attempts happen.
+- [ ] **Retry** on a failed entry resets it to pending; once back
+      online it dispatches and moves to Recently completed.
+- [ ] With nothing queued the sheet shows
+      **"No queued changes — everything is in sync."**
+
+### Offline strip
+
+- [ ] Going offline pins the amber strip to the very top of the
+      wet check screen reading **"Offline — your changes are queued
+      and will sync when you're back online."**
+- [ ] Coming back online removes the strip without a reload.
+
+### 409 conflict toast
+
+- [ ] Set up a finding edit on Device A while another user edits the
+      same finding on Device B and saves first. When Device A reconnects
+      the engine emits a 409. The toast reads
+      **"Someone else changed this first"**, is non-blocking (does
+      not block tapping anywhere on the screen), and includes a
+      **"View what they did"** action that navigates to the wet check
+      and shows the server-wins mirror.
+- [ ] Each conflict toasts only once per mutation id (no duplicate
+      pop-ups while the engine continues to drain).
+
+### Per-photo upload progress
+
+- [ ] Add several photos while still online — the chip near the badge
+      reads **"Uploading photo N of M…"** and the count drops as each
+      photo.link mutation completes.
+
+### Feature-flag rollback
+
+- [ ] Build with `VITE_OFFLINE_SYNC_UI=false`. Reload the app: the
+      badge, queue view, offline strip, photo progress chip, and
+      conflict toasts are all hidden, but the engine continues to
+      drain in the background (verified via DevTools → Application →
+      IndexedDB → `irrigopro-offline-v2` → `mutationQueue` shrinking
+      while online).

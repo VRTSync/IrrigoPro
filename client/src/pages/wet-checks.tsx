@@ -28,6 +28,7 @@ import {
   cachedApiRequest,
 } from "@/lib/offline/api";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
+import { OfflineStrip, OfflineSyncUI } from "@/components/offline/sync-ui";
 import type {
   Customer,
   WorkOrder,
@@ -295,7 +296,11 @@ function WetCheckList() {
 
   return (
     <div className="max-w-3xl mx-auto py-4 space-y-4">
-      <h1 className="text-2xl font-bold">Wet Checks</h1>
+      <OfflineStrip />
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Wet Checks</h1>
+        <OfflineSyncUI />
+      </div>
 
       <Card>
         <CardHeader className="pb-2">
@@ -608,9 +613,13 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
   const naCount = wc.zoneRecords.filter(z => z.status === "not_applicable").length;
   return (
     <div className="max-w-3xl mx-auto py-4 space-y-4">
-      <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
-        <ChevronLeft className="w-4 h-4 mr-1" /> All Wet Checks
-      </Button>
+      <OfflineStrip />
+      <div className="flex items-center justify-between gap-2">
+        <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
+          <ChevronLeft className="w-4 h-4 mr-1" /> All Wet Checks
+        </Button>
+        <OfflineSyncUI />
+      </div>
       {/* Sticky chip — keeps the complete / pending / skipped tally
           visible while the tech scrolls through controllers, so they
           always know what the submit-confirm modal will say. Tapping a
