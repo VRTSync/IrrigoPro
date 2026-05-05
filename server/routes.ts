@@ -11124,8 +11124,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
-  // ─── Admin CRUD for issue type configs (Task #268) ────────────────────────
-  // company_admin and billing_manager only — scoped to the caller's company.
+  // ─── Admin CRUD for issue type configs (Task #268, #277) ──────────────────
+  // company_admin, super_admin, and irrigation_manager — scoped to the
+  // caller's company. Irrigation managers manage the issue list their techs
+  // see in the field; field techs and billing managers remain locked out.
+  const requireIssueTypeAdminAccess = (req: any, res: any, next: any) => {
+    const userRole = req.authenticatedUserRole;
+    if (
+      userRole === "company_admin" ||
+      userRole === "irrigation_manager" ||
+      userRole === "super_admin"
+    ) {
+      return next();
+    }
+    return res.status(403).json({
+      message: "Access denied. Only company administrators and irrigation managers can manage wet check issue types.",
+    });
+  };
+
   const issueTypeAdminBodySchema = insertIssueTypeConfigSchema
     .omit({ companyId: true })
     .extend({
@@ -11144,7 +11160,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       isActive: z.boolean().optional(),
     });
 
-  app.get("/api/admin/issue-types", requireAuthentication, requireBillingAccess, async (req, res) => {
+  app.get("/api/admin/issue-types", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     try {
       const rows = await storage.listAllIssueTypeConfigs(cid);
@@ -11152,7 +11168,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
-  app.post("/api/admin/issue-types", requireAuthentication, requireBillingAccess, async (req, res) => {
+  app.post("/api/admin/issue-types", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const parsed = issueTypeAdminBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -11171,7 +11187,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   const issueTypePatchSchema = issueTypeAdminBodySchema.partial();
-  app.patch("/api/admin/issue-types/:id", requireAuthentication, requireBillingAccess, async (req, res) => {
+  app.patch("/api/admin/issue-types/:id", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid id" });
@@ -11193,7 +11209,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Soft-delete via deactivation — preserves historical references.
-  app.delete("/api/admin/issue-types/:id", requireAuthentication, requireBillingAccess, async (req, res) => {
+  app.delete("/api/admin/issue-types/:id", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid id" });
@@ -11207,7 +11223,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   const issueTypeReorderSchema = z.object({
     orderedIds: z.array(z.coerce.number().int().positive()).min(1),
   });
-  app.post("/api/admin/issue-types/reorder", requireAuthentication, requireBillingAccess, async (req, res) => {
+  app.post("/api/admin/issue-types/reorder", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const parsed = issueTypeReorderSchema.safeParse(req.body ?? {});
     if (!parsed.success) {

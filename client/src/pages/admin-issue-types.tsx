@@ -54,7 +54,9 @@ export default function AdminIssueTypesPage() {
     try { return JSON.parse(safeGet("user") || "{}").role as string | undefined; }
     catch { return undefined; }
   })();
-  const allowed = userRole === "company_admin" || userRole === "billing_manager";
+  const allowed =
+    userRole === "company_admin" ||
+    userRole === "irrigation_manager";
 
   const queryKey = ["/api/admin/issue-types"] as const;
 

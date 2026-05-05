@@ -174,7 +174,16 @@ export default function Navigation() {
           { path: "/estimates", label: "Estimates", icon: FileText },
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
-          { path: "/wet-checks/admin", label: "Wet Checks", icon: Droplets },
+          {
+            path: "/wet-checks/admin",
+            label: "Wet Checks",
+            icon: Droplets,
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/wet-checks/admin", label: "Wet Checks", icon: Droplets },
+              { path: "/admin/issue-types", label: "Issue Types", icon: Droplets },
+            ],
+          },
           { 
             path: "/customers", 
             label: "Customers", 
@@ -232,15 +241,6 @@ export default function Navigation() {
               { path: "/parts", label: "Parts Catalog", icon: Package },
               { path: "/parts-settings", label: "Parts Settings", icon: Settings },
               { path: "/parts-pending-approval", label: "Parts Pending Approval", icon: ShieldCheck, badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined },
-            ]
-          },
-          {
-            path: "/admin",
-            label: "Admin",
-            icon: Settings,
-            isDropdown: true,
-            dropdownItems: [
-              { path: "/admin/issue-types", label: "Wet Check Issue Types", icon: Droplets },
             ]
           },
         ];

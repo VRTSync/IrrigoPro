@@ -243,7 +243,6 @@ function Router() {
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
-                <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
