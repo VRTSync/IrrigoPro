@@ -11311,7 +11311,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // can render delete affordances without fanning out per-row fetches.
   app.get("/api/wet-checks/admin", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (req.authenticatedUserRole !== "company_admin" && req.authenticatedUserRole !== "super_admin") {
+    if (
+      req.authenticatedUserRole !== "company_admin" &&
+      req.authenticatedUserRole !== "super_admin" &&
+      req.authenticatedUserRole !== "irrigation_manager"
+    ) {
       return res.status(403).json({ message: "Forbidden" });
     }
     try {
@@ -11329,7 +11333,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // with a JSON body matches the existing billing-sheets bulk endpoint.
   app.delete("/api/wet-checks/bulk-delete", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (req.authenticatedUserRole !== "company_admin" && req.authenticatedUserRole !== "super_admin") {
+    if (
+      req.authenticatedUserRole !== "company_admin" &&
+      req.authenticatedUserRole !== "super_admin" &&
+      req.authenticatedUserRole !== "irrigation_manager"
+    ) {
       return res.status(403).json({ message: "Forbidden" });
     }
     const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : null;
@@ -11384,7 +11392,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // routed downstream (billing sheet / estimate / work order).
   app.delete("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (req.authenticatedUserRole !== "company_admin" && req.authenticatedUserRole !== "super_admin") {
+    if (
+      req.authenticatedUserRole !== "company_admin" &&
+      req.authenticatedUserRole !== "super_admin" &&
+      req.authenticatedUserRole !== "irrigation_manager"
+    ) {
       return res.status(403).json({ message: "Forbidden" });
     }
     const id = parseInt(req.params.id);

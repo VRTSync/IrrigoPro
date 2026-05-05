@@ -25,6 +25,13 @@ const BILLING_MGR_HEADERS = {
   "x-user-company-id": "99",
 };
 
+const IRRIGATION_MGR_HEADERS = {
+  "Content-Type": "application/json",
+  "x-user-id": "53",
+  "x-user-role": "irrigation_manager",
+  "x-user-company-id": "99",
+};
+
 const OTHER_COMPANY_HEADERS = {
   "Content-Type": "application/json",
   "x-user-id": "53",
@@ -268,13 +275,152 @@ describe("DELETE /api/wet-checks/:id — admin guards and cascade", () => {
       `repeat delete must be 404, got ${followup.status} ${JSON.stringify(followup.body)}`);
   });
 
-  test("Admin list endpoint is also gated to company_admin only", async () => {
+  test("Admin list endpoint is open to company_admin and irrigation_manager, but not other roles", async () => {
     const res = await api(FIELD_HEADERS, "GET", "/api/wet-checks/admin");
     assert.equal(res.status, 403,
       `field_tech admin list must be 403, got ${res.status} ${JSON.stringify(res.body)}`);
 
+    const billingRes = await api(BILLING_MGR_HEADERS, "GET", "/api/wet-checks/admin");
+    assert.equal(billingRes.status, 403,
+      `billing_manager admin list must be 403, got ${billingRes.status} ${JSON.stringify(billingRes.body)}`);
+
     const ok = await api(ADMIN_HEADERS, "GET", "/api/wet-checks/admin");
     assert.equal(ok.status, 200, `company_admin admin list must be 200, got ${ok.status}`);
     assert.ok(Array.isArray(ok.body), "admin list must be an array");
+
+    const irrOk = await api(IRRIGATION_MGR_HEADERS, "GET", "/api/wet-checks/admin");
+    assert.equal(irrOk.status, 200,
+      `irrigation_manager admin list must be 200, got ${irrOk.status} ${JSON.stringify(irrOk.body)}`);
+    assert.ok(Array.isArray(irrOk.body), "irrigation_manager admin list must be an array");
+  });
+
+  test("irrigation_manager: single delete succeeds and cascades", async () => {
+    const { wetCheckId, zoneRecordId, findingId, photoId } =
+      await buildSimpleWetCheck("irr-happy");
+
+    const res = await api(IRRIGATION_MGR_HEADERS, "DELETE", `/api/wet-checks/${wetCheckId}`);
+    assert.equal(res.status, 200,
+      `irrigation_manager delete must be 200, got ${res.status} ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.ok, true);
+
+    const wcRows = await db.select().from(wetChecks).where(eq(wetChecks.id, wetCheckId));
+    const zr = await db.select().from(wetCheckZoneRecords)
+      .where(eq(wetCheckZoneRecords.id, zoneRecordId));
+    const fr = await db.select().from(wetCheckFindings)
+      .where(eq(wetCheckFindings.id, findingId));
+    const pr = await db.select().from(wetCheckPhotos)
+      .where(eq(wetCheckPhotos.id, photoId));
+    assert.equal(wcRows.length, 0, "wet check row must be gone");
+    assert.equal(zr.length, 0, "zone record id must be gone");
+    assert.equal(fr.length, 0, "finding id must be gone");
+    assert.equal(pr.length, 0, "photo id must be gone");
+  });
+
+  test("irrigation_manager: single delete returns 409 when a finding has been routed", async () => {
+    const customerId = await createCustomer("irr-routed-409");
+    const partId = await createPart();
+    const wetCheckId = await createWetCheck(customerId);
+    const z = await addZone(wetCheckId, 1);
+    const routedFindingId = await addFinding(z, partId);
+
+    let res = await api(ADMIN_HEADERS, "POST", `/api/wet-checks/${wetCheckId}/submit`, {});
+    assert.equal(res.status, 200, `submit: ${JSON.stringify(res.body)}`);
+    res = await api(ADMIN_HEADERS, "POST", `/api/wet-checks/${wetCheckId}/approve`, {});
+    assert.equal(res.status, 200, `approve: ${JSON.stringify(res.body)}`);
+    res = await api(ADMIN_HEADERS, "PATCH",
+      `/api/wet-checks/findings/${routedFindingId}/route`,
+      { resolution: "repaired_in_field" });
+    assert.equal(res.status, 200, `route: ${JSON.stringify(res.body)}`);
+    res = await api(ADMIN_HEADERS, "POST", `/api/wet-checks/${wetCheckId}/convert`, {});
+    assert.equal(res.status, 200, `convert: ${JSON.stringify(res.body)}`);
+
+    const del = await api(IRRIGATION_MGR_HEADERS, "DELETE", `/api/wet-checks/${wetCheckId}`);
+    assert.equal(del.status, 409,
+      `irrigation_manager routed delete must be 409, got ${del.status} ${JSON.stringify(del.body)}`);
+    assert.ok(Array.isArray(del.body.routedFindingIds),
+      `409 body must include routedFindingIds[], got ${JSON.stringify(del.body)}`);
+    assert.ok(del.body.routedFindingIds.includes(routedFindingId),
+      `routedFindingIds must include the converted finding ${routedFindingId}`);
+
+    const wcRows = await db.select().from(wetChecks).where(eq(wetChecks.id, wetCheckId));
+    assert.equal(wcRows.length, 1, "wet check must still exist after a 409 refusal");
+  });
+
+  test("irrigation_manager: bulk delete succeeds and reports per-id outcomes (deleted + conflict)", async () => {
+    // Build a deletable wet check.
+    const { wetCheckId: deletableId } = await buildSimpleWetCheck("irr-bulk-ok");
+
+    // Build a routed wet check (will conflict).
+    const customerId = await createCustomer("irr-bulk-conflict");
+    const partId = await createPart();
+    const routedWcId = await createWetCheck(customerId);
+    const z = await addZone(routedWcId, 1);
+    const routedFindingId = await addFinding(z, partId);
+    let r = await api(ADMIN_HEADERS, "POST", `/api/wet-checks/${routedWcId}/submit`, {});
+    assert.equal(r.status, 200);
+    r = await api(ADMIN_HEADERS, "POST", `/api/wet-checks/${routedWcId}/approve`, {});
+    assert.equal(r.status, 200);
+    r = await api(ADMIN_HEADERS, "PATCH",
+      `/api/wet-checks/findings/${routedFindingId}/route`,
+      { resolution: "repaired_in_field" });
+    assert.equal(r.status, 200);
+    r = await api(ADMIN_HEADERS, "POST", `/api/wet-checks/${routedWcId}/convert`, {});
+    assert.equal(r.status, 200);
+
+    const bulk = await api(IRRIGATION_MGR_HEADERS, "DELETE", "/api/wet-checks/bulk-delete", {
+      ids: [deletableId, routedWcId],
+    });
+    assert.equal(bulk.status, 200,
+      `irrigation_manager bulk delete must be 200, got ${bulk.status} ${JSON.stringify(bulk.body)}`);
+    assert.equal(bulk.body.summary.deleted, 1, `summary.deleted: ${JSON.stringify(bulk.body)}`);
+    assert.equal(bulk.body.summary.conflict, 1, `summary.conflict: ${JSON.stringify(bulk.body)}`);
+
+    const byId = new Map(bulk.body.results.map((o) => [o.id, o]));
+    assert.equal(byId.get(deletableId).status, "deleted");
+    assert.equal(byId.get(routedWcId).status, "conflict");
+    assert.ok(Array.isArray(byId.get(routedWcId).routedFindingIds));
+    assert.ok(byId.get(routedWcId).routedFindingIds.includes(routedFindingId));
+
+    // Deletable one is gone, routed one stays.
+    const goneWc = await db.select().from(wetChecks).where(eq(wetChecks.id, deletableId));
+    const stayWc = await db.select().from(wetChecks).where(eq(wetChecks.id, routedWcId));
+    assert.equal(goneWc.length, 0, "deletable wet check must be removed");
+    assert.equal(stayWc.length, 1, "routed wet check must still exist");
+  });
+
+  test("irrigation_manager: bulk delete is still scoped by company (no cross-company deletes)", async () => {
+    const { wetCheckId } = await buildSimpleWetCheck("irr-bulk-xcompany");
+
+    const res = await api(
+      { ...IRRIGATION_MGR_HEADERS, "x-user-company-id": "987654" },
+      "DELETE",
+      "/api/wet-checks/bulk-delete",
+      { ids: [wetCheckId] },
+    );
+    assert.equal(res.status, 200, `bulk: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.summary.deleted, 0, "must not delete across company");
+    assert.equal(res.body.summary.notFound, 1, "must report not_found across company");
+
+    const stillThere = await db.select().from(wetChecks).where(eq(wetChecks.id, wetCheckId));
+    assert.equal(stillThere.length, 1, "wet check must NOT be deleted across company scope");
+  });
+
+  test("field_tech and billing_manager still get 403 on bulk delete", async () => {
+    const { wetCheckId } = await buildSimpleWetCheck("bulk-403");
+
+    const ft = await api(FIELD_HEADERS, "DELETE", "/api/wet-checks/bulk-delete", {
+      ids: [wetCheckId],
+    });
+    assert.equal(ft.status, 403,
+      `field_tech bulk delete must be 403, got ${ft.status} ${JSON.stringify(ft.body)}`);
+
+    const bm = await api(BILLING_MGR_HEADERS, "DELETE", "/api/wet-checks/bulk-delete", {
+      ids: [wetCheckId],
+    });
+    assert.equal(bm.status, 403,
+      `billing_manager bulk delete must be 403, got ${bm.status} ${JSON.stringify(bm.body)}`);
+
+    const stillThere = await db.select().from(wetChecks).where(eq(wetChecks.id, wetCheckId));
+    assert.equal(stillThere.length, 1, "wet check must NOT be deleted by non-admin roles");
   });
 });
