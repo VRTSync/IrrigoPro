@@ -29,6 +29,7 @@ import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-re
 import PartsSettings from "@/pages/parts-settings";
 import LaborRates from "@/pages/labor-rates";
 import AdminCustomers from "@/pages/admin-customers";
+import AdminControllers from "@/pages/admin-controllers";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
 
 import UserProfile from "@/pages/user-profile";
@@ -139,6 +140,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/parts-settings" component={PartsSettings} />
           <Route path="/labor-rates" component={LaborRates} />
           <Route path="/admin/customers" component={AdminCustomers} />
+          <Route path="/admin/controllers" component={AdminControllers} />
           <Route path="/customers" component={Customers} />
           <Route path="/customers/:id/profile" component={CustomerProfile} />
           <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />

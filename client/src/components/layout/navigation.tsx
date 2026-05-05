@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState, useEffect } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, type LucideIcon } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import type { Part, ManualPartReview } from "@shared/schema";
 
@@ -107,6 +107,7 @@ export default function Navigation() {
           { path: "/super-admin", label: "Companies", icon: Settings },
           { path: "/", label: "Dashboard", icon: Home, isCenter: true },
           { path: "/system-users", label: "All Users", icon: Users },
+          { path: "/admin/controllers", label: "Controllers & Zones", icon: Cpu },
         ];
       case "company_admin":
         return [
@@ -164,6 +165,7 @@ export default function Navigation() {
               { path: "/labor-rates", label: "Labor Rates", icon: DollarSign },
               { path: "/admin/issue-types", label: "Wet Check Issue Types", icon: Droplets },
               { path: "/admin/customers", label: "All Customers", icon: Users },
+              { path: "/admin/controllers", label: "Controllers & Zones", icon: Cpu },
             ]
           },
         ];

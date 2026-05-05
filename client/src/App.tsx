@@ -30,6 +30,7 @@ import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import CustomerBilling from "@/pages/customer-billing";
 import QuickBooksPage from "@/pages/quickbooks";
 import AdminDashboard from "@/pages/admin-dashboard";
+import AdminControllers from "@/pages/admin-controllers";
 import Operations from "@/pages/operations";
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
 import SystemUserManagement from "@/pages/system-user-management";
@@ -282,6 +283,7 @@ function Router() {
                 <Route path="/wet-checks" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/system-users" component={SystemUserManagement} />
+                <Route path="/admin/controllers" component={AdminControllers} />
                 <Route path="/user-manager" component={UserManager} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
@@ -325,6 +327,7 @@ function Router() {
               <Route path="/parts" component={PartsCatalog} />
               <Route path="/customers" component={Customers} />
               <Route path="/site-maps" component={SiteMapsPage} />
+              <Route path="/admin/controllers" component={AdminControllers} />
               <Route path="/customer-billing" component={CustomerBilling} />
               <Route path="/field-tech" component={FieldTech} />
               <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />

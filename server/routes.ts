@@ -1,7 +1,7 @@
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage, WetCheckAlreadyRoutedError } from "./storage";
+import { storage, WetCheckAlreadyRoutedError, ControllerHasZonesError } from "./storage";
 import type { InsertInvoice } from "@shared/schema";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -11818,6 +11818,86 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       res.json(result);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
+
+  // ── Admin: per-customer controllers & per-controller zones management ────
+  // Lightweight admin-only surface so company admins can edit how many
+  // controllers each active customer has and how many zones each controller
+  // covers without going through the KML / site-map upload flow.
+  const isAdminRole = (role: string | undefined) =>
+    role === "company_admin" || role === "super_admin";
+  const requireAdminRole = (req: any, res: any): boolean => {
+    if (!isAdminRole(req.authenticatedUserRole)) {
+      res.status(403).json({ message: "Forbidden" });
+      return false;
+    }
+    return true;
+  };
+
+  app.get("/api/admin/customer-controllers", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!requireAdminRole(req, res)) return;
+    try {
+      const rows = await storage.listCustomerControllersOverview(cid);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const setControllerCountBody = z.object({
+    count: z.coerce.number().int().min(1).max(10),
+    confirmDeleteWithZones: z.boolean().optional(),
+  }).strict();
+
+  app.put("/api/admin/customers/:customerId/controllers", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!requireAdminRole(req, res)) return;
+    const customerId = parseInt(req.params.customerId);
+    if (Number.isNaN(customerId)) return res.status(400).json({ message: "Invalid customerId" });
+    const parsed = setControllerCountBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    try {
+      const result = await storage.setCustomerControllerCount(cid, customerId, parsed.data.count, {
+        confirmDeleteWithZones: parsed.data.confirmDeleteWithZones,
+      });
+      res.json(result);
+    } catch (e: any) {
+      if (e instanceof ControllerHasZonesError) {
+        return res.status(409).json({
+          message: `Removing controllers ${e.letters.join(", ")} would discard their zones. Confirm to proceed.`,
+          letters: e.letters,
+          requiresConfirmation: true,
+        });
+      }
+      const msg = e?.message ?? "Failed";
+      const status = /not found/i.test(msg) ? 404 : /must be between/i.test(msg) ? 400 : 500;
+      res.status(status).json({ message: msg });
+    }
+  });
+
+  const setZoneCountBody = z.object({
+    zoneCount: z.coerce.number().int().min(0).max(200),
+  }).strict();
+
+  app.put(
+    "/api/admin/customers/:customerId/controllers/:letter/zones",
+    requireAuthentication,
+    async (req, res) => {
+      const cid = requireCompanyId(req, res); if (!cid) return;
+      if (!requireAdminRole(req, res)) return;
+      const customerId = parseInt(req.params.customerId);
+      const letter = String(req.params.letter || "").toUpperCase();
+      if (Number.isNaN(customerId)) return res.status(400).json({ message: "Invalid customerId" });
+      if (!/^[A-J]$/.test(letter)) return res.status(400).json({ message: "Invalid controller letter" });
+      const parsed = setZoneCountBody.safeParse(req.body ?? {});
+      if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      try {
+        const updated = await storage.updatePropertyController(cid, customerId, letter, {
+          zoneCount: parsed.data.zoneCount,
+        });
+        if (!updated) return res.status(404).json({ message: "Controller not found" });
+        res.json(updated);
+      } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    },
+  );
 
   return httpServer;
 }

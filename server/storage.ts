@@ -155,6 +155,18 @@ export class WetCheckAlreadyRoutedError extends Error {
   }
 }
 
+// Thrown by setCustomerControllerCount when the requested count would remove
+// one or more controllers that still have zoneCount > 0 and the caller did not
+// pass `confirmDeleteWithZones: true`. Surface mapped to HTTP 409 by routes.
+export class ControllerHasZonesError extends Error {
+  letters: string[];
+  constructor(letters: string[]) {
+    super(`Removing controllers ${letters.join(", ")} would discard zones; confirmation required`);
+    this.name = "ControllerHasZonesError";
+    this.letters = letters;
+  }
+}
+
 type DrizzlePartInsert = typeof parts.$inferInsert;
 type DrizzleWorkOrderInsert = typeof workOrders.$inferInsert;
 type DrizzleInvoiceInsert = typeof invoices.$inferInsert;
@@ -575,6 +587,22 @@ export interface IStorage {
     letter: string,
     values: { zoneCount: number; notes?: string },
   ): Promise<PropertyController>;
+  // Admin: company-wide overview of active customers and their controller letters
+  // (with each controller's current zoneCount). Excludes customers hidden from billing.
+  listCustomerControllersOverview(companyId: number): Promise<Array<{
+    customer: Customer;
+    controllers: PropertyController[];
+  }>>;
+  // Admin: reconcile property_controllers rows so they match `count` (1-10).
+  // Updates customers.totalControllers as well. When shrinking, refuses to
+  // delete controllers whose zoneCount > 0 unless `confirmDeleteWithZones`
+  // is true. Returns the updated controller list and the new customer record.
+  setCustomerControllerCount(
+    companyId: number,
+    customerId: number,
+    count: number,
+    opts?: { confirmDeleteWithZones?: boolean },
+  ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }>;
 
   listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]>;
   // Admin-only company-wide list with per-row aggregate counts (zone
@@ -4633,6 +4661,98 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return updated;
+  }
+
+  async listCustomerControllersOverview(companyId: number): Promise<Array<{
+    customer: Customer;
+    controllers: PropertyController[];
+  }>> {
+    const custs = await db.select().from(customers)
+      .where(and(
+        eq(customers.companyId, companyId),
+        sql`coalesce(${customers.hiddenFromBilling}, false) = false`,
+      ))
+      .orderBy(customers.name);
+    if (custs.length === 0) return [];
+    const ctrls = await db.select().from(propertyControllers)
+      .where(and(
+        eq(propertyControllers.companyId, companyId),
+        inArray(propertyControllers.customerId, custs.map(c => c.id)),
+      ))
+      .orderBy(propertyControllers.controllerLetter);
+    const byCust = new Map<number, PropertyController[]>();
+    for (const c of ctrls) {
+      const arr = byCust.get(c.customerId) ?? [];
+      arr.push(c);
+      byCust.set(c.customerId, arr);
+    }
+    return custs.map(customer => ({
+      customer,
+      controllers: byCust.get(customer.id) ?? [],
+    }));
+  }
+
+  async setCustomerControllerCount(
+    companyId: number,
+    customerId: number,
+    count: number,
+    opts?: { confirmDeleteWithZones?: boolean },
+  ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }> {
+    if (!Number.isInteger(count) || count < 1 || count > 10) {
+      throw new Error("Controller count must be between 1 and 10");
+    }
+    const [customer] = await db.select().from(customers)
+      .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)));
+    if (!customer) throw new Error("Customer not found");
+
+    const existing = await this.listPropertyControllers(companyId, customerId);
+    // Determine which letters belong to the new size and which fall outside.
+    const keepLetters = new Set<string>();
+    for (let i = 0; i < count; i++) {
+      keepLetters.add(String.fromCharCode("A".charCodeAt(0) + i));
+    }
+    const toRemove = existing.filter(c => !keepLetters.has(c.controllerLetter));
+    const removedLetters = toRemove.map(c => c.controllerLetter).sort();
+
+    if (toRemove.length > 0) {
+      const withZones = toRemove.filter(c => (c.zoneCount ?? 0) > 0).map(c => c.controllerLetter);
+      if (withZones.length > 0 && !opts?.confirmDeleteWithZones) {
+        throw new ControllerHasZonesError(withZones.sort());
+      }
+      // Mirror the shrink behaviour from updatePropertyController: mark zone
+      // records on in-progress wet checks for the removed letters as not
+      // applicable so the field UI doesn't keep checking phantom controllers.
+      const inProgressIds = await db.select({ id: wetChecks.id }).from(wetChecks)
+        .where(and(
+          eq(wetChecks.companyId, companyId),
+          eq(wetChecks.customerId, customerId),
+          eq(wetChecks.status, "in_progress"),
+        ));
+      const ids = inProgressIds.map(r => r.id);
+      if (ids.length > 0) {
+        await db.update(wetCheckZoneRecords)
+          .set({ status: "not_applicable" })
+          .where(and(
+            inArray(wetCheckZoneRecords.wetCheckId, ids),
+            inArray(wetCheckZoneRecords.controllerLetter, removedLetters),
+          ));
+      }
+      await db.delete(propertyControllers).where(and(
+        eq(propertyControllers.companyId, companyId),
+        eq(propertyControllers.customerId, customerId),
+        inArray(propertyControllers.controllerLetter, removedLetters),
+      ));
+    }
+
+    // Add any missing letters up to the new count (default zoneCount = 100).
+    await this.ensurePropertyControllers(companyId, customerId, count);
+
+    const [updatedCustomer] = await db.update(customers)
+      .set({ totalControllers: count })
+      .where(and(eq(customers.id, customerId), eq(customers.companyId, companyId)))
+      .returning();
+    const controllers = await this.listPropertyControllers(companyId, customerId);
+    return { customer: updatedCustomer ?? customer, controllers, removedLetters };
   }
 
   async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]> {
