@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, authedPhotoSrc, queryClient } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
 
 // Pick the right "back to list" destination for a wet check based on its
@@ -257,13 +257,13 @@ function FindingRow({
           {photos.map(p => (
             <a
               key={p.id}
-              href={p.url}
+              href={authedPhotoSrc(p.url, "medium")}
               target="_blank"
               rel="noreferrer"
               className="block shrink-0"
             >
               <img
-                src={p.url}
+                src={authedPhotoSrc(p.url, "thumb")}
                 alt={p.caption ?? "Wet check photo"}
                 className="h-16 w-16 object-cover rounded border"
                 loading="lazy"

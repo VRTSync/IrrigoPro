@@ -87,6 +87,31 @@ export const getQueryFn: <T>(options: {
     return await res.json();
   };
 
+// Build an `<img src>`-friendly URL for the authenticated photo proxy.
+// Browsers cannot attach custom headers (`x-user-id`, etc.) to `<img>`
+// requests — they only send cookies — and this app authenticates via
+// headers, not session cookies. The server's `requireAuthentication`
+// middleware already accepts the same identifiers as query parameters
+// (the same fallback used for opening PDFs in new tabs), so we mirror
+// that here for thumbnails and gallery previews.
+export function authedPhotoSrc(
+  photoId: string,
+  variant?: "thumb" | "medium" | "original",
+): string {
+  const raw = safeGet("user");
+  let user: { id?: number | string; role?: string; companyId?: number | string; name?: string } | null = null;
+  if (raw) {
+    try { user = JSON.parse(raw); } catch { user = null; }
+  }
+  const params = new URLSearchParams();
+  if (user?.id != null) params.set("x-user-id", String(user.id));
+  if (user?.role) params.set("x-user-role", user.role);
+  if (user?.companyId != null) params.set("x-user-company-id", String(user.companyId));
+  if (variant) params.set("variant", variant);
+  const qs = params.toString();
+  return `/api/photos/${encodeURIComponent(photoId)}${qs ? `?${qs}` : ""}`;
+}
+
 export function parseApiError(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : String(error);
   const jsonStart = message.indexOf("{");

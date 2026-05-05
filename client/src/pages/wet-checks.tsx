@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, authedPhotoSrc, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -73,12 +73,17 @@ async function uploadPhotoToStorage(file: File): Promise<string> {
   const putRes = await fetch(signedUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
   if (!putRes.ok) throw new Error(`Upload to storage failed (${putRes.status})`);
 
-  await fetch("/api/upload/photo/finalize", {
+  const finalizeRes = await fetch("/api/upload/photo/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     credentials: "include",
     body: JSON.stringify({ photoId: url }),
   });
+  if (!finalizeRes.ok) {
+    let detail = `${finalizeRes.status}`;
+    try { const body = await finalizeRes.json(); if (body?.message) detail = body.message; } catch {}
+    throw new Error(`Photo finalize failed (${detail})`);
+  }
   return url as string;
 }
 
@@ -160,7 +165,11 @@ function PhotoCaptureButton({
 function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boolean }) {
   const { toast } = useToast();
   // The photoId is stored as "photos/<uuid>"; the public read endpoint serves it.
-  const src = `/api/photos/${encodeURIComponent(photo.url)}`;
+  // `<img>` cannot send custom headers, so the proxy URL must carry auth
+  // identifiers as query params (mirrors the PDF/new-tab fallback in
+  // requireAuthentication). Without this, every photo request 401s in
+  // production even though the same session can POST the photo metadata.
+  const src = authedPhotoSrc(photo.url, "thumb");
   const delMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/photos/${photo.id}`, "DELETE"),
     onSuccess: () => {
@@ -1095,7 +1104,7 @@ function FindingSheet({
                         data-testid={`pending-photo-${p.id}`}
                       >
                         <img
-                          src={`/api/photos/${encodeURIComponent(p.url)}`}
+                          src={authedPhotoSrc(p.url, "thumb")}
                           alt=""
                           className="w-full h-full object-cover"
                           loading="lazy"

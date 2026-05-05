@@ -715,7 +715,8 @@ import { db } from "./db";
 import { 
   customers, estimates, workOrders, estimateItems, parts, billingSheets, billingSheetItems, 
   users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
-  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs
+  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs,
+  wetCheckPhotos, wetChecks,
 } from "@shared/schema";
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
 
@@ -9890,8 +9891,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // variants (thumb + medium) from the uploaded display copy. New uploads
   // intentionally have no preserved original under `originals/<uuid>` —
   // legacy photos that already have one continue to serve via
-  // `?variant=original`. Errors are logged but never fail the request —
-  // the next-best variant (or the base path) will still serve in galleries.
+  // `?variant=original`. Returns a non-2xx (502) when variant generation
+  // fails so the client can surface it to the user instead of optimistically
+  // attaching a DB row that points at unrenderable bytes.
   app.post("/api/upload/photo/finalize", requireAuthentication, async (req, res) => {
     try {
       const photoId = (req.body?.photoId as string)?.trim();
@@ -9899,13 +9901,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Invalid photoId" });
       }
       const photoService = new ObjectStorageService();
-      // Run variant generation in the background — don't block the upload UX.
-      photoService.ensurePhotoVariants(photoId)
-        .then((r) => {
-          if (r.error) console.warn(`[PHOTO-FINALIZE] ${photoId} partial:`, r);
-        })
-        .catch((e) => console.error(`[PHOTO-FINALIZE] ${photoId} failed:`, e));
-      res.json({ ok: true });
+      // Await variant generation so the client learns about failures
+      // instead of optimistically writing a DB row that points at an
+      // object whose display variants never materialized.
+      try {
+        const result = await photoService.ensurePhotoVariants(photoId);
+        if (result.error) {
+          console.warn(`[PHOTO-FINALIZE] ${photoId} partial:`, result);
+          return res.status(502).json({ ok: false, message: result.error, result });
+        }
+        return res.json({ ok: true, result });
+      } catch (e) {
+        console.error(`[PHOTO-FINALIZE] ${photoId} failed:`, e);
+        return res.status(500).json({ ok: false, message: "Variant generation failed" });
+      }
     } catch (error) {
       console.error("Photo finalize error:", error);
       res.status(500).json({ message: "Failed to finalize photo" });
@@ -9958,11 +9967,69 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Single signed-URL endpoint (kept for compatibility). `?variant=` selects
   // a specific variant; defaults to medium.
+  // Server-side authorization for the photo serve / signed-url routes.
+  //
+  // `requireAuthentication` is intentionally lenient about *how* identity
+  // arrives (cookies/headers/query params — the latter so an `<img>` tag
+  // and `window.open` can carry credentials at all). For raw photo bytes
+  // we want a stricter, *authoritative* check: re-read the user from the
+  // database (so a forged x-user-* tuple is caught the moment we look it
+  // up) and confirm the photo belongs to a record this user's company
+  // owns. Super admins keep cross-tenant access.
+  async function assertCanViewPhoto(req: any, res: any, photoId: string): Promise<boolean> {
+    const userId = req.authenticatedUserId as number | undefined;
+    if (!userId) { res.status(401).json({ error: "Authentication required" }); return false; }
+
+    const user = await storage.getUser(userId);
+    if (!user) { res.status(401).json({ error: "Authentication required" }); return false; }
+
+    // super_admin can view any photo across tenants (mirrors existing
+    // cross-tenant access on other admin routes).
+    if (user.role === "super_admin") return true;
+
+    if (!user.companyId) { res.status(403).json({ error: "Forbidden" }); return false; }
+
+    // Normalize the requested key so we can match it against stored values
+    // (DB rows store the canonical `photos/<uuid>` key, but a caller may
+    // request a variant suffix or a leading slash).
+    const stripped = photoId.replace(/^\/+/, "").replace(/__(thumb|medium)\.jpg$/i, "");
+    const candidates = Array.from(new Set([photoId, stripped]));
+
+    // 1) wet_check_photos rows owned by this company (joined via wet_checks).
+    const wcRows = await db
+      .select({ id: wetCheckPhotos.id })
+      .from(wetCheckPhotos)
+      .innerJoin(wetChecks, eq(wetChecks.id, wetCheckPhotos.wetCheckId))
+      .where(and(
+        eq(wetChecks.companyId, user.companyId),
+        sql`${wetCheckPhotos.url} = ANY(${candidates})`,
+      ))
+      .limit(1);
+    if (wcRows.length > 0) return true;
+
+    // 2) text[] photo arrays on work_orders / billing_sheets / estimates
+    //    scoped to this company.
+    const overlaps = (col: any) => sql`${col} && ${candidates}::text[]`;
+    const woRows = await db.select({ id: workOrders.id }).from(workOrders)
+      .where(and(eq(workOrders.companyId, user.companyId), overlaps(workOrders.photos))).limit(1);
+    if (woRows.length > 0) return true;
+    const bsRows = await db.select({ id: billingSheets.id }).from(billingSheets)
+      .where(and(eq(billingSheets.companyId, user.companyId), overlaps(billingSheets.photos))).limit(1);
+    if (bsRows.length > 0) return true;
+    const esRows = await db.select({ id: estimates.id }).from(estimates)
+      .where(and(eq(estimates.companyId, user.companyId), overlaps(estimates.photos))).limit(1);
+    if (esRows.length > 0) return true;
+
+    res.status(403).json({ error: "Forbidden" });
+    return false;
+  }
+
   app.get("/api/photos/:photoId(*)/signed-url", requireAuthentication, async (req, res) => {
     const photoId = req.params.photoId;
     const variantQ = String(req.query.variant || "medium");
     const variant = (variantQ === "thumb" || variantQ === "medium" || variantQ === "original")
       ? variantQ : "medium";
+    if (!(await assertCanViewPhoto(req, res, photoId))) return;
     try {
       const photoService = new ObjectStorageService();
       const normalized = photoId.startsWith("/") ? photoId.slice(1) : photoId;
@@ -9984,6 +10051,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const variantQ = String(req.query.variant || "");
     const variant = (variantQ === "thumb" || variantQ === "medium" || variantQ === "original")
       ? variantQ : null;
+    if (!(await assertCanViewPhoto(req, res, photoId))) return;
     try {
       const photoService = new ObjectStorageService();
 
