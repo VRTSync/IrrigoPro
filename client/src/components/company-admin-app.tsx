@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { safeSet } from "@/utils/safeStorage";
 import { Switch, Route, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import Navigation from "@/components/layout/navigation";
+import { DesktopShell } from "@/components/layout/desktop-shell";
+import { companyAdminNav } from "@/components/layout/nav-config";
+import InvoicesPage from "@/pages/invoices";
 import AdminDashboard from "@/pages/admin-dashboard";
 import Operations from "@/pages/operations";
 import CompanyUserManagement from "@/pages/company-user-management";
@@ -43,7 +45,6 @@ import ResetPassword from "@/pages/reset-password";
 import FieldPortal from "@/pages/field-portal";
 import NotFound from "@/pages/not-found";
 import OnboardingFlow from "@/components/onboarding/onboarding-flow";
-import PoweredByFooter from "@/components/layout/powered-by-footer";
 
 function RedirectToCommandCenter() {
   const [, navigate] = useLocation();
@@ -126,9 +127,8 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
 
   // Regular company admin app
   return (
-    <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-      <Navigation />
-      <div className="px-4 bg-gray-50 flex-1">
+    <DesktopShell navConfig={companyAdminNav}>
+      <div className="px-4 bg-gray-50">
         <Switch>
           <Route path="/" component={AdminDashboard} />
           <Route path="/admin" component={AdminDashboard} />
@@ -136,6 +136,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/users" component={CompanyUserManagement} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/quickbooks" component={QuickBooksPage} />
+          <Route path="/invoices" component={InvoicesPage} />
           <Route path="/parts-pending-approval" component={PartsPendingApproval} />
           <Route path="/parts" component={PartsCatalog} />
           <Route path="/parts-settings" component={PartsSettings} />
@@ -177,7 +178,6 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route component={NotFound} />
         </Switch>
       </div>
-      <PoweredByFooter />
-    </div>
+    </DesktopShell>
   );
 }
