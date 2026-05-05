@@ -5093,7 +5093,15 @@ export class DatabaseStorage implements IStorage {
     if (!p) return false;
     await this.assertWetCheckEditableByTech(p.wetCheckId, companyId);
     const result = await db.delete(wetCheckPhotos).where(eq(wetCheckPhotos.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const ok = (result.rowCount ?? 0) > 0;
+    if (ok) {
+      // Best-effort blob cleanup (thumb / medium / original / heic-cache /
+      // base) so deleting a single photo doesn't leak its files in object
+      // storage. Mirrors the bulk cleanup in deleteWetCheck.
+      const objectStorage = new ObjectStorageService();
+      await objectStorage.deletePhotoBlobs(p.url);
+    }
+    return ok;
   }
 
   async linkWetCheckPhotoToFinding(
