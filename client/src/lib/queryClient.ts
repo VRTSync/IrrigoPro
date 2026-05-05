@@ -8,6 +8,14 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+// Heartbeat hook so the offline sync engine can update its online state
+// from any apiRequest activity, not just its own dispatches and the
+// 30s `/api/health` poll. Set by the engine bootstrap in main.tsx.
+let apiHeartbeat: ((ok: boolean) => void) | null = null;
+export function setApiHeartbeat(fn: ((ok: boolean) => void) | null) {
+  apiHeartbeat = fn;
+}
+
 export async function apiRequest(
   url: string,
   method: string = "GET",
@@ -35,12 +43,21 @@ export async function apiRequest(
     headers["x-user-company-id"] = user.companyId?.toString() || "";
   }
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: data ? JSON.stringify(data) : undefined,
+      credentials: "include",
+    });
+  } catch (e) {
+    if (apiHeartbeat) try { apiHeartbeat(false); } catch {}
+    throw e;
+  }
+  if (apiHeartbeat) {
+    try { apiHeartbeat(res.status < 500); } catch {}
+  }
 
   await throwIfResNotOk(res);
   return await res.json();

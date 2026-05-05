@@ -63,6 +63,7 @@ import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
 import { billingManagerNav } from "@/components/layout/nav-config";
 import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
+import { ConflictToastBridge } from "@/components/offline/conflict-toast-bridge";
 
 
 function RedirectToCommandCenter() {
@@ -159,6 +160,7 @@ function Router() {
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
@@ -219,6 +221,7 @@ function Router() {
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
@@ -260,6 +263,7 @@ function Router() {
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/parts" component={PartsCatalog} />
                 <Route path="/parts-settings" component={PartsSettings} />
@@ -304,6 +308,7 @@ function Router() {
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
                 <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/system-users" component={SystemUserManagement} />
                 <Route path="/admin/controllers" component={AdminControllers} />
@@ -359,6 +364,7 @@ function Router() {
               <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
               <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
               <Route path="/wet-checks" component={WetChecksPage} />
+              <Route path="/wet-checks/c/:clientId" component={WetChecksPage} />
               <Route path="/wet-checks/:id" component={WetChecksPage} />
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
@@ -385,6 +391,7 @@ function App() {
   return (
     <>
       <ServiceWorkerRegistration />
+      <ConflictToastBridge />
       <Router />
     </>
   );

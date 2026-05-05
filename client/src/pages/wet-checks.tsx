@@ -12,6 +12,22 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
 import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil, AlertTriangle } from "lucide-react";
+import {
+  PHOTO_OFFLINE_MESSAGE,
+  isProbablyOffline,
+  createWetCheck as offlineCreateWetCheck,
+  submitWetCheck as offlineSubmitWetCheck,
+  upsertZoneRecord as offlineUpsertZoneRecord,
+  createFinding as offlineCreateFinding,
+  updateFinding as offlineUpdateFinding,
+  deleteFinding as offlineDeleteFinding,
+  linkPhotoToFinding as offlineLinkPhotoToFinding,
+  warmWetCheckMirror,
+  readWetCheckFromMirror,
+  readWetCheckByClientId,
+  cachedApiRequest,
+} from "@/lib/offline/api";
+import { isOfflineQueueEnabled } from "@/lib/offline/engine";
 import type {
   Customer,
   WorkOrder,
@@ -114,6 +130,13 @@ function PhotoCaptureButton({
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    // Slice 4B (Task #298): photos remain online-only in this slice. If we
+    // can detect we're offline, surface the spec's message instead of
+    // letting the upload fail with a generic network error.
+    if (isProbablyOffline()) {
+      toast({ title: "Photo not captured", description: PHOTO_OFFLINE_MESSAGE, variant: "destructive" });
+      return;
+    }
     setBusy(true);
     try {
       const takenAt = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
@@ -250,13 +273,22 @@ function WetCheckList() {
 
   const createMut = useMutation({
     mutationFn: async (input: { customerId: number }) =>
-      apiRequest("/api/wet-checks", "POST", {
-        customerId: input.customerId,
-        clientId: newClientId(),
-      }),
-    onSuccess: (wc: WetCheck) => {
+      offlineCreateWetCheck({ customerId: input.customerId, clientId: newClientId() }),
+    onSuccess: (wc: { id?: number; clientId: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
-      navigate(`/wet-checks/${wc.id}`);
+      if (wc.id != null) {
+        navigate(`/wet-checks/${wc.id}`);
+      } else {
+        // Offline: server id not assigned yet. Route into the clientId
+        // detail so the tech can keep capturing zones, findings, etc.
+        // The engine will rewrite the URL placeholder once the create op
+        // resolves online; the user-visible URL stays stable.
+        toast({
+          title: "Queued offline",
+          description: "Wet check will sync when you're back online.",
+        });
+        navigate(`/wet-checks/c/${wc.clientId}`);
+      }
     },
     onError: (e: any) => toast({ title: "Failed", description: e?.message ?? "Could not start wet check", variant: "destructive" }),
   });
@@ -364,20 +396,57 @@ function WetCheckList() {
 
 // ─── Detail page ──────────────────────────────────────────────────────────────
 
-function WetCheckDetail({ id }: { id: number }) {
+function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId?: string }) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
   const [activeZone, setActiveZone] = useState<number | null>(null);
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
-    queryKey: ["/api/wet-checks", id],
-    queryFn: () => apiRequest(`/api/wet-checks/${id}`),
+    queryKey: id != null ? ["/api/wet-checks", id] : ["/api/wet-checks", "c", routeClientId],
+    // Mirror-first when offline (or when only clientId is known, i.e. a
+    // wet check that was created offline and has no server id yet) so a
+    // tech who reloads the page mid-capture still sees their queued state.
+    // Online path warms the mirror so the next offline reload has fresh data.
+    queryFn: async () => {
+      // Pure-offline (no server id yet) path: read from mirror by clientId.
+      if (id == null && routeClientId) {
+        const cached = await readWetCheckByClientId(routeClientId);
+        if (!cached) throw new Error("Wet check not yet synced — open it from the list when you're back online.");
+        return cached as WetCheckWithDetails;
+      }
+      // IDB-first: when the offline queue is enabled, return the mirror
+      // immediately if we have one and refresh from the network in the
+      // background. The background refresh re-warms the mirror and triggers
+      // a query invalidation so the UI updates without blocking the tech.
+      if (isOfflineQueueEnabled()) {
+        const cached = await readWetCheckFromMirror(id!);
+        if (cached) {
+          if (!isProbablyOffline()) {
+            void apiRequest(`/api/wet-checks/${id}`)
+              .then((fresh) => warmWetCheckMirror(null, id!, fresh).then(() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
+              }))
+              .catch(() => { /* ignore — heartbeat will recover */ });
+          }
+          return cached as WetCheckWithDetails;
+        }
+        // No mirror row yet — fall through to a blocking fetch and warm.
+        if (isProbablyOffline()) {
+          throw new Error("Wet check not cached locally — reconnect to load it.");
+        }
+      }
+      const fresh = await apiRequest(`/api/wet-checks/${id}`);
+      if (isOfflineQueueEnabled()) {
+        try { await warmWetCheckMirror(null, id!, fresh); } catch {}
+      }
+      return fresh;
+    },
   });
 
   const { data: controllers = [] } = useQuery<PropertyController[]>({
     queryKey: ["/api/properties", wc?.customerId, "controllers"],
-    queryFn: () => apiRequest(`/api/properties/${wc!.customerId}/controllers`),
+    queryFn: () => cachedApiRequest(`/api/properties/${wc!.customerId}/controllers`),
     enabled: !!wc?.customerId,
   });
 
@@ -418,18 +487,38 @@ function WetCheckDetail({ id }: { id: number }) {
   });
 
   const submitMut = useMutation({
-    mutationFn: (): Promise<{ status: string; billingSheetId: number | null; autoBilledCount: number; pendingCount: number }> =>
-      apiRequest(`/api/wet-checks/${id}/submit`, "POST", {}),
+    mutationFn: async (): Promise<{ status?: string; billingSheetId?: number | null; autoBilledCount?: number; pendingCount?: number; queued?: boolean }> => {
+      // Online path: hit the server directly so we get the auto-bill summary.
+      // Offline path: queue the submit linked to this wet check by clientId
+      // so the engine can dispatch it with the real id once create resolves.
+      const serverId = wc?.id ?? id;
+      // If we have no server id yet (e.g. opened by /c/:clientId before
+      // the create has dispatched), the only safe path is to queue.
+      const mustQueue = serverId == null;
+      if ((mustQueue || (isOfflineQueueEnabled() && isProbablyOffline())) && wc?.clientId) {
+        await offlineSubmitWetCheck(wc.clientId, serverId ?? undefined);
+        return { queued: true };
+      }
+      return apiRequest(`/api/wet-checks/${serverId}/submit`, "POST", {});
+    },
     onSuccess: (res) => {
+      if (res.queued) {
+        toast({
+          title: "Queued offline",
+          description: "Submit will run as soon as you're back online.",
+        });
+        setConfirmOpen(false);
+        navigate("/wet-checks");
+        return;
+      }
       const parts: string[] = [];
-      if (res.autoBilledCount > 0) {
+      if ((res.autoBilledCount ?? 0) > 0) {
         parts.push(`${res.autoBilledCount} finding(s) auto-billed${res.billingSheetId ? ` (BS #${res.billingSheetId})` : ""}`);
       }
-      if (res.pendingCount > 0) parts.push(`${res.pendingCount} pending → manager`);
-      if (res.pendingCount === 0 && res.autoBilledCount === 0) parts.push("No findings to bill");
+      if ((res.pendingCount ?? 0) > 0) parts.push(`${res.pendingCount} pending → manager`);
+      if ((res.pendingCount ?? 0) === 0 && (res.autoBilledCount ?? 0) === 0) parts.push("No findings to bill");
       toast({ title: "Submitted", description: parts.join(" · ") });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
       setConfirmOpen(false);
       navigate("/wet-checks");
     },
@@ -453,7 +542,8 @@ function WetCheckDetail({ id }: { id: number }) {
     const zoneRecord = records.find(z => z.zoneNumber === activeZone);
     return (
       <ZoneScreen
-        wetCheckId={id}
+        wetCheckId={wc.id ?? id ?? 0}
+        wetCheckClientId={wc.clientId ?? null}
         customerId={wc.customerId}
         letter={activeLetter}
         zoneNumber={activeZone}
@@ -560,7 +650,7 @@ function WetCheckDetail({ id }: { id: number }) {
           <div className="flex items-start justify-between gap-3">
             <CardTitle>{wc.customerName}</CardTitle>
             {!isReadOnly && (
-              <PhotoCaptureButton wetCheckId={id} />
+              <PhotoCaptureButton wetCheckId={wc.id ?? id ?? 0} />
             )}
           </div>
         </CardHeader>
@@ -621,6 +711,16 @@ function WetCheckDetail({ id }: { id: number }) {
             // confirm modal). The server enforces the same gate, so
             // this is purely a UX fallback for the tech.
             if (!autoBillEnabled) {
+              submitMut.mutate();
+              return;
+            }
+            // Submit-preview is a server-only call. Skip it when offline,
+            // when the offline queue flag is on without an in-band probe,
+            // or when we don't yet have a server id (clientId-only route);
+            // queue the submit directly so the tech can complete the
+            // capture flow without connectivity.
+            const noServerId = (wc?.id ?? id) == null;
+            if (noServerId || isProbablyOffline()) {
               submitMut.mutate();
               return;
             }
@@ -860,6 +960,7 @@ type FindingSheetState =
 
 function ZoneScreen({
   wetCheckId,
+  wetCheckClientId,
   customerId,
   letter,
   zoneNumber,
@@ -871,6 +972,7 @@ function ZoneScreen({
   onAdvance,
 }: {
   wetCheckId: number;
+  wetCheckClientId: string | null;
   customerId: number;
   letter: string;
   zoneNumber: number;
@@ -892,18 +994,36 @@ function ZoneScreen({
   const autoBillEnabled = autoBillCfg?.enabled ?? true;
 
   const setStatus = useMutation({
-    mutationFn: (status: "checked_ok" | "checked_with_issues" | "not_applicable") =>
-      apiRequest(`/api/wet-checks/${wetCheckId}/zone-records`, "POST", {
+    mutationFn: (status: "checked_ok" | "checked_with_issues" | "not_applicable") => {
+      const clientId = zoneRecord?.clientId ?? newClientId();
+      const checkedAt = new Date().toISOString();
+      // Online: behaves identically to before. Offline: queues the write
+      // through the offline engine and updates the IndexedDB mirror so the
+      // page survives a refresh while the tech is still in airplane mode.
+      if (isOfflineQueueEnabled() && wetCheckClientId) {
+        return offlineUpsertZoneRecord({
+          wetCheckClientId,
+          wetCheckId,
+          controllerLetter: letter,
+          zoneNumber,
+          status,
+          ranSuccessfully: status === "checked_ok" ? true : status === "checked_with_issues" ? false : null,
+          notes: null,
+          checkedAt,
+          clientId,
+        });
+      }
+      return apiRequest(`/api/wet-checks/${wetCheckId}/zone-records`, "POST", {
         controllerLetter: letter,
         zoneNumber,
         status,
         ranSuccessfully: status === "checked_ok" ? true : status === "checked_with_issues" ? false : null,
-        // Client-supplied capture timestamp — survives offline-then-sync.
-        checkedAt: new Date().toISOString(),
-        clientId: zoneRecord?.clientId ?? newClientId(),
-      }),
+        checkedAt,
+        clientId,
+      });
+    },
     onSuccess: (_data, status) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       // Auto-advance to the next zone unless the tech needs to add findings.
       if (status === "checked_ok" || status === "not_applicable") {
         setTimeout(() => onAdvance(), 250);
@@ -914,11 +1034,17 @@ function ZoneScreen({
 
   const { data: issueTypes = [] } = useQuery<IssueTypeConfig[]>({
     queryKey: ["/api/wet-checks/issue-types"],
+    queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`),
   });
 
   const deleteFindingMut = useMutation({
-    mutationFn: (findingId: number) => apiRequest(`/api/wet-checks/findings/${findingId}`, "DELETE"),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] }),
+    mutationFn: (f: { id: number; clientId: string | null }) => {
+      if (isOfflineQueueEnabled() && f.clientId) {
+        return offlineDeleteFinding(f.clientId, f.id);
+      }
+      return apiRequest(`/api/wet-checks/findings/${f.id}`, "DELETE");
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
   });
 
   return (
@@ -1059,7 +1185,7 @@ function ZoneScreen({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => deleteFindingMut.mutate(f.id)}
+                        onClick={() => deleteFindingMut.mutate({ id: f.id, clientId: f.clientId ?? null })}
                         data-testid={`delete-finding-${f.id}`}
                       >
                         <Trash2 className="w-4 h-4 text-red-600" />
@@ -1086,6 +1212,7 @@ function ZoneScreen({
         state={findingSheet}
         onClose={() => setFindingSheet({ open: false })}
         zoneRecordId={zoneRecord?.id ?? null}
+        zoneRecordClientId={zoneRecord?.clientId ?? null}
         wetCheckId={wetCheckId}
         customerId={customerId}
         photos={photos}
@@ -1101,6 +1228,7 @@ function FindingSheet({
   state,
   onClose,
   zoneRecordId,
+  zoneRecordClientId,
   wetCheckId,
   customerId,
   photos,
@@ -1109,6 +1237,7 @@ function FindingSheet({
   state: FindingSheetState;
   onClose: () => void;
   zoneRecordId: number | null;
+  zoneRecordClientId: string | null;
   wetCheckId: number;
   customerId: number;
   photos: WetCheckPhoto[];
@@ -1133,7 +1262,7 @@ function FindingSheet({
   // with findingId=null and linked to the new finding once saveMut succeeds.
   const [pendingPhotos, setPendingPhotos] = useState<WetCheckPhoto[]>([]);
 
-  const { data: configs = [] } = useQuery<IssueTypeConfig[]>({ queryKey: ["/api/wet-checks/issue-types"], enabled: open });
+  const { data: configs = [] } = useQuery<IssueTypeConfig[]>({ queryKey: ["/api/wet-checks/issue-types"], queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`), enabled: open });
   const cfg = configs.find(c => c.issueType === issueType);
   // Slice 3 — flag-gated helper text on the Mark Complete toggle. With
   // auto-bill OFF, we restore the Slice 2 wording so the tech isn't
@@ -1171,7 +1300,7 @@ function FindingSheet({
 
   const { data: partsResp } = useQuery<{ parts: Part[]; recentPartIds: number[] }>({
     queryKey: ["/api/wet-checks/parts/by-issue", issueType, customerId],
-    queryFn: () => apiRequest(`/api/wet-checks/parts/by-issue?issueType=${encodeURIComponent(issueType)}&customerId=${customerId}`),
+    queryFn: () => cachedApiRequest(`/api/wet-checks/parts/by-issue?issueType=${encodeURIComponent(issueType)}&customerId=${customerId}`),
     enabled: open && !!issueType,
   });
   const partsList = partsResp?.parts ?? [];
@@ -1193,7 +1322,8 @@ function FindingSheet({
     return { id: null, name: null, price: null };
   };
 
-  const saveMut = useMutation({
+  type SaveResult = { id: number; clientId: string };
+  const saveMut = useMutation<SaveResult, Error, void>({
     mutationFn: async () => {
       const p = effectivePart();
       const payload = {
@@ -1206,36 +1336,67 @@ function FindingSheet({
         repairedInField,
       };
       if (mode === "edit" && editing) {
-        return apiRequest(`/api/wet-checks/findings/${editing.id}`, "PATCH", payload);
+        // Edit path goes through the offline wrapper so the patch is
+        // queued + mirror-updated when the tech is offline.
+        if (isOfflineQueueEnabled() && editing.clientId) {
+          await offlineUpdateFinding(editing.clientId, editing.id, payload);
+          return { id: editing.id, clientId: editing.clientId };
+        }
+        const updated = await apiRequest(`/api/wet-checks/findings/${editing.id}`, "PATCH", payload);
+        return { id: updated.id ?? editing.id, clientId: updated.clientId ?? editing.clientId ?? "" };
       }
-      const created: WetCheckFinding = await apiRequest(
-        `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
-        "POST",
-        { ...payload, issueType, clientId: newClientId() },
-      );
-      // Link any photos the tech queued before saving. We attempt all in
-      // parallel and surface a soft warning if any fail — the finding has
-      // already been saved either way.
-      if (pendingPhotos.length > 0) {
-        const results = await Promise.allSettled(
-          pendingPhotos.map(p =>
-            apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: created.id }),
-          ),
+      const findingClientId = newClientId();
+      let createdId: number | null = null;
+      // When the offline flag is enabled, always route create through the
+      // offline wrapper so dependency-order replay holds even on flaky
+      // connections. Photo linking is queued through `photo.link` whose
+      // `{{f}}` placeholder resolves once the create drains.
+      if (isOfflineQueueEnabled() && zoneRecordClientId) {
+        const res = await offlineCreateFinding({
+          zoneRecordClientId,
+          zoneRecordId: zoneRecordId ?? undefined,
+          wetCheckId,
+          payload: { ...payload, issueType },
+          clientId: findingClientId,
+        });
+        createdId = res.id ?? null;
+        if (pendingPhotos.length > 0) {
+          await Promise.all(
+            pendingPhotos.map((p) => offlineLinkPhotoToFinding(p.id, findingClientId)),
+          );
+        }
+      } else {
+        const created = await apiRequest(
+          `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
+          "POST",
+          { ...payload, issueType, clientId: findingClientId },
         );
-        const failed = results.filter(r => r.status === "rejected").length;
-        if (failed > 0) {
-          toast({
-            title: "Some photos didn't attach",
-            description: `${failed} photo(s) couldn't be linked to the finding. You can re-add them by editing it.`,
-            variant: "destructive",
-          });
+        createdId = created?.id ?? null;
+        if (pendingPhotos.length > 0 && createdId != null) {
+          const results = await Promise.allSettled(
+            pendingPhotos.map((p) =>
+              apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: createdId }),
+            ),
+          );
+          const failed = results.filter((r) => r.status === "rejected").length;
+          if (failed > 0) {
+            toast({
+              title: "Some photos didn't attach",
+              description: `${failed} photo(s) couldn't be linked to the finding. You can re-add them by editing it.`,
+              variant: "destructive",
+            });
+          }
         }
       }
-      return created;
+      return { id: createdId ?? 0, clientId: findingClientId };
     },
     onSuccess: () => {
       toast({ title: mode === "edit" ? "Finding updated" : "Finding added" });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+      // Invalidate the prefix so both id-keyed and clientId-keyed detail
+      // queries (`["/api/wet-checks", id]` and `["/api/wet-checks", "c", clientId]`)
+      // are refreshed. Important for offline-created wet checks that have no
+      // server id yet.
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       setPendingPhotos([]);
       onClose();
     },
@@ -1439,7 +1600,9 @@ function FindingSheet({
 // ─── Page entry ───────────────────────────────────────────────────────────────
 
 export default function WetChecksPage() {
+  const [matchByClientId, clientIdParams] = useRoute<{ clientId: string }>("/wet-checks/c/:clientId");
   const [matchDetail, params] = useRoute<{ id: string }>("/wet-checks/:id");
+  if (matchByClientId) return <WetCheckDetail clientId={clientIdParams!.clientId} />;
   if (matchDetail) return <WetCheckDetail id={parseInt(params!.id)} />;
   return <WetCheckList />;
 }
