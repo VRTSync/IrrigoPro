@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -21,12 +21,18 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +47,7 @@ import {
   ChevronsUpDown,
   LogOut,
   User as UserIcon,
+  X,
 } from "lucide-react";
 import Navigation from "@/components/layout/navigation";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
@@ -58,6 +65,7 @@ import type {
 import type { Part, ManualPartReview } from "@shared/schema";
 
 const SIDEBAR_STORAGE_KEY = "irrigopro_desktop_sidebar_open";
+const SHELL_HINT_SEEN_KEY = "irrigopro_desktop_shell_seen";
 
 function pathMatches(itemPath: string, location: string): boolean {
   if (itemPath === "/") return location === "/";
@@ -189,6 +197,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
             navConfig={navConfig}
             user={user}
             actionsRef={setActionsTarget}
+            showShellHint={enableBadges}
           />
           <div className="flex-1 bg-gray-50">{children}</div>
           <PoweredByFooter />
@@ -202,10 +211,12 @@ function TopStrip({
   navConfig,
   user,
   actionsRef,
+  showShellHint,
 }: {
   navConfig: NavConfig;
   user: SessionUser;
   actionsRef: (el: HTMLDivElement | null) => void;
+  showShellHint: boolean;
 }) {
   const [location] = useLocation();
   const meta = useMemo(
@@ -214,7 +225,9 @@ function TopStrip({
   );
   return (
     <header className="hidden lg:flex sticky top-0 z-30 h-14 items-center gap-3 border-b border-gray-200 bg-white px-4">
-      <SidebarTrigger />
+      <ShellHint enabled={showShellHint}>
+        <SidebarTrigger />
+      </ShellHint>
       <div className="h-6 w-px bg-gray-200" />
       <nav
         aria-label="Breadcrumb"
@@ -259,6 +272,62 @@ function TopStrip({
         )}
       </div>
     </header>
+  );
+}
+
+function ShellHint({
+  enabled,
+  children,
+}: {
+  enabled: boolean;
+  children: React.ReactNode;
+}) {
+  const { open: sidebarOpen } = useSidebar();
+  const [open, setOpen] = useState(false);
+  const interactedRef = useRef(false);
+  const initialOpenRef = useRef(sidebarOpen);
+  useEffect(() => {
+    if (!enabled) return;
+    if (interactedRef.current) return;
+    if (sidebarOpen === initialOpenRef.current) return;
+    interactedRef.current = true;
+    if (safeGet(SHELL_HINT_SEEN_KEY) === "true") return;
+    setOpen(true);
+  }, [enabled, sidebarOpen]);
+  const dismiss = () => {
+    safeSet(SHELL_HINT_SEEN_KEY, "true");
+    setOpen(false);
+  };
+  if (!enabled) return <>{children}</>;
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) dismiss();
+      }}
+    >
+      <PopoverAnchor asChild>{children}</PopoverAnchor>
+      <PopoverContent
+        side="bottom"
+        align="start"
+        sideOffset={8}
+        className="w-64 p-3 text-sm"
+      >
+        <div className="flex items-start gap-2">
+          <p className="flex-1 text-gray-700">
+            Press Cmd+B (Ctrl+B on Windows) to collapse the rail.
+          </p>
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Dismiss hint"
+            className="shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
