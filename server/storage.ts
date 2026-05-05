@@ -35,6 +35,9 @@ import {
   partFittingTypes,
   pricingAuditEvents,
   type PricingAuditEvent,
+  photoLateAdditions,
+  type PhotoLateAddition,
+  type InsertPhotoLateAddition,
   type Company,
   type User,
   type Customer, 
@@ -509,6 +512,16 @@ export interface IStorage {
     parentId: number,
     companyId?: number | null,
   ): Promise<PricingAuditEvent[]>;
+
+  // Photo late-addition audit (Task #195) — records each photos-only PATCH
+  // applied to a ticket that has already reached billing, so managers can
+  // audit who added the late photo, when, and what state the ticket was in.
+  recordPhotoLateAddition(input: InsertPhotoLateAddition): Promise<PhotoLateAddition>;
+  getPhotoLateAdditions(
+    ticketType: 'work_order' | 'billing_sheet',
+    ticketId: number,
+    companyId?: number | null,
+  ): Promise<PhotoLateAddition[]>;
 
   // Manual Part Reviews
   getManualPartReviews(companyId: number): Promise<ManualPartReview[]>;
@@ -3484,6 +3497,31 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(pricingAuditEvents.createdAt));
   }
   // ─── /Pricing audit events ─────────────────────────────────────────────────
+
+  // ─── Photo late-addition audit (Task #195) ─────────────────────────────────
+  async recordPhotoLateAddition(input: InsertPhotoLateAddition): Promise<PhotoLateAddition> {
+    const [row] = await db.insert(photoLateAdditions).values(input).returning();
+    return row;
+  }
+
+  async getPhotoLateAdditions(
+    ticketType: 'work_order' | 'billing_sheet',
+    ticketId: number,
+    companyId?: number | null,
+  ): Promise<PhotoLateAddition[]> {
+    const conditions = [
+      eq(photoLateAdditions.ticketType, ticketType),
+      eq(photoLateAdditions.ticketId, ticketId),
+    ];
+    if (companyId != null) {
+      conditions.push(eq(photoLateAdditions.companyId, companyId));
+    }
+    return await db.select()
+      .from(photoLateAdditions)
+      .where(and(...conditions))
+      .orderBy(desc(photoLateAdditions.createdAt));
+  }
+  // ─── /Photo late-addition audit ────────────────────────────────────────────
 
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {

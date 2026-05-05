@@ -7871,6 +7871,60 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
+      // Task #195: photo-after-billing audit. If this was a photos-only PATCH
+      // applied to a sheet that had already reached billing (status `billed`
+      // or `approved_passed_to_billing`, or has an `invoiceId`), record who
+      // added the late photo, when, and the prior + new photos arrays.
+      if (isBsPhotosOnlyPatch && existingBsForLockCheck) {
+        const wasAfterBilling =
+          existingBsForLockCheck.status === 'billed' ||
+          existingBsForLockCheck.status === 'approved_passed_to_billing' ||
+          existingBsForLockCheck.invoiceId != null;
+        if (wasAfterBilling) {
+          const priorPhotos: string[] = Array.isArray(existingBsForLockCheck.photos)
+            ? (existingBsForLockCheck.photos as string[])
+            : [];
+          const newPhotos: string[] = Array.isArray(req.body.photos) ? req.body.photos : [];
+          const priorSet = new Set(priorPhotos);
+          const newSet = new Set(newPhotos);
+          const addedPhotos = newPhotos.filter((p) => !priorSet.has(p));
+          const removedPhotos = priorPhotos.filter((p) => !newSet.has(p));
+          // Only record when there was an actual addition — pure removals or
+          // no-op writes are not "late additions".
+          if (addedPhotos.length > 0) {
+            const actor = await resolvePhotoAuditActor(req);
+            try {
+              await storage.recordPhotoLateAddition({
+                ticketType: 'billing_sheet',
+                ticketId: id,
+                ticketNumber: existingBsForLockCheck.billingNumber ?? null,
+                ticketStatusAtAddition: existingBsForLockCheck.status ?? null,
+                invoiceIdAtAddition: existingBsForLockCheck.invoiceId ?? null,
+                companyId: actor.companyId ?? null,
+                actorUserId: actor.userId ?? null,
+                actorName: actor.name ?? null,
+                actorRole: actor.role ?? null,
+                priorPhotos,
+                newPhotos,
+                addedPhotos,
+                removedPhotos,
+              });
+            } catch (auditErr) {
+              console.error('[AUDIT] photo_added_after_billing record failed for billing sheet', id, auditErr);
+            }
+            console.log(
+              `[AUDIT] photo_added_after_billing ticketType=billing_sheet ticketId=${id} ` +
+              `ticketNumber=${existingBsForLockCheck.billingNumber ?? '?'} ` +
+              `status=${existingBsForLockCheck.status ?? '?'} ` +
+              `invoiceId=${existingBsForLockCheck.invoiceId ?? 'null'} ` +
+              `actor=${actor.userId ?? '?'} role=${actor.role ?? '?'} ` +
+              `priorCount=${priorPhotos.length} newCount=${newPhotos.length} ` +
+              `added=${addedPhotos.length} removed=${removedPhotos.length}`
+            );
+          }
+        }
+      }
+
       // Handle items if provided — atomically replace items AND resync partsSubtotal/totalAmount in one transaction
       if (items && Array.isArray(items)) {
         const countBefore = (await storage.getBillingSheetById(id))?.items?.length ?? 0;
@@ -8774,6 +8828,58 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
+      // Task #195: photo-after-billing audit. If this was a photos-only PATCH
+      // applied to a work order that had already reached billing (status
+      // `billed` / `approved_passed_to_billing`, or has an `invoiceId`),
+      // record who added the late photo, when, and the prior + new arrays.
+      if (isWoPhotosOnlyPatch && existingForLockCheck) {
+        const wasAfterBilling =
+          existingForLockCheck.status === 'billed' ||
+          existingForLockCheck.status === 'approved_passed_to_billing' ||
+          existingForLockCheck.invoiceId != null;
+        if (wasAfterBilling) {
+          const priorPhotos: string[] = Array.isArray(existingForLockCheck.photos)
+            ? (existingForLockCheck.photos as string[])
+            : [];
+          const newPhotos: string[] = Array.isArray(req.body.photos) ? req.body.photos : [];
+          const priorSet = new Set(priorPhotos);
+          const newSet = new Set(newPhotos);
+          const addedPhotos = newPhotos.filter((p) => !priorSet.has(p));
+          const removedPhotos = priorPhotos.filter((p) => !newSet.has(p));
+          if (addedPhotos.length > 0) {
+            const actor = await resolvePhotoAuditActor(req);
+            try {
+              await storage.recordPhotoLateAddition({
+                ticketType: 'work_order',
+                ticketId: id,
+                ticketNumber: existingForLockCheck.workOrderNumber ?? null,
+                ticketStatusAtAddition: existingForLockCheck.status ?? null,
+                invoiceIdAtAddition: existingForLockCheck.invoiceId ?? null,
+                companyId: actor.companyId ?? null,
+                actorUserId: actor.userId ?? null,
+                actorName: actor.name ?? null,
+                actorRole: actor.role ?? null,
+                priorPhotos,
+                newPhotos,
+                addedPhotos,
+                removedPhotos,
+              });
+            } catch (auditErr) {
+              console.error('[AUDIT] photo_added_after_billing record failed for work order', id, auditErr);
+            }
+            console.log(
+              `[AUDIT] photo_added_after_billing ticketType=work_order ticketId=${id} ` +
+              `ticketNumber=${existingForLockCheck.workOrderNumber ?? '?'} ` +
+              `status=${existingForLockCheck.status ?? '?'} ` +
+              `invoiceId=${existingForLockCheck.invoiceId ?? 'null'} ` +
+              `actor=${actor.userId ?? '?'} role=${actor.role ?? '?'} ` +
+              `priorCount=${priorPhotos.length} newCount=${newPhotos.length} ` +
+              `added=${addedPhotos.length} removed=${removedPhotos.length}`
+            );
+          }
+        }
+      }
+
       // Handle items if provided (delete-and-recreate pattern wrapped in a transaction)
       if (items !== undefined && Array.isArray(items)) {
         const countBefore = (await storage.getWorkOrderItems(id)).length;
@@ -9095,6 +9201,45 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     return role === 'company_admin' || role === 'billing_manager' || role === 'super_admin';
   }
 
+  // Photos-only PATCH paths use `requireWorkOrderUpdateAccess` /
+  // `requireBillingSheetUpdateAccess`, which intentionally do not run the full
+  // `requireAuthentication` chain — so `req.authenticatedUserId/Role/CompanyId`
+  // can be undefined even on legitimate requests. Fall back to the same
+  // x-user-* headers the photos-only access middlewares already trust so the
+  // late-addition audit row is correctly attributed instead of NULL.
+  async function resolvePhotoAuditActor(req: any): Promise<{ userId: number | null; role: string | null; companyId: number | null; name: string | null }> {
+    const fromAuth = await getAuditActor(req);
+    let userId = fromAuth.userId;
+    let role = fromAuth.role;
+    let companyId = fromAuth.companyId;
+    if (userId == null) {
+      const raw = req.headers?.['x-user-id'];
+      const parsed = raw != null ? Number(Array.isArray(raw) ? raw[0] : raw) : NaN;
+      if (Number.isFinite(parsed)) userId = parsed;
+    }
+    if (!role) {
+      const raw = req.headers?.['x-user-role'];
+      if (typeof raw === 'string' && raw.length > 0) role = raw;
+      else if (Array.isArray(raw) && typeof raw[0] === 'string') role = raw[0];
+    }
+    if (companyId == null) {
+      const raw = req.headers?.['x-user-company-id'];
+      const parsed = raw != null ? Number(Array.isArray(raw) ? raw[0] : raw) : NaN;
+      if (Number.isFinite(parsed)) companyId = parsed;
+    }
+    let name: string | null = fromAuth.name;
+    if (!name && userId != null) {
+      try {
+        const u = await storage.getUser(userId);
+        name = u?.name ?? u?.username ?? null;
+        if (companyId == null && typeof u?.companyId === 'number') companyId = u.companyId;
+      } catch {
+        // best-effort; leave name null
+      }
+    }
+    return { userId, role, companyId, name };
+  }
+
   app.get("/api/admin/billing-sheets/zero-price-audit", requireAuthentication, async (req: any, res) => {
     try {
       const actor = await getAuditActor(req);
@@ -9342,6 +9487,88 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     async (req: any, res) => pricingHistoryHandler(req, res, 'work_order'),
   );
   // ─── /Pricing audit event history ────────────────────────────────────────
+
+  // ─── Photo late-addition audit history (Task #195) ───────────────────────
+  // Read-only endpoint that returns the audit trail of photos added to a
+  // ticket AFTER it reached billing. Visible to managers and admins only.
+  function isPhotoLateAdditionViewer(role: string | null): boolean {
+    return role === 'company_admin'
+      || role === 'super_admin'
+      || role === 'billing_manager'
+      || role === 'irrigation_manager';
+  }
+
+  async function photoLateAdditionsHandler(
+    req: any,
+    res: any,
+    ticketType: 'work_order' | 'billing_sheet',
+  ) {
+    try {
+      const role: string | null = (req.authenticatedUserRole as string) ?? null;
+      if (!isPhotoLateAdditionViewer(role)) {
+        return res.status(403).json({
+          message: "Access denied. Manager or admin role required to view the photo audit trail.",
+        });
+      }
+      const ticketId = parseInt(req.params.id);
+      if (!Number.isFinite(ticketId)) {
+        return res.status(400).json({ message: "Invalid id" });
+      }
+
+      // Cross-company guard mirroring the pricing-audit history endpoint.
+      const scopeCompanyId: number | null = typeof req.authenticatedUserCompanyId === 'number'
+        ? req.authenticatedUserCompanyId
+        : null;
+      if (role !== 'super_admin') {
+        if (scopeCompanyId == null) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+        if (ticketType === 'billing_sheet') {
+          const sheet = await storage.getBillingSheetById(ticketId);
+          if (!sheet) return res.status(404).json({ message: "Billing sheet not found" });
+          if (!sheet.customerId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+          const cust = await storage.getCustomer(sheet.customerId);
+          if (!cust || cust.companyId !== scopeCompanyId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+        } else {
+          const wo = await storage.getWorkOrder(ticketId);
+          if (!wo) return res.status(404).json({ message: "Work order not found" });
+          if (!wo.customerId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+          const cust = await storage.getCustomer(wo.customerId);
+          if (!cust || cust.companyId !== scopeCompanyId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+        }
+      }
+
+      const events = await storage.getPhotoLateAdditions(
+        ticketType,
+        ticketId,
+        role === 'super_admin' ? null : scopeCompanyId,
+      );
+      res.json({ ticketType, ticketId, count: events.length, events });
+    } catch (error) {
+      console.error(`[photo-late-additions:${ticketType}] failed:`, error);
+      res.status(500).json({ message: "Failed to load photo audit trail" });
+    }
+  }
+
+  app.get(
+    "/api/billing-sheets/:id/photo-late-additions",
+    requireAuthentication,
+    async (req: any, res) => photoLateAdditionsHandler(req, res, 'billing_sheet'),
+  );
+  app.get(
+    "/api/work-orders/:id/photo-late-additions",
+    requireAuthentication,
+    async (req: any, res) => photoLateAdditionsHandler(req, res, 'work_order'),
+  );
+  // ─── /Photo late-addition audit history ──────────────────────────────────
 
   // Billing Sheet routes
   app.post("/api/work-orders/:id/billing-sheet", async (req, res) => {

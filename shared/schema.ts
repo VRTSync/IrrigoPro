@@ -931,6 +931,37 @@ export const insertPricingAuditEventSchema = createInsertSchema(pricingAuditEven
 export type PricingAuditEvent = typeof pricingAuditEvents.$inferSelect;
 export type InsertPricingAuditEvent = z.infer<typeof insertPricingAuditEventSchema>;
 
+// Task #195: audit trail for photos added to a ticket AFTER it has reached
+// billing (status `billed` / `approved_passed_to_billing`, or has an
+// `invoiceId`). Lets managers prove who added the late photo, when, and what
+// state the ticket was in at the time.
+export const photoLateAdditions = pgTable("photo_late_additions", {
+  id: serial("id").primaryKey(),
+  ticketType: text("ticket_type").notNull(), // 'work_order' | 'billing_sheet'
+  ticketId: integer("ticket_id").notNull(),
+  ticketNumber: text("ticket_number"), // work order / billing number snapshot
+  ticketStatusAtAddition: text("ticket_status_at_addition"),
+  invoiceIdAtAddition: integer("invoice_id_at_addition"),
+  companyId: integer("company_id").references(() => companies.id),
+  actorUserId: integer("actor_user_id").references(() => users.id),
+  actorName: text("actor_name"),
+  actorRole: text("actor_role"),
+  priorPhotos: text("prior_photos").array().notNull().default(sql`ARRAY[]::text[]`),
+  newPhotos: text("new_photos").array().notNull().default(sql`ARRAY[]::text[]`),
+  addedPhotos: text("added_photos").array().notNull().default(sql`ARRAY[]::text[]`),
+  removedPhotos: text("removed_photos").array().notNull().default(sql`ARRAY[]::text[]`),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  ticketLookupIdx: index("photo_late_additions_ticket_idx").on(table.ticketType, table.ticketId),
+}));
+
+export const insertPhotoLateAdditionSchema = createInsertSchema(photoLateAdditions).omit({
+  id: true,
+  createdAt: true,
+});
+export type PhotoLateAddition = typeof photoLateAdditions.$inferSelect;
+export type InsertPhotoLateAddition = z.infer<typeof insertPhotoLateAdditionSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Wet Check System (Slice 2A)
 // ─────────────────────────────────────────────────────────────────────────────
