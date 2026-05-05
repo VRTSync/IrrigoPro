@@ -1,0 +1,268 @@
+# Slice 7 — Estimate Pending-Approval Workflow
+
+**Date:** 2026-05-05
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Decisions locked:**
+- Q1 = Every new estimate goes straight to **Pending Approval** (no draft state in this slice).
+- Q2 = After internal approval, **Billing Manager and Company Admin can send to the customer themselves** — no second handoff to the Irrigation Manager.
+- Q3 = Add a separate `internal_status` column rather than expanding the existing `status` enum, so the customer-facing lifecycle (`status`) and the internal review lifecycle (`internal_status`) cannot collide.
+- Q4 = **Wet-check-generated estimates also land in the queue** (no carve-out). A wet-check finding routed to "send to estimate" goes through the same `createEstimateFromPayload()` write path and inherits `internal_status = 'pending_approval'` like any other new estimate. One pipeline, one review point. If operations decides later that wet-check estimates can skip review, that's a separate slice.
+- Q5 = **Irrigation Manager does not get queue access.** They see the internal-review state of their own estimates via the new `internal_status` badge on the existing `/estimates` page (added in this slice). The consolidated `/estimates/pending-approval` page is billing-roles only.
+
+**Related:** Builds on Slice 1 (Estimate System Strip-Down). Future estimate-system follow-ups (templates / quick entry, comment thread, PDF email attachment, notifications & tests) are intentionally out of scope here and would each get their own slice doc.
+
+---
+
+## Executive Summary
+
+After Slice 1, an estimate is a clean flat-line-item document — but the workflow around it is missing two things needed for field use: a way for the Irrigation Manager to hand a draft over to someone with billing authority, and a place where the Company Admin or Billing Manager actually sees the queue of work waiting for review. Today, an estimate created in the field lands in the same flat list as everything else and is essentially invisible to the people who need to act on it.
+
+Slice 7 introduces a second status track — `internal_status` — that records where the estimate sits in the *internal* approval workflow, independent of the customer-facing `status`. Estimates created by the Irrigation Manager land in `pending_approval` and surface in a new **Pending Approval** queue page visible only to Billing Managers and Company Admins. Approval routes that previously had no role enforcement are gated behind a new middleware. The customer-facing approval flow built in Slice 1 (token email, browser approval link, auto-conversion to work order) is left untouched.
+
+**Slice 7 ships when:** new estimates default to `internal_status = 'pending_approval'`, the `/estimates/pending-approval` page lists them for authorized reviewers only, the role middleware blocks unauthorized approval/send actions, and a reviewer can move an estimate to `approved_internal` and then `sent_to_customer` from the queue without leaving it.
+
+---
+
+## Why Now
+
+The original estimate flow assumed a single user — usually the Irrigation Manager — handled an estimate end-to-end: create it, mark it approved, send the email. In the field, that's the wrong shape. The Irrigation Manager is the one who walks the property and writes up the work; the Billing Manager owns customer relationships and pricing review; the Company Admin holds final authority. With one shared `status` field and no queue, three things break: estimates get sent to customers without billing review; estimates pile up in `pending` with no signal that anyone is supposed to act on them; and there's no audit-trail distinction between "the customer hasn't responded yet" and "we haven't even sent it yet." A second status track fixes all three.
+
+This also sets up the right foundation for any later estimate-system follow-ups. Future templates / quick-entry work needs a place for fast-entry estimates to land where someone qualified will look at them before they go out. A future edit-before-send + comment thread needs an explicit `needs_revision` state so a reviewer can hand an estimate back without rejecting it outright. Both fit cleanly on top of the `internal_status` column introduced here without changing it.
+
+---
+
+## What an Estimate Becomes
+
+After Slice 7, an estimate carries two parallel lifecycles:
+
+- **`status`** (customer-facing, unchanged from Slice 1): `pending` → `approved` / `rejected` / `expired`. Tracks the customer's response after we send them the approval email. Customer's view.
+- **`internal_status`** (new, internal workflow): `pending_approval` → `approved_internal` → `sent_to_customer`. The values `needs_revision` and `draft` are reserved for future estimate-system slices (comment thread + in-progress saves) and are NOT added in this slice. Tracks where the estimate sits inside the company before it ever reaches the customer. Reviewer's view.
+
+At creation, every estimate gets `status = 'pending'` and `internal_status = 'pending_approval'`. At internal approval, only `internal_status` flips to `approved_internal`. At send-to-customer, `internal_status` flips to `sent_to_customer` and the existing token + email flow runs. When the customer responds, `status` flips to `approved` or `rejected` — `internal_status` stays at `sent_to_customer` because the company's job is done.
+
+This is also where the **role wall** gets built: `irrigation_manager` creates estimates and views them, but cannot internally approve or send them. `billing_manager` and `company_admin` see the pending-approval queue and own the approve / send actions. `field_tech` sees nothing estimate-related.
+
+---
+
+## Scope of Slice 7
+
+### In Scope
+
+1. Add `internal_status` column to the `estimates` table with default `'pending_approval'`.
+2. Update `processEstimatePayload` (`server/estimate-payload.ts`) to set `internalStatus = 'pending_approval'` on creation when not explicitly provided.
+3. Add `requireEstimateApprovalAccess` middleware in `server/routes.ts` (`company_admin` + `billing_manager` + `super_admin`).
+4. Apply the new middleware to: `PATCH /api/estimates/:id/approve`, `PATCH /api/estimates/:id/reject`, `POST /api/estimates/:id/send-approval-email`, and the legacy `POST /api/estimates/:id/approve` and `POST /api/estimates/:id/reject` routes.
+5. Add `PATCH /api/estimates/:id/internal-approve` — flips `internal_status` from `pending_approval` to `approved_internal`. Does NOT trigger the customer email or the work-order conversion.
+6. Modify `POST /api/estimates/:id/send-approval-email` to also set `internal_status = 'sent_to_customer'` on success. Allow it to run from either `pending_approval` or `approved_internal` (one-step "Approve & Send" path).
+7. Add `getEstimatesPendingApproval(companyId)` to `IStorage` and the database storage class. Returns estimates with `internal_status = 'pending_approval'` for the requested company, ordered newest-first.
+8. Add `GET /api/estimates/pending-approval` route, gated by `requireEstimateApprovalAccess`, scoped to the authenticated user's company.
+9. New page `client/src/pages/estimates-pending-approval.tsx` — desktop table + mobile cards, mirrors the existing `estimates.tsx` patterns, exposes "Approve" and "Approve & Send" per row.
+10. Register `/estimates/pending-approval` in three router blocks: company-admin (`client/src/components/company-admin-app.tsx`), billing-manager (`client/src/App.tsx` line 252 area), and the default-fallback admin block (`client/src/App.tsx` line 324 area).
+11. Add a navigation entry to `client/src/components/layout/navigation.tsx` for `company_admin` and `billing_manager` roles, with a live count badge fed by the new endpoint.
+12. Update `getStatusBadge` in `client/src/pages/estimates.tsx` (and add an internal-status badge) so the existing list shows where each estimate sits in both lifecycles.
+13. Add tests in `tests/`: a payload-default test (new estimate gets `internal_status = 'pending_approval'`), a role-guard test (irrigation_manager cannot hit `internal-approve`), and a queue-scope test (queue returns only the company's pending estimates).
+
+### Out of Scope (Slice 7)
+
+- The "Quick Entry" mobile sheet and template seeding — separate future slice.
+- Edit-before-send, comment thread, and `needs_revision` state — separate future slice.
+- PDF attachment to the customer email — separate future slice.
+- Notifications when a new estimate enters the queue — separate future slice.
+- Audit log for `internal_status` transitions — separate future slice.
+- Removing the redundant POST-vs-PATCH approve/reject duplication — separate cleanup.
+
+---
+
+## Schema Changes
+
+A single Drizzle migration. Forward-only, additive.
+
+```ts
+// shared/schema.ts — estimates table addition
+export const estimates = pgTable("estimates", {
+  // ... existing fields ...
+  status: text("status").notNull().default("pending"),
+  // NEW: internal review workflow, independent of customer-facing `status`.
+  // Values: 'pending_approval' (default), 'approved_internal',
+  // 'sent_to_customer'. A future slice will add 'needs_revision'; another may
+  // add 'draft' if in-progress saves are wanted.
+  internalStatus: text("internal_status").notNull().default("pending_approval"),
+  // ... rest unchanged ...
+});
+```
+
+Migration SQL:
+
+```sql
+ALTER TABLE estimates
+  ADD COLUMN internal_status TEXT NOT NULL DEFAULT 'pending_approval';
+```
+
+Existing rows (if any) inherit the default. Because Slice 1 stipulated production has no estimate data, the default backfill is essentially a no-op there — but the column is added safely either way.
+
+---
+
+## API Changes
+
+### `POST /api/estimates`
+
+No signature change. Two behaviour additions:
+
+1. The `processEstimatePayload` function defaults `internalStatus` to `'pending_approval'` when the caller doesn't provide it.
+2. The route handler **force-sets** `parsed.estimate.internalStatus = 'pending_approval'` regardless of what arrived in the request body. This is defence-in-depth so a buggy or malicious client can't bypass the queue by submitting an explicit `'sent_to_customer'`.
+
+Wet-check conversions (which call `storage.createEstimateFromPayload()` directly, not the HTTP route) inherit the default from `processEstimatePayload`. Per **Q4**, this is intentional: wet-check-generated estimates land in the queue alongside manually-created ones. There is no carve-out.
+
+### `PATCH /api/estimates/:id/internal-approve` — NEW
+
+```ts
+app.patch("/api/estimates/:id/internal-approve",
+  requireAuthentication,
+  requireEstimateApprovalAccess,
+  async (req, res) => { ... }
+);
+```
+
+Validates the estimate exists and is in `internal_status = 'pending_approval'`. Sets `internal_status = 'approved_internal'`. Does not touch the customer-facing `status`, does not send email, does not create a work order. Returns the updated estimate.
+
+### `POST /api/estimates/:id/send-approval-email` — modified
+
+Adds `requireEstimateApprovalAccess`. On successful email send, also sets `internal_status = 'sent_to_customer'`. Permits running from either `pending_approval` (one-step Approve & Send) or `approved_internal` (two-step), but not from `sent_to_customer` (already sent).
+
+### `PATCH /api/estimates/:id/approve` and `PATCH /api/estimates/:id/reject`
+
+Add `requireEstimateApprovalAccess`. These routes handle the *customer-facing* approve/reject (manual override on behalf of the customer); they should be gated to billing roles regardless. The legacy POST variants get the same treatment.
+
+### `GET /api/estimates/pending-approval` — NEW
+
+```ts
+app.get("/api/estimates/pending-approval",
+  requireAuthentication,
+  requireEstimateApprovalAccess,
+  async (req, res) => { ... }
+);
+```
+
+Returns the estimates list filtered to `internal_status = 'pending_approval'` and `companyId = req.authenticatedUserCompanyId`, ordered by `createdAt DESC`. Same shape as `GET /api/estimates`.
+
+> **Implementation note — route ordering.** This route MUST be registered before `GET /api/estimates/:id` in `server/routes.ts`, otherwise Express will route the request through the `:id` handler with `id = "pending-approval"` and return a 500 from `parseInt(NaN)`. Specifically: insert the new handler right after `app.get("/api/estimates", ...)` (currently around `routes.ts:4705`) and before the existing `app.get("/api/estimates/:id", ...)` (currently around `routes.ts:4715`). For super_admin (no `companyId`), pass `null` and have the storage method skip the company filter.
+
+---
+
+## Storage Layer Changes
+
+In `server/storage.ts`:
+
+- Add to the `IStorage` interface: `getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]>`. `null` means "all companies" and is only ever passed for `super_admin` callers; every other caller passes their own company ID.
+- Implement on the database storage class, mirroring `getEstimates` (with the same per-row recompute) but filtered by `internalStatus = 'pending_approval'` and (when `companyId` is non-null) `companyId`.
+
+No changes to `_writeEstimateWithItems`, `createEstimateFromPayload`, or `updateEstimateWithItems`. The default value comes from the schema and from `processEstimatePayload`.
+
+---
+
+## Middleware
+
+```ts
+const requireEstimateApprovalAccess = (req: any, res: any, next: any) => {
+  const userRole = req.authenticatedUserRole;
+  if (
+    userRole !== "company_admin" &&
+    userRole !== "billing_manager" &&
+    userRole !== "super_admin"
+  ) {
+    return res.status(403).json({
+      message:
+        "Access denied. Estimate approval and customer delivery are restricted to billing managers, company administrators, and super admins.",
+    });
+  }
+  next();
+};
+```
+
+Mirrors `requireBillingAccess` in shape. Lives next to it in `server/routes.ts`.
+
+---
+
+## UI Changes
+
+### `client/src/pages/estimates-pending-approval.tsx` — NEW
+
+A queue page modeled on `parts-pending-approval.tsx` and the existing `estimates.tsx` patterns.
+
+- Fetches `GET /api/estimates/pending-approval` on mount and every 60 seconds.
+- Desktop: table with columns Estimate, Customer, Project, Amount, Created By, Created, Actions.
+- Mobile: stacked cards.
+- Per-row actions: **View** (opens `EstimateDetailModal`), **Approve** (calls `PATCH internal-approve`, refetches), **Approve & Send** (calls `internal-approve` then `send-approval-email` in sequence; toasts success or partial failure), **Reject** (calls `PATCH /api/estimates/:id/reject`).
+- Empty state: friendly "No estimates waiting for review."
+- Header shows the count and a Refresh button consistent with `estimates.tsx`.
+
+### Routing
+
+Per **Q5**, register the new route only in router blocks for `billing_manager` and `company_admin` (and the default-fallback admin block). Do **not** register it in the `irrigation_manager` block — they get visibility via badges on `/estimates`, not the queue page.
+
+- `client/src/App.tsx` line ~252 (`billing_manager` block): add `<Route path="/estimates/pending-approval" component={EstimatesPendingApproval} />` and the import at the top.
+- `client/src/App.tsx` line ~324 (default-fallback admin block): same addition.
+- `client/src/components/company-admin-app.tsx`: same addition near the existing `parts-pending-approval` line.
+
+### Navigation
+
+In `client/src/components/layout/navigation.tsx`:
+
+- Add a `useQuery` for `GET /api/estimates/pending-approval` enabled when `userRole === 'billing_manager' || userRole === 'company_admin'`, refetched every 60s — same pattern as the existing `pendingApprovalCount` query for the parts queue. Name the local count variable `pendingEstimateCount` to keep it distinct.
+- For `company_admin`: add `{ path: "/estimates/pending-approval", label: "Estimate Approvals", icon: ShieldCheck, badge: pendingEstimateCount > 0 ? pendingEstimateCount : undefined }` to the existing Operations dropdown.
+- For `billing_manager`: add the same item to the existing Billing dropdown (alongside Billing Sheets and Command Center).
+- Do **not** add a nav entry for `irrigation_manager` — Q5.
+
+### `client/src/pages/estimates.tsx` — Irrigation Manager visibility
+
+Per **Q5**, the Manager doesn't get the queue page; they get the same information surfaced as badges on the existing list:
+
+- Add a `getInternalStatusBadge(internalStatus)` helper alongside the existing `getStatusBadge(status)`. Render it next to the customer-status badge in both the desktop table cell and the mobile card. Suggested colour mapping: `pending_approval` → amber, `approved_internal` → emerald, `sent_to_customer` → blue, `needs_revision` → orange (reserved for a future slice), `draft` → outline (reserved).
+- Update the "Active" / "Completed" bucketing so an estimate with `internal_status = 'pending_approval'` reads as **"Awaiting Review"** in the Manager's view, not "Active." The `activeStatuses` array should still include `pending` and `approved` for the customer-facing axis, but the section header / row colour should reflect that these estimates haven't been internally cleared yet.
+
+---
+
+## Migration
+
+```sql
+ALTER TABLE estimates
+  ADD COLUMN internal_status TEXT NOT NULL DEFAULT 'pending_approval';
+```
+
+Forward-only. Backfills via the `DEFAULT` clause — every existing row (production has none after Slice 1's confirmation) gets `'pending_approval'`. If a non-production environment has stray estimates that should be considered already-approved, those can be hand-flipped with a one-off `UPDATE` after migration.
+
+---
+
+## Risks and Rollback
+
+- **Misclassified existing estimates** in non-production environments. Mitigation: the migration's default is the safest choice — landing them in the queue costs nothing more than a manual "Approve" click. The opposite default (`'sent_to_customer'`) would silently bypass review.
+- **Role-guard regression** breaking field-tech or irrigation-manager existing flows. Mitigation: the new middleware only applies to approval/send routes, not to create/edit/view. The role-guard test added in Slice 7 covers the negative case explicitly.
+- **Two-step UI race.** "Approve & Send" runs internal-approve then send-approval-email in sequence. If the second call fails, the estimate is left in `approved_internal` — the reviewer sees it, can retry the send. Mitigation: clear toast on partial failure pointing at the next action.
+
+Rollback: `git revert` plus a Drizzle migration that drops the `internal_status` column. The customer-facing flow is untouched, so rollback loses nothing.
+
+---
+
+## Success Criteria
+
+Slice 7 ships when, in order:
+
+1. The migration runs cleanly. `estimates.internal_status` exists with default `'pending_approval'`.
+2. A new estimate created via `POST /api/estimates` writes `internal_status = 'pending_approval'` regardless of any value the client supplied (Q4 / defence-in-depth).
+3. A wet-check finding routed to "send to estimate" produces an estimate with `internal_status = 'pending_approval'` and surfaces in the queue (Q4).
+4. An `irrigation_manager` calling `PATCH /api/estimates/:id/internal-approve` receives a 403.
+5. An `irrigation_manager` navigating to `/estimates/pending-approval` does not see the page in their nav and the route does not resolve to the queue component for their role (Q5).
+6. A `billing_manager` calling `GET /api/estimates/pending-approval` sees only their company's pending estimates.
+7. The pending-approval page renders the queue, supports Approve, Approve & Send, and Reject; the count badge in the navigation matches.
+8. The Irrigation Manager's `/estimates` page shows the new `internal_status` badge alongside the existing customer-status badge for every row (Q5).
+9. The customer-facing approval-by-link flow built in Slice 1 still works end-to-end.
+10. The three new tests pass.
+
+---
+
+## What This Unblocks
+
+Any future estimate-system follow-up lands cleanly on top of this slice. A quick-entry / templates slice gets a clearly-named home — the queue — for fast-entry estimates, instead of having them disappear into a global list. An edit-before-send + comment thread slice can extend the queue with a `needs_revision` state and a per-estimate discussion without touching the customer flow. A PDF-email slice can replace the email body with a polished PDF attachment, gated by the same `requireEstimateApprovalAccess` middleware. A notifications & audit slice can hang notifications and an audit-log feed off the `internal_status` transitions defined here.
+
+The estimate system gets a real intake-and-review pipeline, and any later slice slots into it without re-shaping it.

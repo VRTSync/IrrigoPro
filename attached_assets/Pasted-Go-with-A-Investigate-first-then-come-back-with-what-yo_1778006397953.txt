@@ -1,0 +1,16 @@
+Go with (A). Investigate first, then come back with what you found before drafting anything.
+Specifically I want to know:
+
+Git state. What does git log --oneline -50 show? Is there a merge commit for #306? A revert commit after it? Any tag like pre-multi-artifact-migration or similar? Anything stashed or uncommitted? Are there branches related to #306 still around?
+Which scenario actually happened. Distinguish between "merged here and rolled back" (would leave commit history evidence) vs. "ran in a different Repl and merge didn't land in this tree" (would leave this Repl's history clean). Tell me which of your two original hypotheses the evidence supports — or a third I haven't considered.
+Hidden state from a possible prior run. If #306 did run and was rolled back, check whether anything outside the working tree carries residue:
+
+Did the DB schema get pushed against? Compare current Neon schema to what shared/schema.ts defines and report any drift, especially in the session table, billing_number_counters, photo storage, or MFA tables.
+Are there secrets, workflows, or .replit config entries that look like they were added for the multi-artifact layout (port shifts, new workflow names, new env vars referenced)?
+Is there a deleted-but-still-in-history .migration-backup/ directory?
+
+
+The Replit task system itself. Why does it show #306 as Merged when the working tree disagrees? Is the task system tracking a different branch or a different Repl? I want to understand whether the task tracker is reliable here or whether I should ignore its statuses going forward.
+
+On your other two points: agreed, write the setup-only task as a custom one — I want the verification gate, and I know the standard template does too much. And yes, use a full repo-root mirror with diff -rq and your exclude list (.git, node_modules, dist, uploads, .cache, .local, .migration-backup) for verification rather than a hand-curated checklist. Better approach.
+Don't draft the task yet. Investigate, report back, and we'll decide whether the setup task can run as-is or whether we need a cleanup step first.

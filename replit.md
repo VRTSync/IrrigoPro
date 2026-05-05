@@ -1,9 +1,50 @@
-# IrrigoPro - Irrigation Business Management System
+# IrrigoPro
+A full-stack business management system for irrigation companies, streamlining operations from estimates to billing.
 
-## Overview
-IrrigoPro is a comprehensive full-stack irrigation business management system designed to streamline operations for irrigation businesses. It manages the entire workflow from estimates and customer approvals to work orders and invoices, enhancing efficiency and customer satisfaction. Key capabilities include site map management, QuickBooks integration, and robust role-based access control. The project's vision is to be the leading operational backbone for irrigation companies, enabling growth and improving service delivery within the irrigation industry.
+## Run & Operate
+- **Run Dev Server**: `npm run dev`
+- **Build**: `npm run build`
+- **Typecheck**: `npm run typecheck`
+- **DB Push**: `npm run db:push`
+- **Generate Drizzle Migrations**: `npm run db:generate`
+- **Required Env Vars**: `DATABASE_URL`, `POSTMARK_API_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `QB_CLIENT_ID`, `QB_CLIENT_SECRET`, `QB_WEBHOOK_TOKEN`, `QB_REDIRECT_URI`
 
-## User Preferences
+## Stack
+- **Frontend**: React (TypeScript, Vite, shadcn/ui, Tailwind CSS), TanStack React Query, Wouter, React Hook Form (Zod)
+- **Backend**: Node.js (Express.js), TypeScript
+- **Database**: PostgreSQL (Neon Database)
+- **ORM**: Drizzle ORM
+- **Authentication**: Session-based, TOTP MFA, email verification, phone-based login
+
+## Where things live
+- `client/`: Frontend application
+- `server/`: Backend API and logic
+- `drizzle/`: Drizzle ORM migrations
+- `server/db/schema.ts`: Database schema
+- `server/routes.ts`: API route definitions and middleware
+- `client/src/components/ui/`: shadcn/ui components
+- `client/src/styles/tailwind.css`: Main Tailwind CSS
+
+## Architecture decisions
+- **Role-based Pricing Visibility**: Field technicians never see financial data, enforced at the server level via `applyPricingVisibility()` function.
+- **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
+- **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout for efficiency.
+- **Independent Parts Management**: Parts catalog operates independently from QuickBooks for robust inventory control.
+- **KML for Site Maps**: KML import is used for interactive irrigation maps.
+- **IrrigoPro Display Name (`irrigoName`)**: A separate customer field for internal recognition, defaulting to the official customer name, displayed prominently.
+
+## Product
+- Manages estimates, customer approval, work orders, invoicing, and billing sheets, with monthly invoice consolidation to QuickBooks.
+- Granular role-based access control for pricing, site maps, QuickBooks, customer management, and work orders/billing sheets.
+- Interactive site maps with KML import, controller management, and live GPS tracking.
+- Token-based customer email approval for estimates and PWA push notifications.
+- Secure authentication with MFA and phone number-based login.
+- External Work Order API for CRM integration and photo uploads for work orders/billing sheets.
+- Authoritative pricing and auditing for catalog items and labor rates.
+- Animated loading skeletons for enhanced user experience.
+- Location Picker with live GPS tracking.
+
+## User preferences
 Preferred communication style: Simple, everyday language.
 Site Map Display Preferences: Default display mode set to solid markers with zone/controller identifiers in the center, enhanced popups with detailed information. Maintain original styling and functionality unless explicitly requested to change.
 App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details.
@@ -25,57 +66,17 @@ Parts Catalog Access: Billing managers and irrigation managers have comprehensiv
 Work Order & Billing Sheet Photo Uploads: Photos can be attached during work order and billing sheet creation via the FileUpload component. Uploaded photos are stored in the `photos` array field (text[]) and displayed in the Photos section of the detail view for all statuses. Add/remove of photos AFTER creation is supported in the work order detail view AND in the billing sheet view modal (CompletedWorkDetailModal) via the "Add Photos" button and an "X" remove overlay (with a confirmation dialog). Allowed roles for post-creation photo edits: company_admin, super_admin, irrigation_manager, billing_manager (full access on any record), and field_tech (only on work orders assigned to them, and only on billing sheets they created). Edits are blocked once a record is billed/invoiced or cancelled. Photo changes save immediately via PATCH /api/work-orders/:id and PATCH /api/billing-sheets/:id. The middleware `requireWorkOrderUpdateAccess` and `requireBillingSheetUpdateAccess` allows a photos-only payload (single key `photos: string[]`) from field techs scoped to ownership/assignment, in addition to their existing status-only paths. Important fix: previously, photos uploaded during billing sheet creation were silently dropped because the `onSubmit` handler in standalone-billing-sheet.tsx did not include the `uploadedPhotos` state in its submission payload — this is now fixed for both new sheets and manager edits.
 Work Order Editing: Full work order editing available for irrigation managers and admins (company_admin, super_admin) on non-completed/non-cancelled work orders. An "Edit" button in the work order detail header opens the EditWorkOrderModal with all editable fields: project name, description, project address, location notes, scheduled date, priority, technician assignment, special instructions, and internal notes. Changes saved via PATCH /api/work-orders/:id. Field techs and billing managers do not see the edit button. Customer assignment and work order items are not editable through this form.
 Work Order Assignment: The assignment dropdown on work orders includes both irrigation managers and field technicians, grouped by role (Managers / Field Techs). The `/api/users/field-techs` endpoint returns both `field_tech` and `irrigation_manager` active users. Reassignment in work order details also shows grouped managers and field techs.
-Location Picker Enhancements: The LocationPicker component features a live GPS tracking dot (pulsing blue circle) that continuously shows the user's real-time position on the map. A "Use My Location" button snaps the work location pin to the user's GPS coordinates with reverse geocoding. The map automatically re-centers when the customer/community selection changes using `map.flyTo()` for smooth transitions.
 Phone-Based User Login: New company team members use their phone number as their login username. The phone field is required when creating new users, and the username is automatically set to the phone number. Email is optional. Existing users with text-slug usernames are completely unaffected.
 IrrigoPro Display Name (irrigoName): Customers have a separate `irrigo_name` field (stored in the database as `irrigo_name`) that is the name shown to all IrrigoPro users throughout the app — intended to be a property name or nickname the field team recognizes. It defaults to the official customer name on creation and auto-fills from the customer name when adding new customers. Displayed as the primary name everywhere (customer list, profile, billing, site maps, customer selector). Official name shown as a faint subtitle only when it differs. In the customer form, the field is highlighted with a green bordered box, green badge labeled "Irrigo Facing", and a Tag icon so it is unmistakable. Search across all views matches both irrigoName and official name.
 
-## System Architecture
+## Gotchas
+- Field technicians cannot see any pricing information; this is enforced at the API level.
+- Photos uploaded to billing sheets require the `uploadedPhotos` state in the submission payload for new sheets and manager edits.
+- Estimates automatically create work orders upon approval; manual work order creation is for direct billing only.
+- Company admin users have limited direct access to estimates and work orders pages; they view through modals.
 
-### Frontend
-- **Framework**: React with TypeScript, Vite.
-- **UI/UX**: shadcn/ui components with Radix UI, Tailwind CSS. Responsive, mobile-first design with dual-layout and role-based mobile navigation.
-- **State Management**: TanStack React Query.
-- **Routing**: Wouter.
-- **Forms**: React Hook Form with Zod validation.
-
-### Backend
-- **Runtime**: Node.js with Express.js.
-- **Language**: TypeScript with ES modules.
-- **Database**: PostgreSQL with Drizzle ORM.
-- **Schema Management**: Drizzle Kit for migrations.
-- **API Design**: RESTful API with JSON responses.
-
-### Core Features
-- **Complete Business Workflow**: Manages estimates, customer approval, work order generation, field work, invoicing, and standalone billing sheets.
-- **Monthly Invoice Consolidation**: Consolidates customer work into single monthly, tax-free QuickBooks invoices.
-- **Role-based Access Control**: Granular permissions for Admin, Manager, and Field Tech roles, including pricing visibility control for field technicians.
-- **Site Maps & Controller Management System**: KML import for interactive irrigation maps using Leaflet.
-- **Customer Email Approval System**: Token-based estimate approval.
-- **Notification System**: Database-driven notifications for work order assignments, completions, estimate approvals, and iOS PWA Push Notifications.
-- **Location Management Enhancement**: Interactive map-based picker with live GPS and "Use My Location" functionality.
-- **Authentication & Security**: Secure password reset, email verification, MFA (TOTP with backup codes), phone-based user login, session-based authentication.
-- **User Management**: Company administrators manage users.
-- **External Work Order API**: REST API for CRM integration with API key authentication.
-- **Photo Uploads**: Work order and billing sheet photo attachments with role-based editing permissions and a photo processing pipeline.
-- **Authoritative Pricing & Auditing**: Server-side enforcement of catalog pricing for line items and auditing for $0 catalog prices and labor rates.
-- **Billing Number Generation**: Uses a `billing_number_counters` table for monotonically increasing billing numbers.
-
-## External Dependencies
-
-### Frontend
-- **UI Components**: Radix UI (via shadcn/ui)
-- **Form Handling**: React Hook Form, Zod
-- **Date Handling**: date-fns
-- **Icons**: Lucide React
-- **Carousel**: Embla Carousel
-- **Mapping**: Leaflet, OpenStreetMap, Esri satellite tiles
-- **PWA & Notifications**: Service Worker API, Notification API, Badge API
-
-### Backend
-- **Database**: Neon Database (PostgreSQL)
-- **ORM**: Drizzle ORM
-- **Session Management**: connect-pg-simple
-- **Email Service**: Postmark API
-- **SMS Service**: Twilio
-- **QuickBooks Integration**: OAuth2 authentication, customer sync, invoice creation.
-- **PDF Generation**: Puppeteer.
+## Pointers
+- **React Query Docs**: _Populate as you build_
+- **Drizzle ORM Docs**: _Populate as you build_
+- **Tailwind CSS Docs**: _Populate as you build_
+- **QuickBooks API Docs**: _Populate as you build_
