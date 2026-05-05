@@ -486,6 +486,213 @@ describe("Offline queue replay — idempotent retry", () => {
   });
 });
 
+describe("Offline queue replay — Slice 4C photo.upload", () => {
+  test("queued photo.upload runs sign → PUT → finalize → metadata POST and clears the blob", async () => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      if (url.startsWith("/api/upload/photo?")) {
+        return jsonResponse(200, { signedUrl: "https://signed.example/abc", url: "photos/abc.jpg" });
+      }
+      if (url === "https://signed.example/abc") {
+        // PUT signed URL — return a real Response-like with no body.
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(""), json: () => Promise.resolve({}) });
+      }
+      if (url === "/api/upload/photo/finalize") return jsonResponse(200, { url: "photos/abc.jpg" });
+      if (url === "/api/wet-checks/77/photos") return jsonResponse(201, { id: 9001, url: "photos/abc.jpg", clientId: "p-1" });
+      return jsonResponse(404, {});
+    };
+    const env = await freshEnv(fetchImpl);
+    const { engine, db } = env;
+    const { putWetCheckMirror, putPhotoBlob, getPhotoBlob } = dbMod;
+    await putWetCheckMirror(db, {
+      clientId: "wc-P", id: 77, status: "in_progress", updatedAt: 0,
+      data: { id: 77, clientId: "wc-P" },
+    });
+    // Pre-store the captured Blob exactly the way `queuePhotoUpload`
+    // would in the browser. Using a tiny Blob here keeps the test fast
+    // and avoids dragging the real compression worker into node:test.
+    const fakeBlob = new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: "image/jpeg" });
+    await putPhotoBlob(db, {
+      clientId: "p-1", blob: fakeBlob, contentType: "image/jpeg",
+      name: "img.jpg", byteSize: 5, capturedAt: 0, compressed: true,
+    });
+    await engine.enqueue(makeMutation({
+      kind: "photo.upload",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/{{wc}}/photos",
+      body: { takenAt: "2026-05-05T00:00:00Z", clientId: "p-1", zoneRecordId: null, findingId: null },
+      clientId: "p-1",
+      parentClientId: "wc-P",
+      placeholders: { wc: "wc-P" },
+    }));
+    await engine.drainAll();
+    const urls = calls.map((c) => c.url);
+    // Order matters: sign → PUT → finalize → metadata POST.
+    const signIdx = urls.findIndex((u) => u.startsWith("/api/upload/photo?"));
+    const putIdx = urls.indexOf("https://signed.example/abc");
+    const finIdx = urls.indexOf("/api/upload/photo/finalize");
+    const metaIdx = urls.indexOf("/api/wet-checks/77/photos");
+    assert.ok(signIdx >= 0 && putIdx > signIdx && finIdx > putIdx && metaIdx > finIdx,
+      `expected sign→PUT→finalize→meta order, got ${urls.join(", ")}`);
+    // Metadata POST body carries the finalized url + original clientId.
+    const metaBody = JSON.parse(calls[metaIdx].body);
+    assert.equal(metaBody.url, "photos/abc.jpg");
+    assert.equal(metaBody.clientId, "p-1");
+    // Blob is removed only after the metadata POST succeeded.
+    const blobAfter = await getPhotoBlob(db, "p-1");
+    assert.equal(blobAfter, undefined, "blob should be deleted after success");
+    // Mutation marked completed with progress=100.
+    const remaining = await listAllMutations(env.db);
+    const m = remaining.find((x) => x.clientId === "p-1");
+    assert.equal(m.status, "completed");
+    assert.equal(m.progress, 100);
+  });
+
+  test("transient PUT failure retries and the Blob is preserved across attempts", async () => {
+    let putAttempts = 0;
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      calls.push(url);
+      if (url.startsWith("/api/upload/photo?")) {
+        return jsonResponse(200, { signedUrl: "https://signed.example/r", url: "photos/r.jpg" });
+      }
+      if (url === "https://signed.example/r") {
+        putAttempts++;
+        if (putAttempts === 1) {
+          return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve(""), json: () => Promise.resolve({}) });
+        }
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(""), json: () => Promise.resolve({}) });
+      }
+      if (url === "/api/upload/photo/finalize") return jsonResponse(200, {});
+      if (url === "/api/wet-checks/55/photos") return jsonResponse(201, { id: 1234 });
+      return jsonResponse(404, {});
+    };
+    const env = await freshEnv(fetchImpl);
+    const { engine, db } = env;
+    const { putWetCheckMirror, putPhotoBlob, getPhotoBlob } = dbMod;
+    await putWetCheckMirror(db, {
+      clientId: "wc-R", id: 55, status: "in_progress", updatedAt: 0,
+      data: { id: 55, clientId: "wc-R" },
+    });
+    const blob = new Blob([new Uint8Array([9, 9])], { type: "image/jpeg" });
+    await putPhotoBlob(db, {
+      clientId: "p-R", blob, contentType: "image/jpeg",
+      name: "r.jpg", byteSize: 2, capturedAt: 0, compressed: true,
+    });
+    await engine.enqueue(makeMutation({
+      kind: "photo.upload",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/{{wc}}/photos",
+      body: { takenAt: "2026-05-05T00:00:00Z", clientId: "p-R", zoneRecordId: null, findingId: null },
+      clientId: "p-R",
+      parentClientId: "wc-R",
+      placeholders: { wc: "wc-R" },
+    }));
+    // First tick: PUT fails → backoff scheduled.
+    await engine.tick();
+    while (engine.inFlight.size > 0) await new Promise((r) => setTimeout(r, 0));
+    let q = await listAllMutations(env.db);
+    assert.equal(q[0].status, "pending", "still pending after 5xx");
+    // Blob MUST still be in IDB so the retry has bytes to send.
+    const blobBetween = await getPhotoBlob(db, "p-R");
+    assert.ok(blobBetween, "blob preserved between attempts");
+    // Advance past backoff and retry.
+    env.setNow(1_000_000 + 2000);
+    engine.setOnline(true);
+    await engine.tick();
+    while (engine.inFlight.size > 0) await new Promise((r) => setTimeout(r, 0));
+    q = await listAllMutations(env.db);
+    assert.equal(q[0].status, "completed");
+    assert.equal(putAttempts, 2);
+    const blobAfter = await getPhotoBlob(db, "p-R");
+    assert.equal(blobAfter, undefined, "blob deleted only after final success");
+  });
+
+  test("missing blob fails the mutation terminally instead of looping", async () => {
+    const fetchImpl = async () => jsonResponse(200, {});
+    const env = await freshEnv(fetchImpl);
+    const { engine, db } = env;
+    const { putWetCheckMirror } = dbMod;
+    await putWetCheckMirror(db, {
+      clientId: "wc-M", id: 11, status: "in_progress", updatedAt: 0,
+      data: { id: 11, clientId: "wc-M" },
+    });
+    // Note: no putPhotoBlob — simulates a wiped IDB / partial upgrade.
+    await engine.enqueue(makeMutation({
+      kind: "photo.upload",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/{{wc}}/photos",
+      body: { clientId: "p-missing" },
+      clientId: "p-missing",
+      parentClientId: "wc-M",
+      placeholders: { wc: "wc-M" },
+    }));
+    await engine.drainAll();
+    const q = await listAllMutations(env.db);
+    const m = q.find((x) => x.clientId === "p-missing");
+    assert.equal(m.status, "failed", "missing blob → terminal failure (not infinite retry)");
+  });
+
+  test("photo.upload waits for finding.create when parented to it, then substitutes {{f}}", async () => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      if (url === "/api/wet-checks/zone-records/200/findings") return jsonResponse(201, { id: 4242, clientId: "f-C" });
+      if (url.startsWith("/api/upload/photo?")) {
+        return jsonResponse(200, { signedUrl: "https://signed.example/c", url: "photos/c.jpg" });
+      }
+      if (url === "https://signed.example/c") {
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(""), json: () => Promise.resolve({}) });
+      }
+      if (url === "/api/upload/photo/finalize") return jsonResponse(200, {});
+      if (url === "/api/wet-checks/40/photos") return jsonResponse(201, { id: 8 });
+      return jsonResponse(404, {});
+    };
+    const env = await freshEnv(fetchImpl);
+    const { engine, db } = env;
+    const { putWetCheckMirror, putZoneRecordMirror, putPhotoBlob } = dbMod;
+    await putWetCheckMirror(db, {
+      clientId: "wc-C", id: 40, status: "in_progress", updatedAt: 0,
+      data: { id: 40, clientId: "wc-C" },
+    });
+    await putZoneRecordMirror(db, {
+      clientId: "zr-C", id: 200, wetCheckClientId: "wc-C", wetCheckId: 40, updatedAt: 0,
+      data: { id: 200, clientId: "zr-C" },
+    });
+    const blob = new Blob([new Uint8Array([7])], { type: "image/jpeg" });
+    await putPhotoBlob(db, {
+      clientId: "p-C", blob, contentType: "image/jpeg",
+      name: "c.jpg", byteSize: 1, capturedAt: 0, compressed: true,
+    });
+    await engine.enqueue(makeMutation({
+      kind: "finding.create",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/zone-records/{{zr}}/findings",
+      body: { issueType: "head_replacement", quantity: 1, clientId: "f-C" },
+      clientId: "f-C",
+      parentClientId: "zr-C",
+      placeholders: { zr: "zr-C" },
+    }));
+    await engine.enqueue(makeMutation({
+      kind: "photo.upload",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/{{wc}}/photos",
+      body: { clientId: "p-C", takenAt: "2026-05-05T00:00:00Z", zoneRecordId: "{{zr}}", findingId: "{{f}}" },
+      clientId: "p-C",
+      parentClientId: "f-C",
+      placeholders: { wc: "wc-C", zr: "zr-C", f: "f-C" },
+    }));
+    await engine.drainAll();
+    const findIdx = calls.findIndex((c) => c.url === "/api/wet-checks/zone-records/200/findings");
+    const metaIdx = calls.findIndex((c) => c.url === "/api/wet-checks/40/photos");
+    assert.ok(findIdx >= 0 && metaIdx > findIdx, "finding.create dispatched before photo metadata POST");
+    const metaBody = JSON.parse(calls[metaIdx].body);
+    assert.equal(metaBody.findingId, 4242, "{{f}} substituted with finding's resolved server id");
+    assert.equal(metaBody.zoneRecordId, 200, "{{zr}} substituted with zone record server id");
+  });
+});
+
 describe("Offline queue replay — full airplane-mode cycle", () => {
   test("queue 30 zone records offline, reconnect, drain in order", async () => {
     const calls = [];

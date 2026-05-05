@@ -12,7 +12,9 @@
 
 import {
   deleteMutation,
+  deletePhotoBlob,
   enqueueMutation,
+  getPhotoBlob,
   listAllMutations,
   openOfflineDB,
   pruneCompleted,
@@ -273,19 +275,28 @@ export class SyncEngine {
     const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
     if (ac) this.aborts.set(m.id, ac);
     try {
-      const headers: Record<string, string> = {
-        ...this.authHeaders(),
-      };
-      if (m.method !== "DELETE" && body !== undefined) {
-        headers["Content-Type"] = "application/json";
+      let res: Response;
+      if (m.kind === "photo.upload") {
+        // Specialized path: pull the captured Blob from IndexedDB and run
+        // the existing sign → PUT → finalize → POST flow against the
+        // injected fetchImpl. The Blob row is only deleted from IDB after
+        // the metadata POST succeeds — the spec's storage-hygiene rule.
+        res = await this.dispatchPhotoUpload(db, m, url, body);
+      } else {
+        const headers: Record<string, string> = {
+          ...this.authHeaders(),
+        };
+        if (m.method !== "DELETE" && body !== undefined) {
+          headers["Content-Type"] = "application/json";
+        }
+        res = await this.fetchImpl(url, {
+          method: m.method,
+          headers,
+          body: m.method === "DELETE" || body === undefined ? undefined : JSON.stringify(body),
+          credentials: "include",
+          signal: ac?.signal,
+        });
       }
-      const res = await this.fetchImpl(url, {
-        method: m.method,
-        headers,
-        body: m.method === "DELETE" || body === undefined ? undefined : JSON.stringify(body),
-        credentials: "include",
-        signal: ac?.signal,
-      });
 
       // Any successful response is a heartbeat: we know we're online.
       if (res.ok) {
@@ -300,10 +311,15 @@ export class SyncEngine {
           status: "completed",
           lastError: null,
           resolvedId,
+          progress: m.kind === "photo.upload" ? 100 : m.progress,
         });
         // Mirror server-assigned id back into the matching mirror row so
         // future reads can find it by server id, not just clientId.
         await this.applyServerIdToMirror(db, m, resolvedId);
+        // 4C — only NOW is the captured Blob safe to drop from IDB.
+        if (m.kind === "photo.upload") {
+          try { await deletePhotoBlob(db, m.clientId); } catch {}
+        }
         await this.broadcastState();
       } else if (res.status === 409) {
         // Conflict — server wins.
@@ -376,6 +392,67 @@ export class SyncEngine {
     if (this.online && this.inFlight.size < this.maxConcurrent) {
       this.scheduleTick();
     }
+  }
+
+  // 4C — sign → PUT → finalize → POST. The Blob lives in IndexedDB; on
+  // every retry we re-sign and re-PUT (signed URLs are short-lived).
+  // Returns the final metadata-POST Response so the outer dispatch loop
+  // can apply its standard ok/409/4xx/5xx classification.
+  private async dispatchPhotoUpload(
+    db: OfflineDB,
+    m: QueuedMutation,
+    metadataUrl: string,
+    metadataBody: any,
+  ): Promise<Response> {
+    const blobRow = await getPhotoBlob(db, m.clientId);
+    if (!blobRow) {
+      // The Blob was lost (manual IDB clear, partial upgrade, etc).
+      // Synthesize a permanent 4xx so the outer loop fails the mutation
+      // instead of retrying it forever against missing bytes.
+      return new Response(
+        JSON.stringify({ message: "Photo bytes missing from local storage" }),
+        { status: 410, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const auth = this.authHeaders();
+    // 1) Sign
+    const signRes = await this.fetchImpl(
+      `/api/upload/photo?originalName=${encodeURIComponent(blobRow.name)}`,
+      { method: "POST", headers: auth, credentials: "include" },
+    );
+    if (!signRes.ok) return signRes;
+    const signed = await signRes.json();
+    await updateMutation(db, m.id, { progress: 25 });
+    // 2) PUT bytes to signed URL.
+    const putRes = await this.fetchImpl(signed.signedUrl, {
+      method: "PUT",
+      body: blobRow.blob,
+      headers: { "Content-Type": blobRow.contentType },
+    });
+    if (!putRes.ok) {
+      // Surface as a 5xx so the outer loop schedules a retry — signed
+      // URLs commonly fail with transient 503s on weak LTE.
+      return new Response("PUT failed", { status: 502 });
+    }
+    await updateMutation(db, m.id, { progress: 60 });
+    // 3) Finalize
+    const finRes = await this.fetchImpl("/api/upload/photo/finalize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth },
+      credentials: "include",
+      body: JSON.stringify({ photoId: signed.url }),
+    });
+    if (!finRes.ok) return finRes;
+    await updateMutation(db, m.id, { progress: 80 });
+    // 4) POST metadata to /api/wet-checks/:id/photos. The placeholder-
+    // resolved body from the queue is merged with the dynamic url field.
+    const finalBody = { ...(metadataBody as object | null ?? {}), url: signed.url };
+    return await this.fetchImpl(metadataUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auth },
+      credentials: "include",
+      body: JSON.stringify(finalBody),
+    });
   }
 
   private async applyServerIdToMirror(db: OfflineDB, m: QueuedMutation, id: number | null) {

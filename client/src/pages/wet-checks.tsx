@@ -15,6 +15,9 @@ import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2
 import {
   PHOTO_OFFLINE_MESSAGE,
   isProbablyOffline,
+  isOfflinePhotosEnabled,
+  ensurePersistentStorage,
+  queuePhotoUpload,
   createWetCheck as offlineCreateWetCheck,
   submitWetCheck as offlineSubmitWetCheck,
   upsertZoneRecord as offlineUpsertZoneRecord,
@@ -110,15 +113,25 @@ async function uploadPhotoToStorage(file: File): Promise<string> {
 // takenAt so true camera time survives offline-then-sync.
 function PhotoCaptureButton({
   wetCheckId,
+  wetCheckClientId,
   zoneRecordId,
+  zoneRecordClientId,
   findingId,
+  findingClientId,
   onUploaded,
   skipInvalidate,
   testIdSuffix,
 }: {
   wetCheckId: number;
+  // 4C — when the OFFLINE_PHOTOS flag is on, the captured Blob is queued
+  // through the offline engine using these clientIds as parents. The
+  // wet-check clientId is required to take the offline path; without it
+  // we fall back to the direct online sign→PUT→finalize flow.
+  wetCheckClientId?: string | null;
   zoneRecordId?: number | null;
+  zoneRecordClientId?: string | null;
   findingId?: number | null;
+  findingClientId?: string | null;
   onUploaded?: (photo: WetCheckPhoto) => void;
   skipInvalidate?: boolean;
   testIdSuffix?: string;
@@ -131,9 +144,72 @@ function PhotoCaptureButton({
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-    // Slice 4B (Task #298): photos remain online-only in this slice. If we
-    // can detect we're offline, surface the spec's message instead of
-    // letting the upload fail with a generic network error.
+    // 4C path — offline-photos flag on AND we have a wet-check clientId
+    // to anchor the queued mutation. Compresses + persists the Blob in
+    // IndexedDB and enqueues the upload; engine drains it now (online)
+    // or on reconnect (offline). Optimistic thumbnail comes from a
+    // local object URL.
+    if (isOfflinePhotosEnabled() && wetCheckClientId) {
+      setBusy(true);
+      try {
+        // Best-effort persistent-storage request + tight-quota guard.
+        // Fire-and-forget: never blocks capture.
+        void ensurePersistentStorage().then((s) => {
+          if (s.quotaTight) {
+            toast({
+              title: "Storage almost full",
+              description: "Free up space on your device — queued photos may not save.",
+              variant: "destructive",
+            });
+          }
+        });
+        const queued = await queuePhotoUpload({
+          file,
+          wetCheckClientId,
+          wetCheckId,
+          zoneRecordClientId: zoneRecordClientId ?? null,
+          zoneRecordId: zoneRecordId ?? null,
+          findingClientId: findingClientId ?? null,
+          findingId: findingId ?? null,
+        });
+        // The compression spec says: silent fallback for ≤10MB originals,
+        // toast only when the original was huge AND we couldn't compress.
+        if (queued.usedFallback && queued.originalSize > 10 * 1024 * 1024) {
+          toast({
+            title: "Photo couldn't be compressed",
+            description: "Uploading the original — this may be slow on weak signal.",
+          });
+        }
+        if (!skipInvalidate) {
+          queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+        }
+        // Synthesize an optimistic photo for callers (FindingSheet
+        // pre-save) that need a stable id to display the thumbnail.
+        // The negative id is replaced by the real server id once the
+        // metadata POST resolves and React Query refetches.
+        const optimistic: WetCheckPhoto = {
+          id: -Date.now(),
+          wetCheckId,
+          url: queued.localUrl || "",
+          takenAt: new Date().toISOString(),
+          zoneRecordId: zoneRecordId ?? null,
+          findingId: findingId ?? null,
+          clientId: queued.clientId,
+        } as unknown as WetCheckPhoto;
+        onUploaded?.(optimistic);
+        toast({
+          title: isProbablyOffline() ? "Photo queued offline" : "Photo queued",
+          description: isProbablyOffline() ? "Will upload when you're back online." : undefined,
+        });
+      } catch (err: any) {
+        toast({ title: "Photo capture failed", description: err?.message ?? "Try again", variant: "destructive" });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    // Legacy direct-upload path. With the flag off, photos remain
+    // online-only and we surface the Slice 4B message offline.
     if (isProbablyOffline()) {
       toast({ title: "Photo not captured", description: PHOTO_OFFLINE_MESSAGE, variant: "destructive" });
       return;
@@ -659,7 +735,10 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
           <div className="flex items-start justify-between gap-3">
             <CardTitle>{wc.customerName}</CardTitle>
             {!isReadOnly && (
-              <PhotoCaptureButton wetCheckId={wc.id ?? id ?? 0} />
+              <PhotoCaptureButton
+                wetCheckId={wc.id ?? id ?? 0}
+                wetCheckClientId={wc.clientId ?? null}
+              />
             )}
           </div>
         </CardHeader>
@@ -1066,7 +1145,12 @@ function ZoneScreen({
           <div className="flex items-center justify-between gap-2">
             <CardTitle>Controller {letter} · Zone {zoneNumber}</CardTitle>
             {!readOnly && zoneRecord && (
-              <PhotoCaptureButton wetCheckId={wetCheckId} zoneRecordId={zoneRecord.id} />
+              <PhotoCaptureButton
+                wetCheckId={wetCheckId}
+                wetCheckClientId={wetCheckClientId}
+                zoneRecordId={zoneRecord.id}
+                zoneRecordClientId={zoneRecord.clientId ?? null}
+              />
             )}
           </div>
         </CardHeader>
@@ -1190,7 +1274,14 @@ function ZoneScreen({
                       >
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <PhotoCaptureButton wetCheckId={wetCheckId} zoneRecordId={zoneRecord.id} findingId={f.id} />
+                      <PhotoCaptureButton
+                        wetCheckId={wetCheckId}
+                        wetCheckClientId={wetCheckClientId}
+                        zoneRecordId={zoneRecord.id}
+                        zoneRecordClientId={zoneRecord.clientId ?? null}
+                        findingId={f.id}
+                        findingClientId={f.clientId ?? null}
+                      />
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1223,6 +1314,7 @@ function ZoneScreen({
         zoneRecordId={zoneRecord?.id ?? null}
         zoneRecordClientId={zoneRecord?.clientId ?? null}
         wetCheckId={wetCheckId}
+        wetCheckClientId={wetCheckClientId}
         customerId={customerId}
         photos={photos}
         readOnly={readOnly}
@@ -1239,6 +1331,7 @@ function FindingSheet({
   zoneRecordId,
   zoneRecordClientId,
   wetCheckId,
+  wetCheckClientId,
   customerId,
   photos,
   readOnly,
@@ -1248,6 +1341,7 @@ function FindingSheet({
   zoneRecordId: number | null;
   zoneRecordClientId: string | null;
   wetCheckId: number;
+  wetCheckClientId: string | null;
   customerId: number;
   photos: WetCheckPhoto[];
   readOnly: boolean;
@@ -1496,8 +1590,11 @@ function FindingSheet({
                 {!readOnly && editing.resolution === "pending" && (
                   <PhotoCaptureButton
                     wetCheckId={wetCheckId}
+                    wetCheckClientId={wetCheckClientId}
                     zoneRecordId={zoneRecordId}
+                    zoneRecordClientId={zoneRecordClientId}
                     findingId={editing.id}
+                    findingClientId={editing.clientId ?? null}
                   />
                 )}
               </div>

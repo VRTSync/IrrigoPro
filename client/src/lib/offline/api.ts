@@ -9,6 +9,7 @@
 // online-only in 4B with a "try when you're back online" message.
 
 import { apiRequest } from "@/lib/queryClient";
+import { compressPhoto } from "@/lib/photo-prep";
 import {
   deleteFindingMirror,
   enqueueMutation,
@@ -21,6 +22,7 @@ import {
   openOfflineDB,
   putApiCache,
   putFindingMirror,
+  putPhotoBlob,
   putWetCheckMirror,
   putZoneRecordMirror,
   type OfflineDB,
@@ -54,8 +56,63 @@ function newMutation(partial: Omit<QueuedMutation, "id" | "attemptCount" | "last
 
 // Photo-offline guard — exported so callers can show the spec's exact
 // message when a tech tries to capture a photo with no network.
+// Only surfaced when the 4C OFFLINE_PHOTOS flag is OFF; with the flag
+// on, photos are queued through the mutation engine and this message is
+// never shown.
 export const PHOTO_OFFLINE_MESSAGE =
   "Photos require connectivity — try when you're back online.";
+
+// 4C — feature flag. ON by default per spec; can be disabled at build
+// time via `VITE_OFFLINE_PHOTOS=false` for incident rollback.
+export function isOfflinePhotosEnabled(): boolean {
+  if (!isOfflineQueueEnabled()) return false;
+  try {
+    const v = (import.meta as any).env?.VITE_OFFLINE_PHOTOS;
+    if (v === false || v === "false" || v === "0") return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+// 4C — request persistent storage so the browser is much less likely to
+// evict the queued photo Blobs under quota pressure. Idempotent and
+// safe to call repeatedly (browsers cache the decision). Also returns
+// a tight-quota signal so the caller can warn the tech proactively
+// instead of failing silently when IDB rejects a put().
+export interface PersistentStorageStatus {
+  persisted: boolean;
+  /** quota in bytes if known */
+  quotaBytes?: number;
+  /** usage in bytes if known */
+  usageBytes?: number;
+  /** true when free space < 50MB OR usage > 80% of quota */
+  quotaTight: boolean;
+}
+export async function ensurePersistentStorage(): Promise<PersistentStorageStatus> {
+  let persisted = false;
+  let quotaBytes: number | undefined;
+  let usageBytes: number | undefined;
+  try {
+    if (typeof navigator !== "undefined" && (navigator as any).storage?.persist) {
+      // `persist()` returns whether the storage IS persisted after the
+      // call — on Safari the prompt may be silently denied; we treat
+      // anything other than `true` as best-effort.
+      persisted = await (navigator as any).storage.persist();
+    }
+    if (typeof navigator !== "undefined" && (navigator as any).storage?.estimate) {
+      const est = await (navigator as any).storage.estimate();
+      quotaBytes = est.quota;
+      usageBytes = est.usage;
+    }
+  } catch (err) {
+    console.warn("[offline] ensurePersistentStorage failed", err);
+  }
+  const free = (quotaBytes ?? 0) - (usageBytes ?? 0);
+  const ratioTight = quotaBytes ? (usageBytes ?? 0) / quotaBytes > 0.8 : false;
+  const freeTight = quotaBytes ? free < 50 * 1024 * 1024 : false;
+  return { persisted, quotaBytes, usageBytes, quotaTight: ratioTight || freeTight };
+}
 
 // IDB-first read for GET endpoints used during the wet-check capture
 // flow (controllers, issue-type configs, parts-by-issue). Returns the
@@ -381,6 +438,90 @@ export async function linkPhotoToFinding(
     parentClientId: findingClientId,
     placeholders: { f: findingClientId },
   }));
+}
+
+// 4C — capture-and-queue a wet check photo. Compresses with the web
+// worker, stores the resulting Blob in IndexedDB, and enqueues a
+// `photo.upload` mutation whose parent is the most-specific known
+// entity (finding > zone record > wet check). The engine will run the
+// existing sign → PUT → finalize → metadata-POST flow on its next tick
+// (immediately when online, on reconnect when offline).
+export interface QueuePhotoUploadInput {
+  file: File;
+  wetCheckClientId: string;
+  wetCheckId?: number;
+  zoneRecordClientId?: string | null;
+  zoneRecordId?: number | null;
+  findingClientId?: string | null;
+  findingId?: number | null;
+}
+export interface QueuePhotoUploadResult {
+  clientId: string;
+  /** object URL pointing at the captured Blob — for optimistic thumbnails */
+  localUrl: string;
+  originalSize: number;
+  compressedSize: number;
+  usedFallback: boolean;
+}
+export async function queuePhotoUpload(input: QueuePhotoUploadInput): Promise<QueuePhotoUploadResult> {
+  const clientId = uuid();
+  const compressed = await compressPhoto(input.file);
+  const db = await openOfflineDB();
+  await putPhotoBlob(db, {
+    clientId,
+    blob: compressed.file,
+    contentType: compressed.file.type || "image/jpeg",
+    name: compressed.file.name || `photo-${clientId}.jpg`,
+    byteSize: compressed.file.size,
+    capturedAt: Date.now(),
+    compressed: !compressed.usedFallback,
+  });
+  // Most-specific parent precedence: finding > zoneRecord > wetCheck.
+  // The engine's `readySet` only dispatches a mutation once its parent
+  // has resolved, so picking the right parent is what enforces the
+  // dependency-order replay for 4C.
+  const parentClientId =
+    (input.findingClientId ?? null)
+    || (input.zoneRecordClientId ?? null)
+    || input.wetCheckClientId;
+  const placeholders: Record<string, string> = { wc: input.wetCheckClientId };
+  if (input.zoneRecordClientId) placeholders.zr = input.zoneRecordClientId;
+  if (input.findingClientId) placeholders.f = input.findingClientId;
+  // Body: server expects numeric zoneRecordId/findingId; the engine
+  // substitutes `{{zr}}` / `{{f}}` with resolved server ids at dispatch
+  // time. `url` is filled in by the engine after the finalize step.
+  const body: Record<string, any> = {
+    takenAt: input.file.lastModified
+      ? new Date(input.file.lastModified).toISOString()
+      : new Date().toISOString(),
+    clientId,
+    zoneRecordId: input.zoneRecordClientId ? "{{zr}}" : (input.zoneRecordId ?? null),
+    findingId: input.findingClientId ? "{{f}}" : (input.findingId ?? null),
+  };
+  await getSyncEngine().enqueue(newMutation({
+    kind: "photo.upload",
+    method: "POST",
+    urlTemplate: "/api/wet-checks/{{wc}}/photos",
+    body,
+    clientId,
+    parentClientId,
+    placeholders,
+  }));
+  // Optimistic local thumbnail. Caller is responsible for revoking the
+  // object URL when the photo eventually replaces it with the server one.
+  let localUrl = "";
+  try {
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      localUrl = URL.createObjectURL(compressed.file);
+    }
+  } catch {}
+  return {
+    clientId,
+    localUrl,
+    originalSize: compressed.originalSize,
+    compressedSize: compressed.compressedSize,
+    usedFallback: compressed.usedFallback,
+  };
 }
 
 export async function deleteFinding(findingClientId: string, findingId: number | undefined): Promise<void> {

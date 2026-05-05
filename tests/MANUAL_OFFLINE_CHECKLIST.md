@@ -72,6 +72,93 @@ arrives in 4B.
 - [ ] `curl https://<host>/api/health` returns `{ "ok": true }` with no
       auth required. This is what 4B's sync engine will poll.
 
+---
+
+## Slice 4C — Photo Capture & Offline Upload
+
+Goal: a field tech can take a wet check photo with no signal, see it
+appear locally as a thumbnail, navigate around the app, and have the
+photo upload itself once connectivity returns — without ever losing the
+captured bytes. Behind the `OFFLINE_PHOTOS` feature flag
+(`VITE_OFFLINE_PHOTOS`, default ON).
+
+### Setup
+
+1. Build with the offline + photos flags on (default):
+   `OFFLINE_SERVICE_WORKER=true OFFLINE_QUEUE=true OFFLINE_PHOTOS=true npm run build && npm start`
+2. Sign in as a **field tech** user.
+3. On first capture, accept the browser's persistent-storage prompt
+   if shown (Safari shows it implicitly via Add to Home Screen).
+
+### iOS Safari (iPhone, latest two majors)
+
+- [ ] Open a wet check, tap **Photo** at the wet check level — the
+      capture sheet opens, you take a photo, and within ~1 second a
+      thumbnail appears (object URL).
+- [ ] Confirm a `POST /api/upload/photo`, `PUT https://...signed...`,
+      `POST /api/upload/photo/finalize`, and
+      `POST /api/wet-checks/:id/photos` all show 200/201 in DevTools.
+- [ ] Enable Airplane Mode. Take 3 more photos at different parents:
+      one at the wet check, one on a zone with status set, and one on
+      a finding (open the finding, tap Photo). Each shows a
+      "Photo queued offline" toast and a thumbnail.
+- [ ] Confirm `chrome://inspect` / Safari Web Inspector ▸ Storage ▸
+      IndexedDB ▸ `irrigopro_offline` ▸ `photoBlobs` contains 3 rows
+      with `byteSize` ≤ 1MB each (the compressor's target).
+- [ ] Reload the app while still in Airplane Mode — thumbnails are
+      regenerated from the persisted Blobs (no broken images).
+- [ ] Disable Airplane Mode. Within the next sync tick the queue
+      drains in order (wet check → zone → finding → photos). The
+      `photoBlobs` store empties as each upload confirms.
+- [ ] Open the wet check on a different device / browser session: all
+      3 server-side photos are present at the correct parents.
+
+### Android Chrome (latest stable)
+
+- [ ] Repeat the iOS sequence on Android Chrome. On the first capture,
+      DevTools ▸ Application ▸ Storage shows "Persistent" = true.
+- [ ] Force-quit the app while photos are queued; reopen — queued
+      photos are still in `photoBlobs` and drain on next online tick.
+
+### Compression behaviour
+
+- [ ] A normal phone photo (~3-6MB) compresses silently to ≤1MB JPEG
+      with the longest side ≤1920px (verify in `photoBlobs.byteSize`).
+- [ ] A HEIC/HEIF photo from a stock iPhone first decodes via
+      `heic2any`, then compresses through `browser-image-compression`.
+- [ ] Force a compression failure (DevTools ▸ Application ▸ Service
+      Workers ▸ block `image-compression` script) and capture a >10MB
+      photo: a "Photo couldn't be compressed" toast appears AND the
+      original bytes still upload (no data loss).
+- [ ] A small photo (<10MB) that fails compression silently uploads
+      the original — no warning toast.
+
+### Storage hygiene
+
+- [ ] Take a photo offline; in DevTools, deliberately fail the signed
+      PUT (block the storage host). The mutation transitions to
+      `pending` with a backoff; the Blob row in `photoBlobs` remains
+      intact across retries.
+- [ ] Once the PUT succeeds and the metadata POST returns 201, the
+      matching `photoBlobs` row is deleted.
+- [ ] Delete the `photoBlobs` row manually mid-flight (simulating an
+      eviction). The mutation transitions to `failed` with a
+      "Photo bytes missing from local storage" error rather than
+      retrying forever.
+
+### Quota warning
+
+- [ ] In DevTools ▸ Application ▸ Storage, set a quota of ~50MB and
+      fill it with junk so the estimate crosses the 80% / <50MB-free
+      threshold. Capture a new photo — a "Storage almost full" toast
+      appears alongside the queued thumbnail.
+
+### Feature-flag rollback
+
+- [ ] Build with `OFFLINE_PHOTOS=false` (or
+      `VITE_OFFLINE_PHOTOS=false`). Capture a photo offline: the Slice
+      4B "Photos require connectivity — try when you're back online"
+      toast returns; no `photo.upload` rows appear in `mutationQueue`.
 
 ---
 

@@ -44,6 +44,22 @@ interface PhotoMirror {
   data: any;
   updatedAt: number;
 }
+// 4C — captured photo bytes live here, keyed by the same clientId used by
+// the metadata mirror and by the queued `photo.upload` mutation. The Blob
+// is never deleted from this store until the engine confirms the metadata
+// POST returned 2xx, so a dead-battery / refresh / failed sync can never
+// orphan the bytes the tech captured.
+interface PhotoBlobRow {
+  clientId: string;
+  blob: Blob;
+  contentType: string;
+  name: string;
+  byteSize: number;
+  capturedAt: number;
+  // Whether `compressPhoto` produced this blob (vs falling back to the
+  // original camera bytes). Used by storage hygiene + tests.
+  compressed: boolean;
+}
 interface KvRow {
   id: number | string;
   data: any;
@@ -74,6 +90,10 @@ interface OfflineSchema extends DBSchema {
     value: PhotoMirror;
     indexes: { byWetCheckId: number };
   };
+  photoBlobs: {
+    key: string;
+    value: PhotoBlobRow;
+  };
   parts: { key: number; value: KvRow };
   issueTypeConfigs: { key: number; value: KvRow };
   propertyControllers: {
@@ -100,7 +120,7 @@ interface OfflineSchema extends DBSchema {
 export type OfflineDB = IDBPDatabase<OfflineSchema>;
 
 const DB_NAME = "irrigopro_offline";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise: Promise<OfflineDB> | null = null;
 
@@ -131,6 +151,11 @@ export function openOfflineDB(): Promise<OfflineDB> {
         if (!db.objectStoreNames.contains("wetCheckPhotos")) {
           const s = db.createObjectStore("wetCheckPhotos", { keyPath: "clientId" });
           s.createIndex("byWetCheckId", "wetCheckId");
+        }
+        if (!db.objectStoreNames.contains("photoBlobs")) {
+          // 4C — keyed by the photo clientId. No indexes needed; lookups
+          // are always by clientId from the queued mutation row.
+          db.createObjectStore("photoBlobs", { keyPath: "clientId" });
         }
         if (!db.objectStoreNames.contains("parts")) {
           db.createObjectStore("parts", { keyPath: "id" });
@@ -254,6 +279,27 @@ export async function deleteFindingMirror(db: OfflineDB, clientId: string) {
 }
 export async function listFindingsForZoneRecord(db: OfflineDB, zoneRecordClientId: string) {
   return await db.getAllFromIndex("wetCheckFindings", "byZoneRecordClientId", zoneRecordClientId);
+}
+
+// Photo blob helpers (4C) ----------------------------------------------
+//
+// The Blob is stored once at capture time and only deleted by the engine
+// after the metadata POST returns 2xx. A failed sync, browser refresh,
+// or quota eviction must never strand a queued upload without its bytes.
+
+export type PhotoBlob = PhotoBlobRow;
+
+export async function putPhotoBlob(db: OfflineDB, row: PhotoBlobRow): Promise<void> {
+  await db.put("photoBlobs", row);
+}
+export async function getPhotoBlob(db: OfflineDB, clientId: string): Promise<PhotoBlobRow | undefined> {
+  return await db.get("photoBlobs", clientId);
+}
+export async function deletePhotoBlob(db: OfflineDB, clientId: string): Promise<void> {
+  await db.delete("photoBlobs", clientId);
+}
+export async function listPhotoBlobs(db: OfflineDB): Promise<PhotoBlobRow[]> {
+  return await db.getAll("photoBlobs");
 }
 
 // Generic IDB-first read cache for GET endpoints (controllers, issue

@@ -17,7 +17,8 @@ export type QueuedMutationKind =
   | "finding.create"
   | "finding.update"
   | "finding.delete"
-  | "photo.link";
+  | "photo.link"
+  | "photo.upload";
 
 export interface QueuedMutation {
   id: string; // local UUID
@@ -50,6 +51,11 @@ export interface QueuedMutation {
   // After a successful POST that creates a server row, we capture the
   // server-assigned id so dependents can substitute it.
   resolvedId: number | null;
+  // 0–100, observable in the queue. Currently used by `photo.upload` to
+  // surface sign → PUT → finalize → POST progress in coarse buckets so
+  // a future UI can show a per-photo bar without us having to poll the
+  // engine for state. Optional; absent on text-only mutations.
+  progress?: number;
 }
 
 export interface ConflictEvent {

@@ -65,3 +65,66 @@ export async function preparePhotoForUpload(
 
   return { displayFile };
 }
+
+// 4C — offline-capture compressor. Targets the spec's ≤1MB / ≤1920px JPEG
+// envelope so a queued photo is small enough to ship over weak LTE on
+// reconnect, while still being sharp enough for the medium server variant.
+// Always runs in a web worker so the main thread stays responsive while
+// the tech keeps tapping zone buttons. Falls back to the original bytes
+// on any failure (worker boot fail, decode error, OOM) so the upload is
+// never blocked by prep — the spec's "compression fallback to original"
+// rule. The caller decides whether to surface a toast based on the
+// returned `originalSize` (≥10MB = warn; smaller = silent).
+export interface CompressedPhoto {
+  file: File;
+  usedFallback: boolean;
+  originalSize: number;
+  compressedSize: number;
+}
+export async function compressPhoto(file: File): Promise<CompressedPhoto> {
+  const originalSize = file.size;
+  let working: File = file;
+  const lowerName = file.name.toLowerCase();
+  const looksHeic = file.type === "image/heic" || file.type === "image/heif"
+    || lowerName.endsWith(".heic") || lowerName.endsWith(".heif");
+  if (looksHeic) {
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      const blob = Array.isArray(converted) ? converted[0] : converted;
+      working = new File(
+        [blob],
+        file.name.replace(/\.(heic|heif)$/i, ".jpg"),
+        { type: "image/jpeg" },
+      );
+    } catch (err) {
+      console.warn("[photo-prep] offline HEIC convert failed; queuing original bytes", err);
+    }
+  }
+  try {
+    const out = await imageCompression(working, {
+      maxSizeMB: 1.0,
+      maxWidthOrHeight: 1920,
+      useWebWorker: true,
+      initialQuality: 0.85,
+      fileType: working.type === "image/png" ? "image/jpeg" : undefined,
+    });
+    const outFile = out instanceof File
+      ? out
+      : new File([out], working.name, { type: (out as Blob).type || "image/jpeg" });
+    return {
+      file: outFile,
+      usedFallback: false,
+      originalSize,
+      compressedSize: outFile.size,
+    };
+  } catch (err) {
+    console.warn("[photo-prep] offline compression failed; queuing original bytes", err);
+    return {
+      file: working,
+      usedFallback: true,
+      originalSize,
+      compressedSize: working.size,
+    };
+  }
+}
