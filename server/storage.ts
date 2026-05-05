@@ -118,6 +118,7 @@ import {
   type PropertyController,
   type InsertPropertyController,
   type IssueTypeConfig,
+  type InsertIssueTypeConfig,
   type WetCheck,
   type InsertWetCheck,
   type WetCheckZoneRecord,
@@ -555,6 +556,10 @@ export interface IStorage {
 
   // ── Wet Check System (Slice 2A) ───────────────────────────────────────────
   listIssueTypeConfigs(companyId: number): Promise<IssueTypeConfig[]>;
+  listAllIssueTypeConfigs(companyId: number): Promise<IssueTypeConfig[]>;
+  createIssueTypeConfig(companyId: number, data: Omit<InsertIssueTypeConfig, "companyId">): Promise<IssueTypeConfig>;
+  updateIssueTypeConfig(companyId: number, id: number, patch: Partial<Omit<InsertIssueTypeConfig, "companyId">>): Promise<IssueTypeConfig | undefined>;
+  reorderIssueTypeConfigs(companyId: number, orderedIds: number[]): Promise<IssueTypeConfig[]>;
   getPartsByIssueType(companyId: number, issueType: string, customerId?: number | null): Promise<{ parts: Part[]; recentPartIds: number[] }>;
   listPropertyControllers(companyId: number, customerId: number): Promise<PropertyController[]>;
   ensurePropertyControllers(companyId: number, customerId: number, count: number): Promise<PropertyController[]>;
@@ -4454,6 +4459,47 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(issueTypeConfigs)
       .where(and(eq(issueTypeConfigs.companyId, companyId), eq(issueTypeConfigs.isActive, true)))
       .orderBy(issueTypeConfigs.sortOrder);
+  }
+
+  async listAllIssueTypeConfigs(companyId: number): Promise<IssueTypeConfig[]> {
+    return await db.select().from(issueTypeConfigs)
+      .where(eq(issueTypeConfigs.companyId, companyId))
+      .orderBy(issueTypeConfigs.sortOrder);
+  }
+
+  async createIssueTypeConfig(
+    companyId: number,
+    data: Omit<InsertIssueTypeConfig, "companyId">,
+  ): Promise<IssueTypeConfig> {
+    const [row] = await db.insert(issueTypeConfigs).values({
+      ...data,
+      companyId,
+    }).returning();
+    return row;
+  }
+
+  async updateIssueTypeConfig(
+    companyId: number,
+    id: number,
+    patch: Partial<Omit<InsertIssueTypeConfig, "companyId">>,
+  ): Promise<IssueTypeConfig | undefined> {
+    const [row] = await db.update(issueTypeConfigs)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(and(eq(issueTypeConfigs.id, id), eq(issueTypeConfigs.companyId, companyId)))
+      .returning();
+    return row;
+  }
+
+  async reorderIssueTypeConfigs(companyId: number, orderedIds: number[]): Promise<IssueTypeConfig[]> {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await db.update(issueTypeConfigs)
+        .set({ sortOrder: (i + 1) * 10, updatedAt: new Date() })
+        .where(and(
+          eq(issueTypeConfigs.id, orderedIds[i]),
+          eq(issueTypeConfigs.companyId, companyId),
+        ));
+    }
+    return await this.listAllIssueTypeConfigs(companyId);
   }
 
   async getPartsByIssueType(companyId: number, issueType: string, customerId?: number | null): Promise<{ parts: Part[]; recentPartIds: number[] }> {

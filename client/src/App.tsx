@@ -25,6 +25,7 @@ import BillingSheets from "@/pages/billing-sheets";
 import MissingPhotosReport from "@/pages/missing-photos-report";
 import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-report";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
+import AdminIssueTypesPage from "@/pages/admin-issue-types";
 import LaborRateAuditPage from "@/pages/labor-rate-audit";
 import CustomerBilling from "@/pages/customer-billing";
 import QuickBooksPage from "@/pages/quickbooks";
@@ -196,6 +197,7 @@ function Router() {
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />
@@ -238,6 +240,7 @@ function Router() {
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />

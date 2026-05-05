@@ -252,6 +252,7 @@ import {
   billingSheetStatusValues,
   type InsertWetCheckFinding,
   type InsertWetCheckZoneRecord,
+  insertIssueTypeConfigSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { processEstimatePayload } from "./estimate-payload";
@@ -11119,6 +11120,101 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const cid = requireCompanyId(req, res); if (!cid) return;
     try {
       const rows = await storage.listIssueTypeConfigs(cid);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // ─── Admin CRUD for issue type configs (Task #268) ────────────────────────
+  // company_admin and billing_manager only — scoped to the caller's company.
+  const issueTypeAdminBodySchema = insertIssueTypeConfigSchema
+    .omit({ companyId: true })
+    .extend({
+      issueType: z.string().trim().min(1, "issueType is required").max(64)
+        .regex(/^[a-z0-9_]+$/i, "issueType may only contain letters, numbers, and underscores"),
+      issueGroup: z.enum(["quick_fix", "advanced", "zone_issue"]),
+      displayLabel: z.string().trim().min(1, "displayLabel is required").max(64),
+      defaultLaborHours: z.union([z.string(), z.number()])
+        .transform((v) => typeof v === "number" ? v.toFixed(2) : v.trim())
+        .refine((v) => /^\d+(\.\d{1,2})?$/.test(v), "defaultLaborHours must be a non-negative number with up to 2 decimals")
+        .refine((v) => parseFloat(v) >= 0, "defaultLaborHours must be non-negative")
+        .refine((v) => parseFloat(v) <= 999.99, "defaultLaborHours is too large"),
+      partCategoryFilter: z.string().trim().max(64).nullish()
+        .transform((v) => (v == null || v === "") ? null : v),
+      sortOrder: z.coerce.number().int().min(0).max(100000).optional(),
+      isActive: z.boolean().optional(),
+    });
+
+  app.get("/api/admin/issue-types", requireAuthentication, requireBillingAccess, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    try {
+      const rows = await storage.listAllIssueTypeConfigs(cid);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.post("/api/admin/issue-types", requireAuthentication, requireBillingAccess, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const parsed = issueTypeAdminBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+    }
+    try {
+      const row = await storage.createIssueTypeConfig(cid, parsed.data);
+      res.status(201).json(row);
+    } catch (e: any) {
+      const msg = String(e?.message ?? "");
+      if (e?.code === "23505" || /unique/i.test(msg)) {
+        return res.status(409).json({ message: "An issue type with that key already exists for this company." });
+      }
+      res.status(500).json({ message: msg || "Failed" });
+    }
+  });
+
+  const issueTypePatchSchema = issueTypeAdminBodySchema.partial();
+  app.patch("/api/admin/issue-types/:id", requireAuthentication, requireBillingAccess, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid id" });
+    const parsed = issueTypePatchSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+    }
+    try {
+      const row = await storage.updateIssueTypeConfig(cid, id, parsed.data);
+      if (!row) return res.status(404).json({ message: "Not found" });
+      res.json(row);
+    } catch (e: any) {
+      const msg = String(e?.message ?? "");
+      if (e?.code === "23505" || /unique/i.test(msg)) {
+        return res.status(409).json({ message: "An issue type with that key already exists for this company." });
+      }
+      res.status(500).json({ message: msg || "Failed" });
+    }
+  });
+
+  // Soft-delete via deactivation — preserves historical references.
+  app.delete("/api/admin/issue-types/:id", requireAuthentication, requireBillingAccess, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const row = await storage.updateIssueTypeConfig(cid, id, { isActive: false });
+      if (!row) return res.status(404).json({ message: "Not found" });
+      res.json(row);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const issueTypeReorderSchema = z.object({
+    orderedIds: z.array(z.coerce.number().int().positive()).min(1),
+  });
+  app.post("/api/admin/issue-types/reorder", requireAuthentication, requireBillingAccess, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const parsed = issueTypeReorderSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+    }
+    try {
+      const rows = await storage.reorderIssueTypeConfigs(cid, parsed.data.orderedIds);
       res.json(rows);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });

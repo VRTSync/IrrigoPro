@@ -162,6 +162,7 @@ export default function Navigation() {
               { path: "/company-profile", label: "Company", icon: Settings },
               { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
               { path: "/labor-rates", label: "Labor Rates", icon: DollarSign },
+              { path: "/admin/issue-types", label: "Wet Check Issue Types", icon: Droplets },
               { path: "/admin/customers", label: "All Customers", icon: Users },
             ]
           },
@@ -228,6 +229,15 @@ export default function Navigation() {
               { path: "/parts", label: "Parts Catalog", icon: Package },
               { path: "/parts-settings", label: "Parts Settings", icon: Settings },
               { path: "/parts-pending-approval", label: "Parts Pending Approval", icon: ShieldCheck, badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined },
+            ]
+          },
+          {
+            path: "/admin",
+            label: "Admin",
+            icon: Settings,
+            isDropdown: true,
+            dropdownItems: [
+              { path: "/admin/issue-types", label: "Wet Check Issue Types", icon: Droplets },
             ]
           },
         ];
