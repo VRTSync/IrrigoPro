@@ -1,7 +1,7 @@
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, WetCheckAlreadyRoutedError } from "./storage";
 import type { InsertInvoice } from "@shared/schema";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -11189,6 +11189,48 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const rows = await storage.listWetChecks(cid, opts);
       res.json(rows);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // Company-admin-only company-wide management list. Returns every wet
+  // check for the company with aggregate child counts so the admin page
+  // can render delete affordances without fanning out per-row fetches.
+  app.get("/api/wet-checks/admin", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (req.authenticatedUserRole !== "company_admin" && req.authenticatedUserRole !== "super_admin") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    try {
+      const opts: { status?: string } = {};
+      if (req.query.status) opts.status = String(req.query.status);
+      const rows = await storage.listWetChecksForAdmin(cid, opts);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // Hard delete — company_admin only. 409 when any finding has been
+  // routed downstream (billing sheet / estimate / work order).
+  app.delete("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (req.authenticatedUserRole !== "company_admin" && req.authenticatedUserRole !== "super_admin") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const id = parseInt(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    try {
+      const ok = await storage.deleteWetCheck(id, cid);
+      if (!ok) return res.status(404).json({ message: "Not found" });
+      res.json({ ok });
+    } catch (e: any) {
+      if (e instanceof WetCheckAlreadyRoutedError) {
+        return res.status(409).json({
+          message: "Cannot delete: one or more findings have already been routed to a billing sheet, estimate, or work order.",
+          routedFindingIds: e.routedFindingIds,
+        });
+      }
+      const msg = e?.message ?? "Failed";
+      const status = /not found for company/.test(msg) ? 404 : 500;
+      res.status(status).json({ message: msg });
+    }
   });
 
   app.get("/api/wet-checks/:id", requireAuthentication, async (req, res) => {

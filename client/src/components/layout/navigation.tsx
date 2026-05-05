@@ -118,6 +118,7 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/work-orders", label: "Work Orders", icon: Wrench },
               { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
+              { path: "/wet-checks/admin", label: "Wet Checks", icon: Droplets },
             ]
           },
           { 

@@ -133,6 +133,7 @@ import { db } from "./db";
 import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
+import { ObjectStorageService } from "./objectStorage";
 
 // Executor accepted by storage helpers that may run inside a caller's
 // transaction. Both `db` and a Drizzle PgTransaction satisfy this
@@ -140,6 +141,18 @@ import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-pa
 // transaction parameter type keeps callers honest while still accepting
 // the top-level db handle.
 type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// Thrown by deleteWetCheck when one or more findings have already been
+// routed to a billing sheet, estimate or work order. Surface mapped to
+// HTTP 409 by the route layer.
+export class WetCheckAlreadyRoutedError extends Error {
+  routedFindingIds: number[];
+  constructor(routedFindingIds: number[]) {
+    super(`Wet check has ${routedFindingIds.length} routed finding(s); delete is not allowed`);
+    this.name = "WetCheckAlreadyRoutedError";
+    this.routedFindingIds = routedFindingIds;
+  }
+}
 
 type DrizzlePartInsert = typeof parts.$inferInsert;
 type DrizzleWorkOrderInsert = typeof workOrders.$inferInsert;
@@ -553,6 +566,18 @@ export interface IStorage {
   ): Promise<PropertyController | undefined>;
 
   listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]>;
+  // Admin-only company-wide list with per-row aggregate counts (zone
+  // records, findings, photos). Used by the company-admin Wet Checks
+  // management page.
+  listWetChecksForAdmin(companyId: number, opts?: { status?: string }): Promise<Array<WetCheck & {
+    zoneRecordCount: number;
+    findingCount: number;
+    photoCount: number;
+  }>>;
+  // Hard-deletes a wet check and all of its child rows (zone records,
+  // findings, photos). Refuses with WetCheckAlreadyRoutedError if any
+  // finding has been routed to a billing sheet, estimate or work order.
+  deleteWetCheck(id: number, companyId: number): Promise<boolean>;
   listWetChecksPendingReview(companyId: number): Promise<Array<WetCheck & {
     findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
     totalBillable: string;
@@ -4534,6 +4559,104 @@ export class DatabaseStorage implements IStorage {
     if (opts?.status) conds.push(eq(wetChecks.status, opts.status));
     if (opts?.technicianId) conds.push(eq(wetChecks.technicianId, opts.technicianId));
     return await db.select().from(wetChecks).where(and(...conds)).orderBy(desc(wetChecks.startedAt)).limit(200);
+  }
+
+  async listWetChecksForAdmin(
+    companyId: number,
+    opts?: { status?: string },
+  ): Promise<Array<WetCheck & { zoneRecordCount: number; findingCount: number; photoCount: number }>> {
+    const conds = [eq(wetChecks.companyId, companyId)];
+    if (opts?.status) conds.push(eq(wetChecks.status, opts.status));
+    // Admin list is the canonical "show every wet check" surface for
+    // company admins (used to find and delete records). Returning the
+    // full set avoids silently hiding older rows; callers narrow the
+    // result with the status filter and the client-side search box.
+    const wcs = await db.select().from(wetChecks)
+      .where(and(...conds))
+      .orderBy(desc(wetChecks.startedAt));
+    if (wcs.length === 0) return [];
+    const ids = wcs.map(w => w.id);
+
+    // Per-wet-check counts via three small grouped queries; cheaper than
+    // joining and de-duplicating in app code.
+    const zoneRows = await db.select({
+      wetCheckId: wetCheckZoneRecords.wetCheckId,
+      n: sql<number>`count(*)::int`,
+    }).from(wetCheckZoneRecords)
+      .where(inArray(wetCheckZoneRecords.wetCheckId, ids))
+      .groupBy(wetCheckZoneRecords.wetCheckId);
+    const findingRows = await db.select({
+      wetCheckId: wetCheckFindings.wetCheckId,
+      n: sql<number>`count(*)::int`,
+    }).from(wetCheckFindings)
+      .where(inArray(wetCheckFindings.wetCheckId, ids))
+      .groupBy(wetCheckFindings.wetCheckId);
+    const photoRows = await db.select({
+      wetCheckId: wetCheckPhotos.wetCheckId,
+      n: sql<number>`count(*)::int`,
+    }).from(wetCheckPhotos)
+      .where(inArray(wetCheckPhotos.wetCheckId, ids))
+      .groupBy(wetCheckPhotos.wetCheckId);
+
+    const zoneMap = new Map(zoneRows.map(r => [r.wetCheckId, Number(r.n)]));
+    const findingMap = new Map(findingRows.map(r => [r.wetCheckId, Number(r.n)]));
+    const photoMap = new Map(photoRows.map(r => [r.wetCheckId, Number(r.n)]));
+
+    return wcs.map(wc => ({
+      ...wc,
+      zoneRecordCount: zoneMap.get(wc.id) ?? 0,
+      findingCount: findingMap.get(wc.id) ?? 0,
+      photoCount: photoMap.get(wc.id) ?? 0,
+    }));
+  }
+
+  async deleteWetCheck(id: number, companyId: number): Promise<boolean> {
+    // Scope-check first so a cross-company id leaks no information.
+    await this.assertWetCheckBelongsToCompany(id, companyId);
+    // Refuse if any finding has been routed downstream. Once a finding
+    // points at a billing sheet, estimate or work order, deleting the
+    // wet check would orphan that downstream record's source-of-truth.
+    const routed = await db.select({ id: wetCheckFindings.id })
+      .from(wetCheckFindings)
+      .where(and(
+        eq(wetCheckFindings.wetCheckId, id),
+        or(
+          sql`${wetCheckFindings.billingSheetId} IS NOT NULL`,
+          sql`${wetCheckFindings.estimateId} IS NOT NULL`,
+          sql`${wetCheckFindings.workOrderId} IS NOT NULL`,
+        ),
+      ));
+    if (routed.length > 0) {
+      throw new WetCheckAlreadyRoutedError(routed.map(r => r.id));
+    }
+    // Snapshot every photo URL so the object-storage cleanup pass below
+    // has a stable list even after the rows are gone. Done before the
+    // transaction so a transient storage failure can't roll back the DB.
+    const photoRows = await db.select({ url: wetCheckPhotos.url })
+      .from(wetCheckPhotos).where(eq(wetCheckPhotos.wetCheckId, id));
+
+    // Single transaction: explicitly clean up children in dependency order
+    // and then the wet_checks row. Cascades on the FKs would do most of
+    // this on their own, but doing it explicitly makes the cleanup
+    // contract auditable.
+    const ok = await db.transaction(async (tx) => {
+      await tx.delete(wetCheckPhotos).where(eq(wetCheckPhotos.wetCheckId, id));
+      await tx.delete(wetCheckFindings).where(eq(wetCheckFindings.wetCheckId, id));
+      await tx.delete(wetCheckZoneRecords).where(eq(wetCheckZoneRecords.wetCheckId, id));
+      const result = await tx.delete(wetChecks)
+        .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
+      return (result.rowCount ?? 0) > 0;
+    });
+
+    if (ok && photoRows.length > 0) {
+      // Best-effort blob cleanup (thumb / medium / original / heic-cache /
+      // base) for every photo attached to the deleted wet check. Failures
+      // are logged inside deletePhotoBlobs and never bubble up — the DB
+      // is already consistent at this point.
+      const objectStorage = new ObjectStorageService();
+      await Promise.all(photoRows.map(p => objectStorage.deletePhotoBlobs(p.url)));
+    }
+    return ok;
   }
 
   // Inbox aggregate for the manager review surface. Returns every

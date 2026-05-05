@@ -422,6 +422,74 @@ export class ObjectStorageService {
     return result;
   }
 
+  // Best-effort delete of every blob associated with a single photo:
+  // the base bytes, both display variants (thumb/medium), the preserved
+  // original (originals/<uuid>), and the HEIC write-through cache. Each
+  // deletion is independent and 404s are swallowed so partial cleanup
+  // never blocks the caller. Returns the count of objects actually
+  // removed for observability.
+  async deletePhotoBlobs(photoIdOrUrl: string): Promise<number> {
+    const baseId = this.normalizePhotoBaseId(photoIdOrUrl);
+    if (!baseId) return 0;
+    const keys = [
+      baseId,
+      thumbPath(baseId),
+      mediumPath(baseId),
+      originalPath(baseId),
+      heicCachePath(baseId),
+    ];
+    let deleted = 0;
+    await Promise.all(keys.map(async (key) => {
+      try {
+        const file = await this.searchPublicObject(key);
+        if (!file) return;
+        await file.delete({ ignoreNotFound: true });
+        deleted++;
+      } catch (err) {
+        // Best-effort: log and continue so a single failed key does not
+        // block the rest of the cleanup or the caller's transaction.
+        console.warn(`[OBJECT-STORAGE] failed to delete photo blob ${key}:`, err);
+      }
+    }));
+    return deleted;
+  }
+
+  // Accepts either a stored photoId (e.g. `photos/<uuid>`), a legacy
+  // `uploads/<filename>` key, or a fully-qualified URL emitted by
+  // signed-upload finalize. Returns the canonical base key used by the
+  // variant scheme (or null if it cannot be inferred safely).
+  private normalizePhotoBaseId(input: string): string | null {
+    if (!input) return null;
+    let s = input.trim();
+    if (!s) return null;
+    // Strip any query/fragment.
+    s = s.split("?")[0].split("#")[0];
+    if (s.startsWith("http://") || s.startsWith("https://")) {
+      try {
+        const u = new URL(s);
+        s = u.pathname.replace(/^\/+/, "");
+        // Drop a leading `<bucket>/` segment if the URL came from
+        // storage.googleapis.com or similar.
+        for (const searchPath of this.getPublicObjectSearchPaths()) {
+          try {
+            const { objectName } = parseObjectPath(searchPath);
+            const prefix = objectName.endsWith("/") ? objectName : `${objectName}/`;
+            const idx = s.indexOf(prefix);
+            if (idx !== -1) { s = s.slice(idx + prefix.length); break; }
+          } catch { /* skip */ }
+        }
+      } catch {
+        return null;
+      }
+    }
+    s = s.replace(/^\/+/, "");
+    if (!s) return null;
+    // Refuse anything that doesn't look like a photo key — never want to
+    // accidentally delete unrelated objects (logos, exports, etc.).
+    if (!/^(photos|uploads)\//.test(s)) return null;
+    return s;
+  }
+
   // Gets the upload URL for a company logo.
   async getCompanyLogoUploadURL(): Promise<string> {
     const publicSearchPaths = this.getPublicObjectSearchPaths();
