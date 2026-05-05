@@ -249,7 +249,9 @@ import {
   type BillingSheetItem,
   type InsertBillingSheet,
   type BillingSheetStatus,
-  billingSheetStatusValues
+  billingSheetStatusValues,
+  type InsertWetCheckFinding,
+  type InsertWetCheckZoneRecord,
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -10843,6 +10845,396 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.error('[DATA FIX] Failed to run billing sheet labor rate correction:', err);
     }
   })();
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Slice 2A — Wet Check capture endpoints (Task #229)
+  // All scoped by req.authenticatedUserCompanyId, all idempotent on clientId.
+  // ─────────────────────────────────────────────────────────────────────────
+  const requireCompanyId = (req: any, res: any): number | null => {
+    const cid = req.authenticatedUserCompanyId;
+    if (!cid) { res.status(403).json({ message: "Company scope required" }); return null; }
+    return cid;
+  };
+  const isFieldRole = (role: string | undefined) =>
+    role === "field_tech" || role === "irrigation_manager" || role === "company_admin" || role === "super_admin" || role === "billing_manager";
+
+  app.get("/api/wet-checks/issue-types", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    try {
+      const rows = await storage.listIssueTypeConfigs(cid);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.get("/api/wet-checks/parts/by-issue", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const issueType = String(req.query.issueType ?? "");
+    if (!issueType) return res.status(400).json({ message: "issueType required" });
+    const customerId = req.query.customerId ? parseInt(String(req.query.customerId)) : null;
+    try {
+      const result = await storage.getPartsByIssueType(cid, issueType, customerId);
+      res.json(result);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.get("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    const customerId = parseInt(req.params.customerId);
+    try {
+      const rows = await storage.listPropertyControllers(cid, customerId);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // PATCH /api/properties/:customerId/controllers — body identifies the
+  // controller by letter, matching the spec's "get + patch at the same
+  // collection path" contract.
+  const propertyControllerPatchBody = z.object({
+    controllerLetter: z.string().min(1).transform(s => s.toUpperCase()),
+    zoneCount: z.coerce.number().int().min(1).max(100).optional(),
+    notes: z.string().nullish(),
+  });
+  app.patch("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const customerId = parseInt(req.params.customerId);
+    const parsed = propertyControllerPatchBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const { controllerLetter, zoneCount, notes } = parsed.data;
+    try {
+      const updated = await storage.updatePropertyController(cid, customerId, controllerLetter, {
+        zoneCount,
+        notes: notes ?? undefined,
+      });
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.get("/api/wet-checks", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    try {
+      const opts: { status?: string; technicianId?: number } = {};
+      if (req.query.status) opts.status = String(req.query.status);
+      if (req.query.mine === "1" && req.authenticatedUserId) opts.technicianId = req.authenticatedUserId;
+      const rows = await storage.listWetChecks(cid, opts);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.get("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    try {
+      const wc = await storage.getWetCheck(parseInt(req.params.id), cid);
+      if (!wc) return res.status(404).json({ message: "Not found" });
+      res.json(wc);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // numControllers is intentionally NOT accepted from the client — the
+  // server is authoritative and always derives it from the customer record
+  // (customer.totalControllers) so a manipulated client cannot under- or
+  // over-scope a wet check.
+  const wetCheckCreateBody = z.object({
+    customerId: z.coerce.number().int().positive(),
+    weather: z.string().nullish(),
+    notes: z.string().nullish(),
+    clientId: z.string().uuid().nullish(),
+  }).strict();
+
+  app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = wetCheckCreateBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const body = parsed.data;
+    try {
+      const customer = await storage.getCustomer(body.customerId);
+      if (!customer || customer.companyId !== cid) return res.status(404).json({ message: "Customer not found" });
+      const techId = req.authenticatedUserId;
+      if (!techId) return res.status(401).json({ message: "Authentication required" });
+      const tech = await storage.getUser(techId);
+      if (!tech) return res.status(401).json({ message: "User not found" });
+
+      // Resume an existing in-progress wet check at this property for this tech
+      // before creating a new one. Idempotent for the common "tap New again" case.
+      const existing = await storage.findActiveWetCheck(cid, body.customerId, tech.id);
+      if (existing) {
+        return res.status(200).json(existing);
+      }
+
+      const numControllers = Math.max(1, Math.min(10, Number(customer.totalControllers ?? 1)));
+      await storage.ensurePropertyControllers(cid, body.customerId, numControllers);
+
+      const wc = await storage.createWetCheck({
+        companyId: cid,
+        customerId: body.customerId,
+        technicianId: tech.id,
+        technicianName: tech.name,
+        customerName: customer.name,
+        propertyAddress: customer.address ?? null,
+        numControllers,
+        status: "in_progress",
+        weather: body.weather ?? null,
+        notes: body.notes ?? null,
+        clientId: body.clientId ?? null,
+      });
+      res.status(201).json(wc);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const wetCheckPatchBody = z.object({
+    weather: z.string().nullish(),
+    notes: z.string().nullish(),
+    numControllers: z.coerce.number().int().min(1).max(10).optional(),
+  }).partial();
+
+  app.patch("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = wetCheckPatchBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    try {
+      const updated = await storage.updateWetCheck(parseInt(req.params.id), cid, parsed.data);
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const submitBody = z.object({ clientId: z.string().uuid().nullish() }).partial();
+  app.post("/api/wet-checks/:id/submit", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    // Body is optional; if provided, validate clientId shape only.
+    if (req.body && Object.keys(req.body).length > 0) {
+      const parsed = submitBody.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid body", errors: parsed.error.flatten() });
+    }
+    try {
+      const updated = await storage.submitWetCheck(parseInt(req.params.id), cid);
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) {
+      const msg = e?.message ?? "Failed";
+      const status = /zero zones checked/.test(msg) ? 400 : 500;
+      res.status(status).json({ message: msg });
+    }
+  });
+
+  const zoneRecordBody = z.object({
+    controllerLetter: z.string().min(1).transform(s => s.toUpperCase()),
+    zoneNumber: z.coerce.number().int().min(1).max(100),
+    status: z.enum(["not_checked", "checked_ok", "checked_with_issues", "not_applicable"]).default("checked_ok"),
+    ranSuccessfully: z.boolean().nullish(),
+    observedPressure: z.union([z.string(), z.number()]).nullish(),
+    observedFlow: z.union([z.string(), z.number()]).nullish(),
+    notes: z.string().nullish(),
+    // Client-supplied capture timestamp (ms or ISO). Server falls back to now()
+    // when status moves out of not_checked and the client didn't send one.
+    checkedAt: z.union([z.string().datetime(), z.number(), z.date()]).nullish(),
+    clientId: z.string().uuid().nullish(),
+  });
+
+  app.post("/api/wet-checks/:id/zone-records", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = zoneRecordBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const body = parsed.data;
+    try {
+      const wetCheckId = parseInt(req.params.id);
+      const checkedAt =
+        body.checkedAt != null
+          ? new Date(body.checkedAt as string | number | Date)
+          : (body.status !== "not_checked" ? new Date() : null);
+      const created = await storage.upsertWetCheckZoneRecord(wetCheckId, cid, {
+        wetCheckId,
+        controllerLetter: body.controllerLetter,
+        zoneNumber: body.zoneNumber,
+        status: body.status,
+        ranSuccessfully: body.ranSuccessfully ?? null,
+        observedPressure: body.observedPressure != null ? String(body.observedPressure) : null,
+        observedFlow: body.observedFlow != null ? String(body.observedFlow) : null,
+        notes: body.notes ?? null,
+        checkedAt,
+        checkedBy: req.authenticatedUserId ?? null,
+        clientId: body.clientId ?? null,
+      });
+      res.status(201).json(created);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  // PATCH zone-record: strict allow-list — protected linkage fields
+  // (wetCheckId, controllerLetter, zoneNumber, clientId) are NOT mutable
+  // post-creation; only field-tech-editable observation fields are.
+  const zoneRecordPatchBody = z.object({
+    status: z.enum(["not_checked", "checked_ok", "checked_with_issues", "not_applicable"]).optional(),
+    ranSuccessfully: z.boolean().nullish(),
+    observedPressure: z.union([z.string(), z.number()]).nullish(),
+    observedFlow: z.union([z.string(), z.number()]).nullish(),
+    notes: z.string().nullish(),
+  }).strict();
+
+  app.patch("/api/wet-checks/zone-records/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = zoneRecordPatchBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const body = parsed.data;
+    const patch: Partial<InsertWetCheckZoneRecord> = {};
+    if (body.status !== undefined) patch.status = body.status;
+    if (body.ranSuccessfully !== undefined) patch.ranSuccessfully = body.ranSuccessfully ?? null;
+    if (body.observedPressure !== undefined) patch.observedPressure = body.observedPressure != null ? String(body.observedPressure) : null;
+    if (body.observedFlow !== undefined) patch.observedFlow = body.observedFlow != null ? String(body.observedFlow) : null;
+    if (body.notes !== undefined) patch.notes = body.notes ?? null;
+    // Stamp checkedAt / checkedBy whenever an active status is set.
+    if (body.status === "checked_ok" || body.status === "checked_with_issues" || body.status === "not_applicable") {
+      patch.checkedAt = new Date();
+      patch.checkedBy = req.authenticatedUserId ?? null;
+    }
+    try {
+      const updated = await storage.updateWetCheckZoneRecord(parseInt(req.params.id), cid, patch);
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const findingCreateBody = z.object({
+    issueType: z.string().min(1),
+    severity: z.string().nullish(),
+    partId: z.coerce.number().int().nullish(),
+    partName: z.string().nullish(),
+    partPrice: z.union([z.string(), z.number()]).nullish(),
+    quantity: z.coerce.number().int().min(1).default(1),
+    laborHours: z.union([z.string(), z.number()]).default("0.00"),
+    notes: z.string().nullish(),
+    repairedInField: z.boolean().optional(),
+    clientId: z.string().uuid().nullish(),
+  });
+
+  app.post("/api/wet-checks/zone-records/:id/findings", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = findingCreateBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const body = parsed.data;
+    try {
+      const userId = req.authenticatedUserId ?? null;
+      const created = await storage.createWetCheckFinding(parseInt(req.params.id), cid, {
+        issueType: body.issueType,
+        severity: body.severity ?? null,
+        partId: body.partId ?? null,
+        partName: body.partName ?? null,
+        partPrice: body.partPrice != null ? String(body.partPrice) : null,
+        quantity: body.quantity,
+        laborHours: String(body.laborHours),
+        notes: body.notes ?? null,
+        // Tech can mark "fixed it on the spot" — finding is documented but
+        // already resolved (no manager routing required).
+        resolution: body.repairedInField ? "repaired_in_field" : "pending",
+        resolutionDecidedAt: body.repairedInField ? new Date() : null,
+        resolutionDecidedBy: body.repairedInField ? userId : null,
+        clientId: body.clientId ?? null,
+      });
+      res.status(201).json(created);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const findingPatchBody = z.object({
+    issueType: z.string().min(1).optional(),
+    severity: z.string().nullish(),
+    partId: z.coerce.number().int().nullish(),
+    partName: z.string().nullish(),
+    partPrice: z.union([z.string(), z.number()]).nullish(),
+    quantity: z.coerce.number().int().min(1).optional(),
+    laborHours: z.union([z.string(), z.number()]).optional(),
+    notes: z.string().nullish(),
+    repairedInField: z.boolean().optional(),
+  }).partial();
+
+  app.patch("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = findingPatchBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const body = parsed.data;
+    const userId = req.authenticatedUserId ?? null;
+    const patch: Partial<InsertWetCheckFinding> = {};
+    if (body.issueType !== undefined) patch.issueType = body.issueType;
+    if (body.severity !== undefined) patch.severity = body.severity ?? null;
+    if (body.partId !== undefined) patch.partId = body.partId ?? null;
+    if (body.partName !== undefined) patch.partName = body.partName ?? null;
+    if (body.partPrice !== undefined) patch.partPrice = body.partPrice != null ? String(body.partPrice) : null;
+    if (body.quantity !== undefined) patch.quantity = body.quantity;
+    if (body.laborHours !== undefined) patch.laborHours = String(body.laborHours);
+    if (body.notes !== undefined) patch.notes = body.notes ?? null;
+    if (body.repairedInField !== undefined) {
+      patch.resolution = body.repairedInField ? "repaired_in_field" : "pending";
+      patch.resolutionDecidedAt = body.repairedInField ? new Date() : null;
+      patch.resolutionDecidedBy = body.repairedInField ? userId : null;
+    }
+    try {
+      const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.delete("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const ok = await storage.deleteWetCheckFinding(parseInt(req.params.id), cid);
+      res.json({ ok });
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  const photoBody = z.object({
+    zoneRecordId: z.coerce.number().int().nullish(),
+    findingId: z.coerce.number().int().nullish(),
+    // Canonical photoId from /api/upload/photo (e.g. "photos/<uuid>"), or
+    // a fully-qualified URL. Accepted as a non-empty string and validated at
+    // the storage layer.
+    url: z.string().min(1),
+    caption: z.string().nullish(),
+    // Client-supplied capture timestamp (ms or ISO). Falls back to NOW() in
+    // the schema default if absent — preserves true camera time on offline sync.
+    takenAt: z.union([z.string().datetime(), z.number(), z.date()]).nullish(),
+    clientId: z.string().uuid().nullish(),
+  });
+
+  app.post("/api/wet-checks/:id/photos", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = photoBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    const body = parsed.data;
+    const takenBy = req.authenticatedUserId;
+    if (!takenBy) return res.status(401).json({ message: "Authentication required" });
+    try {
+      const wetCheckId = parseInt(req.params.id);
+      const takenAt = body.takenAt != null ? new Date(body.takenAt as string | number | Date) : new Date();
+      const created = await storage.attachWetCheckPhoto(wetCheckId, cid, {
+        zoneRecordId: body.zoneRecordId ?? null,
+        findingId: body.findingId ?? null,
+        url: body.url,
+        caption: body.caption ?? null,
+        takenAt,
+        takenBy,
+        clientId: body.clientId ?? null,
+      });
+      res.status(201).json(created);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
+  app.delete("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const ok = await storage.deleteWetCheckPhoto(parseInt(req.params.id), cid);
+      res.json({ ok });
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
 
   return httpServer;
 }

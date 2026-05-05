@@ -45,6 +45,7 @@ import PartsSettings from "@/pages/parts-settings";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
 import BillingDashboard from "@/pages/billing-dashboard";
 import InvoicesPage from "@/pages/invoices";
+import WetChecksPage from "@/pages/wet-checks";
 
 import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
@@ -147,6 +148,8 @@ function Router() {
                 <Route path="/field-portal" component={FieldPortal} />
                 <Route path="/work-orders" component={WorkOrders} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/customers" component={Customers} />
                 <Route path="/customers/:id/profile" component={CustomerProfile} />
                 <Route path="/customers/:customerId/site-maps" component={CustomerSiteMapsPage} />
@@ -192,6 +195,8 @@ function Router() {
                 <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
+                <Route path="/wet-checks" component={WetChecksPage} />
+                <Route path="/wet-checks/:id" component={WetChecksPage} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
@@ -311,6 +316,8 @@ function Router() {
               <Route path="/billing-sheets/zero-price-audit" component={BillingZeroPriceAuditPage} />
               <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
               <Route path="/billing-sheets" component={BillingSheets} />
+              <Route path="/wet-checks" component={WetChecksPage} />
+              <Route path="/wet-checks/:id" component={WetChecksPage} />
               <Route path="/user-manager" component={UserManager} />
               <Route path="/user-profile" component={UserProfile} />
               <Route path="/license-agreement" component={LicenseAgreement} />

@@ -1,4 +1,5 @@
-import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index, check } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -925,6 +926,215 @@ export const insertPricingAuditEventSchema = createInsertSchema(pricingAuditEven
 });
 export type PricingAuditEvent = typeof pricingAuditEvents.$inferSelect;
 export type InsertPricingAuditEvent = z.infer<typeof insertPricingAuditEventSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wet Check System (Slice 2A)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Per-property, per-controller record. Persists across visits — the tech's
+// zoneCount override on a wet check writes back here so the next wet check at
+// the same property starts with the corrected counts.
+export const propertyControllers = pgTable("property_controllers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  controllerLetter: text("controller_letter").notNull(),
+  zoneCount: integer("zone_count").notNull().default(100),
+  notes: text("notes"),
+  // Future hook for VRTSync map / GPS wiring; not populated by capture UI.
+  controllerId: integer("controller_id").references(() => controllers.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqCustomerLetter: uniqueIndex("uniq_property_ctrl").on(table.customerId, table.controllerLetter),
+}));
+
+// Issue type catalog — drives the field-UI preset grid and the per-issue
+// labor defaults / part category filter for the part picker.
+export const issueTypeConfigs = pgTable("issue_type_configs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  issueType: text("issue_type").notNull(),
+  issueGroup: text("issue_group").notNull(), // quick_fix | advanced | zone_issue
+  displayLabel: text("display_label").notNull(),
+  defaultLaborHours: decimal("default_labor_hours", { precision: 5, scale: 2 }).notNull(),
+  partCategoryFilter: text("part_category_filter"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqIssueType: uniqueIndex("uniq_issue_type").on(table.companyId, table.issueType),
+}));
+
+export const wetChecks = pgTable("wet_checks", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  technicianId: integer("technician_id").references(() => users.id).notNull(),
+  technicianName: text("technician_name").notNull(),
+  customerName: text("customer_name").notNull(),
+  propertyAddress: text("property_address"),
+  numControllers: integer("num_controllers").notNull(),
+  status: text("status").notNull().default("in_progress"),
+  // in_progress | submitted | approved | partially_converted | converted
+  weather: text("weather"),
+  notes: text("notes"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  submittedAt: timestamp("submitted_at"),
+  approvedAt: timestamp("approved_at"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedByName: text("approved_by_name"),
+  fullyConvertedAt: timestamp("fully_converted_at"),
+  clientId: text("client_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  clientIdUniq: uniqueIndex("uniq_wet_check_client_id")
+    .on(table.clientId)
+    .where(sql`${table.clientId} IS NOT NULL`),
+  customerIdx: index("idx_wet_checks_customer").on(table.customerId),
+  statusIdx: index("idx_wet_checks_status").on(table.companyId, table.status),
+}));
+
+export const wetCheckZoneRecords = pgTable("wet_check_zone_records", {
+  id: serial("id").primaryKey(),
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id, { onDelete: "cascade" }).notNull(),
+  controllerLetter: text("controller_letter").notNull(),
+  zoneNumber: integer("zone_number").notNull(),
+  status: text("status").notNull().default("not_checked"),
+  // not_checked | checked_ok | checked_with_issues | not_applicable
+  ranSuccessfully: boolean("ran_successfully"),
+  observedPressure: decimal("observed_pressure", { precision: 6, scale: 2 }),
+  observedFlow: decimal("observed_flow", { precision: 6, scale: 2 }),
+  notes: text("notes"),
+  checkedAt: timestamp("checked_at"),
+  checkedBy: integer("checked_by").references(() => users.id),
+  clientId: text("client_id"),
+}, (table) => ({
+  uniqZone: uniqueIndex("uniq_wet_check_zone").on(table.wetCheckId, table.controllerLetter, table.zoneNumber),
+  clientIdUniq: uniqueIndex("uniq_zone_record_client_id")
+    .on(table.clientId)
+    .where(sql`${table.clientId} IS NOT NULL`),
+}));
+
+export const wetCheckFindings = pgTable("wet_check_findings", {
+  id: serial("id").primaryKey(),
+  zoneRecordId: integer("zone_record_id").references(() => wetCheckZoneRecords.id, { onDelete: "cascade" }).notNull(),
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id).notNull(),
+  issueType: text("issue_type").notNull(),
+  issueGroup: text("issue_group").notNull(),
+  severity: text("severity"),
+  partId: integer("part_id").references(() => parts.id),
+  partName: text("part_name"),
+  partPrice: decimal("part_price", { precision: 10, scale: 2 }),
+  quantity: integer("quantity").notNull(),
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  notes: text("notes"),
+  resolution: text("resolution").notNull().default("pending"),
+  // pending | repaired_in_field | sent_to_estimate | deferred_to_work_order | documented_only
+  resolutionDecidedAt: timestamp("resolution_decided_at"),
+  resolutionDecidedBy: integer("resolution_decided_by").references(() => users.id),
+  billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id),
+  estimateId: integer("estimate_id").references(() => estimates.id),
+  workOrderId: integer("work_order_id").references(() => workOrders.id),
+  convertedAt: timestamp("converted_at"),
+  clientId: text("client_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  wetCheckIdx: index("idx_findings_wet_check").on(table.wetCheckId),
+  zoneIdx: index("idx_findings_zone").on(table.zoneRecordId),
+  clientIdUniq: uniqueIndex("uniq_finding_client_id")
+    .on(table.clientId)
+    .where(sql`${table.clientId} IS NOT NULL`),
+  // At most one routing target may be set on a finding (billing | estimate | work order).
+  singleTargetCheck: check(
+    "wet_check_finding_single_target",
+    sql`(
+      (CASE WHEN ${table.billingSheetId} IS NULL THEN 0 ELSE 1 END)
+      + (CASE WHEN ${table.estimateId}     IS NULL THEN 0 ELSE 1 END)
+      + (CASE WHEN ${table.workOrderId}    IS NULL THEN 0 ELSE 1 END)
+    ) <= 1`,
+  ),
+}));
+
+export const wetCheckPhotos = pgTable("wet_check_photos", {
+  id: serial("id").primaryKey(),
+  wetCheckId: integer("wet_check_id").references(() => wetChecks.id, { onDelete: "cascade" }).notNull(),
+  zoneRecordId: integer("zone_record_id").references(() => wetCheckZoneRecords.id, { onDelete: "set null" }),
+  findingId: integer("finding_id").references(() => wetCheckFindings.id, { onDelete: "set null" }),
+  url: text("url").notNull(),
+  caption: text("caption"),
+  takenAt: timestamp("taken_at").defaultNow().notNull(),
+  takenBy: integer("taken_by").references(() => users.id).notNull(),
+  clientId: text("client_id"),
+}, (table) => ({
+  wetCheckIdx: index("idx_photos_wet_check").on(table.wetCheckId),
+  clientIdUniq: uniqueIndex("uniq_photo_client_id")
+    .on(table.clientId)
+    .where(sql`${table.clientId} IS NOT NULL`),
+}));
+
+export const insertPropertyControllerSchema = createInsertSchema(propertyControllers).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export const insertIssueTypeConfigSchema = createInsertSchema(issueTypeConfigs).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export const insertWetCheckSchema = createInsertSchema(wetChecks).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export const insertWetCheckZoneRecordSchema = createInsertSchema(wetCheckZoneRecords).omit({ id: true });
+export const insertWetCheckFindingSchema = createInsertSchema(wetCheckFindings).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export const insertWetCheckPhotoSchema = createInsertSchema(wetCheckPhotos).omit({ id: true });
+
+export type PropertyController = typeof propertyControllers.$inferSelect;
+export type IssueTypeConfig = typeof issueTypeConfigs.$inferSelect;
+export type WetCheck = typeof wetChecks.$inferSelect;
+export type WetCheckZoneRecord = typeof wetCheckZoneRecords.$inferSelect;
+export type WetCheckFinding = typeof wetCheckFindings.$inferSelect;
+export type WetCheckPhoto = typeof wetCheckPhotos.$inferSelect;
+
+export type InsertPropertyController = z.infer<typeof insertPropertyControllerSchema>;
+export type InsertIssueTypeConfig = z.infer<typeof insertIssueTypeConfigSchema>;
+export type InsertWetCheck = z.infer<typeof insertWetCheckSchema>;
+export type InsertWetCheckZoneRecord = z.infer<typeof insertWetCheckZoneRecordSchema>;
+export type InsertWetCheckFinding = z.infer<typeof insertWetCheckFindingSchema>;
+export type InsertWetCheckPhoto = z.infer<typeof insertWetCheckPhotoSchema>;
+
+export type WetCheckWithDetails = WetCheck & {
+  zoneRecords: (WetCheckZoneRecord & { findings: WetCheckFinding[] })[];
+  photos: WetCheckPhoto[];
+};
+
+// Stable seed for issue_type_configs — applied per company on startup.
+export const WET_CHECK_ISSUE_TYPE_SEED: ReadonlyArray<{
+  issueType: string;
+  issueGroup: "quick_fix" | "advanced" | "zone_issue";
+  displayLabel: string;
+  defaultLaborHours: string;
+  partCategoryFilter: string | null;
+  sortOrder: number;
+}> = [
+  { issueType: "head_replacement",   issueGroup: "quick_fix", displayLabel: "Head Replace",     defaultLaborHours: "0.25", partCategoryFilter: "Head",       sortOrder: 10 },
+  { issueType: "nozzle_replacement", issueGroup: "quick_fix", displayLabel: "Nozzle Replace",   defaultLaborHours: "0.10", partCategoryFilter: "Nozzle",     sortOrder: 20 },
+  { issueType: "head_adjustment",    issueGroup: "quick_fix", displayLabel: "Adjust",           defaultLaborHours: "0.05", partCategoryFilter: null,         sortOrder: 30 },
+  { issueType: "leak_repair",        issueGroup: "advanced",  displayLabel: "Leak",             defaultLaborHours: "1.00", partCategoryFilter: "Fitting",    sortOrder: 40 },
+  { issueType: "pressure_issue",     issueGroup: "advanced",  displayLabel: "Pressure Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 50 },
+  { issueType: "coverage_issue",     issueGroup: "advanced",  displayLabel: "Coverage Issue",   defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 60 },
+  { issueType: "valve_issue",        issueGroup: "zone_issue", displayLabel: "Valve",           defaultLaborHours: "1.50", partCategoryFilter: "Valve",      sortOrder: 70 },
+  { issueType: "wiring_issue",       issueGroup: "zone_issue", displayLabel: "Wiring",          defaultLaborHours: "1.00", partCategoryFilter: "Wire",       sortOrder: 80 },
+  { issueType: "controller_issue",   issueGroup: "zone_issue", displayLabel: "Controller",      defaultLaborHours: "1.00", partCategoryFilter: "Controller", sortOrder: 90 },
+  { issueType: "other",              issueGroup: "advanced",  displayLabel: "Other",            defaultLaborHours: "0.50", partCategoryFilter: null,         sortOrder: 100 },
+];
+
+export function deriveIssueGroup(issueType: string): "quick_fix" | "advanced" | "zone_issue" {
+  const seed = WET_CHECK_ISSUE_TYPE_SEED.find((s) => s.issueType === issueType);
+  return (seed?.issueGroup ?? "advanced");
+}
 
 // Internal migration-tracking table — must be declared here so drizzle-kit
 // does not treat it as an unknown table and attempt to drop it during db:push.

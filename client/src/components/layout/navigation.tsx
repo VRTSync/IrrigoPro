@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 import { useState, useEffect } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, type LucideIcon } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import type { Part, ManualPartReview } from "@shared/schema";
 
@@ -196,10 +196,10 @@ export default function Navigation() {
       case "field_tech":
         return [
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
-          { path: "/billing-sheets", label: "Onsite", icon: ClipboardList },
+          { path: "/wet-checks", label: "Wet Checks", icon: Droplets },
           { path: "/", label: "Home", icon: Home, isCenter: true },
+          { path: "/billing-sheets", label: "Onsite", icon: ClipboardList },
           { path: "/customers", label: "Customers", icon: Users },
-          { path: "/site-maps", label: "Maps", icon: MapIcon },
         ];
       case "billing_manager":
         return [

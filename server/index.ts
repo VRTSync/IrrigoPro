@@ -1352,6 +1352,193 @@ async function runStartupMigrations() {
       'Server Startup'
     );
   }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Slice 2A — Wet Check System tables (Task #229)
+  // ───────────────────────────────────────────────────────────────────────
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS property_controllers (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        customer_id INTEGER NOT NULL REFERENCES customers(id),
+        controller_letter TEXT NOT NULL,
+        zone_count INTEGER NOT NULL DEFAULT 100,
+        notes TEXT,
+        controller_id INTEGER REFERENCES controllers(id),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_property_ctrl
+        ON property_controllers (customer_id, controller_letter);
+
+      CREATE TABLE IF NOT EXISTS issue_type_configs (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        issue_type TEXT NOT NULL,
+        issue_group TEXT NOT NULL,
+        display_label TEXT NOT NULL,
+        default_labor_hours NUMERIC(5,2) NOT NULL,
+        part_category_filter TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_issue_type
+        ON issue_type_configs (company_id, issue_type);
+
+      CREATE TABLE IF NOT EXISTS wet_checks (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        customer_id INTEGER NOT NULL REFERENCES customers(id),
+        technician_id INTEGER NOT NULL REFERENCES users(id),
+        technician_name TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        property_address TEXT,
+        num_controllers INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'in_progress',
+        weather TEXT,
+        notes TEXT,
+        started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        submitted_at TIMESTAMP,
+        approved_at TIMESTAMP,
+        approved_by INTEGER REFERENCES users(id),
+        approved_by_name TEXT,
+        fully_converted_at TIMESTAMP,
+        client_id TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_wet_check_client_id
+        ON wet_checks (client_id) WHERE client_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_wet_checks_customer ON wet_checks (customer_id);
+      CREATE INDEX IF NOT EXISTS idx_wet_checks_status ON wet_checks (company_id, status);
+
+      CREATE TABLE IF NOT EXISTS wet_check_zone_records (
+        id SERIAL PRIMARY KEY,
+        wet_check_id INTEGER NOT NULL REFERENCES wet_checks(id) ON DELETE CASCADE,
+        controller_letter TEXT NOT NULL,
+        zone_number INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'not_checked',
+        ran_successfully BOOLEAN,
+        observed_pressure NUMERIC(6,2),
+        observed_flow NUMERIC(6,2),
+        notes TEXT,
+        checked_at TIMESTAMP,
+        checked_by INTEGER REFERENCES users(id),
+        client_id TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_wet_check_zone
+        ON wet_check_zone_records (wet_check_id, controller_letter, zone_number);
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_zone_record_client_id
+        ON wet_check_zone_records (client_id) WHERE client_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS wet_check_findings (
+        id SERIAL PRIMARY KEY,
+        zone_record_id INTEGER NOT NULL REFERENCES wet_check_zone_records(id) ON DELETE CASCADE,
+        wet_check_id INTEGER NOT NULL REFERENCES wet_checks(id),
+        issue_type TEXT NOT NULL,
+        issue_group TEXT NOT NULL,
+        severity TEXT,
+        part_id INTEGER REFERENCES parts(id),
+        part_name TEXT,
+        part_price NUMERIC(10,2),
+        quantity INTEGER NOT NULL,
+        labor_hours NUMERIC(5,2) NOT NULL,
+        notes TEXT,
+        resolution TEXT NOT NULL DEFAULT 'pending',
+        resolution_decided_at TIMESTAMP,
+        resolution_decided_by INTEGER REFERENCES users(id),
+        billing_sheet_id INTEGER REFERENCES billing_sheets(id),
+        estimate_id INTEGER REFERENCES estimates(id),
+        work_order_id INTEGER REFERENCES work_orders(id),
+        converted_at TIMESTAMP,
+        client_id TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        CONSTRAINT one_routing_target CHECK (
+          (CASE WHEN billing_sheet_id IS NOT NULL THEN 1 ELSE 0 END) +
+          (CASE WHEN estimate_id IS NOT NULL THEN 1 ELSE 0 END) +
+          (CASE WHEN work_order_id IS NOT NULL THEN 1 ELSE 0 END)
+          <= 1
+        )
+      );
+      CREATE INDEX IF NOT EXISTS idx_findings_wet_check ON wet_check_findings (wet_check_id);
+      CREATE INDEX IF NOT EXISTS idx_findings_zone ON wet_check_findings (zone_record_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_finding_client_id
+        ON wet_check_findings (client_id) WHERE client_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS wet_check_photos (
+        id SERIAL PRIMARY KEY,
+        wet_check_id INTEGER NOT NULL REFERENCES wet_checks(id) ON DELETE CASCADE,
+        zone_record_id INTEGER REFERENCES wet_check_zone_records(id) ON DELETE SET NULL,
+        finding_id INTEGER REFERENCES wet_check_findings(id) ON DELETE SET NULL,
+        url TEXT NOT NULL,
+        caption TEXT,
+        taken_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        taken_by INTEGER NOT NULL REFERENCES users(id),
+        client_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_photos_wet_check ON wet_check_photos (wet_check_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uniq_photo_client_id
+        ON wet_check_photos (client_id) WHERE client_id IS NOT NULL;
+
+      -- Idempotent attach of the single-routing-target CHECK on existing DBs
+      -- (CREATE TABLE IF NOT EXISTS skips constraints on tables that already exist).
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname IN ('one_routing_target', 'wet_check_finding_single_target')
+            AND conrelid = 'wet_check_findings'::regclass
+        ) THEN
+          ALTER TABLE wet_check_findings
+            ADD CONSTRAINT wet_check_finding_single_target CHECK (
+              (
+                (CASE WHEN billing_sheet_id IS NULL THEN 0 ELSE 1 END)
+                + (CASE WHEN estimate_id     IS NULL THEN 0 ELSE 1 END)
+                + (CASE WHEN work_order_id   IS NULL THEN 0 ELSE 1 END)
+              ) <= 1
+            );
+        END IF;
+      END$$;
+    `);
+    logger.info('Startup migration: ensured wet check tables exist', 'Server Startup');
+
+    // Seed issue_type_configs per company (idempotent — only inserts missing rows).
+    const { WET_CHECK_ISSUE_TYPE_SEED } = await import("@shared/schema");
+    const allCompaniesRows = await pool.query(`SELECT id FROM companies WHERE is_active = TRUE`);
+    for (const row of allCompaniesRows.rows as { id: number }[]) {
+      for (const seed of WET_CHECK_ISSUE_TYPE_SEED) {
+        await pool.query(
+          `INSERT INTO issue_type_configs
+             (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (company_id, issue_type) DO NOTHING`,
+          [
+            row.id,
+            seed.issueType,
+            seed.issueGroup,
+            seed.displayLabel,
+            seed.defaultLaborHours,
+            seed.partCategoryFilter,
+            seed.sortOrder,
+          ]
+        );
+      }
+    }
+    logger.info(
+      `Startup migration: seeded issue_type_configs for ${allCompaniesRows.rowCount ?? 0} company(ies)`,
+      'Server Startup'
+    );
+  } catch (err) {
+    logger.error(
+      'Startup migration: wet check tables / seed error (non-fatal)',
+      err instanceof Error ? err : new Error(String(err)),
+      'Server Startup'
+    );
+  }
 }
 
 (async () => {
