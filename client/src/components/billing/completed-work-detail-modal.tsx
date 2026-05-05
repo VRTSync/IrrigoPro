@@ -15,6 +15,7 @@ import {
   FileText,
   X,
   CheckCircle,
+  CheckCircle2,
   DollarSign,
   ChevronLeft,
   ChevronRight,
@@ -23,6 +24,16 @@ import {
   Plus,
   Upload,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
@@ -142,6 +153,7 @@ export function CompletedWorkDetailModal({
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoToRemove, setPhotoToRemove] = useState<number | null>(null);
+  const [confirmNoPhotosNeeded, setConfirmNoPhotosNeeded] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -162,6 +174,56 @@ export function CompletedWorkDetailModal({
   ].includes(userRole);
 
   const bs = type === "billing_sheet" ? (data as BillingSheet) : null;
+
+  // Optimistic local mirror of the no-photos-needed flag so the modal updates
+  // immediately after marking, before the parent's list refetches.
+  const [localNoPhotosNeeded, setLocalNoPhotosNeeded] = useState<{
+    noPhotosNeeded: boolean;
+    noPhotosNeededAt: string | Date | null;
+    noPhotosNeededBy: number | null;
+  } | null>(null);
+  useEffect(() => {
+    setLocalNoPhotosNeeded(null);
+  }, [id, open]);
+
+  const effectiveNoPhotosNeeded = localNoPhotosNeeded?.noPhotosNeeded ?? !!bs?.noPhotosNeeded;
+  const effectiveNoPhotosNeededAt = localNoPhotosNeeded?.noPhotosNeededAt ?? bs?.noPhotosNeededAt ?? null;
+
+  // Same role allowlist as the server endpoint POST /api/billing-sheets/:id/no-photos-needed
+  const canMarkNoPhotosNeeded =
+    type === "billing_sheet" &&
+    [
+      "company_admin",
+      "super_admin",
+      "irrigation_manager",
+      "billing_manager",
+    ].includes(userRole);
+
+  const noPhotosNeededMutation = useMutation<BillingSheet, Error, void>({
+    mutationFn: async () => {
+      return apiRequest(`/api/billing-sheets/${id}/no-photos-needed`, "POST");
+    },
+    onSuccess: (updated) => {
+      setLocalNoPhotosNeeded({
+        noPhotosNeeded: true,
+        noPhotosNeededAt: updated?.noPhotosNeededAt ?? new Date().toISOString(),
+        noPhotosNeededBy: updated?.noPhotosNeededBy ?? userId ?? null,
+      });
+      toast({
+        title: "Marked as 'No Photos Needed'",
+        description: "This billing sheet no longer needs photos.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets/missing-photos"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing-sheets"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not mark sheet",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   // Fetch the customer to compare their current labor rate vs stored rate on billing sheet
   const { data: customerForRateCheck } = useQuery({
@@ -473,6 +535,37 @@ export function CompletedWorkDetailModal({
               <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
                 <CheckCircle className="w-4 h-4 flex-shrink-0" />
                 <span className="font-medium">Awaiting irrigation manager review before passing to billing.</span>
+              </div>
+            )}
+
+            {/* No Photos Needed — admin/manager action and audit note */}
+            {type === 'billing_sheet' && effectiveNoPhotosNeeded && (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                data-testid="banner-no-photos-needed"
+              >
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                <span>
+                  <span className="font-medium">Marked as not needing photos</span>
+                  {effectiveNoPhotosNeededAt ? ` on ${fmtDateTime(effectiveNoPhotosNeededAt)}` : ''}.
+                </span>
+              </div>
+            )}
+            {type === 'billing_sheet' && !effectiveNoPhotosNeeded && canMarkNoPhotosNeeded && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
+                <span className="text-gray-700">
+                  Photos missing or not applicable? Clear this sheet from the missing-photos report.
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setConfirmNoPhotosNeeded(true)}
+                  disabled={noPhotosNeededMutation.isPending}
+                  data-testid="button-no-photos-needed"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                  {noPhotosNeededMutation.isPending ? "Marking…" : "No Photos Needed"}
+                </Button>
               </div>
             )}
 
@@ -886,6 +979,39 @@ export function CompletedWorkDetailModal({
           </DialogContent>
         </Dialog>
       )}
+
+      {/* No Photos Needed confirmation */}
+      <AlertDialog
+        open={confirmNoPhotosNeeded}
+        onOpenChange={(open) => { if (!open) setConfirmNoPhotosNeeded(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark as 'No Photos Needed'</AlertDialogTitle>
+            <AlertDialogDescription>
+              Mark this billing sheet as not needing photos? It will be removed from the missing-photos report.
+              {bs ? (
+                <span className="block mt-2 text-gray-700">
+                  <strong>{bs.billingNumber}</strong>
+                  {bs.customerName ? ` — ${bs.customerName}` : ''}
+                </span>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-no-photos-needed">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmNoPhotosNeeded(false);
+                noPhotosNeededMutation.mutate();
+              }}
+              data-testid="button-confirm-no-photos-needed"
+            >
+              Mark as not needed
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Photo remove confirmation */}
       <Dialog open={photoToRemove !== null} onOpenChange={() => setPhotoToRemove(null)}>
