@@ -50,6 +50,7 @@ import InvoicesPage from "@/pages/invoices";
 import WetChecksPage from "@/pages/wet-checks";
 import AdminWetChecksPage from "@/pages/admin-wet-checks";
 import WetCheckReviewPage from "@/pages/wet-check-review";
+import ManagerWetChecksPage from "@/pages/manager-wet-checks";
 
 import SiteMapsPage from "@/pages/site-maps";
 import CustomerSiteMapsPage from "@/pages/customer-site-maps-page";
@@ -200,6 +201,7 @@ function Router() {
                 <Route path="/billing-sheets/labor-rate-audit" component={LaborRateAuditPage} />
                 <Route path="/billing-sheets" component={BillingSheets} />
                 <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
+                <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
                 <Route path="/wet-checks/admin" component={AdminWetChecksPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
@@ -279,6 +281,7 @@ function Router() {
               <Switch>
                 <Route path="/" component={SuperAdminDashboard} />
                 <Route path="/super-admin" component={SuperAdminDashboard} />
+                <Route path="/manager/wet-checks" component={ManagerWetChecksPage} />
                 <Route path="/wet-checks/pending-review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks/:id/review" component={WetCheckReviewPage} />
                 <Route path="/wet-checks" component={WetChecksPage} />

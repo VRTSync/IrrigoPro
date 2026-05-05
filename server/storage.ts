@@ -675,6 +675,10 @@ export interface IStorage {
     findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
     totalBillable: string;
     customerLaborRate: string;
+    autoBilledCount: number;
+    autoBilledTotal: string;
+    pendingCount: number;
+    pendingTotal: string;
   }>>;
   // Cheap status lookup used by the route layer to choose role policy
   // for a finding edit (tech vs manager) without a full join.
@@ -5163,6 +5167,10 @@ export class DatabaseStorage implements IStorage {
     findingCounts: { quick_fix: number; advanced: number; zone_issue: number; total: number };
     totalBillable: string;
     customerLaborRate: string;
+    autoBilledCount: number;
+    autoBilledTotal: string;
+    pendingCount: number;
+    pendingTotal: string;
   }>> {
     // Queue is status-based by default (Slice 2 behavior). With Slice 3's
     // WET_CHECK_AUTO_BILL flag ON we additionally narrow the result to
@@ -5214,9 +5222,22 @@ export class DatabaseStorage implements IStorage {
       const counts = { quick_fix: 0, advanced: 0, zone_issue: 0, total: fs.length };
       const rate = rateByCustomer.get(wc.customerId) ?? 45;
       let billable = 0;
+      // Per-resolution breakdown for the manager inbox card pills:
+      //   - autoBilled = findings already auto-routed to a billing sheet
+      //     (repaired_in_field, the only resolution that creates billable
+      //     work without further manager input).
+      //   - pending = findings still awaiting a routing decision.
+      let autoBilledCount = 0;
+      let autoBilledTotal = 0;
+      let pendingCount = 0;
+      let pendingTotal = 0;
       for (const f of fs) {
         const g = (f.issueGroup as keyof typeof counts) ?? "advanced";
         if (g === "quick_fix" || g === "advanced" || g === "zone_issue") counts[g]++;
+        const partPrice = parseFloat(String(f.partPrice ?? 0));
+        const qty = Number(f.quantity ?? 0);
+        const laborHours = parseFloat(String(f.laborHours ?? 0));
+        const lineTotal = partPrice * qty + laborHours * rate;
         // Total estimated billable spans the two monetised buckets:
         // repaired_in_field (→ billing sheet) and sent_to_estimate.
         // 'pending' findings are included so the manager can see the
@@ -5225,17 +5246,24 @@ export class DatabaseStorage implements IStorage {
           f.resolution === "repaired_in_field" ||
           f.resolution === "sent_to_estimate" ||
           f.resolution === "pending";
-        if (!isMonetised) continue;
-        const partPrice = parseFloat(String(f.partPrice ?? 0));
-        const qty = Number(f.quantity ?? 0);
-        const laborHours = parseFloat(String(f.laborHours ?? 0));
-        billable += partPrice * qty + laborHours * rate;
+        if (isMonetised) billable += lineTotal;
+        if (f.resolution === "repaired_in_field") {
+          autoBilledCount++;
+          autoBilledTotal += lineTotal;
+        } else if (!f.resolution || f.resolution === "pending") {
+          pendingCount++;
+          pendingTotal += lineTotal;
+        }
       }
       return {
         ...wc,
         findingCounts: counts,
         totalBillable: billable.toFixed(2),
         customerLaborRate: rate.toFixed(2),
+        autoBilledCount,
+        autoBilledTotal: autoBilledTotal.toFixed(2),
+        pendingCount,
+        pendingTotal: pendingTotal.toFixed(2),
       };
     });
   }
