@@ -131,6 +131,8 @@ process.on('uncaughtException', (error: Error) => {
   process.exit(1);
 });
 
+import { seedIssueTypeConfigsForActiveCompanies } from "./seed-issue-type-configs";
+
 async function runStartupMigrations() {
   // Add branches column to customers table if not already present
   try {
@@ -1507,29 +1509,9 @@ async function runStartupMigrations() {
     logger.info('Startup migration: ensured wet check tables exist', 'Server Startup');
 
     // Seed issue_type_configs per company (idempotent — only inserts missing rows).
-    const { WET_CHECK_ISSUE_TYPE_SEED } = await import("@shared/schema");
-    const allCompaniesRows = await pool.query(`SELECT id FROM companies WHERE is_active = TRUE`);
-    for (const row of allCompaniesRows.rows as { id: number }[]) {
-      for (const seed of WET_CHECK_ISSUE_TYPE_SEED) {
-        await pool.query(
-          `INSERT INTO issue_type_configs
-             (company_id, issue_type, issue_group, display_label, default_labor_hours, part_category_filter, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           ON CONFLICT (company_id, issue_type) DO NOTHING`,
-          [
-            row.id,
-            seed.issueType,
-            seed.issueGroup,
-            seed.displayLabel,
-            seed.defaultLaborHours,
-            seed.partCategoryFilter,
-            seed.sortOrder,
-          ]
-        );
-      }
-    }
+    const seededCount = await seedIssueTypeConfigsForActiveCompanies();
     logger.info(
-      `Startup migration: seeded issue_type_configs for ${allCompaniesRows.rowCount ?? 0} company(ies)`,
+      `Startup migration: seeded issue_type_configs for ${seededCount} company(ies)`,
       'Server Startup'
     );
   } catch (err) {
