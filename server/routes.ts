@@ -11509,8 +11509,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const rows = await storage.listPropertyControllers(cid, customerId);
       // Customer-level bucket is now stored as branch_name = '' (NOT NULL).
       // Older rows that may still hold NULL during the in-flight migration
-      // are also treated as customer-level here.
-      res.json(rows.filter(r => (r.branchName ?? "") === ""));
+      // are also treated as customer-level here. Map the customer-level
+      // bucket back to branchName: null on the wire so existing API
+      // consumers see the same shape as before Task #320.
+      res.json(
+        rows
+          .filter(r => (r.branchName ?? "") === "")
+          .map(r => ({ ...r, branchName: null })),
+      );
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
@@ -11554,7 +11560,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           notes: notes ?? undefined,
         });
       }
-      res.json(updated);
+      // Preserve pre-Task-#320 wire shape: customer-level bucket is
+      // exposed as branchName: null even though it's stored as ''.
+      res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
@@ -12180,7 +12188,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         confirmDeleteWithZones: parsed.data.confirmDeleteWithZones,
         branchName: parsed.data.branchName ?? null,
       });
-      res.json({ ...result, branchName: parsed.data.branchName ?? null });
+      // Preserve pre-Task-#320 wire shape on the rows themselves: the
+      // customer-level bucket is exposed as branchName: null.
+      const wireBranch = parsed.data.branchName ?? null;
+      const wireControllers = result.controllers.map(c => ({
+        ...c,
+        branchName: c.branchName ? c.branchName : null,
+      }));
+      res.json({ ...result, controllers: wireControllers, branchName: wireBranch });
     } catch (e: any) {
       if (e instanceof ControllerHasZonesError) {
         return res.status(409).json({
@@ -12222,7 +12237,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           parsed.data.branchName ?? null,
         );
         if (!updated) return res.status(404).json({ message: "Controller not found" });
-        res.json(updated);
+        // Preserve pre-Task-#320 wire shape: customer-level → null.
+        res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
       } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
     },
   );
