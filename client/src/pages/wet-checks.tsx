@@ -90,11 +90,15 @@ function PhotoCaptureButton({
   zoneRecordId,
   findingId,
   onUploaded,
+  skipInvalidate,
+  testIdSuffix,
 }: {
   wetCheckId: number;
   zoneRecordId?: number | null;
   findingId?: number | null;
-  onUploaded?: () => void;
+  onUploaded?: (photo: WetCheckPhoto) => void;
+  skipInvalidate?: boolean;
+  testIdSuffix?: string;
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -108,15 +112,17 @@ function PhotoCaptureButton({
     try {
       const takenAt = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
       const url = await uploadPhotoToStorage(file);
-      await apiRequest(`/api/wet-checks/${wetCheckId}/photos`, "POST", {
+      const created: WetCheckPhoto = await apiRequest(`/api/wet-checks/${wetCheckId}/photos`, "POST", {
         url,
         takenAt,
         zoneRecordId: zoneRecordId ?? null,
         findingId: findingId ?? null,
         clientId: newClientId(),
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
-      onUploaded?.();
+      if (!skipInvalidate) {
+        queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+      }
+      onUploaded?.(created);
       toast({ title: "Photo added" });
     } catch (err: any) {
       toast({ title: "Photo upload failed", description: err?.message ?? "Try again", variant: "destructive" });
@@ -125,6 +131,7 @@ function PhotoCaptureButton({
     }
   };
 
+  const suffix = testIdSuffix ?? `${zoneRecordId ?? findingId ?? "wc"}`;
   return (
     <>
       <input
@@ -134,7 +141,7 @@ function PhotoCaptureButton({
         capture="environment"
         className="hidden"
         onChange={onPick}
-        data-testid={`photo-input-${zoneRecordId ?? findingId ?? "wc"}`}
+        data-testid={`photo-input-${suffix}`}
       />
       <Button
         size="sm"
@@ -142,7 +149,7 @@ function PhotoCaptureButton({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={busy}
-        data-testid={`btn-photo-${zoneRecordId ?? findingId ?? "wc"}`}
+        data-testid={`btn-photo-${suffix}`}
       >
         {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Camera className="w-4 h-4 mr-1" />}
         Photo
@@ -834,6 +841,9 @@ function FindingSheet({
   const [notes, setNotes] = useState<string>("");
   const [search, setSearch] = useState<string>("");
   const [repairedInField, setRepairedInField] = useState<boolean>(false);
+  // Photos picked while creating a finding (before save). Uploaded immediately
+  // with findingId=null and linked to the new finding once saveMut succeeds.
+  const [pendingPhotos, setPendingPhotos] = useState<WetCheckPhoto[]>([]);
 
   const { data: configs = [] } = useQuery<IssueTypeConfig[]>({ queryKey: ["/api/wet-checks/issue-types"], enabled: open });
   const cfg = configs.find(c => c.issueType === issueType);
@@ -858,6 +868,7 @@ function FindingSheet({
       setLaborHours(cfg?.defaultLaborHours ?? "0");
       setNotes("");
       setRepairedInField(false);
+      setPendingPhotos([]);
     }
     setSearch("");
   }, [open, editing?.id, cfg?.defaultLaborHours]);
@@ -887,7 +898,7 @@ function FindingSheet({
   };
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const p = effectivePart();
       const payload = {
         partId: p.id,
@@ -901,19 +912,48 @@ function FindingSheet({
       if (mode === "edit" && editing) {
         return apiRequest(`/api/wet-checks/findings/${editing.id}`, "PATCH", payload);
       }
-      return apiRequest(`/api/wet-checks/zone-records/${zoneRecordId}/findings`, "POST", {
-        ...payload,
-        issueType,
-        clientId: newClientId(),
-      });
+      const created: WetCheckFinding = await apiRequest(
+        `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
+        "POST",
+        { ...payload, issueType, clientId: newClientId() },
+      );
+      // Link any photos the tech queued before saving. We attempt all in
+      // parallel and surface a soft warning if any fail — the finding has
+      // already been saved either way.
+      if (pendingPhotos.length > 0) {
+        const results = await Promise.allSettled(
+          pendingPhotos.map(p =>
+            apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: created.id }),
+          ),
+        );
+        const failed = results.filter(r => r.status === "rejected").length;
+        if (failed > 0) {
+          toast({
+            title: "Some photos didn't attach",
+            description: `${failed} photo(s) couldn't be linked to the finding. You can re-add them by editing it.`,
+            variant: "destructive",
+          });
+        }
+      }
+      return created;
     },
     onSuccess: () => {
       toast({ title: mode === "edit" ? "Finding updated" : "Finding added" });
       queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
+      setPendingPhotos([]);
       onClose();
     },
     onError: (e: any) => toast({ title: "Failed", description: e?.message, variant: "destructive" }),
   });
+
+  const removePendingPhoto = async (photoId: number) => {
+    try {
+      await apiRequest(`/api/wet-checks/photos/${photoId}`, "DELETE");
+      setPendingPhotos(prev => prev.filter(p => p.id !== photoId));
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e?.message, variant: "destructive" });
+    }
+  };
 
   const renderPartButton = (p: Part) => {
     const eff = effectivePart();
@@ -983,7 +1023,7 @@ function FindingSheet({
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} data-testid="finding-notes" />
           </div>
 
-          {editing && (
+          {editing ? (
             <div data-testid="finding-sheet-photos">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-sm font-medium">Photos</div>
@@ -1013,6 +1053,57 @@ function FindingSheet({
                 );
               })()}
             </div>
+          ) : (
+            !readOnly && (
+              <div data-testid="finding-sheet-photos">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-sm font-medium">Photos</div>
+                  {zoneRecordId && (
+                    <PhotoCaptureButton
+                      wetCheckId={wetCheckId}
+                      zoneRecordId={null}
+                      findingId={null}
+                      skipInvalidate
+                      testIdSuffix="pending"
+                      onUploaded={(photo) => setPendingPhotos(prev => [...prev, photo])}
+                    />
+                  )}
+                </div>
+                {pendingPhotos.length === 0 ? (
+                  <div className="text-xs text-gray-500">
+                    {zoneRecordId
+                      ? "No photos yet. Photos picked here attach automatically when you save."
+                      : "Pick a zone before adding photos."}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2" data-testid="pending-photos">
+                    {pendingPhotos.map(p => (
+                      <div
+                        key={p.id}
+                        className="relative inline-block w-20 h-20 rounded overflow-hidden border"
+                        data-testid={`pending-photo-${p.id}`}
+                      >
+                        <img
+                          src={`/api/photos/${encodeURIComponent(p.url)}`}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removePendingPhoto(p.id)}
+                          className="absolute top-0 right-0 bg-black/60 text-white p-0.5 rounded-bl"
+                          aria-label="Remove queued photo"
+                          data-testid={`remove-pending-photo-${p.id}`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
           )}
 
           <label className="flex items-center gap-2 text-sm" data-testid="finding-repaired-toggle">

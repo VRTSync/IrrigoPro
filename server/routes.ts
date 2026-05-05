@@ -11223,6 +11223,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
 
+  const photoLinkBody = z.object({
+    findingId: z.number().int().positive(),
+  }).strict();
+
+  app.patch("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    const parsed = photoLinkBody.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    try {
+      const updated = await storage.linkWetCheckPhotoToFinding(
+        parseInt(req.params.id),
+        parsed.data.findingId,
+        cid,
+      );
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      res.json(updated);
+    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+  });
+
   app.delete("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });

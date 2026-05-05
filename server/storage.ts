@@ -610,6 +610,11 @@ export interface IStorage {
     insert: Omit<InsertWetCheckPhoto, "wetCheckId">,
   ): Promise<WetCheckPhoto>;
   deleteWetCheckPhoto(id: number, companyId: number): Promise<boolean>;
+  linkWetCheckPhotoToFinding(
+    photoId: number,
+    findingId: number,
+    companyId: number,
+  ): Promise<WetCheckPhoto | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4909,6 +4914,26 @@ export class DatabaseStorage implements IStorage {
     await this.assertWetCheckEditableByTech(p.wetCheckId, companyId);
     const result = await db.delete(wetCheckPhotos).where(eq(wetCheckPhotos.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async linkWetCheckPhotoToFinding(
+    photoId: number,
+    findingId: number,
+    companyId: number,
+  ): Promise<WetCheckPhoto | undefined> {
+    const [p] = await db.select().from(wetCheckPhotos).where(eq(wetCheckPhotos.id, photoId));
+    if (!p) return undefined;
+    await this.assertWetCheckEditableByTech(p.wetCheckId, companyId);
+    const [f] = await db.select().from(wetCheckFindings).where(eq(wetCheckFindings.id, findingId));
+    if (!f || f.wetCheckId !== p.wetCheckId) {
+      throw new Error(`Finding ${findingId} does not belong to wet check ${p.wetCheckId}`);
+    }
+    const [updated] = await db
+      .update(wetCheckPhotos)
+      .set({ findingId, zoneRecordId: f.zoneRecordId })
+      .where(eq(wetCheckPhotos.id, photoId))
+      .returning();
+    return updated;
   }
 
   async approveWetCheck(
