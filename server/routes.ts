@@ -6211,7 +6211,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (estimate.internalStatus !== "pending_approval") {
         return res.status(400).json({ message: "Only estimates pending internal review can be internally approved" });
       }
-      const updated = await storage.updateEstimate(id, { internalStatus: "approved_internal" } as any);
+      const updated = await storage.updateEstimate(id, { internalStatus: "approved_internal" });
       res.json({ message: "Estimate internally approved", estimate: updated });
     } catch (error) {
       console.error('Internal approve error:', error);
