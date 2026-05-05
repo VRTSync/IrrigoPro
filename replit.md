@@ -47,6 +47,8 @@ IrrigoPro is a full-stack business management system for irrigation companies, s
 - Photo uploads for work orders and billing sheets with role-based editing.
 - Authoritative pricing and auditing for catalog items and labor rates.
 - Animated loading skeletons for enhanced user experience.
+- Offline sync capabilities with UI for progress, conflicts, and errors.
+- Real-time GPS tracking and "Use My Location" feature in LocationPicker.
 
 ## User preferences
 Preferred communication style: Simple, everyday language.
