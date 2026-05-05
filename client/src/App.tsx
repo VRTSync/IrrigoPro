@@ -58,6 +58,8 @@ import FieldTechMaps from "@/pages/field-tech-maps";
 import { NotificationPermissionBanner } from "@/components/notifications/notification-permission-banner";
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
+import { DesktopShell } from "@/components/layout/desktop-shell";
+import { billingManagerNav } from "@/components/layout/nav-config";
 
 
 function RedirectToCommandCenter() {
@@ -228,9 +230,8 @@ function Router() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
-            <div className="px-4 flex-1">
+          <DesktopShell navConfig={billingManagerNav}>
+            <div className="px-4">
               <Switch>
                 <Route path="/" component={BillingDashboard} />
                 <Route path="/billing" component={BillingDashboard} />
@@ -254,6 +255,7 @@ function Router() {
                 <Route path="/parts-pending-approval" component={PartsPendingApproval} />
                 <Route path="/quickbooks" component={QuickBooksPage} />
                 <Route path="/invoices" component={InvoicesPage} />
+                <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                 <Route path="/switch-user" component={SwitchUser} />
                 <Route path="/user-profile" component={UserProfile} />
                 <Route path="/license-agreement" component={LicenseAgreement} />
@@ -262,8 +264,7 @@ function Router() {
                 <Route component={NotFound} />
               </Switch>
             </div>
-            <PoweredByFooter />
-          </div>
+          </DesktopShell>
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>

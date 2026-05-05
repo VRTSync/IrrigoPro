@@ -76,6 +76,66 @@ export const reportsGroup: NavGroup = {
   ],
 };
 
+export const billingManagerNav: NavConfig = {
+  items: [
+    { type: "leaf", label: "Dashboard", path: "/", icon: Home },
+    {
+      type: "group",
+      label: "Billing",
+      icon: DollarSign,
+      defaultOpen: true,
+      items: [
+        { type: "leaf", label: "Billing Dashboard", path: "/billing/dashboard", icon: Home },
+        { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
+        { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
+        { type: "leaf", label: "Invoices", path: "/invoices", icon: Receipt },
+        reportsGroup,
+      ],
+    },
+    {
+      type: "group",
+      label: "Operations",
+      icon: Briefcase,
+      items: [
+        { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
+        {
+          type: "leaf",
+          label: "Wet Check Reviews",
+          path: "/wet-checks/pending-review",
+          icon: ShieldCheck,
+          badgeKey: "wetCheckReviews",
+        },
+      ],
+    },
+    { type: "leaf", label: "Customers", path: "/customers", icon: Users },
+    {
+      type: "group",
+      label: "Parts",
+      icon: Package,
+      items: [
+        { type: "leaf", label: "Parts Catalog", path: "/parts", icon: Package },
+        {
+          type: "leaf",
+          label: "Parts Pending Approval",
+          path: "/parts-pending-approval",
+          icon: ShieldCheck,
+          badgeKey: "partsPendingApproval",
+        },
+        { type: "leaf", label: "Parts Settings", path: "/parts-settings", icon: Settings },
+      ],
+    },
+    {
+      type: "group",
+      label: "Settings",
+      icon: Settings,
+      items: [
+        { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
+        { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
+      ],
+    },
+  ],
+};
+
 export const companyAdminNav: NavConfig = {
   items: [
     { type: "leaf", label: "Dashboard", path: "/", icon: Home },
