@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -56,6 +57,9 @@ export default function AdminWetChecksPage() {
   const [search, setSearch] = useState("");
   const [pendingDelete, setPendingDelete] = useState<AdminWetCheckRow | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  const [bulkConflictIds, setBulkConflictIds] = useState<Set<number>>(new Set());
 
   const queryKey = useMemo(
     () => ["/api/wet-checks/admin", statusFilter] as const,
@@ -84,6 +88,45 @@ export default function AdminWetChecksPage() {
     );
   }, [data, search]);
 
+  const visibleIds = useMemo(() => filtered.map(r => r.id), [filtered]);
+  const selectedVisibleCount = useMemo(
+    () => visibleIds.filter(id => selectedIds.has(id)).length,
+    [visibleIds, selectedIds],
+  );
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    setBulkConflictIds(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setBulkConflictIds(new Set());
+  };
+
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       return await apiRequest(`/api/wet-checks/${id}`, "DELETE");
@@ -110,6 +153,58 @@ export default function AdminWetChecksPage() {
       });
       setPendingDelete(null);
       setConflictMessage(null);
+    },
+  });
+
+  type BulkOutcome = {
+    id: number;
+    status: 'deleted' | 'conflict' | 'not_found' | 'error';
+    message?: string;
+    routedFindingIds?: number[];
+  };
+  type BulkResponse = {
+    results: BulkOutcome[];
+    summary: { requested: number; deleted: number; conflict: number; notFound: number; failed: number };
+  };
+
+  const bulkDeleteMutation = useMutation<BulkResponse, unknown, number[]>({
+    mutationFn: async (ids: number[]) => {
+      return await apiRequest("/api/wet-checks/bulk-delete", "DELETE", { ids });
+    },
+    onSuccess: (data) => {
+      const { summary, results } = data;
+      const conflictIds = new Set(results.filter(r => r.status === 'conflict').map(r => r.id));
+      const remaining = new Set<number>();
+      for (const r of results) {
+        if (r.status !== 'deleted' && r.status !== 'not_found') remaining.add(r.id);
+      }
+      setSelectedIds(remaining);
+      setBulkConflictIds(conflictIds);
+      setShowBulkConfirm(false);
+
+      const parts: string[] = [`${summary.deleted} deleted`];
+      if (summary.conflict > 0) parts.push(`${summary.conflict} blocked (already routed)`);
+      if (summary.notFound > 0) parts.push(`${summary.notFound} not found`);
+      if (summary.failed > 0) parts.push(`${summary.failed} failed`);
+
+      const hasProblem = summary.conflict + summary.failed > 0;
+      toast({
+        title: hasProblem ? "Bulk delete finished with issues" : "Wet checks deleted",
+        description: parts.join(" · "),
+        variant: hasProblem ? "destructive" : undefined,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/admin"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks/pending-review"] });
+    },
+    onError: (err) => {
+      toast({
+        title: "Bulk delete failed",
+        description: parseApiError(err, "Could not delete the selected wet checks."),
+        variant: "destructive",
+      });
+      setShowBulkConfirm(false);
     },
   });
 
@@ -150,6 +245,41 @@ export default function AdminWetChecksPage() {
         </CardContent>
       </Card>
 
+      {selectedIds.size > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3"
+          data-testid="bulk-selection-toolbar"
+        >
+          <span className="text-sm font-medium text-blue-700" data-testid="text-bulk-selected-count">
+            {selectedIds.size} selected
+          </span>
+          {bulkConflictIds.size > 0 && (
+            <span className="text-xs text-red-700" data-testid="text-bulk-conflict-count">
+              {bulkConflictIds.size} could not be deleted (findings already routed)
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={clearSelection}
+            className="text-blue-600 border-blue-300 hover:bg-blue-100 text-xs"
+            data-testid="button-bulk-clear"
+          >
+            Clear
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setShowBulkConfirm(true)}
+            className="bg-red-600 hover:bg-red-700 text-white ml-auto text-xs"
+            disabled={bulkDeleteMutation.isPending}
+            data-testid="button-bulk-delete"
+          >
+            <Trash2 className="w-3 h-3 mr-1" />
+            Delete {selectedIds.size} Selected
+          </Button>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-gray-500">
           <Loader2 className="animate-spin h-5 w-5 mr-2" /> Loading wet checks…
@@ -164,9 +294,30 @@ export default function AdminWetChecksPage() {
         </CardContent></Card>
       ) : (
         <div className="space-y-2">
+          <div className="flex items-center gap-2 px-2 py-1 text-xs text-gray-600">
+            <Checkbox
+              checked={allVisibleSelected ? true : (someVisibleSelected ? "indeterminate" : false)}
+              onCheckedChange={() => toggleSelectAllVisible()}
+              aria-label="Select all visible wet checks"
+              data-testid="checkbox-select-all"
+            />
+            <span>Select all {filtered.length} visible</span>
+          </div>
           {filtered.map(row => (
-            <Card key={row.id} data-testid={`card-wet-check-${row.id}`}>
+            <Card
+              key={row.id}
+              data-testid={`card-wet-check-${row.id}`}
+              className={bulkConflictIds.has(row.id) ? "border-red-300" : undefined}
+            >
               <CardContent className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex-shrink-0 self-start sm:self-center pt-1">
+                  <Checkbox
+                    checked={selectedIds.has(row.id)}
+                    onCheckedChange={() => toggleSelect(row.id)}
+                    aria-label={`Select wet check ${row.id}`}
+                    data-testid={`checkbox-select-${row.id}`}
+                  />
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium truncate">{row.customerName}</span>
@@ -253,6 +404,39 @@ export default function AdminWetChecksPage() {
               {deleteMutation.isPending ? (
                 <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Deleting…</>
               ) : "Delete wet check"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={showBulkConfirm}
+        onOpenChange={(open) => { if (!open) setShowBulkConfirm(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} wet check{selectedIds.size === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the selected wet checks, including their zone records,
+              findings, and photos. Wet checks whose findings have already been routed to a
+              billing sheet, estimate, or work order will be skipped and remain selected so
+              you can review them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-bulk-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+              onClick={(e) => {
+                e.preventDefault();
+                bulkDeleteMutation.mutate(Array.from(selectedIds));
+              }}
+              data-testid="button-confirm-bulk-delete"
+            >
+              {bulkDeleteMutation.isPending ? (
+                <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Deleting…</>
+              ) : `Delete ${selectedIds.size} wet check${selectedIds.size === 1 ? "" : "s"}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

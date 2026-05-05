@@ -11207,6 +11207,64 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
 
+  // Bulk hard delete — company_admin only. Each id is processed
+  // independently and the response reports per-id outcome so the UI can
+  // tell the admin which wet checks could not be deleted (typically
+  // because findings have already been routed downstream). Using DELETE
+  // with a JSON body matches the existing billing-sheets bulk endpoint.
+  app.delete("/api/wet-checks/bulk-delete", requireAuthentication, async (req, res) => {
+    const cid = requireCompanyId(req, res); if (!cid) return;
+    if (req.authenticatedUserRole !== "company_admin" && req.authenticatedUserRole !== "super_admin") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    if (!rawIds || rawIds.length === 0) {
+      return res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+    }
+    const validIds = Array.from(new Set(
+      rawIds
+        .map((x: any) => Number(x))
+        .filter((n: number) => Number.isInteger(n) && n > 0)
+    )) as number[];
+    if (validIds.length === 0) {
+      return res.status(400).json({ message: "No valid IDs provided" });
+    }
+    type Outcome = {
+      id: number;
+      status: 'deleted' | 'conflict' | 'not_found' | 'error';
+      message?: string;
+      routedFindingIds?: number[];
+    };
+    const results: Outcome[] = [];
+    for (const id of validIds) {
+      try {
+        const ok = await storage.deleteWetCheck(id, cid);
+        results.push({ id, status: ok ? 'deleted' : 'not_found' });
+      } catch (e: any) {
+        if (e instanceof WetCheckAlreadyRoutedError) {
+          results.push({
+            id,
+            status: 'conflict',
+            message: "One or more findings have already been routed to a billing sheet, estimate, or work order.",
+            routedFindingIds: e.routedFindingIds,
+          });
+        } else {
+          const msg = e?.message ?? 'Failed';
+          const status: Outcome['status'] = /not found for company/.test(msg) ? 'not_found' : 'error';
+          results.push({ id, status, message: msg });
+        }
+      }
+    }
+    const summary = {
+      requested: validIds.length,
+      deleted: results.filter(r => r.status === 'deleted').length,
+      conflict: results.filter(r => r.status === 'conflict').length,
+      notFound: results.filter(r => r.status === 'not_found').length,
+      failed: results.filter(r => r.status === 'error').length,
+    };
+    res.json({ results, summary });
+  });
+
   // Hard delete — company_admin only. 409 when any finding has been
   // routed downstream (billing sheet / estimate / work order).
   app.delete("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
