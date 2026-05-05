@@ -47,8 +47,24 @@ function makeEdits(f: WetCheckFinding, configs: IssueTypeConfig[]): FindingEdits
 }
 
 export function WetCheckWizard({ id }: { id: number }) {
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const { toast } = useToast();
+
+  // Edit mode — opened from the confirm screen as
+  // /manager/wet-checks/:id?edit=<findingId>. In this mode the wizard
+  // surfaces a single, already-decided finding so the manager can change
+  // their decision before they finalize the convert. After the new
+  // decision is saved we navigate back to the confirm screen.
+  // Re-derive on every location change so query-string updates without
+  // a remount still pick up the new finding id.
+  const editFindingId = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("edit");
+    if (!raw) return null;
+    const n = parseInt(raw);
+    return Number.isFinite(n) ? n : null;
+  }, [location]);
+  const editMode = editFindingId != null;
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({
     queryKey: ["/api/wet-checks", id],
@@ -92,12 +108,19 @@ export function WetCheckWizard({ id }: { id: number }) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [edits, setEdits] = useState<FindingEdits | null>(null);
 
-  // The active finding is whichever pending row matches our explicit pointer.
-  // If the pointer is stale (initial mount, refetch dropped the row, etc.) we
-  // fall back to the first pending finding so the wizard always has work to do.
+  // The active finding is whichever row matches our explicit pointer. In
+  // edit mode we lock onto the requested finding regardless of resolution
+  // so a manager can re-route an already-decided one. Otherwise we fall
+  // back to the first pending finding so the wizard always has work to do.
+  const editTarget = useMemo(
+    () => (editFindingId == null ? null : allFindings.find(p => p.f.id === editFindingId) ?? null),
+    [editFindingId, allFindings],
+  );
   const activeIdx = activeId == null ? -1 : pendingFindings.findIndex(p => p.f.id === activeId);
-  const active = activeIdx >= 0 ? pendingFindings[activeIdx] : (pendingFindings[0] ?? null);
-  const upNext = pendingFindings.filter(p => p.f.id !== active?.f.id);
+  const active: FindingItem | null = editMode
+    ? editTarget
+    : (activeIdx >= 0 ? pendingFindings[activeIdx] : (pendingFindings[0] ?? null));
+  const upNext = editMode ? [] : pendingFindings.filter(p => p.f.id !== active?.f.id);
 
   const photosByFinding = useMemo(() => {
     const m = new Map<number, WetCheckPhoto[]>();
@@ -146,22 +169,7 @@ export function WetCheckWizard({ id }: { id: number }) {
       apiRequest(`/api/wet-checks/findings/${vars.fid}/route`, "PATCH", { resolution: vars.resolution }),
   });
 
-  const convertMut = useMutation({
-    mutationFn: () => apiRequest(`/api/wet-checks/${id}/convert`, "POST", {}),
-    onSuccess: (result: { billingSheetId: number | null; estimateId: number | null; workOrderId: number | null }) => {
-      const bits: string[] = [];
-      if (result.billingSheetId) bits.push(`Billing #${result.billingSheetId}`);
-      if (result.estimateId) bits.push(`Estimate #${result.estimateId}`);
-      if (result.workOrderId) bits.push(`Work order #${result.workOrderId}`);
-      toast({ title: "Wet check converted", description: bits.join(" · ") || "No new records created" });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
-      navigate("/manager/wet-checks");
-    },
-    onError: (e: Error) => toast({ title: "Convert failed", description: e?.message, variant: "destructive" }),
-  });
-
-  const advancing = editMut.isPending || routeMut.isPending || convertMut.isPending;
+  const advancing = editMut.isPending || routeMut.isPending;
 
   const handleDecision = async (resolution: Exclude<Resolution, "pending">) => {
     if (!active || !edits) return;
@@ -178,10 +186,15 @@ export function WetCheckWizard({ id }: { id: number }) {
       }
       const remaining = pendingFindings.length - 1;
       await queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
-      if (remaining <= 0) {
-        // Last pending finding handled — hand off to the existing convert flow.
-        // 5D will replace this with the confirm/done screens.
-        convertMut.mutate();
+      if (editMode) {
+        // The manager opened the wizard from the confirm screen to revise
+        // a single decision. Send them straight back to confirm so they
+        // can review the rest of the summary in context.
+        navigate(`/manager/wet-checks/${id}/confirm`);
+      } else if (remaining <= 0) {
+        // Last pending finding handled — 5D hands off to the confirm screen
+        // which owns the actual convert call and the post-success done view.
+        navigate(`/manager/wet-checks/${id}/confirm`);
       }
     } catch (e: any) {
       toast({ title: "Failed to save", description: e?.message, variant: "destructive" });
@@ -224,6 +237,27 @@ export function WetCheckWizard({ id }: { id: number }) {
   const autoBilledTotal = autoBilled.reduce((s, { f }) => s + lineTotalFinding(f, customerLaborRate), 0);
   const autoBilledSheetId = autoBilled[0]?.f.billingSheetId ?? null;
 
+  // Edit mode with a stale/invalid ?edit=<id>: bounce back to confirm
+  // so the manager doesn't get stranded on a blank page.
+  if (editMode && !editTarget) {
+    return (
+      <div className="max-w-3xl mx-auto py-4 space-y-4">
+        <Card>
+          <CardContent className="py-8 text-center space-y-4">
+            <div className="text-lg font-semibold">That finding can't be edited</div>
+            <p className="text-sm text-gray-600">It may have been removed or already converted.</p>
+            <Button
+              onClick={() => navigate(`/manager/wet-checks/${id}/confirm`)}
+              data-testid="wizard-edit-back-to-confirm"
+            >
+              Back to confirm
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Resume / empty state — no pending findings remain.
   if (!active) {
     return (
@@ -242,12 +276,10 @@ export function WetCheckWizard({ id }: { id: number }) {
             <p className="text-sm text-gray-600">Nothing left to triage on this wet check.</p>
             {wc.status !== "converted" && (
               <Button
-                onClick={() => convertMut.mutate()}
-                disabled={convertMut.isPending}
+                onClick={() => navigate(`/manager/wet-checks/${id}/confirm`)}
                 data-testid="wizard-convert-now"
               >
-                {convertMut.isPending && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
-                Convert wet check
+                Review and confirm
               </Button>
             )}
           </CardContent>
@@ -261,21 +293,40 @@ export function WetCheckWizard({ id }: { id: number }) {
 
   return (
     <div className="max-w-3xl mx-auto py-4 space-y-4">
-      <BackLink />
+      {editMode ? (
+        <Link href={`/manager/wet-checks/${id}/confirm`}>
+          <Button variant="ghost" data-testid="wizard-back-to-confirm">
+            <ChevronLeft className="w-4 h-4 mr-1" /> Back to confirm
+          </Button>
+        </Link>
+      ) : (
+        <BackLink />
+      )}
 
       <div className="space-y-2" data-testid="wizard-header">
         <div className="text-xs text-gray-500">
           {wc.customerName} · <span className="text-gray-400">WC-{wc.id}</span>
         </div>
-        <h1 className="text-2xl font-bold">Decision {decisionIndex} of {totalDecisions || 1}</h1>
-        <div className="bg-gray-100 rounded-full overflow-hidden" style={{ height: 6, width: 90 }}>
-          <div
-            className="bg-blue-500 transition-all"
-            style={{ width: `${progressPct}%`, height: 6 }}
-            data-testid="wizard-progress-bar"
-          />
-        </div>
-        <div className="text-xs text-gray-500" data-testid="wizard-progress-label">{progressPct}% complete</div>
+        <h1 className="text-2xl font-bold">
+          {editMode ? "Edit decision" : `Decision ${decisionIndex} of ${totalDecisions || 1}`}
+        </h1>
+        {!editMode && (
+          <>
+            <div className="bg-gray-100 rounded-full overflow-hidden" style={{ height: 6, width: 90 }}>
+              <div
+                className="bg-blue-500 transition-all"
+                style={{ width: `${progressPct}%`, height: 6 }}
+                data-testid="wizard-progress-bar"
+              />
+            </div>
+            <div className="text-xs text-gray-500" data-testid="wizard-progress-label">{progressPct}% complete</div>
+          </>
+        )}
+        {editMode && (
+          <div className="text-xs text-gray-500" data-testid="wizard-edit-current">
+            Current decision: <span className="font-medium">{active.f.resolution}</span>
+          </div>
+        )}
       </div>
 
       <AutoBilledBanner
@@ -362,23 +413,36 @@ export function WetCheckWizard({ id }: { id: number }) {
       )}
 
       <div className="sticky bottom-0 bg-white border-t py-3 flex items-center justify-between gap-3">
-        <Button
-          variant="ghost"
-          onClick={handleSkip}
-          disabled={advancing}
-          data-testid="wizard-skip"
-        >
-          Skip for now
-        </Button>
-        <Button
-          variant="outline"
-          onClick={handleSaveNext}
-          disabled={advancing}
-          data-testid="wizard-save-next"
-        >
-          {advancing && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
-          Save &amp; next
-        </Button>
+        {editMode ? (
+          <Button
+            variant="ghost"
+            onClick={() => navigate(`/manager/wet-checks/${id}/confirm`)}
+            disabled={advancing}
+            data-testid="wizard-cancel-edit"
+          >
+            Cancel
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="ghost"
+              onClick={handleSkip}
+              disabled={advancing}
+              data-testid="wizard-skip"
+            >
+              Skip for now
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleSaveNext}
+              disabled={advancing}
+              data-testid="wizard-save-next"
+            >
+              {advancing && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+              Save &amp; next
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );
