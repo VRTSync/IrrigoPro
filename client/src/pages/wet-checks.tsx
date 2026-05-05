@@ -1039,7 +1039,9 @@ function ZoneScreen({
                     {f.notes && <div className="text-xs italic">{f.notes}</div>}
                     {f.resolution === "repaired_in_field" && (
                       <Badge variant="secondary" className="mt-1" data-testid={`finding-complete-badge-${f.id}`}>
-                        {autoBillEnabled ? "Complete · auto-bills on submit" : "Complete"}
+                        {autoBillEnabled
+                          ? "Wet check work completed in field · auto-bills on submit"
+                          : "Wet check work completed in field"}
                       </Badge>
                     )}
                   </div>
@@ -1408,11 +1410,11 @@ function FindingSheet({
               className="h-4 w-4 mt-0.5"
             />
             <span>
-              <span className="font-medium">Mark Complete</span>
+              <span className="font-medium">Mark complete — wet check work completed in field</span>
               <span className="block text-xs text-gray-500">
                 {autoBillEnabled
                   ? "Will auto-bill on submit. Leave unchecked to send to the manager for routing."
-                  : "Mark this finding as repaired in the field. Leave unchecked to send to the manager for routing."}
+                  : "Marks this finding as wet check work completed in the field. Leave unchecked to send to the manager for routing."}
               </span>
             </span>
           </label>

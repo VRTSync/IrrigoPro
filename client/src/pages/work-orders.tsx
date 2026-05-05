@@ -710,6 +710,15 @@ export default function WorkOrders() {
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap justify-end">
                                   {getStatusBadge(workOrder.status)}
+                                  {!workOrder.scheduledDate && (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-purple-50 text-purple-700 border-purple-200"
+                                      data-testid={`badge-unscheduled-${workOrder.id}`}
+                                    >
+                                      Unscheduled
+                                    </Badge>
+                                  )}
                                   {isBilled(workOrder) && workOrder.status !== 'billed' && getBilledBadge()}
                                   {canSeeMissingPhotos && isMissingPhotos(workOrder) && (
                                     <Badge
@@ -988,6 +997,15 @@ export default function WorkOrders() {
                       </div>
                       <div className="flex items-center gap-2 flex-wrap justify-end">
                         {getStatusBadge(workOrder.status)}
+                        {!workOrder.scheduledDate && (
+                          <Badge
+                            variant="outline"
+                            className="bg-purple-50 text-purple-700 border-purple-200"
+                            data-testid={`badge-unscheduled-${workOrder.id}`}
+                          >
+                            Unscheduled
+                          </Badge>
+                        )}
                         {isBilled(workOrder) && workOrder.status !== 'billed' && getBilledBadge()}
                         {canSeeMissingPhotos && isMissingPhotos(workOrder) && (
                           <Badge

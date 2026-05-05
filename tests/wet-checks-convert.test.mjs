@@ -273,6 +273,45 @@ describe("Wet check approve / route / convert", () => {
   });
 });
 
+describe("Slice 5A — Queue as work order without a scheduled date", () => {
+  let customerId;
+  let partId;
+  let wetCheckId;
+  let deferredFinding;
+
+  before(async () => {
+    customerId = await createCustomer("queue-no-date");
+    partId = await createPart();
+    wetCheckId = await createWetCheck(customerId);
+    const z1 = await addZone(wetCheckId, 1);
+    deferredFinding = await addFinding(z1, partId);
+
+    const submit = await api("POST", `/api/wet-checks/${wetCheckId}/submit`, {});
+    assert.equal(submit.status, 200, `submit: ${JSON.stringify(submit.body)}`);
+    const approve = await api("POST", `/api/wet-checks/${wetCheckId}/approve`, {});
+    assert.equal(approve.status, 200, `approve: ${JSON.stringify(approve.body)}`);
+
+    const route = await api("PATCH",
+      `/api/wet-checks/findings/${deferredFinding}/route`,
+      { resolution: "deferred_to_work_order" });
+    assert.equal(route.status, 200, `route: ${JSON.stringify(route.body)}`);
+  });
+
+  test("Convert with no scheduledDates produces a WO with scheduledDate=null", async () => {
+    // Posting an empty body (no scheduledDates map at all) is the manager
+    // queueing work without committing to a date — the resulting work order
+    // must persist as scheduledDate=null so the UI can pill it "Unscheduled".
+    const res = await api("POST", `/api/wet-checks/${wetCheckId}/convert`, {});
+    assert.equal(res.status, 200, `convert: ${JSON.stringify(res.body)}`);
+    assert.ok(res.body.workOrderId, "expected workOrderId");
+
+    const wo = await api("GET", `/api/work-orders/${res.body.workOrderId}`);
+    assert.equal(wo.status, 200);
+    assert.equal(wo.body.scheduledDate, null,
+      `expected unscheduled WO, got scheduledDate=${wo.body.scheduledDate}`);
+  });
+});
+
 describe("Wet check convert: sent_to_estimate without partId rolls back the whole conversion", () => {
   let customerId;
   let partId;

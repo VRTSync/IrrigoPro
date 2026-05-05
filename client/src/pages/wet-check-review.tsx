@@ -66,9 +66,9 @@ type Resolution =
 
 const RESOLUTION_LABEL: Record<Resolution, string> = {
   pending: "Pending decision",
-  repaired_in_field: "Repaired in field",
+  repaired_in_field: "Wet check work completed in field",
   sent_to_estimate: "Send to estimate",
-  deferred_to_work_order: "Defer to work order",
+  deferred_to_work_order: "Queue as work order",
   documented_only: "Documented only",
 };
 
@@ -349,16 +349,21 @@ function FindingRow({
       </div>
 
       {finding.resolution === "deferred_to_work_order" && !isConverted && (
-        <label className="text-xs flex items-center gap-2">
-          <Calendar className="w-3 h-3 text-gray-500" />
-          <span className="text-gray-500">Schedule date</span>
-          <Input
-            type="date"
-            value={scheduledDate ?? ""}
-            onChange={(e) => onSetScheduled(finding.id, e.currentTarget.value || null)}
-            data-testid={`finding-sched-${finding.id}`}
-          />
-        </label>
+        <div className="space-y-1">
+          <label className="text-xs flex items-center gap-2">
+            <Calendar className="w-3 h-3 text-gray-500" />
+            <span className="text-gray-500">Schedule date (optional)</span>
+            <Input
+              type="date"
+              value={scheduledDate ?? ""}
+              onChange={(e) => onSetScheduled(finding.id, e.currentTarget.value || null)}
+              data-testid={`finding-sched-${finding.id}`}
+            />
+          </label>
+          <div className="text-xs text-gray-500 pl-5">
+            Adds to the work queue, schedule any time
+          </div>
+        </div>
       )}
     </div>
   );
@@ -549,11 +554,11 @@ function WetCheckReviewDetail({ id }: { id: number }) {
         <CardHeader className="pb-2"><CardTitle className="text-base">Routing summary</CardTitle></CardHeader>
         <CardContent className="text-sm grid grid-cols-2 sm:grid-cols-3 gap-2">
           <div><span className="text-gray-500">Pending:</span> {counts.pending}</div>
-          <div><span className="text-gray-500">Repaired:</span> {counts.repaired_in_field}</div>
+          <div><span className="text-gray-500">Completed in field:</span> {counts.repaired_in_field}</div>
           <div><span className="text-gray-500">→ Estimate:</span> {counts.sent_to_estimate}</div>
           <div><span className="text-gray-500">→ Work order:</span> {counts.deferred_to_work_order}</div>
           <div><span className="text-gray-500">Documented:</span> {counts.documented_only}</div>
-          <div><span className="text-gray-500">Repaired billable:</span> ${billingTotal.toFixed(2)}</div>
+          <div><span className="text-gray-500">Completed-in-field billable:</span> ${billingTotal.toFixed(2)}</div>
         </CardContent>
       </Card>
 
