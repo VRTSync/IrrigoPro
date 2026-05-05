@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronLeft, Loader2, FileText, Wrench, FileCheck, ListChecks } from "lucide-react";
+import { ChevronLeft, Loader2, FileText, Wrench, FileCheck, ListChecks, X, Lightbulb } from "lucide-react";
 import type {
   Customer, IssueTypeConfig, Part, WetCheckFinding, WetCheckPhoto,
   WetCheckWithDetails, WetCheckZoneRecord,
@@ -19,6 +19,26 @@ type Resolution =
   | "pending" | "repaired_in_field" | "sent_to_estimate" | "deferred_to_work_order" | "documented_only";
 
 interface FindingItem { f: WetCheckFinding; zr: WetCheckZoneRecord; }
+
+const TUTORIAL_STORAGE_PREFIX = "wet-check-wizard-tutorial-dismissed-v1";
+
+// Scope the tutorial dismissal per signed-in user so two managers sharing a
+// device each see the tip on their own first open. Falls back to a shared
+// "anon" key if no user is in localStorage yet (matches the auth pattern
+// used elsewhere in the app — see client/src/pages/work-orders.tsx).
+function tutorialStorageKey(): string {
+  if (typeof window === "undefined") return `${TUTORIAL_STORAGE_PREFIX}:anon`;
+  try {
+    const raw = window.localStorage.getItem("user");
+    if (raw) {
+      const u = JSON.parse(raw);
+      if (u && (u.id != null || u.username)) {
+        return `${TUTORIAL_STORAGE_PREFIX}:${u.id ?? u.username}`;
+      }
+    }
+  } catch { /* fall through */ }
+  return `${TUTORIAL_STORAGE_PREFIX}:anon`;
+}
 
 function lineTotal(edits: FindingEdits, laborRate: number): number {
   const partPrice = parseFloat(edits.partPrice ?? "0") || 0;
@@ -149,6 +169,21 @@ export function WetCheckWizard({ id }: { id: number }) {
     }
   }, [active, activeId, edits, issueConfigs]);
 
+  // Move keyboard focus to the active finding's card whenever it changes,
+  // so screen-reader and keyboard users follow along as the wizard advances.
+  const findingCardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const node = findingCardRef.current;
+    if (!node) return;
+    // Don't yank focus away from a form input the manager is editing.
+    const ae = document.activeElement as HTMLElement | null;
+    const tag = ae?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (ae && node.contains(ae)) return;
+    node.focus({ preventScroll: false });
+  }, [active?.f.id]);
+
   // Bundle-building chip — track findings sent to estimate during this session.
   const [bundleIds, setBundleIds] = useState<Set<number>>(new Set());
   const [bundleTotal, setBundleTotal] = useState(0);
@@ -171,7 +206,7 @@ export function WetCheckWizard({ id }: { id: number }) {
 
   const advancing = editMut.isPending || routeMut.isPending;
 
-  const handleDecision = async (resolution: Exclude<Resolution, "pending">) => {
+  const handleDecision = useCallback(async (resolution: Exclude<Resolution, "pending">) => {
     if (!active || !edits) return;
     try {
       await editMut.mutateAsync({ fid: active.f.id, patch: edits });
@@ -199,9 +234,9 @@ export function WetCheckWizard({ id }: { id: number }) {
     } catch (e: any) {
       toast({ title: "Failed to save", description: e?.message, variant: "destructive" });
     }
-  };
+  }, [active, edits, customerLaborRate, editMut, routeMut, pendingFindings.length, id, editMode, navigate, toast]);
 
-  const handleSkip = async () => {
+  const handleSkip = useCallback(async () => {
     if (!active) return;
     // Resolution is already pending; just rotate to the next one locally.
     const idx = pendingFindings.findIndex(p => p.f.id === active.f.id);
@@ -212,7 +247,17 @@ export function WetCheckWizard({ id }: { id: number }) {
     } else {
       toast({ title: "No more pending findings", description: "This is the last one." });
     }
-  };
+  }, [active, pendingFindings, issueConfigs, toast]);
+
+  const handlePrev = useCallback(() => {
+    if (!active) return;
+    const idx = pendingFindings.findIndex(p => p.f.id === active.f.id);
+    const prev = idx > 0 ? pendingFindings[idx - 1] : null;
+    if (prev) {
+      setActiveId(prev.f.id);
+      setEdits(makeEdits(prev.f, issueConfigs));
+    }
+  }, [active, pendingFindings, issueConfigs]);
 
   const handleSaveNext = async () => {
     if (!active || !edits) return;
@@ -229,6 +274,82 @@ export function WetCheckWizard({ id }: { id: number }) {
       toast({ title: "Save failed", description: e?.message, variant: "destructive" });
     }
   };
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────
+  // 1/2/3 → decision actions, ←/→ → navigate findings, Esc → back to inbox.
+  // Suppressed while a text input is focused or a dialog (e.g. parts picker)
+  // is open so we never steal keystrokes from the manager's typing.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (target?.isContentEditable) return;
+      // Don't fire while the parts picker (or any other) modal is open.
+      if (typeof document !== "undefined" && document.querySelector('[role="dialog"][data-state="open"]')) return;
+      if (advancing) return;
+
+      switch (e.key) {
+        case "1":
+          if (!active) return;
+          e.preventDefault();
+          handleDecision("sent_to_estimate");
+          break;
+        case "2":
+          if (!active) return;
+          e.preventDefault();
+          handleDecision("deferred_to_work_order");
+          break;
+        case "3":
+          if (!active) return;
+          e.preventDefault();
+          handleDecision("documented_only");
+          break;
+        case "ArrowRight":
+          if (editMode || !active) return;
+          // Spec: "→ advances to the next finding (after a decision)".
+          // Decisions (1/2/3) auto-advance, so the typical "after a
+          // decision" path is already covered. ArrowRight here is the
+          // manual forward step through the pending queue — useful when
+          // the manager wants to move on without committing yet, or to
+          // step through after a decision finishes saving.
+          e.preventDefault();
+          handleSkip();
+          break;
+        case "ArrowLeft":
+          if (editMode || !active) return;
+          e.preventDefault();
+          handlePrev();
+          break;
+        case "Escape":
+          e.preventDefault();
+          if (editMode) navigate(`/manager/wet-checks/${id}/confirm`);
+          else navigate("/manager/wet-checks");
+          break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, advancing, editMode, handleDecision, handleSkip, handlePrev, navigate, id]);
+
+  // ── First-open onboarding tooltip ─────────────────────────────────────
+  // Persisted in localStorage so the dismissal sticks per browser/user.
+  // (A `tutorial_progress` JSON column is the preferred backing store but
+  // isn't yet on the users table; localStorage is the documented fallback.)
+  const [showTutorial, setShowTutorial] = useState(false);
+  useEffect(() => {
+    if (editMode) return;
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem(tutorialStorageKey()) === "1") return;
+    } catch { return; }
+    setShowTutorial(true);
+  }, [editMode]);
+  const dismissTutorial = useCallback(() => {
+    setShowTutorial(false);
+    try { window.localStorage.setItem(tutorialStorageKey(), "1"); } catch { /* ignore */ }
+  }, []);
 
   if (isLoading || !wc) {
     return <div className="flex justify-center py-10"><Loader2 className="animate-spin" /></div>;
@@ -271,7 +392,7 @@ export function WetCheckWizard({ id }: { id: number }) {
         />
         <Card>
           <CardContent className="py-8 text-center space-y-4">
-            <ListChecks className="w-10 h-10 mx-auto text-green-600" />
+            <ListChecks className="w-10 h-10 mx-auto text-green-600" aria-hidden="true" />
             <div className="text-lg font-semibold">All findings have a decision</div>
             <p className="text-sm text-gray-600">Nothing left to triage on this wet check.</p>
             {wc.status !== "converted" && (
@@ -292,38 +413,52 @@ export function WetCheckWizard({ id }: { id: number }) {
   const issueConfig = issueConfigs.find(c => c.issueType === active.f.issueType) ?? null;
 
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4">
+    <div className="max-w-3xl mx-auto py-4 space-y-4 px-4 sm:px-0">
       {editMode ? (
         <Link href={`/manager/wet-checks/${id}/confirm`}>
           <Button variant="ghost" data-testid="wizard-back-to-confirm">
-            <ChevronLeft className="w-4 h-4 mr-1" /> Back to confirm
+            <ChevronLeft className="w-4 h-4 mr-1" aria-hidden="true" /> Back to confirm
           </Button>
         </Link>
       ) : (
         <BackLink />
       )}
 
-      <div className="space-y-2" data-testid="wizard-header">
-        <div className="text-xs text-gray-500">
-          {wc.customerName} · <span className="text-gray-400">WC-{wc.id}</span>
+      {/* Sticky on mobile so the progress + heading stay in view as the
+          manager scrolls a tall finding card. Inline on desktop. */}
+      <div
+        className="space-y-2 sticky top-0 z-20 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 -mx-4 px-4 py-2 sm:static sm:mx-0 sm:px-0 sm:py-0 sm:bg-transparent"
+        data-testid="wizard-header"
+      >
+        <div className="text-xs text-gray-700">
+          {wc.customerName} · <span className="text-gray-500">WC-{wc.id}</span>
         </div>
         <h1 className="text-2xl font-bold">
           {editMode ? "Edit decision" : `Decision ${decisionIndex} of ${totalDecisions || 1}`}
         </h1>
         {!editMode && (
           <>
-            <div className="bg-gray-100 rounded-full overflow-hidden" style={{ height: 6, width: 90 }}>
+            <div
+              className="bg-gray-200 rounded-full overflow-hidden"
+              style={{ height: 6, width: 90 }}
+              role="progressbar"
+              aria-label="Wet check decision progress"
+              aria-valuenow={progressPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuetext={`${completedDecisions} of ${totalDecisions || 1} decisions complete`}
+            >
               <div
-                className="bg-blue-500 transition-all"
+                className="bg-blue-600 transition-all"
                 style={{ width: `${progressPct}%`, height: 6 }}
                 data-testid="wizard-progress-bar"
               />
             </div>
-            <div className="text-xs text-gray-500" data-testid="wizard-progress-label">{progressPct}% complete</div>
+            <div className="text-xs text-gray-700" data-testid="wizard-progress-label">{progressPct}% complete</div>
           </>
         )}
         {editMode && (
-          <div className="text-xs text-gray-500" data-testid="wizard-edit-current">
+          <div className="text-xs text-gray-700" data-testid="wizard-edit-current">
             Current decision: <span className="font-medium">{active.f.resolution}</span>
           </div>
         )}
@@ -339,7 +474,7 @@ export function WetCheckWizard({ id }: { id: number }) {
       {bundleIds.size > 0 && (
         <Card className="border-blue-200 bg-blue-50/60" data-testid="wizard-bundle-chip">
           <CardContent className="py-2 flex items-center gap-2 text-sm text-blue-900">
-            <FileText className="w-4 h-4 text-blue-700" />
+            <FileText className="w-4 h-4 text-blue-700" aria-hidden="true" />
             <span>
               Building estimate: {bundleIds.size} finding{bundleIds.size === 1 ? "" : "s"} · ${bundleTotal.toFixed(2)}
             </span>
@@ -348,58 +483,110 @@ export function WetCheckWizard({ id }: { id: number }) {
       )}
 
       {edits && (
-        <FindingCard
-          finding={active.f}
-          zone={active.zr}
-          photos={photosByFinding.get(active.f.id) ?? []}
-          parts={parts}
-          issueConfig={issueConfig}
-          customerLaborRate={customerLaborRate}
-          edits={edits}
-          onChange={setEdits}
-        />
+        <div
+          ref={findingCardRef}
+          tabIndex={-1}
+          aria-label={`Active finding ${decisionIndex} of ${totalDecisions || 1}`}
+          className="outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg"
+        >
+          <FindingCard
+            finding={active.f}
+            zone={active.zr}
+            photos={photosByFinding.get(active.f.id) ?? []}
+            parts={parts}
+            issueConfig={issueConfig}
+            customerLaborRate={customerLaborRate}
+            edits={edits}
+            onChange={setEdits}
+          />
+        </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="wizard-decision-row">
-        <DecisionCard
-          testId="wizard-decision-estimate"
-          accent="blue"
-          icon={FileText}
-          title="Send to estimate"
-          helper="Customer must approve before work starts"
-          disabled={advancing}
-          loading={advancing}
-          onClick={() => handleDecision("sent_to_estimate")}
-        />
-        <DecisionCard
-          testId="wizard-decision-work-order"
-          accent="purple"
-          icon={Wrench}
-          title="Queue as work order"
-          helper="Adds to the work queue, schedule any time"
-          disabled={advancing}
-          onClick={() => handleDecision("deferred_to_work_order")}
-        />
-        <DecisionCard
-          testId="wizard-decision-document"
-          accent="gray"
-          icon={FileCheck}
-          title="Document only"
-          helper="Logged for the record, no work scheduled"
-          disabled={advancing}
-          onClick={() => handleDecision("documented_only")}
-        />
+      <div className="relative">
+        {showTutorial && (
+          <div
+            role="dialog"
+            aria-label="Wizard tip"
+            className="absolute -top-2 left-0 right-0 -translate-y-full z-30"
+            data-testid="wizard-tutorial-tooltip"
+          >
+            <div className="mx-auto max-w-md bg-gray-900 text-white text-sm rounded-lg shadow-lg px-3 py-2 flex items-start gap-2">
+              <Lightbulb className="w-4 h-4 mt-0.5 text-yellow-300 shrink-0" aria-hidden="true" />
+              <div className="flex-1">
+                Tap a decision card to route this finding.
+                <div className="text-xs text-gray-300 mt-0.5 hidden sm:block">
+                  Tip: press 1, 2, or 3 on your keyboard.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={dismissTutorial}
+                aria-label="Dismiss tip"
+                className="text-gray-300 hover:text-white shrink-0 min-h-[44px] min-w-[44px] -mr-2 -my-2 flex items-center justify-center"
+                data-testid="wizard-tutorial-dismiss"
+              >
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
+              <span
+                aria-hidden="true"
+                className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 bg-gray-900 rotate-45"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="wizard-decision-row">
+          <DecisionCard
+            testId="wizard-decision-estimate"
+            accent="blue"
+            icon={FileText}
+            title="Send to estimate"
+            helper="Customer must approve before work starts"
+            shortcutLabel="1"
+            disabled={advancing}
+            loading={advancing}
+            onClick={() => handleDecision("sent_to_estimate")}
+          />
+          <DecisionCard
+            testId="wizard-decision-work-order"
+            accent="purple"
+            icon={Wrench}
+            title="Queue as work order"
+            helper="Adds to the work queue, schedule any time"
+            shortcutLabel="2"
+            disabled={advancing}
+            onClick={() => handleDecision("deferred_to_work_order")}
+          />
+          <DecisionCard
+            testId="wizard-decision-document"
+            accent="gray"
+            icon={FileCheck}
+            title="Document only"
+            helper="Logged for the record, no work scheduled"
+            shortcutLabel="3"
+            disabled={advancing}
+            onClick={() => handleDecision("documented_only")}
+          />
+        </div>
       </div>
+
+      {!editMode && (
+        <div className="hidden sm:block text-[11px] text-gray-500" data-testid="wizard-shortcut-hint">
+          Shortcuts: <kbd className="px-1 border rounded">1</kbd>/<kbd className="px-1 border rounded">2</kbd>/<kbd className="px-1 border rounded">3</kbd> route ·
+          {" "}<kbd className="px-1 border rounded">←</kbd>/<kbd className="px-1 border rounded">→</kbd> navigate ·
+          {" "}<kbd className="px-1 border rounded">Esc</kbd> back to inbox
+        </div>
+      )}
 
       {upNext.length > 0 && (
         <div className="space-y-2" data-testid="wizard-up-next">
-          <div className="text-xs uppercase tracking-wide text-gray-500">Up next</div>
+          <div className="text-xs uppercase tracking-wide text-gray-600">Up next</div>
           {upNext.map(({ f, zr }) => {
             const cfg = issueConfigs.find(c => c.issueType === f.issueType) ?? null;
             return (
               <div
                 key={f.id}
-                className="rounded-md border bg-gray-50 px-3 py-2 text-xs text-gray-600 flex items-center justify-between"
+                className="rounded-md border bg-gray-50 px-3 py-2 text-xs text-gray-700 flex items-center justify-between"
                 data-testid={`wizard-up-next-${f.id}`}
               >
                 <span className="truncate">
@@ -419,6 +606,7 @@ export function WetCheckWizard({ id }: { id: number }) {
             onClick={() => navigate(`/manager/wet-checks/${id}/confirm`)}
             disabled={advancing}
             data-testid="wizard-cancel-edit"
+            className="min-h-[44px]"
           >
             Cancel
           </Button>
@@ -429,6 +617,7 @@ export function WetCheckWizard({ id }: { id: number }) {
               onClick={handleSkip}
               disabled={advancing}
               data-testid="wizard-skip"
+              className="min-h-[44px]"
             >
               Skip for now
             </Button>
@@ -437,8 +626,9 @@ export function WetCheckWizard({ id }: { id: number }) {
               onClick={handleSaveNext}
               disabled={advancing}
               data-testid="wizard-save-next"
+              className="min-h-[44px]"
             >
-              {advancing && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+              {advancing && <Loader2 className="w-4 h-4 mr-1 animate-spin" aria-hidden="true" />}
               Save &amp; next
             </Button>
           </>
@@ -451,8 +641,8 @@ export function WetCheckWizard({ id }: { id: number }) {
 function BackLink() {
   return (
     <Link href="/manager/wet-checks">
-      <Button variant="ghost" data-testid="wizard-back-to-inbox">
-        <ChevronLeft className="w-4 h-4 mr-1" /> Back to inbox
+      <Button variant="ghost" data-testid="wizard-back-to-inbox" className="min-h-[44px]">
+        <ChevronLeft className="w-4 h-4 mr-1" aria-hidden="true" /> Back to inbox
       </Button>
     </Link>
   );
