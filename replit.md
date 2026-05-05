@@ -26,20 +26,21 @@ A full-stack business management system for irrigation companies, streamlining o
 - `client/src/styles/tailwind.css`: Main Tailwind CSS
 
 ## Architecture decisions
-- **Role-based Pricing Visibility**: Field technicians never see financial data, enforced at the server level via `applyPricingVisibility()` function.
+- **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side via `applyPricingVisibility()`.
 - **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
-- **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout for efficiency.
+- **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout.
 - **Independent Parts Management**: Parts catalog operates independently from QuickBooks for robust inventory control.
 - **KML for Site Maps**: KML import is used for interactive irrigation maps.
-- **IrrigoPro Display Name (`irrigoName`)**: A separate customer field for internal recognition, defaulting to the official customer name, displayed prominently.
+- **IrrigoPro Display Name (`irrigoName`)**: A separate customer field for internal recognition, defaulting to the official customer name.
+- **Monthly Invoice Consolidation**: All customer work consolidated into single QuickBooks invoices with tax-free totals.
 
 ## Product
-- Manages estimates, customer approval, work orders, invoicing, and billing sheets, with monthly invoice consolidation to QuickBooks.
+- Manages estimates, customer approval, work orders, invoicing, and billing sheets.
 - Granular role-based access control for pricing, site maps, QuickBooks, customer management, and work orders/billing sheets.
 - Interactive site maps with KML import, controller management, and live GPS tracking.
 - Token-based customer email approval for estimates and PWA push notifications.
 - Secure authentication with MFA and phone number-based login.
-- External Work Order API for CRM integration and photo uploads for work orders/billing sheets.
+- External Work Order API for CRM integration and photo uploads.
 - Authoritative pricing and auditing for catalog items and labor rates.
 - Animated loading skeletons for enhanced user experience.
 - Location Picker with live GPS tracking.
