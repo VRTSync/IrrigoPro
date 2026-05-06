@@ -230,6 +230,17 @@ export const billingSheets = pgTable("billing_sheets", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Per-prefix sequence counters for billing sheet numbers (e.g. "BS-2026-").
+// The table is bootstrapped at runtime via raw SQL in
+// `server/storage.ts` (`getNextBillingNumber`) using
+// `CREATE TABLE IF NOT EXISTS`. It is declared here so Drizzle's
+// migration generator does not propose dropping it as an orphan.
+// Do not refactor the runtime bootstrap without coordinating a migration.
+export const billingNumberCounters = pgTable("billing_number_counters", {
+  prefix: text("prefix").primaryKey(),
+  lastSeq: integer("last_seq").notNull().default(0),
+});
+
 // AI generation log - audit trail for all GPT description generation requests
 export const aiGenerationLogs = pgTable("ai_generation_logs", {
   id: serial("id").primaryKey(),
@@ -864,6 +875,7 @@ export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type InvoicePdf = typeof invoicePdfs.$inferSelect;
 export type BillingSheet = typeof billingSheets.$inferSelect;
+export type BillingNumberCounter = typeof billingNumberCounters.$inferSelect;
 export type BillingSheetItem = typeof billingSheetItems.$inferSelect;
 export type ManualPartReview = typeof manualPartReviews.$inferSelect;
 export type AiGenerationLog = typeof aiGenerationLogs.$inferSelect;
