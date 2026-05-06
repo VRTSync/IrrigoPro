@@ -9,12 +9,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { LIFECYCLE_ORDER, type LifecycleStatus } from "@shared/lifecycle";
+import { type LifecycleStatus } from "@shared/lifecycle";
 import type { Estimate } from "@shared/schema";
 import { EstimateListRow } from "./estimate-list-row";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
 import { useEstimateResend } from "@/hooks/use-estimate-resend";
+import {
+  lifecycleOf,
+  nextSort,
+  sortEstimates,
+  type SortDir,
+  type SortField,
+} from "./estimate-list.helpers";
 
 export interface EstimateFilterState {
   customerIds: number[];
@@ -28,15 +35,8 @@ interface Props {
   onEdit: (id: number) => void;
 }
 
-type SortField = "customer" | "amount" | "status" | "date";
-type SortDir = "asc" | "desc";
-
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-
-function lifecycleOf(e: Estimate): LifecycleStatus {
-  return (e.lifecycleStatus ?? "pending_review") as LifecycleStatus;
-}
 
 function ageLabel(date: string | Date | null | undefined): string {
   if (!date) return "";
@@ -79,40 +79,15 @@ export function EstimateList({ estimates, filters, onOpen, onEdit }: Props) {
     });
   }, [estimates, filters]);
 
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        case "customer":
-          cmp = a.customerName.localeCompare(b.customerName);
-          break;
-        case "amount":
-          cmp = parseFloat(a.totalAmount) - parseFloat(b.totalAmount);
-          break;
-        case "status":
-          cmp = LIFECYCLE_ORDER[lifecycleOf(a)] - LIFECYCLE_ORDER[lifecycleOf(b)];
-          break;
-        case "date":
-        default: {
-          const da = new Date(a.estimateDate ?? a.createdAt).getTime();
-          const db = new Date(b.estimateDate ?? b.createdAt).getTime();
-          cmp = da - db;
-          break;
-        }
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [filtered, sortField, sortDir]);
+  const sorted = useMemo(
+    () => sortEstimates(filtered, sortField, sortDir),
+    [filtered, sortField, sortDir],
+  );
 
   const onHeaderClick = (field: SortField) => {
-    if (field === sortField) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir(field === "date" ? "desc" : "asc");
-    }
+    const next = nextSort({ field: sortField, dir: sortDir }, field);
+    setSortField(next.field);
+    setSortDir(next.dir);
   };
 
   const Chevron = ({ field }: { field: SortField }) => {

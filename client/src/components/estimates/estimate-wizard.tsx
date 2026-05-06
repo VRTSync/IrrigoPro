@@ -27,6 +27,7 @@ import {
   type WizardLineItem,
 } from "./wizard/estimate-wizard-line-items-step";
 import { EstimateWizardReviewStep } from "./wizard/estimate-wizard-review-step";
+import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 
 interface EstimateApiPayloadEstimate {
   customerId: number;
@@ -68,7 +69,6 @@ interface EstimateApiPayload {
   items: EstimateApiPayloadItem[];
 }
 
-type SubmitMode = "draft" | "submit";
 
 interface EstimateWizardProps {
   open: boolean;
@@ -449,28 +449,13 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     Error,
     { payload: EstimateApiPayload; mode: SubmitMode }
   >({
-    mutationFn: async ({ payload, mode }) => {
-      let savedId: number | null = estimateId ?? null;
-      if (isEdit) {
-        await apiRequest(`/api/estimates/${estimateId}`, "PUT", payload);
-      } else {
-        const created = (await apiRequest("/api/estimates", "POST", payload)) as { id?: number };
-        savedId = created?.id ?? null;
-      }
-      // Edit-mode draft → "Submit for Approval" requires the lifecycle
-      // transition call after the PUT succeeds. Surface a partial-failure
-      // state (saved, but not submitted) so the toast can be recoverable.
-      if (isEdit && isDraftEdit && mode === "submit" && savedId != null) {
-        try {
-          await apiRequest(`/api/estimates/${savedId}/transition`, "POST", {
-            action: "submit_for_review",
-          });
-        } catch (err) {
-          return { mode, id: savedId, transitionFailed: true };
-        }
-      }
-      return { mode, id: savedId };
-    },
+    mutationFn: ({ payload, mode }) =>
+      submitEstimate(
+        payload,
+        mode,
+        { isEdit, isDraftEdit, estimateId: estimateId ?? null },
+        apiRequest as unknown as Parameters<typeof submitEstimate>[3],
+      ),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
