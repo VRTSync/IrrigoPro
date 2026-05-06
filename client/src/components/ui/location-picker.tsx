@@ -129,27 +129,30 @@ export function LocationPicker({
       setIsLoading(true);
       setGeocodeFailed(false);
 
-      // Centering preference: customer address first, then any saved pin,
-      // then a regional fallback (with a "couldn't locate" notice).
+      // Centering preference: a previously saved pin wins (it's the most
+      // precise location we have — e.g. when editing an existing estimate),
+      // then customer address, then a regional fallback.
       let initialCenter: [number, number] = FALLBACK_CENTER;
       let initialZoom = FALLBACK_ZOOM;
       let usedAddress = false;
 
-      if (hasAddress) {
+      if (selectedLocation) {
+        initialCenter = [selectedLocation.lat, selectedLocation.lng];
+        initialZoom = 20;
+        // Mark the address as "already handled" so the address-change effect
+        // below doesn't fly the map away from the pin on first render.
+        if (hasAddress) {
+          usedAddress = true;
+        }
+      } else if (hasAddress) {
         const coords = await geocodeAddress(trimmedAddress);
         if (coords) {
           initialCenter = [coords.lat, coords.lng];
           initialZoom = 18;
           usedAddress = true;
-        } else if (selectedLocation) {
-          initialCenter = [selectedLocation.lat, selectedLocation.lng];
-          initialZoom = 20;
         } else {
           setGeocodeFailed(true);
         }
-      } else if (selectedLocation) {
-        initialCenter = [selectedLocation.lat, selectedLocation.lng];
-        initialZoom = 20;
       }
 
       const map = L.map(mapRef.current!, {
