@@ -91,6 +91,65 @@ function urlToUploadedFile(url: string): UploadedFile {
   return { url, fileName, originalName: fileName };
 }
 
+const DRAFT_STORAGE_VERSION = 1;
+const DRAFT_KEY_PREFIX = "irrigopro:estimate-wizard-draft:v1:";
+
+function draftKey(estimateId?: number | null): string {
+  return `${DRAFT_KEY_PREFIX}${estimateId ?? "new"}`;
+}
+
+interface PersistedDraft {
+  version: number;
+  savedAt: number;
+  step: Step;
+  customerStep: CustomerStepValue;
+  items: WizardLineItem[];
+  laborRate: number;
+  photos: UploadedFile[];
+  attachments: UploadedFile[];
+}
+
+function loadDraft(estimateId?: number | null): PersistedDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(draftKey(estimateId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedDraft;
+    if (!parsed || parsed.version !== DRAFT_STORAGE_VERSION) return null;
+    // Re-assign rowIds defensively in case of collisions on hydration.
+    parsed.items = (parsed.items ?? []).map((it) => ({
+      ...it,
+      rowId: it.rowId || makeRowId(),
+    }));
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(estimateId: number | null | undefined, draft: Omit<PersistedDraft, "version" | "savedAt">): void {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: PersistedDraft = {
+      version: DRAFT_STORAGE_VERSION,
+      savedAt: Date.now(),
+      ...draft,
+    };
+    window.localStorage.setItem(draftKey(estimateId), JSON.stringify(payload));
+  } catch {
+    // Ignore quota / serialization errors — draft autosave is best-effort.
+  }
+}
+
+function clearDraft(estimateId?: number | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(draftKey(estimateId));
+  } catch {
+    // ignore
+  }
+}
+
 interface DraftSnapshot {
   customerId: number | null;
   customerEmail: string;
@@ -164,14 +223,20 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<PersistedDraft | null>(null);
   const initialSnapshotRef = useRef<DraftSnapshot | null>(null);
   const hydratedRef = useRef(false);
+  const restorePromptedRef = useRef(false);
+  const draftReadyRef = useRef(false);
 
   // Reset state whenever the wizard opens.
   useEffect(() => {
     if (open) {
       setStep(isEdit ? 2 : 1);
       hydratedRef.current = false;
+      restorePromptedRef.current = false;
+      draftReadyRef.current = false;
       if (!isEdit) {
         const blank: CustomerStepValue = {
           customer: null,
@@ -193,6 +258,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         setAttachments([]);
         initialSnapshotRef.current = snapshot(blank, [], 45, [], []);
       }
+    } else {
+      // When the dialog fully closes, also dismiss any open restore prompt
+      // so it doesn't reappear stale on next open.
+      setRestoreOpen(false);
+      setPendingDraft(null);
     }
   }, [open, isEdit]);
 
@@ -296,6 +366,80 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     return JSON.stringify(baseline) !== JSON.stringify(current);
   }, [customerStep, items, laborRate, photos, attachments]);
 
+  // Offer to restore a saved draft once the wizard is ready (immediately for
+  // new estimates; after the existing estimate has hydrated for edits).
+  useEffect(() => {
+    if (!open) return;
+    if (restorePromptedRef.current) return;
+    const ready = isEdit ? hydratedRef.current : true;
+    if (!ready) return;
+    restorePromptedRef.current = true;
+    const draft = loadDraft(estimateId ?? null);
+    if (!draft) {
+      // Nothing to restore — autosave can begin immediately.
+      draftReadyRef.current = true;
+      return;
+    }
+    // Only prompt if the draft actually differs from the current baseline.
+    const baseline = initialSnapshotRef.current;
+    const draftSnap = snapshot(
+      draft.customerStep,
+      draft.items,
+      draft.laborRate,
+      draft.photos,
+      draft.attachments,
+    );
+    if (baseline && JSON.stringify(baseline) === JSON.stringify(draftSnap)) {
+      clearDraft(estimateId ?? null);
+      draftReadyRef.current = true;
+      return;
+    }
+    setPendingDraft(draft);
+    setRestoreOpen(true);
+  }, [open, isEdit, estimateId, existing]);
+
+  // Debounced autosave of the in-progress wizard state to localStorage.
+  useEffect(() => {
+    if (!open) return;
+    if (!draftReadyRef.current) return;
+    if (!isDirty) {
+      // No pending changes — make sure no stale draft lingers.
+      clearDraft(estimateId ?? null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      saveDraft(estimateId ?? null, {
+        step,
+        customerStep,
+        items,
+        laborRate,
+        photos,
+        attachments,
+      });
+    }, 600);
+    return () => window.clearTimeout(handle);
+  }, [open, isDirty, step, customerStep, items, laborRate, photos, attachments, estimateId]);
+
+  const applyDraft = (draft: PersistedDraft) => {
+    setCustomerStep(draft.customerStep);
+    setItems(draft.items);
+    setLaborRate(draft.laborRate);
+    setPhotos(draft.photos);
+    setAttachments(draft.attachments);
+    setStep(draft.step);
+    setRestoreOpen(false);
+    setPendingDraft(null);
+    draftReadyRef.current = true;
+    toast({ title: "Draft restored" });
+  };
+
+  const dismissDraft = () => {
+    clearDraft(estimateId ?? null);
+    setRestoreOpen(false);
+    setPendingDraft(null);
+    draftReadyRef.current = true;
+  };
+
   const saveMutation = useMutation<unknown, Error, EstimateApiPayload>({
     mutationFn: async (payload) => {
       if (isEdit) return await apiRequest(`/api/estimates/${estimateId}`, "PUT", payload);
@@ -307,6 +451,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       if (isEdit && estimateId) {
         queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       }
+      clearDraft(estimateId ?? null);
       toast({ title: "Estimate sent to approval queue" });
       onOpenChange(false);
     },
@@ -606,12 +751,45 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
             <AlertDialogCancel>{isEdit ? "Keep editing" : "Keep working"}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
+                clearDraft(estimateId ?? null);
                 setDiscardOpen(false);
                 onOpenChange(false);
               }}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               {isEdit ? "Discard edits" : "Discard estimate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={restoreOpen}
+        onOpenChange={(o) => {
+          // Treat outside dismiss as "start fresh" so we don't reprompt.
+          if (!o) dismissDraft();
+        }}
+      >
+        <AlertDialogContent data-testid="estimate-wizard-restore-draft">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore your unsaved draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDraft
+                ? `We saved your in-progress ${isEdit ? "edits" : "estimate"} from ${new Date(
+                    pendingDraft.savedAt,
+                  ).toLocaleString()}. Restore where you left off, or start fresh.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={dismissDraft}>Start fresh</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDraft) applyDraft(pendingDraft);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Restore draft
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
