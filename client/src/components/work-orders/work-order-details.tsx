@@ -44,12 +44,14 @@ import {
   DollarSign,
   History,
   X,
+  Navigation,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@shared/schema";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
+import { buildMapsUrl } from "@/lib/maps-url";
 
 interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
@@ -564,7 +566,38 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Project Address:</span>
-                    <p className="text-gray-900">{workOrder.projectAddress || 'Not provided'}</p>
+                    {(() => {
+                      const displayAddress =
+                        workOrder.workLocationAddress || workOrder.projectAddress;
+                      const mapsUrl = buildMapsUrl({
+                        lat: workOrder.workLocationLat,
+                        lng: workOrder.workLocationLng,
+                        address: displayAddress,
+                        label:
+                          displayAddress || workOrder.customerName,
+                      });
+                      const hasLocation =
+                        workOrder.workLocationLat != null || !!displayAddress;
+                      return (
+                        <div className="mt-1 flex flex-wrap items-start gap-2">
+                          <p className="text-gray-900 flex-1 min-w-0">
+                            {displayAddress || 'Not provided'}
+                          </p>
+                          {hasLocation && mapsUrl && (
+                            <a
+                              href={mapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 underline"
+                              data-testid="link-get-directions"
+                            >
+                              <Navigation className="w-3.5 h-3.5" />
+                              Get directions
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </CardContent>
               </Card>

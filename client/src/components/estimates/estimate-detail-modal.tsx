@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink } from "lucide-react";
+import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@shared/schema";
 
 interface EstimateDetailModalProps {
@@ -303,16 +304,30 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     <span className="text-sm text-gray-600 font-mono">
                       {parseFloat(estimate.workLocationLat).toFixed(6)}, {parseFloat(estimate.workLocationLng).toFixed(6)}
                     </span>
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${estimate.workLocationLat},${estimate.workLocationLng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 underline"
-                      data-testid="link-view-on-map"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      View on map
-                    </a>
+                    {(() => {
+                      const mapsUrl = buildMapsUrl({
+                        lat: estimate.workLocationLat,
+                        lng: estimate.workLocationLng,
+                        address: estimate.workLocationAddress,
+                        label:
+                          estimate.workLocationAddress ||
+                          estimate.customerAddress ||
+                          estimate.customerName,
+                      });
+                      if (!mapsUrl) return null;
+                      return (
+                        <a
+                          href={mapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 underline"
+                          data-testid="link-view-on-map"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          View on map
+                        </a>
+                      );
+                    })()}
                   </div>
                   {(estimate.controllerLetter || estimate.zoneNumber) && (
                     <div>

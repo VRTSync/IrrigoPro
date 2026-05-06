@@ -31,6 +31,7 @@ import { FileUpload } from "@/components/ui/file-upload";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { buildMapsUrl } from "@/lib/maps-url";
 import {
   CheckCircle,
   Plus,
@@ -48,6 +49,7 @@ import {
   MapPin,
   Crosshair,
   Loader2,
+  Navigation,
 } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
 import type { WorkOrder, Part, Customer } from "@shared/schema";
@@ -681,21 +683,57 @@ export function WorkOrderCompletion({
                       )}
                     </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleImHere}
-                    disabled={pinningHere || updatePinMutation.isPending}
-                    className="border-blue-600 text-blue-700 hover:bg-blue-50"
-                  >
-                    {pinningHere || updatePinMutation.isPending ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <Crosshair className="w-3.5 h-3.5 mr-1.5" />
-                    )}
-                    I'm here
-                  </Button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {(() => {
+                      const mapsUrl = buildMapsUrl({
+                        lat: livePin.workLocationLat,
+                        lng: livePin.workLocationLng,
+                        address: livePin.workLocationAddress,
+                        label:
+                          livePin.workLocationAddress ||
+                          workOrder.projectAddress ||
+                          workOrder.customerName,
+                      });
+                      const hasPin =
+                        livePin.workLocationLat != null &&
+                        livePin.workLocationLng != null;
+                      if (!hasPin || !mapsUrl) return null;
+                      return (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          asChild
+                          className="border-blue-600 text-blue-700 hover:bg-blue-50"
+                        >
+                          <a
+                            href={mapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-testid="link-get-directions"
+                          >
+                            <Navigation className="w-3.5 h-3.5 mr-1.5" />
+                            Get directions
+                          </a>
+                        </Button>
+                      );
+                    })()}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImHere}
+                      disabled={pinningHere || updatePinMutation.isPending}
+                      className="border-blue-600 text-blue-700 hover:bg-blue-50"
+                    >
+                      {pinningHere || updatePinMutation.isPending ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Crosshair className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      I'm here
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
