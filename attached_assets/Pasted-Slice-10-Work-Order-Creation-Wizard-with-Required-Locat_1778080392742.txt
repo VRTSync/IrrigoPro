@@ -1,0 +1,156 @@
+Slice 10 — Work Order Creation Wizard with Required Location CaptureDate: 2026-05-06
+Status: Ready for Replit implementation
+Author: Engineering planning
+Type: UI redesign + targeted schema-adjacent work (no schema changes)
+Estimated effort: 1.5–2 days
+Decisions locked:
+
+Q1 = Replace WorkOrderForm with a multi-step wizard mirroring the EstimateWizard structure exactly. Five steps. Same visual language.
+Q2 = Map pin is required to advance from Step 2. Address text alone is not enough. The tech needs a navigable point.
+Q3 = Controller & Zone selectors live on Step 2 alongside the pin. Optional, populated from /api/properties/:customerId/controllers.
+Q4 = Edit mode opens on Step 2 (same convention as the estimate wizard's edit-mode-on-line-items rule, applied to the most-likely-edit step).
+Q5 = The dispatch directions button prefers workLocation lat/lng over projectAddress whenever a pin exists.
+Q6 (locked by default) = Field-tech "I'm here" affordance on work-order-completion.tsx — one-tap geolocation pin set, captured into the same workLocationLat/Lng/Address columns. The customer-facing address never changes; the work-location pin gets refined to the actual valve/sprinkler/site.
+Related: Builds on Slice 8 (Estimate Wizard). Reuses LocationPicker, CustomerSelector, LocationFields, composeCustomerAddress. Reuses the visual language patterns refined in Slice 9. No schema changes — work_orders already has workLocationLat, workLocationLng, workLocationAddress, controllerLetter, zoneNumber (all nullable).Executive SummaryThe current work order create flow (client/src/components/work-orders/work-order-form.tsx) is structured as six labeled "Step 1–6" cards inside a single scrolling 95vh dialog — already a wizard mentally, just not gated. Location capture is optional, the map pin is buried inside a toggle that defaults to closed, no controller/zone selectors exist anywhere, and once a work order is created the pin is invisible and uneditable in edit-work-order-modal.tsx. The dispatch list (pages/work-orders.tsx line 1057) ignores the lat/lng entirely and routes the field tech to the customer's billing address text via Google/Apple Maps. Field techs have no way to refine the pin once they're physically at the work area.Slice 10 replaces WorkOrderForm with a five-step WorkOrderWizard that mirrors the EstimateWizard structure. Step 2 is Work Location & Site and Continue is gated until a map pin exists. The dispatch list switches to lat/lng-first navigation. The completion screen gets an "I'm here" button that captures the tech's current geolocation as the refined work pin. The edit modal exposes the pin so it can be corrected post-creation.Slice 10 ships when: every existing entry point opens the new wizard, Step 2 cannot be skipped without a pin, the map pin is visible and editable in edit-work-order-modal.tsx, the dispatch directions button uses the pin when present, the "I'm here" affordance writes to workLocationLat/Lng/Address, and the submit payload remains identical to what the server's existing POST /api/work-orders and PUT /api/work-orders/:id endpoints expect.Why NowThree concrete failures are driving this:First, techs are routed to the wrong place. The customer's billing address is often a corporate office, an HOA management address, or the front gate of a commercial property. The actual irrigation work is a half-mile of pipe away. Managers correctly pin the precise spot during creation, but pages/work-orders.tsx line 1064 throws that data on the floor and sends the tech to projectAddress instead. Every miss costs 15–30 minutes of windshield time.Second, billing accuracy depends on knowing where work happened. Auto-billed wet-check findings, manager review queues, and missing-photos reports all want a single source of truth for "where was this work performed." Right now the lat/lng sits in the database but nothing reads it.Third, the manager's mental model already matches a wizard. The form is six labeled "Step N" cards. Wizardizing it costs the same screen real estate, makes Step 2 truly required, and lets us delete the long single-form scroll.Slice 8 made this slice unblockable: the wizard pattern, container chrome, sticky header/footer, dirty-tracking + discard-confirm, and Esc handling are all proven and reusable. Slice 10 borrows the structure, swaps the steps to match work-order content, and adds the "I'm here" affordance.What a Work Order Creation Flow BecomesFive steps inside the same wizard container the estimate wizard uses (full-screen on mobile, centered dialog ≥768px, sticky header with progress bar, sticky mobile footer):Step 1 — Customer & Branch. Customer picker (existing CustomerSelector) at the top. Once a customer is locked, an inline display card shows name + address with a "Change customer" link. Branch selector renders only if customer.branches?.length > 0, required when shown. Customer email and phone are auto-populated from the customer record but editable inline (matches the Slice 9 estimate-wizard pattern with the helper text "Used for this work order only — won't update the customer record"). CTA: "Continue to Location →".Step 2 — Work Location & Site. The required step. Three discrete sub-cards inside the step body:
+Address & Notes — LocationFields for project address, location notes, access instructions. "Use customer address" / "Use a different address" toggle works the same as in the estimate wizard.
+Pin on Map (required) — LocationPicker, opened by default when no pin exists, collapsed when one does. Pinned-location confirmation uses the blue accent (matching Slice 9's color rationalization, not green). A required-asterisk on the section header and inline helper text below the picker: "Drop a pin so the field tech can navigate straight to the work area. Required to continue."
+Controller & Zone — two selects driven by /api/properties/:customerId/controllers. Optional. Loading state distinguishes "loading…" from "no controllers on file." Auto-clear when the customer changes.
+CTA strip: "← Back" and "Continue to Description →". The Continue button is disabled until workLocation !== null. Inline helper text below explains why when disabled (no tooltip, per Slice 9).Step 3 — Description & Priority. Sticky strip at top: customer/project/branch summary + a "Pinned at: {address}" chip with a small "Edit pin" link that jumps back to Step 2. Below that: description (required), special instructions, internal notes, priority select. CTA: "← Back" / "Continue to Schedule →".Step 4 — Schedule & Assign. Sticky strip same as Step 3. Body: scheduled-date picker, assignee select (managers and field techs grouped), tags (existing tags text array if it's used; otherwise omit). CTA: "← Back" / "Continue to Review →".Step 5 — Review & Submit. Read-only summary of everything: customer/branch block, location block (showing the pinned address + a small map thumbnail rendered from the existing map component if cheap, otherwise just the address + lat/lng), controller/zone if set, work description, scheduling, assignee. Optional collapsible "Site Photos" section using the existing FileUpload. Two CTAs: secondary "← Back to Schedule" and primary "Create Work Order" (or "Save Changes" in edit mode). On submit: POST /api/work-orders (or PUT /api/work-orders/:id). On success: toast "Work order created" (or "Work order updated"), wizard closes, the calling page's React Query cache invalidates ["/api/work-orders"].Edit mode opens on Step 2 (the most-likely-edit step is location, given the existing data quality issue).Scope of Slice 10In Scope
+New top-level component client/src/components/work-orders/work-order-wizard.tsx that owns wizard state and renders the five steps. Pattern: copy the orchestrator shape from estimate-wizard.tsx and swap the step components.
+Five step components co-located in client/src/components/work-orders/wizard/:
+
+work-order-wizard-customer-step.tsx (Step 1)
+work-order-wizard-location-step.tsx (Step 2 — the required step)
+work-order-wizard-description-step.tsx (Step 3)
+work-order-wizard-schedule-step.tsx (Step 4)
+work-order-wizard-review-step.tsx (Step 5)
+
+
+Replace every existing call site of <WorkOrderForm> with <WorkOrderWizard>. Affected:
+
+client/src/pages/work-orders.tsx (the New Work Order button)
+client/src/components/manager/work-orders-manager.tsx
+Any other call site found via grep (search for WorkOrderForm and work-order-form)
+
+
+Keep client/src/components/work-orders/work-order-form.tsx for now if any flow still uses it; delete it only if grep shows zero remaining references after migration.
+Edit mode — WorkOrderWizard accepts workOrderId?: number | null. When present, opens directly on Step 2 with everything pre-loaded. Replace <EditWorkOrderModal> call sites with <WorkOrderWizard workOrderId={...}> so create and edit go through the same component.
+Surface and edit the pin in the existing edit modal during the transition. If you keep edit-work-order-modal.tsx for any non-wizard call sites, add a small map-pin viewer + LocationPicker toggle to its Location section so the pin isn't invisible. Once EditWorkOrderModal is fully migrated to WorkOrderWizard, delete it.
+Dispatch directions button — update pages/work-orders.tsx line 1056–1074 (and any other place that builds a maps URL from projectAddress) to prefer the pin when present:
+
+ts   const url = workOrder.workLocationLat != null && workOrder.workLocationLng != null
+     ? (isMobile ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encodedLabel}`
+                 : `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`)
+     : addressBasedUrl;
+Label = workLocationAddress ?? projectAddress ?? customerName.
+8. "I'm here" affordance on work-order-completion.tsx. A small section near the top of the completion screen showing the inherited pin (with the address) and a button that, on click, calls navigator.geolocation.getCurrentPosition(...), confirms via toast, and writes the new lat/lng to the work order via a PATCH /api/work-orders/:id (or whatever the existing partial-update endpoint is — server-side route). The customer-facing projectAddress is not touched. Existing workLocationAddress is set to a reverse-geocoded address if the existing geocoding utility supports it; otherwise a "Refined by tech" placeholder. Show the previous pin briefly with an "Undo" toast so a misclick doesn't lose data.
+9. Visual language: borrow the wizard chrome from estimate-wizard.tsx. Same Dialog className, same sticky header pattern, same progress bar, same mobile sticky footer, same discard-confirm AlertDialog. Reuse the icon-in-rounded-tile section header pattern from the estimate wizard (icons: User, MapPin, FileText, Calendar, CheckCircle2).
+10. Apply Slice 9 fixes upfront: Enter on INPUT does NOT advance the wizard; native number-input spinners hidden; pinned-location confirmation uses blue accent; controller-loading state distinguished from empty; mobile sticky-footer verbs match desktop.Out of Scope
+Any change to the work_orders schema. The columns needed already exist.
+Any change to the server-side POST/PUT /api/work-orders endpoints. The wizard's submit payload mirrors the existing form's payload exactly, plus workLocationLat/Lng/Address (already accepted) and controllerLetter/zoneNumber (already accepted, currently always null because no UI sets them).
+Field-tech offline support for work order creation. Out of scope.
+Reverse-geocoding the "I'm here" pin. Best-effort if utility exists; otherwise placeholder address.
+Customer-facing approval flow (work orders don't have one in the same shape as estimates).
+Replacing the work-order-list UI. Only the directions button URL changes.
+Splitting the work order's existing assignment/scheduling fields into separate sub-features.
+UI SpecificationWizard ContainerIdentical to the estimate wizard — copy the <DialogContent> className verbatim, including the mobile-takeover and ≥768px centered-modal logic, the sticky header with Step X of 5 · {STEP_TITLES[step]} caption, and the progress bar ((step / 5) * 100).STEP_TITLES: 1: "Customer & Branch", 2: "Work Location & Site", 3: "Description", 4: "Schedule & Assign", 5: "Review & Submit".Step 1 — Customer & BranchTwo cards: Customer (with email/phone overrides + Slice-9 helper caption) and Branch (only when customer.branches?.length > 0, required if shown). No project name field — work orders use a free-text description on Step 3, and the existing schema's projectName defaults to "Work Order" (preserve this default in the submit payload).CTA: "Continue to Location →" disabled until customer && (branches.length === 0 || branchName).Step 2 — Work Location & Site (the required step)Three sub-cards:
+Address & Notes (icon: MapPin)
+
+LocationFields for project address, location notes, access instructions.
+"Use a different address" toggle behaves like the estimate wizard.
+
+
+
+Pin on Map (icon: MapPin, with a red * next to the title)
+
+Inline LocationPicker, expanded by default in create mode, expanded if value.workLocation is null in edit mode.
+Pinned-location confirmation uses bg-blue-50 border-l-4 border-l-blue-500 (Slice-9 color rationalization).
+Helper text below: "Drop a pin so the field tech can navigate straight to the work area. Required to continue."
+When workLocation is null, the Continue CTA below the step is disabled with inline caption "Drop a pin on the map above to continue." (no tooltip).
+
+
+
+Controller & Zone (icon: Cpu, suffix "(optional)")
+
+Same two selects as the estimate wizard's Slice-9 customer step.
+Disabled with caption "Loading controllers…" while fetching, "No controllers on file" when truly empty.
+
+
+CTA: "← Back" / "Continue to Description →" disabled until workLocation !== null.Step 3 — DescriptionSticky strip at top: customer + branch + a "Pinned at: {workLocationAddress ?? ${lat.toFixed(5)}, ${lng.toFixed(5)}}" chip with a small "Edit pin" link → setStep(2).Body: description textarea (required, autofocus when this step opens), special instructions textarea, internal notes textarea, priority select (low / medium / high / urgent), default medium.CTA: "← Back" / "Continue to Schedule →" disabled until description is non-empty.Step 4 — Schedule & AssignSticky strip same as Step 3.Body: scheduled-date picker (<Input type="datetime-local">), assignee select (existing managers + field techs grouped, optional). If your project uses tags or job categories on work orders, include those here; otherwise skip.CTA: "← Back" / "Continue to Review →" never disabled (scheduling and assignee are optional).Step 5 — Review & SubmitRead-only summary cards mirroring the estimate-wizard review layout:
+Customer card with name, branch, email, phone.
+Work Location card with project address, pinned address (or lat/lng), controller/zone, location notes, access instructions. Optional: a small static map thumbnail using the existing map component if it has a <MapThumbnail lat lng /> shape; otherwise just text. Add an "Edit pin" link → setStep(2).
+Description card with description, special instructions (collapsed if long), priority badge.
+Schedule card with date and assignee.
+Site Photos collapsible (existing FileUpload, default collapsed).
+CTAs: secondary "← Back" and primary "Create Work Order" (or "Save Changes" in edit mode). On submit: existing POST /api/work-orders or PUT /api/work-orders/:id, then close + invalidate ["/api/work-orders"] and ["/api/dashboard/stats"].Dispatch Directions ButtonIn pages/work-orders.tsx (and any other place that constructs a maps URL from a work order — search for maps.apple.com, maps.google.com, /maps/search):tsfunction buildMapsUrl(wo: WorkOrder): string {
+  const isIos = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (wo.workLocationLat != null && wo.workLocationLng != null) {
+    const lat = wo.workLocationLat;
+    const lng = wo.workLocationLng;
+    const label = encodeURIComponent(wo.workLocationAddress ?? wo.projectAddress ?? wo.customerName ?? "Work site");
+    return isIos
+      ? `https://maps.apple.com/?ll=${lat},${lng}&q=${label}`
+      : `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  }
+  const encoded = encodeURIComponent(wo.projectAddress ?? "");
+  return isIos
+    ? `https://maps.apple.com/?q=${encoded}`
+    : `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+}Wire this into the existing onClick in pages/work-orders.tsx line 1064 and any siblings."I'm here" Affordance on CompletionIn client/src/components/work-orders/work-order-completion.tsx, near the top of the form (above the parts/labor sections), add a small inline panel:┌─────────────────────────────────────────┐
+│  📍 Work location                        │
+│  123 Main St (pinned by manager)         │
+│                                          │
+│  [📍 I'm here — refine pin]              │
+└─────────────────────────────────────────┘On click:
+
+navigator.geolocation.getCurrentPosition(...) with options { enableHighAccuracy: true, timeout: 8000 }.
+Optimistically update local state and PATCH /api/work-orders/:id with { workLocationLat, workLocationLng, workLocationAddress: null } (or reverse-geocoded address if available). Don't touch projectAddress.
+On success: toast "Pin refined to your location" with an "Undo" action that reverts to the previous lat/lng.
+On geolocation error: toast "Couldn't get your location — check device permissions".
+If the existing API doesn't have a partial-update endpoint, use PUT /api/work-orders/:id with the full work order shape and only the location fields modified — that's how the existing edit modal works.Files AffectedNew
+
+client/src/components/work-orders/work-order-wizard.tsx
+client/src/components/work-orders/wizard/work-order-wizard-customer-step.tsx
+client/src/components/work-orders/wizard/work-order-wizard-location-step.tsx
+client/src/components/work-orders/wizard/work-order-wizard-description-step.tsx
+client/src/components/work-orders/wizard/work-order-wizard-schedule-step.tsx
+client/src/components/work-orders/wizard/work-order-wizard-review-step.tsx
+Modified
+
+client/src/pages/work-orders.tsx — replace <WorkOrderForm> and <EditWorkOrderModal> with <WorkOrderWizard>; update directions button URL builder.
+client/src/components/manager/work-orders-manager.tsx — same replacement.
+client/src/components/work-orders/work-order-completion.tsx — add "I'm here" affordance.
+Any other file that imports WorkOrderForm or EditWorkOrderModal (grep first).
+Deleted (after migration)
+
+client/src/components/work-orders/work-order-form.tsx — only after grep shows zero remaining imports.
+client/src/components/work-orders/edit-work-order-modal.tsx — only after <WorkOrderWizard workOrderId={...}> covers every edit entry point.
+Acceptance Criteria
+Every existing "New Work Order" entry point opens <WorkOrderWizard>. Step 1 lands on Customer & Branch.
+The Continue button on Step 2 is disabled while workLocation === null. The disabled state shows inline helper text, not a hover tooltip.
+On Step 2, the map pin can be dropped, cleared, and re-dropped, and the address auto-populates if the existing LocationPicker returns one.
+Controller & Zone selects on Step 2 are populated from /api/properties/:customerId/controllers. Selecting a controller enables the zone select with the correct number of options.
+Edit mode (<WorkOrderWizard workOrderId={n}>) opens directly on Step 2 with the existing pin pre-loaded and editable.
+Submit produces the exact same payload shape the current WorkOrderForm produces, with workLocationLat, workLocationLng, workLocationAddress always present, and controllerLetter/zoneNumber populated when set.
+The directions button on pages/work-orders.tsx (and every other place that opens a maps URL for a work order) navigates to the lat/lng pin when present, falling back to projectAddress otherwise.
+The "I'm here" button on work-order-completion.tsx captures the tech's geolocation, persists it, and surfaces an undo toast. The customer-facing projectAddress is unchanged.
+Pressing Enter inside any text or number input does NOT advance the wizard (Slice-9 fix applied).
+Discarding via Esc or click-outside while dirty prompts the discard-changes dialog with the same wording as the estimate wizard's, branched for create vs edit.
+Online and offline behavior of the existing flows is unchanged. No server-side changes required beyond what the existing endpoints already accept.
+Test PlanManual
+Required pin gate. Open a new work order, pick a customer, enter the address, do NOT drop a pin → verify Continue is disabled with inline helper. Drop a pin → verify Continue enables and clicking it advances.
+Edit mode pin edit. Open an existing WO that has a pin → verify it opens on Step 2 with the pin shown. Move the pin → submit → confirm the new lat/lng persists.
+Edit mode no pin. Find or create a WO without a pin → open it → verify Step 2 demands a pin before continuing past it.
+Dispatch directions. On the work-orders list, verify the directions button on a WO with a pin opens Maps to the lat/lng (not the address). Verify it falls back to address-only on a WO without a pin.
+"I'm here" on completion. Open a WO completion screen as a tech → tap "I'm here" → grant geolocation permission → verify the pin updates, the address stays the customer's, and the toast offers Undo. Tap Undo → verify the pin reverts.
+Geolocation denied. Repeat the above with permission denied → verify a clear error toast.
+Mobile takeover. Verify the wizard goes full-screen at <640px and the sticky mobile footer renders the right verbs per step.
+Keyboard. Inside Description, press Enter → verify NO step advance.
+Automated
+RTL test: mount <WorkOrderWizard open />, pick a customer, advance to Step 2, assert Continue is disabled. Drop a pin (mock LocationPicker's onLocationSelect), assert Continue enables.
+RTL test: render the dispatch directions button with a WO that has a pin, mock window.open, click → assert the URL contains query=${lat},${lng}.
+RTL test: mount the completion screen, click "I'm here" with navigator.geolocation.getCurrentPosition mocked, assert PATCH was called with the expected lat/lng.
+Risk AssessmentLow–medium. The wizard pattern is proven (Slice 8). Existing schema columns already accept everything the new UI captures. The directions URL change is a 10-line tweak that gracefully falls back. The only real new piece is the "I'm here" geolocation flow, which is well-trodden mobile territory.The medium-risk piece is reverse-geocoding the "I'm here" pin to a human-readable address. If your existing geocoding utility doesn't expose a latLngToAddress(lat, lng) function, ship "I'm here" without reverse-geocoding (just store the lat/lng and a placeholder "Refined by tech" address) and add reverse-geocoding in a separate slice.Out-of-Scope Followups
+Reverse-geocode the "I'm here" pin. Probably its own micro-slice if your existing geocoding utility doesn't already expose a reverse function.
+Field-tech offline support for the wizard. The existing offline-queue work covers wet checks; adapting it to work orders is a separate effort.
+Bulk-fix existing work orders without pins. A migration that flags any WO with workLocationLat IS NULL for manager review.
