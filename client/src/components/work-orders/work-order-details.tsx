@@ -12,7 +12,7 @@ import { FileUpload } from "@/components/ui/file-upload";
 
 import { WorkOrderCompletion } from "./work-order-completion";
 import { AssignmentConfirmationModal } from "./assignment-confirmation-modal";
-import { EditWorkOrderModal } from "./edit-work-order-modal";
+import { WorkOrderWizard } from "./work-order-wizard";
 import { BilledIndicator } from "@/components/ui/billed-indicator";
 import { 
   FileText, 
@@ -1152,13 +1152,13 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
       isLoading={reassignWorkOrder.isPending}
     />
 
-    {/* Edit Work Order Modal */}
+    {/* Edit Work Order Wizard (opens on Step 2 — Work Location & Site) */}
     {showEditModal && (
-      <EditWorkOrderModal
-        workOrder={workOrder}
+      <WorkOrderWizard
         open={showEditModal}
+        workOrderId={workOrder.id}
         onClose={() => setShowEditModal(false)}
-        onSuccess={onUpdate}
+        onCreated={onUpdate}
       />
     )}
     </>

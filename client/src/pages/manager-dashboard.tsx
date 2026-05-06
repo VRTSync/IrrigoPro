@@ -10,7 +10,7 @@ import { ActionSheet, ActionSheetItem, ActionSheetSection } from "@/components/u
 import { FileText, Wrench, Receipt, AlertCircle, CheckCircle2, ClipboardCheck, User, ExternalLink, Droplets } from "lucide-react";
 import { useState } from "react";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
-import { WorkOrderForm } from "@/components/work-orders/work-order-form";
+import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
@@ -517,12 +517,10 @@ export default function ManagerDashboard() {
       />
 
       {showWorkOrderModal && (
-        <WorkOrderForm
+        <WorkOrderWizard
+          open={showWorkOrderModal}
           onClose={() => setShowWorkOrderModal(false)}
-          onSuccess={() => {
-            setShowWorkOrderModal(false);
-            invalidateAll();
-          }}
+          onCreated={() => invalidateAll()}
         />
       )}
 

@@ -44,8 +44,12 @@ import {
   Check,
   ShoppingCart,
   Activity,
-  User
+  User,
+  MapPin,
+  Crosshair,
+  Loader2,
 } from "lucide-react";
+import { ToastAction } from "@/components/ui/toast";
 import type { WorkOrder, Part, Customer } from "@shared/schema";
 
 const workOrderCompletionSchema = z.object({
@@ -91,6 +95,125 @@ export function WorkOrderCompletion({
   const { getUrl: getPhotoSignedUrl } = usePhotoSignedUrls(photoUrls, "thumb");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [pinningHere, setPinningHere] = useState(false);
+
+  // Local mirror of the work-location pin so the "Pinned work location"
+  // line in this modal refreshes the same render the user taps "I'm here",
+  // without mutating the `workOrder` prop. Initialised from the prop and
+  // only changed by the optimistic-update handler below.
+  type PinFields = {
+    workLocationLat: number | null;
+    workLocationLng: number | null;
+    workLocationAddress: string | null;
+  };
+  const [livePin, setLivePin] = useState<PinFields>({
+    workLocationLat: workOrder.workLocationLat != null ? Number(workOrder.workLocationLat) : null,
+    workLocationLng: workOrder.workLocationLng != null ? Number(workOrder.workLocationLng) : null,
+    workLocationAddress: workOrder.workLocationAddress ?? null,
+  });
+
+  // Optimistically update the React Query caches AND the local livePin
+  // so the rendered card refreshes immediately. Cache writes are typed
+  // through WorkOrder; no `any` casts.
+  const applyOptimisticPin = (next: PinFields) => {
+    setLivePin(next);
+    // The cached WorkOrder uses Drizzle decimal columns (string | null),
+    // so we serialise the numeric pin values back to strings before
+    // merging into the cached row. No `any` casts.
+    const cachePatch: Partial<WorkOrder> = {
+      workLocationLat: next.workLocationLat != null ? String(next.workLocationLat) : null,
+      workLocationLng: next.workLocationLng != null ? String(next.workLocationLng) : null,
+      workLocationAddress: next.workLocationAddress,
+    };
+    queryClient.setQueryData<WorkOrder | undefined>(
+      ["/api/work-orders", workOrder.id],
+      (old) => (old ? { ...old, ...cachePatch } : old),
+    );
+    queryClient.setQueriesData<WorkOrder[] | undefined>(
+      { queryKey: ["/api/work-orders"], exact: false },
+      (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((w) => (w.id === workOrder.id ? { ...w, ...cachePatch } : w));
+      },
+    );
+  };
+
+  const updatePinMutation = useMutation({
+    mutationFn: async (payload: { workLocationLat: number | null; workLocationLng: number | null; workLocationAddress: string | null }) => {
+      return await apiRequest(`/api/work-orders/${workOrder.id}`, "PATCH", payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/work-orders", workOrder.id] });
+    },
+  });
+
+  const handleImHere = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      toast({
+        title: "Couldn't get your location",
+        description: "This device doesn't expose GPS to the browser. Try a phone instead.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const previous: PinFields = livePin;
+    setPinningHere(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const next = {
+          workLocationLat: pos.coords.latitude,
+          workLocationLng: pos.coords.longitude,
+          workLocationAddress: null,
+        };
+        // Optimistic local update so the card refreshes immediately.
+        applyOptimisticPin(next);
+        updatePinMutation.mutate(next, {
+          onSuccess: () => {
+            setPinningHere(false);
+            toast({
+              title: "Pin moved to your current location",
+              description: `${next.workLocationLat.toFixed(6)}, ${next.workLocationLng.toFixed(6)}`,
+              action: (
+                <ToastAction
+                  altText="Undo"
+                  onClick={() => {
+                    applyOptimisticPin(previous);
+                    updatePinMutation.mutate(previous);
+                  }}
+                >
+                  Undo
+                </ToastAction>
+              ),
+            });
+          },
+          onError: (err: unknown) => {
+            // Roll back the optimistic update.
+            applyOptimisticPin(previous);
+            setPinningHere(false);
+            const message =
+              err instanceof Error
+                ? err.message
+                : "We brought your old pin back. Please try again.";
+            toast({
+              title: "Couldn't save the new pin",
+              description: message,
+              variant: "destructive",
+            });
+          },
+        });
+      },
+      (err) => {
+        setPinningHere(false);
+        toast({
+          title: "Couldn't get your location",
+          description: err.message || "Allow location access for this site and try again.",
+          variant: "destructive",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
+    );
+  };
   const [completionData, setCompletionData] = useState<WorkOrderCompletionData | null>(null);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
@@ -539,6 +662,43 @@ export function WorkOrderCompletion({
                 </CardContent>
               </Card>
             )}
+
+            {/* Pinned Location + "I'm here" affordance */}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-start gap-2 min-w-0 flex-1">
+                    <MapPin className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-500">Pinned work location</div>
+                      {livePin.workLocationLat != null && livePin.workLocationLng != null ? (
+                        <div className="text-sm text-gray-900 truncate">
+                          {livePin.workLocationAddress ||
+                            `${livePin.workLocationLat.toFixed(6)}, ${livePin.workLocationLng.toFixed(6)}`}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 italic">No pin yet — drop one from where you are.</div>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleImHere}
+                    disabled={pinningHere || updatePinMutation.isPending}
+                    className="border-blue-600 text-blue-700 hover:bg-blue-50"
+                  >
+                    {pinningHere || updatePinMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Crosshair className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    I'm here
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Work Summary */}
             <Card>

@@ -16,8 +16,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
-import { WorkOrderForm } from "@/components/work-orders/work-order-form";
-import { EditWorkOrderModal } from "@/components/work-orders/edit-work-order-modal";
+import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
+import { buildMapsUrl } from "@/lib/maps-url";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { WorkOrderCompletion } from "@/components/work-orders/work-order-completion";
 import { 
@@ -1054,21 +1054,26 @@ export default function WorkOrders() {
                       )}
 
                       {/* Location */}
-                      {workOrder.projectAddress && (
+                      {(workOrder.workLocationLat != null || workOrder.projectAddress) && (
                         <div className="flex items-center gap-2">
                           <MapPin className="w-4 h-4 text-gray-500 flex-shrink-0" />
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              const encodedAddress = encodeURIComponent(workOrder.projectAddress || '');
-                              const mapsUrl = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-                                ? `https://maps.apple.com/?q=${encodedAddress}`
-                                : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
-                              window.open(mapsUrl, '_blank');
+                              const url = buildMapsUrl({
+                                lat: workOrder.workLocationLat,
+                                lng: workOrder.workLocationLng,
+                                address: workOrder.workLocationAddress || workOrder.projectAddress,
+                                label:
+                                  workOrder.workLocationAddress ||
+                                  workOrder.projectAddress ||
+                                  workOrder.customerName,
+                              });
+                              if (url) window.open(url, '_blank');
                             }}
                             className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm truncate flex-1 text-left"
                           >
-                            {workOrder.projectAddress}
+                            {workOrder.workLocationAddress || workOrder.projectAddress || `${Number(workOrder.workLocationLat).toFixed(5)}, ${Number(workOrder.workLocationLng).toFixed(5)}`}
                           </button>
                         </div>
                       )}
@@ -1369,25 +1374,24 @@ export default function WorkOrders() {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Work Order Form Dialog — new work orders only */}
+        {/* Work Order Wizard — new work orders */}
         {showWorkOrderForm && (
-          <WorkOrderForm 
-            onClose={() => setShowWorkOrderForm(false)} 
-            onSuccess={() => {
-              setShowWorkOrderForm(false);
+          <WorkOrderWizard
+            open={showWorkOrderForm}
+            onClose={() => setShowWorkOrderForm(false)}
+            onCreated={() => {
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
           />
         )}
 
-        {/* Edit Work Order Modal — pre-filled editing of an existing work order */}
+        {/* Work Order Wizard — edit existing work order (opens on Step 2) */}
         {editingWorkOrder && (
-          <EditWorkOrderModal
-            workOrder={editingWorkOrder}
+          <WorkOrderWizard
             open={!!editingWorkOrder}
+            workOrderId={editingWorkOrder.id}
             onClose={() => setEditingWorkOrder(null)}
-            onSuccess={() => {
-              setEditingWorkOrder(null);
+            onCreated={() => {
               queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
             }}
           />

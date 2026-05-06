@@ -10,7 +10,7 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
-import { WorkOrderForm } from "@/components/work-orders/work-order-form";
+import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 
 interface Estimate {
@@ -442,16 +442,13 @@ export default function Operations() {
         />
       )}
 
-      {/* Work Order Form for Company Admin Users */}
+      {/* Work Order Wizard for Company Admin Users */}
       {showWorkOrderForm && (
-        <Dialog open={showWorkOrderForm} onOpenChange={setShowWorkOrderForm}>
-          <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto">
-            <WorkOrderForm 
-              onClose={handleWorkOrderFormClose}
-              onSuccess={handleWorkOrderFormSuccess}
-            />
-          </DialogContent>
-        </Dialog>
+        <WorkOrderWizard
+          open={showWorkOrderForm}
+          onClose={handleWorkOrderFormClose}
+          onCreated={handleWorkOrderFormSuccess}
+        />
       )}
     </div>
   );

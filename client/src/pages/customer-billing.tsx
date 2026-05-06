@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
-import { EditWorkOrderModal } from "@/components/work-orders/edit-work-order-modal";
+import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { EditBillingSheetModal } from "@/components/billing/edit-billing-sheet-modal";
 import { BilledBadge, BilledIndicator } from "@/components/ui/billed-indicator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -2506,13 +2506,13 @@ export default function CustomerBilling() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Work Order Modal */}
+      {/* Edit Work Order Wizard */}
       {selectedWorkOrder && showEditWorkOrder && (
-        <EditWorkOrderModal
-          workOrder={selectedWorkOrder}
+        <WorkOrderWizard
           open={showEditWorkOrder}
+          workOrderId={selectedWorkOrder.id}
           onClose={() => { setShowEditWorkOrder(false); setSelectedWorkOrder(null); }}
-          onSuccess={() => {
+          onCreated={() => {
             queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
             queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
           }}
