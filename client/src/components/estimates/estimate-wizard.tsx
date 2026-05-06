@@ -276,32 +276,42 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   });
 
   // Load the real customer record so the "Use customer address" toggle
-  // reverts to the customer's stored address (not a synthesised one).
-  const { data: realCustomer } = useQuery<Customer>({
+  // reverts to the customer's stored address (not a synthesised one). We
+  // wait for this to resolve before hydrating Step 1 so the user never
+  // sees a synthetic-customer → real-customer swap that looks like the
+  // address (and contact info) is changing on its own.
+  const {
+    data: realCustomer,
+    isFetched: realCustomerFetched,
+    isLoading: realCustomerLoading,
+  } = useQuery<Customer>({
     queryKey: ["/api/customers", existing?.customerId],
     enabled: isEdit && open && !!existing?.customerId,
   });
 
-  useEffect(() => {
-    if (!realCustomer) return;
-    setCustomerStep((s) => {
-      if (!s.customer || s.customer.id !== realCustomer.id) return s;
-      if (s.customer === realCustomer) return s;
-      return { ...s, customer: realCustomer };
-    });
-  }, [realCustomer]);
+  // Spinner gate: only show "Loading estimate…" while one of the queries
+  // is actually in flight before hydration completes. If a query errors
+  // out, the spinner clears (instead of hanging forever) and hydration
+  // falls back to the synthetic customer record so the user can still
+  // make progress on the estimate.
+  const hydrating =
+    isEdit && !hydratedRef.current && (existingLoading || realCustomerLoading);
 
   useEffect(() => {
     if (!isEdit || !existing || !open || hydratedRef.current) return;
+    // If the estimate references a customer, wait for that customer record
+    // to come back before hydrating, so we hydrate the real customer in a
+    // single pass (no flicker, no apparent re-pick prompt).
+    if (existing.customerId && !realCustomerFetched) return;
     const lr = parseFloat(existing.laborRate ?? "45") || 45;
     setLaborRate(lr);
-    const cust: Customer = {
+    const cust: Customer = realCustomer ?? ({
       id: existing.customerId,
       name: existing.customerName,
       email: existing.customerEmail,
       phone: existing.customerPhone,
       address: existing.projectAddress,
-    } as Customer;
+    } as Customer);
     // If the estimate has a recorded projectAddress, default the toggle to
     // "different address" so the field is fully editable on open. The user
     // can flip back to "Use customer address" to lock it to the customer
@@ -346,7 +356,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     setAttachments(at);
     initialSnapshotRef.current = snapshot(cs, loaded, lr, ph, at);
     hydratedRef.current = true;
-  }, [isEdit, existing, open]);
+  }, [isEdit, existing, open, realCustomer, realCustomerFetched]);
 
   // Re-derive labor rate from the selected customer whenever the customer
   // changes — including in edit mode, since the user can swap customers from
@@ -699,7 +709,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
             totalSteps={3}
             stepTitles={[STEP_TITLES[1], STEP_TITLES[2], STEP_TITLES[3]]}
             contextLine={headerContextLine}
-            loading={isEdit && existingLoading && !hydratedRef.current}
+            loading={hydrating}
             loadingLabel="Loading estimate…"
             accent="blue"
             leading={
@@ -720,7 +730,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
-            {isEdit && existingLoading && !hydratedRef.current ? (
+            {hydrating ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -34,6 +34,13 @@ interface CustomerSelectorProps {
   disabled?: boolean;
   hideLabel?: boolean;
   canCreateCustomer?: boolean;
+  /**
+   * When true and no customer is selected, automatically open the
+   * picker dialog and focus the search input. Used by callers (e.g. the
+   * estimate wizard) that want customer selection to be the obvious
+   * first action with no extra click.
+   */
+  autoOpen?: boolean;
 }
 
 export function CustomerSelector({ 
@@ -44,10 +51,28 @@ export function CustomerSelector({
   disabled = false,
   hideLabel = false,
   canCreateCustomer = true,
+  autoOpen = false,
 }: CustomerSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewCustomerDialog, setShowNewCustomerDialog] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const autoOpenedRef = useRef(false);
+
+  // Auto-open the picker dialog once when requested and no customer is
+  // selected yet, so callers that want customer selection front-and-center
+  // don't need an extra click. Re-arms once a customer is selected so a
+  // later "Change customer" still triggers re-open if the caller wants it.
+  useEffect(() => {
+    if (!autoOpen) return;
+    if (selectedCustomer) {
+      autoOpenedRef.current = false;
+      return;
+    }
+    if (autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    setIsOpen(true);
+  }, [autoOpen, selectedCustomer]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -204,6 +229,8 @@ export function CustomerSelector({
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <Input
+                ref={searchInputRef}
+                autoFocus
                 placeholder="Search customers by name, email, or address..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}

@@ -109,16 +109,16 @@ export function EstimateWizardCustomerStep({
     return () => sub.unsubscribe();
   }, [form, onChange]);
 
-  // When the selected customer changes and we're using their address,
-  // sync the project address in the form to match the customer.
+  // Keep the form's projectAddress field in sync whenever the controlled
+  // value changes (e.g. on customer selection or "use different address"
+  // toggle). `handleSelectCustomer` and `handleToggleAddress` are the only
+  // places that compute a new address, so this just mirrors that into the
+  // form.
   useEffect(() => {
-    if (value.customer && !value.useDifferentAddress) {
-      const next = value.customer.address || "";
-      if (form.getValues("projectAddress") !== next) {
-        form.setValue("projectAddress", next, { shouldDirty: false });
-      }
+    if (form.getValues("projectAddress") !== value.projectAddress) {
+      form.setValue("projectAddress", value.projectAddress, { shouldDirty: false });
     }
-  }, [value.customer?.id, value.useDifferentAddress, form]);
+  }, [value.projectAddress, form]);
 
   useEffect(() => {
     if (value.customer) {
@@ -162,15 +162,18 @@ export function EstimateWizardCustomerStep({
   }, [selectedController, zoneCount, value.zoneNumber, onChange]);
 
   const handleSelectCustomer = (c: Customer) => {
-    const nextAddress = value.useDifferentAddress ? value.projectAddress : (c.address || "");
-    // Reset the map pin and controller/zone whenever the customer changes —
-    // those choices are scoped to the previous customer's setup.
+    // A single customer pick fans out to every customer-derived default:
+    // contact info, project address (snap back to the customer's address
+    // even if a previous selection had toggled "use different address"),
+    // map pin, and controller/zone. The user never has to re-select.
+    const nextAddress = c.address || "";
     onChange({
       ...value,
       customer: c,
       customerEmail: c.email ?? "",
       customerPhone: c.phone ?? "",
       projectAddress: nextAddress,
+      useDifferentAddress: false,
       workLocation: null,
       controllerLetter: null,
       zoneNumber: null,
@@ -231,6 +234,7 @@ export function EstimateWizardCustomerStep({
               onSelectCustomer={handleSelectCustomer}
               hideLabel
               placeholder="Search and select a customer..."
+              autoOpen
             />
           ) : value.customer ? (
             <div className="space-y-3">
@@ -298,7 +302,9 @@ export function EstimateWizardCustomerStep({
         </CardContent>
       </Card>
 
-      {/* Project Details card */}
+      {/* Project Details card — gated until a customer is chosen so it's
+          obvious that customer selection is the first step. */}
+      {value.customer && (
       <Card>
         <CardContent className="p-4 sm:p-5 space-y-4">
           <div className="flex items-center gap-2">
@@ -315,7 +321,6 @@ export function EstimateWizardCustomerStep({
             <Input
               id="wizard-project-name"
               ref={projectNameRef}
-              autoFocus
               value={value.projectName}
               onChange={(e) => onChange({ ...value, projectName: e.target.value })}
               placeholder="e.g., Backyard Irrigation System"
@@ -324,24 +329,23 @@ export function EstimateWizardCustomerStep({
             />
           </div>
 
-          {value.customer && (
-            <div className="flex justify-end -mb-2">
-              <button
-                type="button"
-                onClick={handleToggleAddress}
-                className="text-xs text-blue-600 hover:text-blue-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
-                data-testid="wizard-toggle-address"
-              >
-                {value.useDifferentAddress ? "Use customer address" : "Use a different address"}
-              </button>
-            </div>
-          )}
+          <div className="flex justify-end -mb-2">
+            <button
+              type="button"
+              onClick={handleToggleAddress}
+              className="text-xs text-blue-600 hover:text-blue-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded"
+              data-testid="wizard-toggle-address"
+            >
+              {value.useDifferentAddress ? "Use customer address" : "Use a different address"}
+            </button>
+          </div>
 
           <Form {...form}>
             <LocationFields control={form.control} readOnlyAddress={addressReadOnly} />
           </Form>
         </CardContent>
       </Card>
+      )}
 
       {/* Work Location (map) card */}
       {value.customer && (
