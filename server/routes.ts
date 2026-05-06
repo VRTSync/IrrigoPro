@@ -6389,6 +6389,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         customerEmail: estimate.customerEmail,
         projectName: estimate.projectName,
         projectAddress: estimate.projectAddress || undefined,
+        workLocationLat: estimate.workLocationLat ?? null,
+        workLocationLng: estimate.workLocationLng ?? null,
+        workLocationAddress: estimate.workLocationAddress ?? null,
+        controllerLetter: estimate.controllerLetter ?? null,
+        zoneNumber: estimate.zoneNumber ?? null,
         totalAmount: `$${parseFloat(estimate.totalAmount).toFixed(2)}`,
         approvalToken,
         estimateDate: new Date(estimate.estimateDate).toLocaleDateString(),
@@ -8614,17 +8619,29 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Generate PDF
-  app.post("/api/estimates/:id/pdf", async (req, res) => {
+  // Task #348: produces a real PDF (puppeteer) that includes the project
+  // address, the pinned work-location coordinates, and a Google Maps link
+  // so customers and dispatch can confirm the exact work area.
+  app.post("/api/estimates/:id/pdf", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
         return res.status(404).json({ message: "Estimate not found" });
       }
-      
-      // For now, just simulate PDF generation
-      // In a real implementation, you would use a PDF generation library
-      res.json({ message: "PDF generated successfully", downloadUrl: `/api/estimates/${id}/pdf/download` });
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+
+      const { renderEstimatePdf } = await import('./estimate-pdf');
+      const pdf = await renderEstimatePdf(estimate);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="estimate-${estimate.estimateNumber}.pdf"`,
+      );
+      res.send(pdf);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to generate PDF" });

@@ -12,6 +12,11 @@ export interface EstimateEmailData {
   customerEmail: string;
   projectName: string;
   projectAddress?: string;
+  workLocationLat?: string | null;
+  workLocationLng?: string | null;
+  workLocationAddress?: string | null;
+  controllerLetter?: string | null;
+  zoneNumber?: number | null;
   totalAmount: string;
   approvalToken: string;
   estimateDate: string;
@@ -195,6 +200,22 @@ export class EmailService {
           <td style="padding: 8px 0; color: #1f2937;">${data.projectAddress}</td>
         </tr>
         ` : ''}
+        ${data.workLocationLat && data.workLocationLng ? `
+        <tr>
+          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Pinned spot:</td>
+          <td style="padding: 8px 0; color: #1f2937;">
+            ${data.workLocationAddress ? `${data.workLocationAddress}<br/>` : ''}
+            <a href="https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}" style="color: #3b82f6;">View on map</a>
+            <span style="color: #6b7280; font-size: 12px;">(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)})</span>
+          </td>
+        </tr>
+        ` : ''}
+        ${data.controllerLetter || data.zoneNumber ? `
+        <tr>
+          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Controller / Zone:</td>
+          <td style="padding: 8px 0; color: #1f2937;">${data.controllerLetter ? `Controller ${data.controllerLetter}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}</td>
+        </tr>
+        ` : ''}
         <tr>
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Date:</td>
           <td style="padding: 8px 0; color: #1f2937;">${data.estimateDate}</td>
@@ -277,6 +298,8 @@ ESTIMATE DETAILS:
 - Estimate #: ${data.estimateNumber}
 - Project: ${data.projectName}
 ${data.projectAddress ? `- Location: ${data.projectAddress}` : ''}
+${data.workLocationLat && data.workLocationLng ? `- Pinned spot: ${data.workLocationAddress ? `${data.workLocationAddress} ` : ''}(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)}) — https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}` : ''}
+${data.controllerLetter || data.zoneNumber ? `- Controller/Zone: ${data.controllerLetter ? `Controller ${data.controllerLetter}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}` : ''}
 - Date: ${data.estimateDate}
 - Prepared by: ${data.createdBy}
 

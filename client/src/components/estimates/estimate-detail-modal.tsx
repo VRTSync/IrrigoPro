@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink } from "lucide-react";
 import type { Estimate } from "@shared/schema";
 
 interface EstimateDetailModalProps {
@@ -282,6 +282,61 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 </CardContent>
               </Card>
             </div>
+
+            {/* Pinned Work Location (Task #348) */}
+            {estimate.workLocationLat != null && estimate.workLocationLng != null && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center space-x-2">
+                    <MapPin className="w-5 h-5 text-blue-600" />
+                    <span>Pinned Work Location</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {estimate.workLocationAddress && (
+                    <div>
+                      <span className="font-medium text-gray-700">Address:</span>
+                      <p className="text-gray-900">{estimate.workLocationAddress}</p>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-gray-600 font-mono">
+                      {parseFloat(estimate.workLocationLat).toFixed(6)}, {parseFloat(estimate.workLocationLng).toFixed(6)}
+                    </span>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${estimate.workLocationLat},${estimate.workLocationLng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 underline"
+                      data-testid="link-view-on-map"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      View on map
+                    </a>
+                  </div>
+                  {(estimate.controllerLetter || estimate.zoneNumber) && (
+                    <div>
+                      <span className="font-medium text-gray-700">Controller / Zone:</span>
+                      <p className="text-gray-900">
+                        {estimate.controllerLetter ? `Controller ${estimate.controllerLetter}` : ''}
+                        {estimate.controllerLetter && estimate.zoneNumber ? ' · ' : ''}
+                        {estimate.zoneNumber ? `Zone ${estimate.zoneNumber}` : ''}
+                      </p>
+                    </div>
+                  )}
+                  <div className="rounded-lg overflow-hidden border border-gray-200">
+                    <iframe
+                      title="Pinned work location"
+                      width="100%"
+                      height="220"
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                      src={`https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(estimate.workLocationLng) - 0.003}%2C${parseFloat(estimate.workLocationLat) - 0.002}%2C${parseFloat(estimate.workLocationLng) + 0.003}%2C${parseFloat(estimate.workLocationLat) + 0.002}&layer=mapnik&marker=${estimate.workLocationLat}%2C${estimate.workLocationLng}`}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Project Details */}
             <Card>
