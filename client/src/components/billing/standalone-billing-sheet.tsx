@@ -40,6 +40,7 @@ import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { LocationPicker } from "@/components/ui/location-picker";
+import { composeCustomerAddress } from "@/lib/customer-address";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Customer, Part } from "@shared/schema";
@@ -831,7 +832,7 @@ export function StandaloneBillingSheet({
                             <div className="mt-4">
                               <LocationPicker
                                 key={selectedCustomer.id}
-                                defaultAddress={selectedCustomer.address || ""}
+                                defaultAddress={composeCustomerAddress(selectedCustomer)}
                                 onLocationSelect={(location) => {
                                   setSelectedLocation(location);
                                   form.setValue("workLocationLat", location.lat);

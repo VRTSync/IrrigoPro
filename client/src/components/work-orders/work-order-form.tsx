@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { LocationPicker } from "@/components/ui/location-picker";
+import { composeCustomerAddress } from "@/lib/customer-address";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import { Calendar, User, AlertCircle, FileText, Target, MapPin, Camera } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -255,7 +256,7 @@ export function WorkOrderForm({ onClose, onSuccess, editingWorkOrder }: WorkOrde
                   <div className="mt-4">
                     <LocationPicker
                       key={selectedCustomer.id} // Force re-render when customer changes
-                      defaultAddress={selectedCustomer.address || ""}
+                      defaultAddress={composeCustomerAddress(selectedCustomer)}
                       onLocationSelect={(location) => {
                         setSelectedLocation(location);
                         form.setValue("workLocationLat", location.lat);

@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, RotateCcw, Navigation, Loader2 } from "lucide-react";
+import { MapPin, RotateCcw, Navigation, Loader2, AlertCircle } from "lucide-react";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -37,9 +37,42 @@ const PULSING_DOT_CSS = `
 }
 `;
 
-export function LocationPicker({ 
-  defaultAddress, 
-  onLocationSelect, 
+const FALLBACK_CENTER: [number, number] = [39.8283, -98.5795];
+const FALLBACK_ZOOM = 12;
+
+async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
+    );
+    const data = await response.json();
+    if (data && data.length > 0) {
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    }
+  } catch (error) {
+    console.error("Geocoding error:", error);
+  }
+  return null;
+}
+
+async function reverseGeocode(lat: number, lng: number): Promise<string> {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`
+    );
+    const data = await response.json();
+    if (data && data.display_name) {
+      return data.display_name;
+    }
+  } catch (error) {
+    console.error("Reverse geocoding error:", error);
+  }
+  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+}
+
+export function LocationPicker({
+  defaultAddress,
+  onLocationSelect,
   selectedLocation,
   className = ""
 }: LocationPickerProps) {
@@ -53,36 +86,11 @@ export function LocationPicker({
   const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [geocodeFailed, setGeocodeFailed] = useState(false);
 
-  const geocodeAddress = async (address: string): Promise<{ lat: number; lng: number } | null> => {
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
-      );
-      const data = await response.json();
-      if (data && data.length > 0) {
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-      }
-    } catch (error) {
-      console.error("Geocoding error:", error);
-    }
-    return null;
-  };
-
-  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`
-      );
-      const data = await response.json();
-      if (data && data.display_name) {
-        return data.display_name;
-      }
-    } catch (error) {
-      console.error("Reverse geocoding error:", error);
-    }
-    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  };
+  const trimmedAddress = (defaultAddress ?? "").trim();
+  const hasAddress = trimmedAddress.length > 0;
+  const showEmptyState = !hasAddress && !selectedLocation;
 
   const updateLiveLocationMarker = useCallback((lat: number, lng: number) => {
     const map = mapInstanceRef.current;
@@ -104,7 +112,10 @@ export function LocationPicker({
     }
   }, []);
 
+  // Initialize the map. Skipped while we're in the empty-address state
+  // (re-runs when an address arrives so the map mounts at that point).
   useEffect(() => {
+    if (showEmptyState) return;
     if (!mapRef.current || mapInstanceRef.current) return;
 
     if (!document.getElementById('pulsing-dot-styles')) {
@@ -116,18 +127,27 @@ export function LocationPicker({
 
     const initializeMap = async () => {
       setIsLoading(true);
-      let initialCenter: [number, number] = [39.8283, -98.5795];
-      let initialZoom = 4;
+      setGeocodeFailed(false);
 
-      if (defaultAddress && defaultAddress.trim()) {
-        const coords = await geocodeAddress(defaultAddress);
+      // Centering preference: customer address first, then any saved pin,
+      // then a regional fallback (with a "couldn't locate" notice).
+      let initialCenter: [number, number] = FALLBACK_CENTER;
+      let initialZoom = FALLBACK_ZOOM;
+      let usedAddress = false;
+
+      if (hasAddress) {
+        const coords = await geocodeAddress(trimmedAddress);
         if (coords) {
           initialCenter = [coords.lat, coords.lng];
           initialZoom = 18;
+          usedAddress = true;
+        } else if (selectedLocation) {
+          initialCenter = [selectedLocation.lat, selectedLocation.lng];
+          initialZoom = 20;
+        } else {
+          setGeocodeFailed(true);
         }
-      }
-
-      if (selectedLocation) {
+      } else if (selectedLocation) {
         initialCenter = [selectedLocation.lat, selectedLocation.lng];
         initialZoom = 20;
       }
@@ -165,7 +185,7 @@ export function LocationPicker({
       }
 
       mapInstanceRef.current = map;
-      prevAddressRef.current = defaultAddress;
+      prevAddressRef.current = usedAddress ? trimmedAddress : undefined;
       setIsLoading(false);
 
       if ('geolocation' in navigator) {
@@ -197,31 +217,42 @@ export function LocationPicker({
       }
       liveLocationMarkerRef.current = null;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEmptyState]);
 
+  // Whenever the customer address changes, re-center the map on it — even
+  // if a `selectedLocation` pin is already present. The pin stays visible.
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map || !defaultAddress || defaultAddress === prevAddressRef.current) return;
-    prevAddressRef.current = defaultAddress;
+    if (!map) return;
+    if (!hasAddress) return;
+    if (trimmedAddress === prevAddressRef.current) return;
 
+    prevAddressRef.current = trimmedAddress;
+    setGeocodeFailed(false);
     (async () => {
-      const coords = await geocodeAddress(defaultAddress);
+      const coords = await geocodeAddress(trimmedAddress);
       if (coords) {
         map.flyTo([coords.lat, coords.lng], 18, { duration: 1 });
+      } else {
+        setGeocodeFailed(true);
       }
     })();
-  }, [defaultAddress]);
+  }, [trimmedAddress, hasAddress]);
 
   const resetToDefault = async () => {
-    if (!mapInstanceRef.current || !defaultAddress) return;
+    if (!mapInstanceRef.current || !hasAddress) return;
     setIsLoading(true);
-    const coords = await geocodeAddress(defaultAddress);
+    setGeocodeFailed(false);
+    const coords = await geocodeAddress(trimmedAddress);
     if (coords) {
       mapInstanceRef.current.setView([coords.lat, coords.lng], 18);
       if (markerRef.current) {
         mapInstanceRef.current.removeLayer(markerRef.current);
         markerRef.current = null;
       }
+    } else {
+      setGeocodeFailed(true);
     }
     setIsLoading(false);
   };
@@ -286,7 +317,7 @@ export function LocationPicker({
               variant="default"
               size="sm"
               onClick={handleUseMyLocation}
-              disabled={isLocating || isLoading}
+              disabled={isLocating || isLoading || showEmptyState}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {isLocating ? (
@@ -296,7 +327,7 @@ export function LocationPicker({
               )}
               {isLocating ? "Locating..." : "Use My Location"}
             </Button>
-            {defaultAddress && (
+            {hasAddress && (
               <Button
                 type="button"
                 variant="outline"
@@ -322,7 +353,16 @@ export function LocationPicker({
               <p className="text-sm text-red-800">{locationError}</p>
             </div>
           )}
-          
+
+          {geocodeFailed && !showEmptyState && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-amber-800">
+                Couldn't locate this address — click on the map to set the work location.
+              </p>
+            </div>
+          )}
+
           {selectedLocation && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-sm font-medium text-blue-900">Selected Location:</p>
@@ -331,22 +371,34 @@ export function LocationPicker({
               </p>
             </div>
           )}
-          
-          <div className="relative">
-            <div 
-              ref={mapRef} 
-              className="w-full h-64 rounded-lg border border-gray-300"
-              style={{ minHeight: "256px" }}
-            />
-            {isLoading && (
-              <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-lg">
-                <div className="flex items-center gap-2 text-gray-600">
-                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                  Loading map...
-                </div>
+
+          {showEmptyState ? (
+            <div className="w-full h-64 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center px-4">
+              <div className="text-center">
+                <MapPin className="w-6 h-6 text-gray-400 mx-auto mb-2" />
+                <p className="text-sm font-medium text-gray-700">No address on file for this customer</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Add an address to the customer profile to enable map centering.
+                </p>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <div
+                ref={mapRef}
+                className="w-full h-64 rounded-lg border border-gray-300"
+                style={{ minHeight: "256px" }}
+              />
+              {isLoading && (
+                <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-lg">
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    Loading map...
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

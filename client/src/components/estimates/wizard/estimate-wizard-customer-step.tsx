@@ -16,6 +16,7 @@ import {
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { LocationFields } from "@/components/location/location-fields";
 import { LocationPicker } from "@/components/ui/location-picker";
+import { composeCustomerAddress } from "@/lib/customer-address";
 import {
   User,
   Mail,
@@ -209,8 +210,7 @@ export function EstimateWizardCustomerStep({
   const mapDefaultAddress =
     value.workLocation?.address ||
     value.projectAddress ||
-    value.customer?.address ||
-    "";
+    composeCustomerAddress(value.customer);
 
   return (
     <div className="space-y-4">
