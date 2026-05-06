@@ -341,8 +341,8 @@ export const estimates = pgTable("estimates", {
   estimateDate: timestamp("estimate_date").defaultNow().notNull(), // Date of estimate creation
   status: text("status").notNull().default("pending"), // pending, approved, rejected, expired
   // Internal review track (separate from customer-facing `status`).
-  // Allowed values for Slice 7: pending_approval, approved_internal, sent_to_customer.
-  // Reserved for future slices: needs_revision, draft.
+  // Allowed values: draft, pending_approval, approved_internal, sent_to_customer.
+  // Reserved for future slices: needs_revision.
   internalStatus: text("internal_status").notNull().default("pending_approval"),
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -844,7 +844,8 @@ export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
 export type Assembly = typeof assemblies.$inferSelect;
 export type AssemblyPart = typeof assemblyParts.$inferSelect;
-export type Estimate = typeof estimates.$inferSelect;
+import type { LifecycleStatus } from "./lifecycle";
+export type Estimate = typeof estimates.$inferSelect & { lifecycleStatus?: LifecycleStatus };
 export type EstimateItem = typeof estimateItems.$inferSelect;
 export type PropertyZone = typeof propertyZones.$inferSelect;
 export type Zone = typeof zones.$inferSelect;

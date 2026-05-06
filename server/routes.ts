@@ -4797,10 +4797,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/estimates", requireAuthentication, async (req, res) => {
     try {
       const parsed = createEstimateWithItemsSchema.parse(req.body);
-      // Defence-in-depth: regardless of what the client sends, every new
-      // estimate enters the manager review queue. A malicious or buggy
-      // client cannot bypass the queue by submitting `sent_to_customer`.
-      (parsed.estimate as { internalStatus?: string }).internalStatus = 'pending_approval';
+      // Defence-in-depth: only `draft` and `pending_approval` may be set on
+      // create. Anything else (including the customer-facing `sent_to_customer`)
+      // is coerced to the manager review queue so a malicious or buggy client
+      // cannot bypass review. Slice 10a allows `draft` so wizard "Save as draft"
+      // can land here without an extra transition call.
+      {
+        const estimateBody = parsed.estimate as { internalStatus?: string };
+        const requested = estimateBody.internalStatus;
+        estimateBody.internalStatus = requested === 'draft' ? 'draft' : 'pending_approval';
+      }
       // Single sanctioned entry point — same service the wet-check
       // conversion engine calls — so the two flows can never drift in
       // pricing semantics or downstream side effects.
@@ -6333,6 +6339,68 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Send approval email to customer
+  // Shared helper for sending an estimate's approval email. Used by both
+  // POST /api/estimates/:id/send-approval-email and the new transition
+  // endpoint (`send_to_customer` and `resend`) so token generation, the
+  // `approvalSentAt` / `internalStatus = sent_to_customer` write, and the
+  // Postmark send all live in one place. Optionally also resets
+  // `estimateDate` (used by `resend` to clear the expired bucket).
+  async function _sendEstimateApprovalEmailFlow(
+    estimateId: number,
+    opts: { resetEstimateDate?: boolean } = {},
+  ) {
+    const crypto = await import('crypto');
+    const approvalToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpiresAt = new Date();
+    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
+
+    const updates: Partial<InsertEstimate> = {
+      approvalToken,
+      tokenExpiresAt,
+      approvalSentAt: new Date(),
+      internalStatus: "sent_to_customer",
+      ...(opts.resetEstimateDate ? { estimateDate: new Date() } : {}),
+    };
+    await storage.updateEstimate(estimateId, updates);
+
+    const estimateWithItems = await storage.getEstimate(estimateId);
+    if (!estimateWithItems) throw new Error(`Estimate ${estimateId} not found after update`);
+    const items = estimateWithItems.items ?? [];
+    const laborRate = parseFloat(estimateWithItems.laborRate);
+
+    const { EmailService } = await import('./email-service');
+    await EmailService.sendEstimateApprovalEmail({
+      estimateId: estimateWithItems.id,
+      estimateNumber: estimateWithItems.estimateNumber,
+      customerName: estimateWithItems.customerName,
+      customerEmail: estimateWithItems.customerEmail,
+      projectName: estimateWithItems.projectName,
+      projectAddress: estimateWithItems.projectAddress || undefined,
+      workLocationLat: estimateWithItems.workLocationLat ?? null,
+      workLocationLng: estimateWithItems.workLocationLng ?? null,
+      workLocationAddress: estimateWithItems.workLocationAddress ?? null,
+      controllerLetter: estimateWithItems.controllerLetter ?? null,
+      zoneNumber: estimateWithItems.zoneNumber ?? null,
+      totalAmount: `$${parseFloat(estimateWithItems.totalAmount).toFixed(2)}`,
+      approvalToken,
+      estimateDate: new Date(estimateWithItems.estimateDate).toLocaleDateString(),
+      createdBy: estimateWithItems.createdBy,
+      companyId: estimateWithItems.companyId!,
+      items: items.map(item => ({
+        description: item.description || item.partName,
+        partName: item.partName,
+        quantity: item.quantity,
+        partPrice: parseFloat(item.partPrice),
+        laborHours: parseFloat(item.laborHours),
+        partsCost: parseFloat(item.totalPrice),
+        laborCost: parseFloat(item.laborHours) * laborRate,
+        lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
+      })),
+    });
+
+    return estimateWithItems;
+  }
+
   app.post("/api/estimates/:id/send-approval-email", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -6359,65 +6427,95 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(400).json({ message: "Estimate is not in a sendable internal state" });
       }
 
-      // Generate secure approval token with 30-day expiration
-      const crypto = await import('crypto');
-      const approvalToken = crypto.randomBytes(32).toString('hex');
-      const tokenExpiresAt = new Date();
-      tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30); // Token expires in 30 days
-      
-      // Update estimate with approval token, expiration, and sent timestamp.
-      // Also flip the internal review track to `sent_to_customer` so the
-      // estimate disappears from the manager review queue.
-      await storage.updateEstimate(id, {
-        approvalToken,
-        tokenExpiresAt,
-        approvalSentAt: new Date(),
-        internalStatus: "sent_to_customer",
-      } as any);
+      await _sendEstimateApprovalEmailFlow(id);
 
-      // Get estimate with items for email
-      const estimateWithItems = await storage.getEstimate(id);
-      const items = estimateWithItems?.items ?? [];
-      const laborRate = parseFloat(estimate.laborRate);
-
-      const { EmailService } = await import('./email-service');
-
-      await EmailService.sendEstimateApprovalEmail({
-        estimateId: estimate.id,
-        estimateNumber: estimate.estimateNumber,
-        customerName: estimate.customerName,
-        customerEmail: estimate.customerEmail,
-        projectName: estimate.projectName,
-        projectAddress: estimate.projectAddress || undefined,
-        workLocationLat: estimate.workLocationLat ?? null,
-        workLocationLng: estimate.workLocationLng ?? null,
-        workLocationAddress: estimate.workLocationAddress ?? null,
-        controllerLetter: estimate.controllerLetter ?? null,
-        zoneNumber: estimate.zoneNumber ?? null,
-        totalAmount: `$${parseFloat(estimate.totalAmount).toFixed(2)}`,
-        approvalToken,
-        estimateDate: new Date(estimate.estimateDate).toLocaleDateString(),
-        createdBy: estimate.createdBy,
-        companyId: estimate.companyId!,
-        items: items.map(item => ({
-          description: item.description || item.partName,
-          partName: item.partName,
-          quantity: item.quantity,
-          partPrice: parseFloat(item.partPrice),
-          laborHours: parseFloat(item.laborHours),
-          partsCost: parseFloat(item.totalPrice),
-          laborCost: parseFloat(item.laborHours) * laborRate,
-          lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
-        })),
-      });
-
-      res.json({ 
+      res.json({
         message: "Approval email sent successfully",
         sentAt: new Date()
       });
     } catch (error) {
       console.error('Error sending approval email:', error);
       res.status(500).json({ message: "Failed to send approval email" });
+    }
+  });
+
+  // Slice 10a — explicit lifecycle transition endpoint. One canonical
+  // entry point the upcoming Estimates Dashboard will use to move an
+  // estimate forward. Validates the transition server-side; returns the
+  // freshly-loaded estimate (with computed lifecycleStatus) on success
+  // or 400 with a human-readable message on an invalid transition.
+  app.post("/api/estimates/:id/transition", requireAuthentication, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ message: "Invalid estimate ID" });
+      }
+      const action = (req.body?.action ?? "") as string;
+      const allowedActions = ["submit_for_review", "send_to_customer", "resend"];
+      if (!allowedActions.includes(action)) {
+        return res.status(400).json({ message: `Unknown transition action: ${action}` });
+      }
+
+      const estimate = await storage.getEstimate(id);
+      if (!estimate) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+
+      const role = req.authenticatedUserRole;
+      const canSubmitForReview =
+        role === 'irrigation_manager' || role === 'company_admin' || role === 'super_admin';
+      const canResend = canSubmitForReview;
+      const canSendToCustomer =
+        role === 'billing_manager' || role === 'company_admin' || role === 'super_admin';
+
+      if (action === "submit_for_review") {
+        if (!canSubmitForReview) {
+          return res.status(403).json({ message: "Access denied. Submitting for review requires irrigation manager or admin role." });
+        }
+        if (estimate.internalStatus !== "draft") {
+          return res.status(400).json({ message: "Only draft estimates can be submitted for review" });
+        }
+        const updates: Partial<InsertEstimate> = {
+          internalStatus: "pending_approval",
+          updatedAt: new Date(),
+        };
+        await storage.updateEstimate(id, updates);
+        const fresh = await storage.getEstimate(id);
+        return res.json({ message: "Estimate submitted for review", estimate: fresh });
+      }
+
+      if (action === "send_to_customer") {
+        if (!canSendToCustomer) {
+          return res.status(403).json({ message: "Access denied. Sending to a customer requires billing manager or admin role." });
+        }
+        if (estimate.internalStatus !== "pending_approval") {
+          return res.status(400).json({ message: "Only estimates pending review can be sent to the customer" });
+        }
+        await _sendEstimateApprovalEmailFlow(id);
+        const fresh = await storage.getEstimate(id);
+        return res.json({ message: "Estimate sent to customer", estimate: fresh });
+      }
+
+      if (action === "resend") {
+        if (!canResend) {
+          return res.status(403).json({ message: "Access denied. Resending requires irrigation manager or admin role." });
+        }
+        if (estimate.lifecycleStatus !== "expired") {
+          return res.status(400).json({ message: "Only expired estimates can be resent" });
+        }
+        await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true });
+        const fresh = await storage.getEstimate(id);
+        return res.json({ message: "Estimate resent to customer", estimate: fresh });
+      }
+
+      // Unreachable due to allowedActions check.
+      return res.status(400).json({ message: "Unknown transition action" });
+    } catch (error) {
+      console.error('Estimate transition error:', error);
+      res.status(500).json({ message: "Failed to transition estimate" });
     }
   });
 

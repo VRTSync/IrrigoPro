@@ -134,6 +134,7 @@ import { db } from "./db";
 import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
+import { computeLifecycleStatus } from "@shared/lifecycle";
 import { ObjectStorageService } from "./objectStorage";
 
 // Executor accepted by storage helpers that may run inside a caller's
@@ -1550,7 +1551,8 @@ export class DatabaseStorage implements IStorage {
           ...estimate,
           partsSubtotal: partsSubtotal.toFixed(2),
           laborSubtotal: laborSubtotal.toFixed(2),
-          totalAmount: totalAmount.toFixed(2)
+          totalAmount: totalAmount.toFixed(2),
+          lifecycleStatus: computeLifecycleStatus(estimate),
         };
       })
     );
@@ -1593,6 +1595,7 @@ export class DatabaseStorage implements IStorage {
           partsSubtotal: partsSubtotal.toFixed(2),
           laborSubtotal: laborSubtotal.toFixed(2),
           totalAmount: totalAmount.toFixed(2),
+          lifecycleStatus: computeLifecycleStatus(estimate),
         };
       })
     );
@@ -1628,6 +1631,7 @@ export class DatabaseStorage implements IStorage {
       partsSubtotal: partsSubtotal.toFixed(2),
       laborSubtotal: laborSubtotal.toFixed(2),
       totalAmount: totalAmount.toFixed(2),
+      lifecycleStatus: computeLifecycleStatus(estimate),
       items,
     };
   }
@@ -1659,7 +1663,7 @@ export class DatabaseStorage implements IStorage {
       }).returning();
       createdItems.push(createdItem);
     }
-    return { ...newEstimate, items: createdItems };
+    return { ...newEstimate, lifecycleStatus: computeLifecycleStatus(newEstimate), items: createdItems };
   }
 
   async createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
@@ -1691,7 +1695,8 @@ export class DatabaseStorage implements IStorage {
 
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {
     const [updatedEstimate] = await db.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
-    return updatedEstimate || undefined;
+    if (!updatedEstimate) return undefined;
+    return { ...updatedEstimate, lifecycleStatus: computeLifecycleStatus(updatedEstimate) } as Estimate;
   }
 
   async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
@@ -1711,7 +1716,7 @@ export class DatabaseStorage implements IStorage {
         }).returning();
         createdItems.push(createdItem);
       }
-      return { ...updatedEstimate, items: createdItems };
+      return { ...updatedEstimate, lifecycleStatus: computeLifecycleStatus(updatedEstimate), items: createdItems };
     });
   }
 
@@ -3773,7 +3778,8 @@ export class DatabaseStorage implements IStorage {
 
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {
-    return await db.select().from(estimates).where(eq(estimates.customerId, customerId)).orderBy(desc(estimates.createdAt));
+    const rows = await db.select().from(estimates).where(eq(estimates.customerId, customerId)).orderBy(desc(estimates.createdAt));
+    return rows.map((e) => ({ ...e, lifecycleStatus: computeLifecycleStatus(e) }) as Estimate);
   }
 
   async getBillingSheetsByCustomer(customerId: number): Promise<BillingSheetWithItems[]> {
