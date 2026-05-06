@@ -1,0 +1,251 @@
+# Slice 11 Hotfix #2 — Drizzle CASCADE Redundancy
+
+**Date:** 2026-05-06
+**Status:** Active hotfix during Slice 11 deploy. Supersedes the constraint-drift theory in `slice-11-hotfix-migration-constraint-drift.md`.
+**Type:** Operational, two-actor (Replit agent + human operator)
+
+---
+
+## TL;DR
+
+Slice 11's deploy migration is failing on `ALTER TABLE work_order_items DROP CONSTRAINT work_order_items_zone_id_estimate_zones_id_fk` with `does not exist`. The first hotfix theorized this was constraint-naming drift (`_fkey` vs `_fk`); diagnostic confirmed that's not it — the constraints exist with the exact Drizzle-expected names.
+
+The real cause is a **redundant operation in the Drizzle-generated migration**. The migration drops `estimate_zones` with `CASCADE` two lines before the explicit `DROP CONSTRAINT` statements. Per PostgreSQL's documented CASCADE semantics, the CASCADE auto-drops every foreign key referencing `estimate_zones` — including the two zone_id FKs the migration then tries to drop explicitly. The second drop fails because the constraint was already dropped by the CASCADE.
+
+The earlier diagnostic showed the constraints "still exist" because the failed migration rolled back atomically and restored everything. So the constraints exist *post-rollback*, but they're gone *mid-migration* by the time the explicit DROP runs.
+
+The fix: pre-execute the destructive operations as a manual transaction in production (which Randy runs himself via Replit's SQL console — the agent is read-only), then click Publish. With the destructive parts already done, Drizzle's regenerated diff covers only additive operations (CREATE photo_late_additions, ADD COLUMN work_location_*, FK renames, etc.) and the publish runs cleanly.
+
+---
+
+## Decisions locked
+
+- **Q1 = Verify the CASCADE theory before any destructive operation.** The agent runs a non-destructive query against the production read-replica that confirms (a) the two zone FK constraints exist and reference `estimate_zones`, and (b) the live state is consistent with a clean post-rollback (no `photo_late_additions`, `estimate_zones` still present, `billing_number_counters` row count ≥ 1). If those queries return as expected, the theory is confirmed and we proceed.
+
+- **Q2 = Randy executes the destructive SQL.** The Replit agent has read-only access; Randy has write access via Replit's production SQL console. The destructive transaction (DROP CONSTRAINT, DROP COLUMN, DROP TABLE, DROP INDEX) is Randy's task, not the agent's. The slice provides the exact SQL block for Randy to paste.
+
+- **Q3 = Single transaction, with a verification SELECT before COMMIT.** The destructive operations run inside a `BEGIN ... COMMIT` block. The last statement before `COMMIT` is a SELECT that confirms the expected state (estimate_zones gone, zone_id columns gone). If the SELECT returns the wrong values, Randy `ROLLBACK` instead of `COMMIT` — nothing is changed.
+
+- **Q4 = Publish runs the additive remainder.** With `estimate_zones`, the zone_id columns, the orphan index, and the `one_routing_target` constraint already dropped manually, the next Publish only needs to: create `photo_late_additions`, add `work_location_*` / `controller_letter` / `zone_number` columns, rename `_fkey` constraints to `_fk`, add the new `wet_check_finding_single_target` CHECK. No destructive operations.
+
+- **Q5 = No code or migration .sql files are edited in this slice.** Randy's manual transaction handles the destructive parts directly in the live DB. Drizzle's snapshot will reconcile naturally on the next regeneration. A future slice can add `drizzle-kit introspect` to the publish workflow to prevent this class of redundancy bug going forward — out of scope here.
+
+---
+
+## Why this slice exists
+
+Two failed deploy attempts and one hotfix that diagnosed the wrong root cause have left Slice 11 stuck. This slice formalizes the correct theory, the verification step, and the manual repair so anyone picking it up has a clear sequence and the rationale on file. It also writes down what we learned for future Drizzle migrations that hit the same CASCADE-redundancy pattern.
+
+---
+
+## What changes
+
+**Production database (manual, by Randy):**
+- Drop `work_order_items_zone_id_estimate_zones_id_fk` constraint.
+- Drop `estimate_items_zone_id_estimate_zones_id_fk` constraint.
+- Drop `work_order_items.zone_id` column.
+- Drop `estimate_items.zone_id` column.
+- Drop `estimate_zones` table.
+- Drop `wet_check_findings.one_routing_target` constraint.
+- Drop `missing_photos_notifications_last_sms_sid_idx` index.
+
+All of the above are operations the Drizzle-generated migration was attempting anyway — this slice just runs them explicitly, in a working order, before the publish.
+
+**Repository:** no changes. Specifically not changed:
+- `shared/schema.ts` — already correct (Slice 11 added `billingNumberCounters`).
+- `migrations/*.sql` — Replit's Publish flow auto-generates SQL on each publish; no checked-in migration to edit.
+- `migrations/backups/work_order_items_zone_ids_pre_drop.csv` — already in place from Slice 11.
+
+---
+
+## Two-actor execution sequence
+
+### Step 1 — Replit agent runs verification (read-only)
+
+Paste this into the Replit agent:
+
+> # Verify the CASCADE theory before any destructive operation
+>
+> Run both queries against the production read-replica and report verbatim output. Do not propose next steps after; just report.
+>
+> Query A — confirm both zone FKs exist and reference `estimate_zones`:
+> ```sql
+> SELECT
+>   c.conname AS constraint_name,
+>   c.conrelid::regclass AS owning_table,
+>   c.confrelid::regclass AS references_table,
+>   pg_get_constraintdef(c.oid) AS definition
+> FROM pg_constraint c
+> WHERE c.contype = 'f'
+>   AND c.conrelid IN ('work_order_items'::regclass, 'estimate_items'::regclass)
+>   AND c.conname LIKE '%zone%';
+> ```
+>
+> Expected: two rows, both showing `references_table = estimate_zones`.
+>
+> Query B — confirm clean post-rollback state:
+> ```sql
+> SELECT to_regclass('photo_late_additions') AS new_table_should_be_null,
+>        to_regclass('estimate_zones')        AS old_table_should_be_present,
+>        (SELECT COUNT(*) FROM billing_number_counters) AS counter_rows;
+> ```
+>
+> Expected: `null`, `estimate_zones`, ≥1.
+>
+> Query C — confirm there are no other FK constraints referencing `estimate_zones` we'd miss:
+> ```sql
+> SELECT c.conname, c.conrelid::regclass AS owning_table
+> FROM pg_constraint c
+> WHERE c.contype = 'f' AND c.confrelid = 'estimate_zones'::regclass;
+> ```
+>
+> Expected: same two rows from Query A. If a third row appears, stop and report — that's an FK we didn't account for.
+
+If all three queries return the expected results, proceed to Step 2. If any return differently, stop and reassess.
+
+### Step 2 — Randy runs the destructive transaction (production SQL console, write access)
+
+Paste this into Replit's production SQL console:
+
+```sql
+BEGIN;
+
+-- Drop the zone FK constraints first, before the table drop.
+-- This works regardless of whether the existing constraint name was the Drizzle convention or PG default.
+ALTER TABLE work_order_items DROP CONSTRAINT IF EXISTS work_order_items_zone_id_estimate_zones_id_fk;
+ALTER TABLE work_order_items DROP CONSTRAINT IF EXISTS work_order_items_zone_id_fkey;
+ALTER TABLE estimate_items DROP CONSTRAINT IF EXISTS estimate_items_zone_id_estimate_zones_id_fk;
+ALTER TABLE estimate_items DROP CONSTRAINT IF EXISTS estimate_items_zone_id_fkey;
+
+-- Drop the zone_id columns. The 18 affected work_order_items rows are backed up in
+-- migrations/backups/work_order_items_zone_ids_pre_drop.csv from Slice 11.
+ALTER TABLE work_order_items DROP COLUMN IF EXISTS zone_id;
+ALTER TABLE estimate_items DROP COLUMN IF EXISTS zone_id;
+
+-- Drop the orphan estimate_zones table. RLS no longer matters once the table is gone.
+ALTER TABLE estimate_zones DISABLE ROW LEVEL SECURITY;
+DROP TABLE IF EXISTS estimate_zones;
+
+-- Drop the old one-of-three-routing-targets check constraint. The new
+-- wet_check_finding_single_target constraint will be added by the next publish.
+ALTER TABLE wet_check_findings DROP CONSTRAINT IF EXISTS one_routing_target;
+
+-- Drop the orphan index Drizzle wants gone.
+DROP INDEX IF EXISTS missing_photos_notifications_last_sms_sid_idx;
+
+-- Verification SELECT — every value must match the comment before COMMIT.
+SELECT
+  to_regclass('estimate_zones')                                                                                AS estimate_zones_should_be_null,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='work_order_items' AND column_name='zone_id') AS work_order_zone_id_should_be_false,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='estimate_items'   AND column_name='zone_id') AS estimate_items_zone_id_should_be_false,
+  EXISTS(SELECT 1 FROM pg_constraint WHERE conname='one_routing_target')                                       AS one_routing_target_should_be_false,
+  EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='missing_photos_notifications_last_sms_sid_idx')             AS orphan_index_should_be_false,
+  (SELECT COUNT(*) FROM billing_number_counters)                                                                AS counter_rows_must_be_at_least_1;
+
+COMMIT;
+```
+
+Expected verification output, before committing:
+- `estimate_zones_should_be_null` = `null`
+- `work_order_zone_id_should_be_false` = `f`
+- `estimate_items_zone_id_should_be_false` = `f`
+- `one_routing_target_should_be_false` = `f`
+- `orphan_index_should_be_false` = `f`
+- `counter_rows_must_be_at_least_1` ≥ 1
+
+If any value is wrong, run `ROLLBACK;` instead of `COMMIT;`. The transaction reverts cleanly and we reassess.
+
+### Step 3 — Click Publish
+
+With Step 2 committed, Replit's Publish flow regenerates the migration. The new diff should only contain additive operations:
+- `CREATE TABLE photo_late_additions` plus its index and FK constraints
+- `ALTER TABLE estimates / work_orders / billing_sheets ADD COLUMN ...` for the work_location and controller fields
+- `ALTER TABLE ... DROP CONSTRAINT ..._fkey; ALTER TABLE ... ADD CONSTRAINT ..._fk ...` for the wet_check_* and property_controllers FK rename churn
+- `ALTER TABLE wet_check_findings ADD CONSTRAINT wet_check_finding_single_target CHECK ...`
+
+No `DROP TABLE`, no `DROP COLUMN`, no zone-related operations. Click Publish. The deploy should run clean.
+
+If Publish surfaces another destructive warning that wasn't in Step 2's plan, stop and report — that's a fourth thing we didn't account for, and it goes through the same verify-then-execute cycle before approving.
+
+### Step 4 — Smoke test (Replit agent + Randy together)
+
+Paste the smoke-test prompt into the Replit agent:
+
+> # Slice 11 post-deploy smoke test
+>
+> Run these queries against production and report results:
+>
+> ```sql
+> SELECT to_regclass('photo_late_additions')           AS new_table_should_be_present,
+>        to_regclass('estimate_zones')                  AS old_table_should_be_null,
+>        (SELECT COUNT(*) FROM billing_number_counters) AS counter_rows,
+>        EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='estimates' AND column_name='work_location_lat') AS estimates_has_new_columns,
+>        EXISTS(SELECT 1 FROM pg_constraint WHERE conname='wet_check_finding_single_target')                              AS new_check_constraint_present;
+> ```
+>
+> Expected: `photo_late_additions`, `null`, ≥1, `t`, `t`.
+
+Then Randy creates one billing sheet through the app and confirms the billing number is sequential (one greater than the previous max for that prefix). This proves `getNextBillingNumber()` still works against the now-tracked `billing_number_counters` table.
+
+### Step 5 — Report
+
+Single message back, including:
+- Verification query outputs from Step 1 (already done).
+- The verification SELECT row from Step 2's transaction.
+- Confirmation that Step 3's Publish ran without any destructive warnings or errors.
+- Step 4's smoke test results.
+- A one-sentence sign-off that Slice 10a's deploy is now unblocked.
+
+---
+
+## Risks and rollback
+
+- **Step 2 transaction half-fails partway through.** Postgres single-transaction semantics protect us — any individual statement failure auto-aborts the transaction; nothing is committed. Mitigation: the `IF EXISTS` clauses on every DROP make each statement idempotent so they don't fail just because something doesn't exist.
+
+- **Verification SELECT before COMMIT shows wrong values.** Run `ROLLBACK;`. No changes applied. Reassess what's different from expected.
+
+- **Publish in Step 3 still surfaces a `DROP` operation we didn't predict.** Possibilities: (a) Drizzle's snapshot has more orphans than we identified; (b) some other `_fkey` constraint Drizzle wants to rename has drift. Treat any new destructive line as a separate verify-then-execute sub-task — do not rubber-stamp.
+
+- **Smoke test fails after Step 3.** Most likely culprit: `getNextBillingNumber()` raw-SQL bootstrap can no longer find `billing_number_counters`. But Slice 11's earlier deploy attempt already confirmed the table is present and the row count is intact. If this fails, it points to a separate bug in the schema declaration vs. the runtime SQL. Reassess.
+
+**Rollback after Step 2 commit:** if the manual transaction commits and Step 3's Publish then breaks something downstream, rollback options:
+- Recreate `estimate_zones` from prior schema definition (the table had no rows of meaningful data). The 18 zone associations in `work_order_items` are recoverable from the CSV in `migrations/backups/`.
+- Re-add the zone_id columns and re-populate from CSV.
+- Restore the `one_routing_target` constraint definition from git history if a wet-check flow regression appears.
+
+None of these rollbacks are clean one-step operations — they're recovery scripts, not commands. If a rollback is needed, expect to spend an hour reconstructing.
+
+---
+
+## Success criteria
+
+Slice 11 Hotfix #2 ships when, in order:
+
+1. Step 1's three verification queries all return expected results.
+2. Step 2's transaction commits cleanly with the verification SELECT showing every value as expected.
+3. Step 3's Publish runs to completion without surfacing any new destructive operations beyond what was already executed manually.
+4. Step 4's smoke test queries all return expected values, and a fresh billing sheet through the app gets a sequential billing number.
+5. The Slice 7 pending-approval queue and the customer-approval-by-link flow both still work end-to-end (manual click-through).
+6. Slice 10a's branch can now be deployed without resurfacing this issue.
+
+---
+
+## What this unblocks (and what it doesn't)
+
+**Unblocks:**
+- Slice 10a deploy — the schema/lifecycle work that was waiting on this migration to land.
+- Slices 10b/10c/10d — all of which depend on 10a's `lifecycleStatus` field being live.
+
+**Does not unblock (still tech debt):**
+- The CASCADE-redundancy bug in Drizzle's migration generator. It will keep generating these redundant `DROP CONSTRAINT` statements after `DROP TABLE CASCADE`. Future migrations that drop tables will hit the same pattern. The mitigation is either (a) always pre-execute destructive operations manually before publish, which is what we just did and is fragile, or (b) add `drizzle-kit introspect` to the workflow so the snapshot reflects live DB reality before each migration generation. A future polish slice should pick this up — call it Slice 11c.
+- The `_fkey` → `_fk` constraint rename churn that Drizzle keeps generating. The wet_check_*, property_controllers, and issue_type_configs constraints will keep getting renamed every time the snapshot drifts. Same mitigation as above.
+
+---
+
+## Notes for future Drizzle deploys
+
+If a future migration prompt shows `DROP TABLE x CASCADE` followed by `ALTER TABLE y DROP CONSTRAINT y_x_id_fk` for any `y` whose FK references `x`:
+
+- Don't approve as-is. The CASCADE will drop the FK; the explicit DROP will then fail.
+- Either pre-execute the destructive parts manually (this slice's pattern) or edit the generated SQL to add `IF EXISTS` to the redundant DROP CONSTRAINT lines.
+- Track this debt — every time it bites is a signal that the introspection workflow upgrade is overdue.
