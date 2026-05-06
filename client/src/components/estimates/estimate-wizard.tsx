@@ -68,6 +68,8 @@ interface EstimateApiPayload {
   items: EstimateApiPayloadItem[];
 }
 
+type SubmitMode = "draft" | "submit";
+
 interface EstimateWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -440,19 +442,58 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     draftReadyRef.current = true;
   };
 
-  const saveMutation = useMutation<unknown, Error, EstimateApiPayload>({
-    mutationFn: async (payload) => {
-      if (isEdit) return await apiRequest(`/api/estimates/${estimateId}`, "PUT", payload);
-      return await apiRequest("/api/estimates", "POST", payload);
+  const isDraftEdit = isEdit && existing?.internalStatus === "draft";
+
+  const saveMutation = useMutation<
+    { mode: SubmitMode; id: number | null; transitionFailed?: boolean },
+    Error,
+    { payload: EstimateApiPayload; mode: SubmitMode }
+  >({
+    mutationFn: async ({ payload, mode }) => {
+      let savedId: number | null = estimateId ?? null;
+      if (isEdit) {
+        await apiRequest(`/api/estimates/${estimateId}`, "PUT", payload);
+      } else {
+        const created = (await apiRequest("/api/estimates", "POST", payload)) as { id?: number };
+        savedId = created?.id ?? null;
+      }
+      // Edit-mode draft → "Submit for Approval" requires the lifecycle
+      // transition call after the PUT succeeds. Surface a partial-failure
+      // state (saved, but not submitted) so the toast can be recoverable.
+      if (isEdit && isDraftEdit && mode === "submit" && savedId != null) {
+        try {
+          await apiRequest(`/api/estimates/${savedId}/transition`, "POST", {
+            action: "submit_for_review",
+          });
+        } catch (err) {
+          return { mode, id: savedId, transitionFailed: true };
+        }
+      }
+      return { mode, id: savedId };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       if (isEdit && estimateId) {
         queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       }
       clearDraft(estimateId ?? null);
-      toast({ title: "Estimate sent to approval queue" });
+      if (result.transitionFailed) {
+        toast({
+          title: "Saved as draft, but couldn't submit for review",
+          description: "Your changes were saved. Try submitting again from the draft.",
+          variant: "destructive",
+        });
+        onOpenChange(false);
+        return;
+      }
+      if (result.mode === "draft") {
+        toast({ title: isDraftEdit ? "Draft saved" : "Saved to drafts" });
+      } else if (isDraftEdit) {
+        toast({ title: "Submitted for review" });
+      } else {
+        toast({ title: isEdit ? "Estimate updated" : "Estimate sent to approval queue" });
+      }
       onOpenChange(false);
     },
     onError: (err) => {
@@ -464,7 +505,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     },
   });
 
-  const handleSubmit = () => {
+  const handleSubmit = (mode: SubmitMode = "submit") => {
     if (!customerStep.customer) {
       toast({ title: "Customer required", variant: "destructive" });
       setStep(1);
@@ -486,13 +527,14 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       locationNotes: customerStep.locationNotes.trim() || "",
       accessInstructions: customerStep.accessInstructions.trim() || "",
       status: existing?.status ?? "pending",
-      // Round-trip the manager-internal review status when editing so an
-      // already-approved estimate doesn't silently bounce back to
-      // "pending_approval". New estimates omit this field and the server
-      // defaults to "pending_approval".
-      ...(isEdit && existing?.internalStatus
-        ? { internalStatus: existing.internalStatus }
-        : {}),
+      // Slice 10c — Save as draft sets internalStatus="draft". For
+      // edit/submit we round-trip the existing review status; for new
+      // submits we let the server default to "pending_approval".
+      ...(mode === "draft"
+        ? { internalStatus: "draft" }
+        : isEdit && existing?.internalStatus
+          ? { internalStatus: existing.internalStatus }
+          : {}),
       partsSubtotal: totals.partsSubtotal.toFixed(2),
       laborSubtotal: totals.laborSubtotal.toFixed(2),
       totalAmount: totals.totalAmount.toFixed(2),
@@ -515,7 +557,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       description: it.description,
       sortOrder: index,
     }));
-    saveMutation.mutate({ estimate, items: itemsPayload });
+    saveMutation.mutate({ payload: { estimate, items: itemsPayload }, mode });
   };
 
   const requestClose = () => {
@@ -538,7 +580,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       if (tag === "BUTTON" || tag === "A") return;
       if (step === 3 && !saveMutation.isPending) {
         e.preventDefault();
-        handleSubmit();
+        handleSubmit("submit");
       }
     }
   };
@@ -591,14 +633,26 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           <Button type="button" variant="outline" onClick={() => setStep(2)} className="flex-1">
             ← Back
           </Button>
+          {(!isEdit || isDraftEdit) && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleSubmit("draft")}
+              disabled={saveMutation.isPending}
+              className="flex-1"
+              data-testid="wizard-save-draft-mobile"
+            >
+              {isDraftEdit ? "Save" : "Draft"}
+            </Button>
+          )}
           <Button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => handleSubmit("submit")}
             disabled={saveMutation.isPending}
             className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
           >
             {saveMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            {isEdit ? "Save" : "Submit"}
+            {isEdit && !isDraftEdit ? "Save" : "Submit"}
           </Button>
         </>
       )}
@@ -723,9 +777,10 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 onPhotosChange={setPhotos}
                 onAttachmentsChange={setAttachments}
                 onBack={() => setStep(2)}
-                onSubmit={handleSubmit}
+                onSubmit={(mode) => handleSubmit(mode ?? "submit")}
                 submitting={saveMutation.isPending}
                 isEdit={isEdit}
+                isDraftEdit={isDraftEdit}
               />
             )}
           </div>

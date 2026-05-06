@@ -450,7 +450,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   Close
                 </Button>
                 {estimate.status !== 'converted_to_work_order' && onEdit && (
-                  <Button 
+                  <Button
                     onClick={() => {
                       onEdit(estimateId!);
                       onOpenChange(false);
@@ -459,7 +459,9 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     className="border-blue-200 text-blue-600 hover:bg-blue-50 w-full sm:w-auto"
                   >
                     <Edit2 className="w-4 h-4 mr-2" />
-                    Edit Estimate
+                    {estimate.lifecycleStatus === 'draft' || estimate.internalStatus === 'draft'
+                      ? 'Continue editing'
+                      : 'Edit Estimate'}
                   </Button>
                 )}
                 {/* Approval Actions for Pending Estimates */}

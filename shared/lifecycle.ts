@@ -57,3 +57,58 @@ export function computeLifecycleStatus(
 
   return "pending_review";
 }
+
+// Slice 10c — shared tint + label map so the board column headers and the
+// list status badges stay visually in sync. Tailwind class strings only;
+// the consumers compose them as needed.
+export const LIFECYCLE_TINTS: Record<
+  LifecycleStatus,
+  { label: string; bg: string; text: string; border: string }
+> = {
+  draft: {
+    label: "Draft",
+    bg: "bg-gray-100",
+    text: "text-gray-700",
+    border: "border-gray-200",
+  },
+  pending_review: {
+    label: "Pending review",
+    bg: "bg-amber-50",
+    text: "text-amber-700",
+    border: "border-amber-200",
+  },
+  sent: {
+    label: "Sent",
+    bg: "bg-blue-50",
+    text: "text-blue-700",
+    border: "border-blue-200",
+  },
+  approved: {
+    label: "Approved",
+    bg: "bg-green-50",
+    text: "text-green-700",
+    border: "border-green-200",
+  },
+  rejected: {
+    label: "Rejected",
+    bg: "bg-red-50",
+    text: "text-red-700",
+    border: "border-red-200",
+  },
+  expired: {
+    label: "Expired",
+    bg: "bg-gray-100",
+    text: "text-gray-500",
+    border: "border-gray-200",
+  },
+};
+
+// Lifecycle order used for list "Status" sorting.
+export const LIFECYCLE_ORDER: Record<LifecycleStatus, number> = {
+  draft: 0,
+  pending_review: 1,
+  sent: 2,
+  approved: 3,
+  rejected: 4,
+  expired: 5,
+};

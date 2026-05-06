@@ -29,9 +29,15 @@ interface EstimateWizardReviewStepProps {
   onPhotosChange: (next: UploadedFile[]) => void;
   onAttachmentsChange: (next: UploadedFile[]) => void;
   onBack: () => void;
-  onSubmit: () => void;
+  onSubmit: (mode?: "draft" | "submit") => void;
   submitting: boolean;
   isEdit: boolean;
+  /**
+   * Slice 10c — when editing an estimate whose lifecycle is `draft`, the
+   * footer flips to a dual CTA: "Save changes" (PUT only) + "Submit for
+   * Approval" (PUT + transition). Pass `true` to enable.
+   */
+  isDraftEdit?: boolean;
 }
 
 const fmt = (n: number) =>
@@ -58,6 +64,7 @@ export function EstimateWizardReviewStep({
   onSubmit,
   submitting,
   isEdit,
+  isDraftEdit,
 }: EstimateWizardReviewStepProps) {
   const totals = computeTotals(items, laborRate);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -243,20 +250,51 @@ export function EstimateWizardReviewStep({
       </Card>
 
       {/* Desktop footer */}
-      <div className="hidden sm:flex justify-between gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={onBack} data-testid="wizard-back-3">
-          ← Back to Line Items
-        </Button>
-        <Button
-          type="button"
-          onClick={onSubmit}
-          disabled={submitting}
-          className="bg-blue-600 hover:bg-blue-700 text-white"
-          data-testid="wizard-submit"
-        >
-          {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-          {isEdit ? "Save Changes" : "Submit for Approval"}
-        </Button>
+      <div className="hidden sm:flex flex-col gap-2 pt-2">
+        {isDraftEdit && (
+          <p className="text-xs text-gray-500 text-right">
+            Save changes keeps this as a draft. Submit for Approval sends it to the billing manager.
+          </p>
+        )}
+        <div className="flex justify-between gap-3">
+          <Button type="button" variant="outline" onClick={onBack} data-testid="wizard-back-3">
+            ← Back to Line Items
+          </Button>
+          <div className="flex items-center gap-2">
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onSubmit("draft")}
+                disabled={submitting}
+                data-testid="wizard-save-draft"
+              >
+                Save as draft
+              </Button>
+            )}
+            {isDraftEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onSubmit("draft")}
+                disabled={submitting}
+                data-testid="wizard-save-draft"
+              >
+                Save changes
+              </Button>
+            )}
+            <Button
+              type="button"
+              onClick={() => onSubmit("submit")}
+              disabled={submitting}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              data-testid="wizard-submit"
+            >
+              {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {isEdit && !isDraftEdit ? "Save Changes" : "Submit for Approval"}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
