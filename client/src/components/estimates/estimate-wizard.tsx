@@ -303,7 +303,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     // to come back before hydrating, so we hydrate the real customer in a
     // single pass (no flicker, no apparent re-pick prompt).
     if (existing.customerId && !realCustomerFetched) return;
-    const lr = parseFloat(existing.laborRate ?? "45") || 45;
+    // Prefer the snapshot appliedLaborRate so edit mode matches what the
+    // server uses to compute totals (storage.getEstimate prefers
+    // appliedLaborRate over laborRate). Falls back to the stamped
+    // laborRate, then the schema default.
+    const lr = parseFloat(String(existing.appliedLaborRate ?? existing.laborRate ?? "45")) || 45;
     setLaborRate(lr);
     const cust: Customer = realCustomer ?? ({
       id: existing.customerId,

@@ -4807,6 +4807,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const requested = estimateBody.internalStatus;
         estimateBody.internalStatus = requested === 'draft' ? 'draft' : 'pending_approval';
       }
+      // Authoritative labor rate: the customer record is the master.
+      // Override whatever the client sent on create so a tampered/stale
+      // payload can never bypass the customer's master rate. Falls back
+      // to the schema default (45.00) only if the customer truly has no
+      // rate on file.
+      const customerId = (parsed.estimate as { customerId?: number | null }).customerId ?? null;
+      if (customerId != null) {
+        const customer = await storage.getCustomer(customerId);
+        if (!customer) {
+          return res.status(400).json({ message: `Customer ${customerId} not found` });
+        }
+        const masterRate = String(customer.laborRate ?? "45.00");
+        (parsed.estimate as { laborRate: string }).laborRate = masterRate;
+        (parsed.estimate as { appliedLaborRate?: string | null }).appliedLaborRate = masterRate;
+      }
       // Single sanctioned entry point — same service the wet-check
       // conversion engine calls — so the two flows can never drift in
       // pricing semantics or downstream side effects.
@@ -4831,6 +4846,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid estimate ID" });
       }
       const parsed = createEstimateWithItemsSchema.parse(req.body);
+      // Authoritative labor rate on update: the customer record is the
+      // master, but we only override the stored rate when the customer
+      // actually changed. Editing an estimate without swapping the
+      // customer preserves the rate that was stamped at creation so
+      // historical totals do not silently shift.
+      const existing = await storage.getEstimate(estimateId);
+      if (!existing) {
+        return res.status(404).json({ message: "Estimate not found" });
+      }
+      const newCustomerId = (parsed.estimate as { customerId?: number | null }).customerId ?? null;
+      const customerChanged = newCustomerId != null && newCustomerId !== existing.customerId;
+      if (customerChanged) {
+        const customer = await storage.getCustomer(newCustomerId!);
+        if (!customer) {
+          return res.status(400).json({ message: `Customer ${newCustomerId} not found` });
+        }
+        const masterRate = String(customer.laborRate ?? "45.00");
+        (parsed.estimate as { laborRate: string }).laborRate = masterRate;
+        (parsed.estimate as { appliedLaborRate?: string | null }).appliedLaborRate = masterRate;
+      } else {
+        // Customer unchanged — preserve the originally stamped rate
+        // regardless of what the client sent so a stale/tampered payload
+        // cannot reprice the estimate behind the user's back. Use the
+        // snapshot (appliedLaborRate ?? laborRate) consistently for both
+        // fields so legacy records where the two diverged stay in sync
+        // with the read-time totals computed by storage.getEstimate.
+        const snapshotRate = String(existing.appliedLaborRate ?? existing.laborRate);
+        (parsed.estimate as { laborRate: string }).laborRate = snapshotRate;
+        (parsed.estimate as { appliedLaborRate?: string | null }).appliedLaborRate = snapshotRate;
+      }
       const { estimate, items } = processEstimatePayload(parsed);
       const updatedEstimate = await storage.updateEstimateWithItems(estimateId, estimate, items);
       res.json(updatedEstimate);
