@@ -27,6 +27,8 @@ import {
   computeTotals,
   type WizardLineItem,
 } from "./wizard/estimate-wizard-line-items-step";
+import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
+import { nextFlatTotalHoursForModeSwitch } from "@/components/wizard-shared/labor-mode-switch";
 import { EstimateWizardReviewStep } from "./wizard/estimate-wizard-review-step";
 import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
 
@@ -44,6 +46,9 @@ interface EstimateApiPayloadEstimate {
   laborSubtotal: string;
   totalAmount: string;
   laborRate: string;
+  // Task #396 — labor mode + flat-mode aggregate hours.
+  laborMode: LaborMode;
+  totalLaborHours: string;
   photos: string[];
   attachments: string[];
   workLocationLat: number | null;
@@ -223,6 +228,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   });
   const [items, setItems] = useState<WizardLineItem[]>([]);
   const [laborRate, setLaborRate] = useState<number>(45);
+  // Task #396 — labor mode defaults to 'flat' for new estimates.
+  const [laborMode, setLaborMode] = useState<LaborMode>("flat");
+  const [flatTotalHours, setFlatTotalHours] = useState<number>(0);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -257,6 +265,10 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         setCustomerStep(blank);
         setItems([]);
         setLaborRate(45);
+        // Task #396 — new wizard sessions always start in flat mode with
+        // 0 hours so a prior session can't leak labor settings forward.
+        setLaborMode("flat");
+        setFlatTotalHours(0);
         setPhotos([]);
         setAttachments([]);
         initialSnapshotRef.current = snapshot(blank, [], 45, [], []);
@@ -309,6 +321,16 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     // laborRate, then the schema default.
     const lr = parseFloat(String(existing.appliedLaborRate ?? existing.laborRate ?? "45")) || 45;
     setLaborRate(lr);
+    // Task #396 — hydrate labor mode + flat hours from persisted estimate.
+    const existingMode: LaborMode =
+      (existing as unknown as { laborMode?: string }).laborMode === "flat"
+        ? "flat"
+        : "per_part";
+    setLaborMode(existingMode);
+    const persistedFlatHours = parseFloat(
+      String((existing as unknown as { totalLaborHours?: string }).totalLaborHours ?? "0"),
+    ) || 0;
+    setFlatTotalHours(persistedFlatHours);
     const cust: Customer = realCustomer ?? ({
       id: existing.customerId,
       name: existing.customerName,
@@ -516,7 +538,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       setStep(2);
       return;
     }
-    const totals = computeTotals(items, laborRate);
+    const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
     const estimate: EstimateApiPayloadEstimate = {
       customerId: customerStep.customer.id,
       customerName: customerStep.customer.name,
@@ -539,6 +561,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       laborSubtotal: totals.laborSubtotal.toFixed(2),
       totalAmount: totals.totalAmount.toFixed(2),
       laborRate: laborRate.toFixed(2),
+      laborMode,
+      totalLaborHours: totals.totalLaborHours.toFixed(2),
       photos: photos.map((p) => p.url),
       attachments: attachments.map((a) => a.url),
       workLocationLat: customerStep.workLocation?.lat ?? null,
@@ -552,7 +576,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       partName: it.partName,
       partPrice: it.partPrice.toFixed(2),
       quantity: it.quantity,
-      laborHours: (it.laborHours * it.quantity).toFixed(2),
+      // Task #396 — In flat mode, per-line labor hours are zeroed at the
+      // payload boundary so the estimate's totalLaborHours is the single
+      // source of truth on the wire as well as on disk.
+      laborHours:
+        laborMode === "flat" ? "0.00" : (it.laborHours * it.quantity).toFixed(2),
       totalPrice: (it.partPrice * it.quantity).toFixed(2),
       description: it.description,
       sortOrder: index,
@@ -590,7 +618,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     if (customerStep.customer?.name) parts.push(customerStep.customer.name);
     if (customerStep.projectName.trim()) parts.push(customerStep.projectName.trim());
     if (step >= 2 && items.length > 0) {
-      const totals = computeTotals(items, laborRate);
+      const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
       parts.push(
         new Intl.NumberFormat("en-US", {
           style: "currency",
@@ -600,7 +628,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       );
     }
     return parts.length ? parts.join(" · ") : null;
-  }, [customerStep.customer?.name, customerStep.projectName, items, laborRate, step]);
+  }, [customerStep.customer?.name, customerStep.projectName, items, laborRate, laborMode, flatTotalHours, step]);
 
   const stickyMobileFooter = (
     <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
@@ -755,6 +783,15 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 onBack={() => setStep(1)}
                 onContinue={() => setStep(3)}
                 onChangeCustomer={() => setStep(1)}
+                laborMode={laborMode}
+                onLaborModeChange={(next) => {
+                  setFlatTotalHours((prev) =>
+                    nextFlatTotalHoursForModeSwitch(laborMode, next, prev, items),
+                  );
+                  setLaborMode(next);
+                }}
+                flatTotalHours={flatTotalHours}
+                onFlatTotalHoursChange={setFlatTotalHours}
               />
             ) : (
               <EstimateWizardReviewStep
@@ -769,6 +806,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 locationNotes={customerStep.locationNotes}
                 accessInstructions={customerStep.accessInstructions}
                 laborRate={laborRate}
+                laborMode={laborMode}
+                flatTotalHours={flatTotalHours}
                 items={items}
                 photos={photos}
                 attachments={attachments}

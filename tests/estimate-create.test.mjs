@@ -87,6 +87,9 @@ describe("Estimate creation — flat line items, no zones (Slice 1)", () => {
         estimateDate: new Date().toISOString(),
         status: "draft",
         laborRate: "75.00",
+        // Task #396 — this Slice 1 test asserts legacy per-line labor
+        // behavior; flat is the new default so the mode must be explicit.
+        laborMode: "per_part",
         createdBy: "Test Admin",
       },
       items,

@@ -266,6 +266,11 @@ const createEstimateWithItemsSchema = z.object({
     laborSubtotal: z.union([z.string(), z.number()]).optional(),
     totalAmount: z.union([z.string(), z.number()]).optional(),
     laborRate: z.union([z.string(), z.number()]),
+    // Task #396 — labor entry mode + flat-mode aggregate hours. Either field
+    // may be omitted for backward-compat; the payload normalizer defaults
+    // laborMode to 'flat' and totalLaborHours to 0.
+    laborMode: z.enum(["flat", "per_part"]).optional(),
+    totalLaborHours: z.union([z.string(), z.number()]).optional(),
     // Map picker / controller / zone fields are optional. Lat/Lng come from
     // the LocationPicker as numbers; persist them as decimal strings.
     workLocationLat: z
@@ -4876,6 +4881,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (parsed.estimate as { laborRate: string }).laborRate = snapshotRate;
         (parsed.estimate as { appliedLaborRate?: string | null }).appliedLaborRate = snapshotRate;
       }
+      // Task #396 — preserve persisted laborMode when the client omits it.
+      // processEstimatePayload defaults to 'flat' when laborMode is missing,
+      // which would silently flip a legacy per_part estimate to flat (and
+      // zero its per-line labor) on any update from a caller that doesn't
+      // explicitly send the mode.
+      const incomingLaborMode = (parsed.estimate as { laborMode?: 'flat' | 'per_part' | null })
+        .laborMode;
+      if (incomingLaborMode !== 'flat' && incomingLaborMode !== 'per_part') {
+        const persistedMode: 'flat' | 'per_part' =
+          (existing as { laborMode?: 'flat' | 'per_part' | null }).laborMode === 'per_part'
+            ? 'per_part'
+            : 'flat';
+        (parsed.estimate as { laborMode?: 'flat' | 'per_part' | null }).laborMode = persistedMode;
+      }
       const { estimate, items } = processEstimatePayload(parsed);
       const updatedEstimate = await storage.updateEstimateWithItems(estimateId, estimate, items);
       res.json(updatedEstimate);
@@ -6943,6 +6962,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         aiInputs: reqAiInputs,
         aiShortDescription,
         aiDetailedDescription,
+        // Task #396 — labor mode at completion. Defaults to flat (single
+        // totalHours value); per_part is accepted but the completion form
+        // does not currently surface a per-line labor input.
+        laborMode: incomingLaborMode,
       } = req.body;
 
       // Billing lock: prevent completing an already-billed work order
@@ -6977,8 +7000,41 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Snapshot the customer's configured labor rate at the time of completion.
       const appliedLaborRate = parseFloat(customerForRates?.laborRate || '0');
 
-      // Calculate totals
-      const laborHours = parseFloat(totalHours || '0');
+      // Task #396 — authoritative labor calculation by mode.
+      //   flat     → use the client-supplied totalHours.
+      //   per_part → recompute Σ(laborHours × quantity) across the work
+      //              order's persisted items so the saved labor snapshot
+      //              never drifts from the per-line breakdown carried on
+      //              the WO (e.g. inherited from the originating estimate).
+      const priorLaborModeForCalc: 'flat' | 'per_part' =
+        existingWorkOrder?.laborMode === 'per_part' ? 'per_part' : 'flat';
+      const completionLaborModeForCalc: 'flat' | 'per_part' =
+        incomingLaborMode === 'per_part' || incomingLaborMode === 'flat'
+          ? incomingLaborMode
+          : priorLaborModeForCalc;
+      let laborHours: number;
+      if (completionLaborModeForCalc === 'per_part') {
+        const persistedItems = await storage.getWorkOrderItems(workOrderId);
+        const sumFromPersisted = persistedItems.reduce(
+          (s, it) =>
+            s +
+            (parseFloat(String(it.laborHours ?? '0')) || 0) *
+              (parseFloat(String(it.quantity ?? '0')) || 0),
+          0,
+        );
+        const sumFromIncoming = Array.isArray(usedParts)
+          ? usedParts.reduce(
+              (s: number, p: { laborHours?: string | number; quantity?: string | number }) =>
+                s +
+                (parseFloat(String(p.laborHours ?? '0')) || 0) *
+                  (parseFloat(String(p.quantity ?? '0')) || 0),
+              0,
+            )
+          : 0;
+        laborHours = sumFromPersisted > 0 ? sumFromPersisted : sumFromIncoming;
+      } else {
+        laborHours = parseFloat(totalHours || '0');
+      }
       const partsCost = parseFloat(totalPartsCost || '0');
 
       const laborSubtotal = laborHours * appliedLaborRate;
@@ -6991,6 +7047,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       // Update work order with completion details and calculated totals
       // Field completion routes into pending_manager_review for manager approval
+      // Task #396 — labor mode resolved above (completionLaborModeForCalc).
+      const completionLaborMode = completionLaborModeForCalc;
+      if (
+        existingWorkOrder &&
+        existingWorkOrder.laborMode &&
+        existingWorkOrder.laborMode !== completionLaborMode
+      ) {
+        console.log(
+          `[AUDIT] work_order_labor_mode_changed workOrderId=${workOrderId} ` +
+          `from=${existingWorkOrder.laborMode} to=${completionLaborMode} reason=completion`
+        );
+      }
       const workOrder = await storage.updateWorkOrder(workOrderId, {
         status: 'pending_manager_review',
         completedAt: new Date(completedAt),
@@ -6998,6 +7066,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         completedByUserName: completedByUserName as string,
         workSummary,
         customerNotes,
+        laborMode: completionLaborMode,
         totalHours: laborHours.toString(),
         photos: mergedPhotos,
         totalPartsCost: partsCost.toString(),
@@ -7896,9 +7965,30 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const bsAuthorizedLaborRate = parseFloat(customerForRate.laborRate);
 
-      // Recalculate totals using the authoritative rate from the customer record
-      const bsTotalHours = parseFloat(billingSheetData.totalHours || '0');
+      // Task #396 — Labor mode normalization. 'flat' uses sheet.totalHours
+      // exclusively; 'per_part' sums per-line laborHours and rewrites the
+      // sheet's totalHours so the snapshot stays consistent.
+      const bsLaborMode: 'flat' | 'per_part' =
+        billingSheetData.laborMode === 'per_part' ? 'per_part' : 'flat';
+      const rawClientItemsForLabor: Array<{ laborHours?: string | number; quantity?: string | number }> =
+        Array.isArray(billingSheetData.items) ? billingSheetData.items : [];
+      // Task #396 — canonical per_part labor formula is
+      // Σ(item.laborHours × item.quantity). Per-row laborHours are
+      // per-unit, so they must be scaled by quantity.
+      const perPartHoursSum = rawClientItemsForLabor.reduce(
+        (sum, it) =>
+          sum +
+          (parseFloat(String(it.laborHours ?? 0)) || 0) *
+            (parseFloat(String(it.quantity ?? 0)) || 0),
+        0
+      );
+      const bsTotalHours = bsLaborMode === 'flat'
+        ? (parseFloat(billingSheetData.totalHours || '0') || 0)
+        : perPartHoursSum;
       const bsLaborSubtotal = bsTotalHours * bsAuthorizedLaborRate;
+      // Persist totalHours back so it is the authoritative aggregate in either mode.
+      billingSheetData.totalHours = bsTotalHours.toFixed(2);
+      billingSheetData.laborMode = bsLaborMode;
 
       // Server-side authoritative pricing (Task #160): for every catalog line item
       // (those with a `partId`), overwrite the client-supplied `unitPrice` with the
@@ -7952,6 +8042,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const unit = parseFloat(String(it.unitPrice ?? 0));
         const computedTotal = (qty * unit).toFixed(2);
         const rawTotal = (it as { totalPrice?: number | string }).totalPrice;
+        // Task #396 — In flat mode, per-line labor hours are zeroed out so
+        // they cannot accidentally be re-summed downstream.
+        const lineLaborHours = bsLaborMode === 'flat'
+          ? '0.00'
+          : String(it.laborHours ?? '0');
         return {
           partId: it.partId ?? null,
           partName: String(it.partName ?? ''),
@@ -7959,7 +8054,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           quantity: String(it.quantity ?? '0'),
           unitPrice: String(it.unitPrice ?? '0'),
           totalPrice: rawTotal != null ? String(rawTotal) : computedTotal,
-          laborHours: String(it.laborHours ?? '0'),
+          laborHours: lineLaborHours,
           notes: it.notes ?? null,
         };
       });
@@ -7988,6 +8083,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         technicianId: billingSheetData.technicianId || null,
         workDescription: billingSheetData.workDescription,
         status: resolvedStatus,
+        laborMode: bsLaborMode,
         totalHours: billingSheetData.totalHours || '0',
         laborRate: bsAuthorizedLaborRate.toFixed(2),
         laborSubtotal: bsLaborSubtotal.toFixed(2),
@@ -8188,6 +8284,55 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         billingSheetData.workDate = new Date(billingSheetData.workDate + 'T00:00:00.000Z');
       }
 
+      // Task #396 — Labor mode normalization on PATCH. If laborMode changes
+      // (or is supplied alongside hours/items), recompute totalHours and
+      // laborSubtotal authoritatively so a mode flip can never be silently
+      // out of sync with the persisted snapshot. Audit any switch.
+      if (
+        billingSheetData.laborMode !== undefined ||
+        billingSheetData.totalHours !== undefined ||
+        (Array.isArray(items) && items.length >= 0)
+      ) {
+        const priorLaborMode = existingBsForLockCheck?.laborMode ?? 'per_part';
+        const newLaborMode: 'flat' | 'per_part' =
+          billingSheetData.laborMode === 'per_part' || billingSheetData.laborMode === 'flat'
+            ? billingSheetData.laborMode
+            : (priorLaborMode === 'per_part' ? 'per_part' : 'flat');
+        const itemsForLabor: Array<{ laborHours?: string | number; quantity?: string | number }> =
+          Array.isArray(items) ? items : [];
+        // Task #396 — see POST: per_part labor must scale by quantity.
+        const perPartSum = itemsForLabor.reduce(
+          (sum, it) =>
+            sum +
+            (parseFloat(String(it.laborHours ?? 0)) || 0) *
+              (parseFloat(String(it.quantity ?? 0)) || 0),
+          0
+        );
+        let nextTotalHours: number;
+        if (newLaborMode === 'flat') {
+          nextTotalHours = parseFloat(
+            String(billingSheetData.totalHours ?? existingBsForLockCheck?.totalHours ?? '0')
+          ) || 0;
+        } else {
+          // per_part: prefer summing supplied items; fall back to existing total.
+          nextTotalHours = Array.isArray(items)
+            ? perPartSum
+            : (parseFloat(String(existingBsForLockCheck?.totalHours ?? '0')) || 0);
+        }
+        const patchRate = parseFloat(
+          String(billingSheetData.laborRate ?? existingBsForLockCheck?.laborRate ?? '0')
+        ) || 0;
+        billingSheetData.laborMode = newLaborMode;
+        billingSheetData.totalHours = nextTotalHours.toFixed(2);
+        billingSheetData.laborSubtotal = (nextTotalHours * patchRate).toFixed(2);
+        if (priorLaborMode !== newLaborMode) {
+          console.log(
+            `[AUDIT] billing_sheet_labor_mode_changed billingSheetId=${id} ` +
+            `from=${priorLaborMode} to=${newLaborMode} totalHours=${nextTotalHours.toFixed(2)}`
+          );
+        }
+      }
+
       // Recalculate totalAmount whenever subtotals are provided
       if (billingSheetData.laborSubtotal !== undefined || billingSheetData.partsSubtotal !== undefined) {
         const patchLaborSubtotal = parseFloat(billingSheetData.laborSubtotal || '0');
@@ -8297,6 +8442,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           }
         }
 
+        // Task #396 — Honor the (now-normalized) laborMode when persisting
+        // line items: flat-mode lines always store 0 labor hours.
+        const persistedLaborMode = billingSheetData.laborMode === 'per_part' ? 'per_part' : 'flat';
         const itemsToInsert = resolvedPatchItems.map((item: any) => ({
           billingSheetId: id,
           partId: item.partId || null,
@@ -8304,7 +8452,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           partDescription: item.partDescription || "",
           quantity: item.quantity,
           unitPrice: item.unitPrice.toString(),
-          laborHours: (item.laborHours ?? 0).toString(),
+          laborHours: persistedLaborMode === 'flat' ? '0.00' : (item.laborHours ?? 0).toString(),
           totalPrice: (Number(item.quantity) * Number(item.unitPrice)).toString(),
           notes: item.notes || "",
         }));
@@ -9064,6 +9212,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
 
         type WoCreateLine = RawBillingItem & { partPrice?: number | string };
+        // Task #396 — Honor work order's laborMode when persisting line items.
+        const woCreateLaborMode = workOrder.laborMode === 'per_part' ? 'per_part' : 'flat';
         let computedPartsCost = 0;
         for (const raw of resolvedWoCreateItems as WoCreateLine[]) {
           const qty = Number(raw.quantity) || 0;
@@ -9076,7 +9226,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             partName: raw.partName ?? "",
             partPrice: price.toString(),
             quantity: qty,
-            laborHours: (Number(raw.laborHours) || 0).toString(),
+            laborHours: woCreateLaborMode === 'flat'
+              ? '0.00'
+              : (Number(raw.laborHours) || 0).toString(),
             totalPrice: lineTotal.toString(),
             notes: raw.notes || null,
           });
@@ -9201,6 +9353,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         totalAmount: _totA,
         ...mutableWorkOrderBody
       } = workOrderBody;
+      // Task #396 — audit any laborMode change on a work order PATCH so the
+      // mode flip is traceable downstream alongside the totals it implies.
+      if (
+        mutableWorkOrderBody.laborMode !== undefined &&
+        existingForLockCheck &&
+        mutableWorkOrderBody.laborMode !== existingForLockCheck.laborMode
+      ) {
+        console.log(
+          `[AUDIT] work_order_labor_mode_changed workOrderId=${id} ` +
+          `from=${existingForLockCheck.laborMode ?? 'per_part'} to=${mutableWorkOrderBody.laborMode}`
+        );
+      }
       const workOrderData = insertWorkOrderSchema.partial().parse(mutableWorkOrderBody);
       let workOrder;
       if (Object.keys(workOrderData).length > 0) {

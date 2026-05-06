@@ -10,6 +10,7 @@ import { ChevronDown, ChevronRight, Image as ImageIcon, Paperclip, User, Briefca
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import type { Customer } from "@shared/schema";
 import { computeTotals, type WizardLineItem } from "./estimate-wizard-line-items-step";
+import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 
 interface EstimateWizardReviewStepProps {
   customer: Customer | null;
@@ -23,6 +24,8 @@ interface EstimateWizardReviewStepProps {
   locationNotes: string;
   accessInstructions: string;
   laborRate: number;
+  laborMode?: LaborMode;
+  flatTotalHours?: number;
   items: WizardLineItem[];
   photos: UploadedFile[];
   attachments: UploadedFile[];
@@ -55,6 +58,8 @@ export function EstimateWizardReviewStep({
   locationNotes,
   accessInstructions,
   laborRate,
+  laborMode = "per_part",
+  flatTotalHours = 0,
   items,
   photos,
   attachments,
@@ -66,7 +71,7 @@ export function EstimateWizardReviewStep({
   isEdit,
   isDraftEdit,
 }: EstimateWizardReviewStepProps) {
-  const totals = computeTotals(items, laborRate);
+  const totals = computeTotals(items, laborRate, laborMode, flatTotalHours);
   const [attachOpen, setAttachOpen] = useState(false);
   const total = photos.length + attachments.length;
 
@@ -142,19 +147,25 @@ export function EstimateWizardReviewStep({
       {/* Line items + totals */}
       <Card>
         <CardContent className="p-0">
+          {(() => {
+            const isFlat = laborMode === "flat";
+            const colCount = isFlat ? 3 : 4;
+            return (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-2 pl-3">Part</th>
                 <th className="py-2 px-2 w-16 text-right">Qty</th>
                 <th className="py-2 px-2 w-24 text-right">Unit</th>
-                <th className="py-2 px-2 w-24 text-right">Labor h</th>
+                {!isFlat && <th className="py-2 px-2 w-24 text-right">Labor h</th>}
                 <th className="py-2 pr-3 w-28 text-right">Line Total</th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => {
-                const lineTotal = it.partPrice * it.quantity + it.laborHours * it.quantity * laborRate;
+                const lineTotal = isFlat
+                  ? it.partPrice * it.quantity
+                  : it.partPrice * it.quantity + it.laborHours * it.quantity * laborRate;
                 return (
                   <tr key={it.rowId} className="border-b last:border-b-0 align-top">
                     <td className="py-2 pl-3">
@@ -163,7 +174,9 @@ export function EstimateWizardReviewStep({
                     </td>
                     <td className="py-2 px-2 text-right">{it.quantity}</td>
                     <td className="py-2 px-2 text-right">{fmt(it.partPrice)}</td>
-                    <td className="py-2 px-2 text-right">{(it.laborHours * it.quantity).toFixed(2)}</td>
+                    {!isFlat && (
+                      <td className="py-2 px-2 text-right">{(it.laborHours * it.quantity).toFixed(2)}</td>
+                    )}
                     <td className="py-2 pr-3 text-right font-semibold">{fmt(lineTotal)}</td>
                   </tr>
                 );
@@ -171,17 +184,17 @@ export function EstimateWizardReviewStep({
             </tbody>
             <tfoot>
               <tr className="border-t bg-gray-50">
-                <td colSpan={4} className="py-2 pl-3 text-sm text-gray-600 text-right">Parts</td>
+                <td colSpan={colCount} className="py-2 pl-3 text-sm text-gray-600 text-right">Parts</td>
                 <td className="py-2 pr-3 text-right text-sm font-medium">{fmt(totals.partsSubtotal)}</td>
               </tr>
               <tr className="bg-gray-50">
-                <td colSpan={4} className="py-2 pl-3 text-sm text-gray-600 text-right">
-                  Labor ({totals.totalLaborHours.toFixed(2)} h × {fmt(laborRate)}/hr)
+                <td colSpan={colCount} className="py-2 pl-3 text-sm text-gray-600 text-right">
+                  Labor {isFlat ? "(flat) " : ""}({totals.totalLaborHours.toFixed(2)} h × {fmt(laborRate)}/hr)
                 </td>
                 <td className="py-2 pr-3 text-right text-sm font-medium">{fmt(totals.laborSubtotal)}</td>
               </tr>
               <tr className="border-t border-green-200 bg-green-50">
-                <td colSpan={4} className="py-3 pl-3 text-base font-semibold text-green-800 text-right">Total</td>
+                <td colSpan={colCount} className="py-3 pl-3 text-base font-semibold text-green-800 text-right">Total</td>
                 <td
                   className="py-3 pr-3 text-right text-lg font-bold text-green-700"
                   data-testid="wizard-review-total"
@@ -191,6 +204,8 @@ export function EstimateWizardReviewStep({
               </tr>
             </tfoot>
           </table>
+            );
+          })()}
         </CardContent>
       </Card>
 

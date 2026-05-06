@@ -109,6 +109,9 @@ interface ItemValue {
 interface PartsLaborValue {
   items: ItemValue[];
   totalHours: number;
+  // Task #396 — labor mode for the billing sheet. 'flat' uses the
+  // single Hours Worked field; 'per_part' sums per-row laborHours×qty.
+  laborMode: "flat" | "per_part";
 }
 
 interface DescriptionValue {
@@ -138,7 +141,11 @@ const blankLocation = (): WizardLocationValue => ({
   zoneNumber: null,
 });
 
-const blankPartsLabor = (): PartsLaborValue => ({ items: [], totalHours: 0 });
+const blankPartsLabor = (): PartsLaborValue => ({
+  items: [],
+  totalHours: 0,
+  laborMode: "flat",
+});
 
 const blankDescription = (): DescriptionValue => ({
   workDescription: "",
@@ -364,7 +371,16 @@ function PartsLaborStep({
     (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0),
     0,
   );
-  const laborSubtotal = (Number(value.totalHours) || 0) * laborRate;
+  // Task #396 — per_part labor sums (laborHours × quantity) per item.
+  const isFlatBs = value.laborMode !== "per_part";
+  const perPartHoursSum = value.items.reduce(
+    (sum, it) => sum + (Number(it.laborHours) || 0) * (Number(it.quantity) || 0),
+    0,
+  );
+  const effectiveHours = isFlatBs
+    ? Number(value.totalHours) || 0
+    : perPartHoursSum;
+  const laborSubtotal = effectiveHours * laborRate;
   const total = partsSubtotal + laborSubtotal;
 
   const addPart = (part: Part, qty: number = 1) => {
@@ -412,7 +428,7 @@ function PartsLaborStep({
     onChange({ ...value, items: next });
   };
 
-  const canContinue = value.items.length > 0 || (Number(value.totalHours) || 0) > 0;
+  const canContinue = value.items.length > 0 || effectiveHours > 0;
 
   return (
     <div className="space-y-4">
@@ -431,29 +447,86 @@ function PartsLaborStep({
       {/* Labor */}
       <Card>
         <CardContent className="p-4 sm:p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="bg-blue-50 p-2 rounded-md">
-              <Calculator className="w-4 h-4 text-blue-600" />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-50 p-2 rounded-md">
+                <Calculator className="w-4 h-4 text-blue-600" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">Labor</h2>
             </div>
-            <h2 className="text-base font-semibold text-gray-900">Labor</h2>
+            {/* Task #396 — Flat | Per-part toggle for billing sheet labor. */}
+            <div
+              className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs"
+              role="tablist"
+              data-testid="bs-labor-mode-toggle"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isFlatBs}
+                className={`px-2.5 py-1 rounded ${
+                  isFlatBs ? "bg-white shadow-sm font-semibold text-gray-900" : "text-gray-500"
+                }`}
+                onClick={() => {
+                  // Switching per_part → flat: prepopulate from the
+                  // current per-row sum so totals don't snap to 0.
+                  const prefill =
+                    value.laborMode === "per_part" && perPartHoursSum > 0
+                      ? perPartHoursSum
+                      : Number(value.totalHours) || 0;
+                  onChange({ ...value, laborMode: "flat", totalHours: prefill });
+                }}
+                data-testid="bs-labor-mode-flat"
+              >
+                Flat
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!isFlatBs}
+                className={`px-2.5 py-1 rounded ${
+                  !isFlatBs ? "bg-white shadow-sm font-semibold text-gray-900" : "text-gray-500"
+                }`}
+                onClick={() => onChange({ ...value, laborMode: "per_part" })}
+                data-testid="bs-labor-mode-per-part"
+              >
+                Per part
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs text-gray-600">
-                Hours Worked <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                type="number"
-                inputMode="decimal"
-                step="0.25"
-                min="0"
-                value={value.totalHours}
-                onChange={(e) =>
-                  onChange({ ...value, totalHours: parseFloat(e.target.value) || 0 })
-                }
-                className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-            </div>
+            {isFlatBs ? (
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-600">
+                  Hours Worked <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.25"
+                  min="0"
+                  value={value.totalHours}
+                  onChange={(e) =>
+                    onChange({ ...value, totalHours: parseFloat(e.target.value) || 0 })
+                  }
+                  className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  data-testid="bs-flat-total-hours"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-600">Total Hours (summed per part)</Label>
+                <div
+                  className="flex items-center h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-gray-700 text-sm"
+                  data-testid="bs-per-part-total-hours"
+                >
+                  {perPartHoursSum.toFixed(2)} hr
+                  <span className="ml-2 text-xs text-gray-500">
+                    (Σ laborHours × qty across items)
+                  </span>
+                </div>
+              </div>
+            )}
             <div className="space-y-1">
               <Label className="text-xs text-gray-600">Labor Rate</Label>
               {customer ? (
@@ -581,23 +654,29 @@ function PartsLaborStep({
                       </div>
                     )}
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-600">
-                      Additional Labor Hours (for this item)
-                    </Label>
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.25"
-                      min="0"
-                      value={item.laborHours}
-                      onChange={(e) =>
-                        updateItem(i, { laborHours: parseFloat(e.target.value) || 0 })
-                      }
-                      placeholder="0"
-                      className="text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                  </div>
+                  {/* Task #396 — per-row labor input only renders in
+                      per_part mode. Stored values are preserved when
+                      switching back. */}
+                  {!isFlatBs && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-gray-600">
+                        Labor Hours (per unit, for this item)
+                      </Label>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.25"
+                        min="0"
+                        value={item.laborHours}
+                        onChange={(e) =>
+                          updateItem(i, { laborHours: parseFloat(e.target.value) || 0 })
+                        }
+                        placeholder="0"
+                        className="text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        data-testid={`bs-item-labor-hours-${i}`}
+                      />
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <Label className="text-xs text-gray-600">Notes (optional)</Label>
                     <Input
@@ -631,7 +710,10 @@ function PartsLaborStep({
               <span className="font-medium">{fmtMoney(partsSubtotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-700">Labor ({value.totalHours || 0} hrs × ${laborRate.toFixed(2)})</span>
+              <span className="text-gray-700">
+                Labor {isFlatBs ? "" : "(per part) "}
+                ({effectiveHours.toFixed(2)} hrs × ${laborRate.toFixed(2)})
+              </span>
               <span className="font-medium">{fmtMoney(laborSubtotal)}</span>
             </div>
             <div className="flex justify-between text-base pt-2 border-t border-blue-200">
@@ -821,7 +903,16 @@ function ReviewStep({
     (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0),
     0,
   );
-  const laborSubtotal = (Number(partsLabor.totalHours) || 0) * laborRate;
+  // Task #396 — review step honors active labor mode so the displayed
+  // totals match what's about to be persisted.
+  const isFlatBsReview = partsLabor.laborMode !== "per_part";
+  const reviewHours = isFlatBsReview
+    ? Number(partsLabor.totalHours) || 0
+    : partsLabor.items.reduce(
+        (s, it) => s + (Number(it.laborHours) || 0) * (Number(it.quantity) || 0),
+        0,
+      );
+  const laborSubtotal = reviewHours * laborRate;
   const total = partsSubtotal + laborSubtotal;
 
   const pinDisplay = locationStep.workLocation
@@ -912,7 +1003,8 @@ function ReviewStep({
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">
-                  Labor ({partsLabor.totalHours} hrs × ${laborRate.toFixed(2)})
+                  Labor {isFlatBsReview ? "" : "(per part) "}
+                  ({reviewHours.toFixed(2)} hrs × ${laborRate.toFixed(2)})
                 </span>
                 <span>{fmtMoney(laborSubtotal)}</span>
               </div>
@@ -1131,6 +1223,12 @@ export function BillingSheetWizard({
       zoneNumber: existing.zoneNumber ?? null,
     };
     const pl: PartsLaborValue = {
+      // Task #396 — hydrate persisted laborMode (default flat) so edits
+      // reopen in the same mode the sheet was saved in.
+      laborMode:
+        (existing as unknown as { laborMode?: string }).laborMode === "per_part"
+          ? "per_part"
+          : "flat",
       totalHours: existing.totalHours ? parseFloat(String(existing.totalHours)) : 0,
       items: Array.isArray(existing.items)
         ? existing.items.map((it: BillingSheetItem) => ({
@@ -1243,7 +1341,18 @@ export function BillingSheetWizard({
         (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0),
         0,
       );
-      const laborSubtotal = (Number(partsLabor.totalHours) || 0) * laborRate;
+      // Task #396 — labor totals must follow the active mode so the
+      // payload's authoritative subtotals match what the server will
+      // recompute (and what the wizard's running total just showed).
+      const isFlatBsSubmit = partsLabor.laborMode !== "per_part";
+      const perPartHoursSubmit = partsLabor.items.reduce(
+        (s, it) => s + (Number(it.laborHours) || 0) * (Number(it.quantity) || 0),
+        0,
+      );
+      const submitTotalHours = isFlatBsSubmit
+        ? Number(partsLabor.totalHours) || 0
+        : perPartHoursSubmit;
+      const laborSubtotal = submitTotalHours * laborRate;
 
       const payload: Record<string, unknown> = {
         customerId: customerStep.customer.id,
@@ -1263,7 +1372,12 @@ export function BillingSheetWizard({
         workDescription: descriptionStep.workDescription.trim(),
         notes: descriptionStep.notes,
         branchName: customerStep.branchName || null,
-        totalHours: partsLabor.totalHours,
+        // Task #396 — honor the user-selected labor mode. Flat sends the
+        // wizard's totalHours; per-part lets the server recompute from
+        // per-row laborHours × quantity (we still send our own totalHours
+        // so the totals shown in the wizard match what gets persisted).
+        laborMode: partsLabor.laborMode,
+        totalHours: submitTotalHours,
         laborRate,
         laborSubtotal,
         partsSubtotal,
@@ -1321,7 +1435,11 @@ export function BillingSheetWizard({
       (customerBranches.length === 0 || !!customerStep.branchName) &&
       !!customerStep.workDate,
     2: !!locationStep.workLocation || legacyAllowNoPin,
-    3: partsLabor.items.length > 0 || (Number(partsLabor.totalHours) || 0) > 0,
+    3:
+      partsLabor.items.length > 0 ||
+      (partsLabor.laborMode === "per_part"
+        ? partsLabor.items.some((it) => (Number(it.laborHours) || 0) > 0)
+        : (Number(partsLabor.totalHours) || 0) > 0),
     4: descriptionStep.workDescription.trim().length > 0,
     5: true,
   };

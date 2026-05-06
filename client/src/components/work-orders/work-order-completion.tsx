@@ -58,6 +58,10 @@ const workOrderCompletionSchema = z.object({
   workSummary: z.string().min(10, "Work summary must be at least 10 characters"),
   customerNotes: z.string().min(5, "Customer notes must be at least 5 characters"),
   totalHours: z.number().min(0.1, "Total hours must be at least 0.1"),
+  // Task #396 — labor mode at field completion. 'flat' uses the
+  // single Total Hours input; 'per_part' derives total hours from
+  // the work order's per-line breakdown (Σ laborHours × qty).
+  laborMode: z.enum(["flat", "per_part"]).default("flat"),
 });
 
 type WorkOrderCompletionData = z.infer<typeof workOrderCompletionSchema>;
@@ -262,6 +266,11 @@ export function WorkOrderCompletion({
       workSummary: "",
       customerNotes: "",
       totalHours: 1,
+      // Task #396 — inherit the work order's persisted labor mode so
+      // a per-part WO (e.g. converted from a per-part estimate) keeps
+      // its mode through field completion. New direct WOs default to
+      // flat (the new system-wide default).
+      laborMode: workOrder.laborMode === "per_part" ? "per_part" : "flat",
     },
   });
 
@@ -293,6 +302,8 @@ export function WorkOrderCompletion({
         workSummary: workDescriptions || "Work completed as per estimate",
         customerNotes: "Work completed according to estimate specifications",
         totalHours: Math.max(estimatedHours, 0.1),
+        // Preserve the WO's persisted labor mode through the prefill.
+        laborMode: workOrder.laborMode === "per_part" ? "per_part" : "flat",
       });
     }
   }, [workOrderItems, workOrder.estimateId, form, usedParts.length]);
@@ -417,6 +428,11 @@ export function WorkOrderCompletion({
         workSummary: completionData.workSummary,
         customerNotes: completionData.customerNotes,
         completedAt: new Date().toISOString(),
+        // Task #396 — completion form now exposes a Flat | Per-part
+        // toggle. Send the user-selected mode so the server records
+        // the audit trail and recomputes totals against the chosen
+        // formula.
+        laborMode: completionData.laborMode,
         totalHours: completionData.totalHours,
         usedParts: usedParts.map(up => ({
           partId: up.partId,
@@ -776,6 +792,59 @@ export function WorkOrderCompletion({
                   )}
                 />
 
+                {/* Task #396 — Flat | Per-part labor toggle. */}
+                <FormField
+                  control={form.control}
+                  name="laborMode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Labor Mode</FormLabel>
+                      <FormControl>
+                        <div
+                          className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs"
+                          role="tablist"
+                          data-testid="wo-complete-labor-mode-toggle"
+                        >
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={field.value !== "per_part"}
+                            className={`px-3 py-1 rounded ${
+                              field.value !== "per_part"
+                                ? "bg-white shadow-sm font-semibold text-gray-900"
+                                : "text-gray-500"
+                            }`}
+                            onClick={() => field.onChange("flat")}
+                            data-testid="wo-complete-labor-mode-flat"
+                          >
+                            Flat
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={field.value === "per_part"}
+                            className={`px-3 py-1 rounded ${
+                              field.value === "per_part"
+                                ? "bg-white shadow-sm font-semibold text-gray-900"
+                                : "text-gray-500"
+                            }`}
+                            onClick={() => field.onChange("per_part")}
+                            data-testid="wo-complete-labor-mode-per-part"
+                          >
+                            Per part
+                          </button>
+                        </div>
+                      </FormControl>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Flat uses the single Total Hours field below. Per part
+                        derives total hours from the per-line breakdown carried
+                        on this work order.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="totalHours"
@@ -791,8 +860,16 @@ export function WorkOrderCompletion({
                           placeholder="Enter hours (e.g., 2.5)"
                           {...field}
                           onChange={e => field.onChange(parseFloat(e.target.value))}
+                          disabled={form.watch("laborMode") === "per_part"}
+                          data-testid="wo-complete-total-hours"
                         />
                       </FormControl>
+                      {form.watch("laborMode") === "per_part" && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          In Per-part mode, total hours come from Σ(laborHours × qty)
+                          across line items and are recomputed on the server.
+                        </p>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}

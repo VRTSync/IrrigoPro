@@ -1530,20 +1530,24 @@ export class DatabaseStorage implements IStorage {
         const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimate.id));
         
         let partsSubtotal = 0;
-        let totalLaborHours = 0;
-        
+        let perPartLaborHours = 0;
+
         items.forEach(item => {
           const itemTotal = parseFloat(String(item.totalPrice));
           const itemLaborHours = parseFloat(String(item.laborHours));
           partsSubtotal += itemTotal;
-          totalLaborHours += itemLaborHours;
+          perPartLaborHours += itemLaborHours;
         });
-        
+
         // Prefer the SNAPSHOT appliedLaborRate (locked at creation /
         // conversion) over the mutable customer/estimate laborRate so
         // downstream reads never reprice an estimate if rates change later.
         const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
-
+        // Task #396 — flat mode uses the persisted totalLaborHours; per_part
+        // mode keeps the legacy sum-of-line-hours behavior.
+        const totalLaborHours = estimate.laborMode === 'flat'
+          ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+          : perPartLaborHours;
         const laborSubtotal = totalLaborHours * laborRate;
         const totalAmount = partsSubtotal + laborSubtotal;
 
@@ -1580,13 +1584,17 @@ export class DatabaseStorage implements IStorage {
         const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimate.id));
 
         let partsSubtotal = 0;
-        let totalLaborHours = 0;
+        let perPartLaborHours = 0;
         items.forEach(item => {
           partsSubtotal += parseFloat(String(item.totalPrice));
-          totalLaborHours += parseFloat(String(item.laborHours));
+          perPartLaborHours += parseFloat(String(item.laborHours));
         });
 
         const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+        // Task #396 — honor flat mode using persisted totalLaborHours.
+        const totalLaborHours = estimate.laborMode === 'flat'
+          ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+          : perPartLaborHours;
         const laborSubtotal = totalLaborHours * laborRate;
         const totalAmount = partsSubtotal + laborSubtotal;
 
@@ -1611,18 +1619,22 @@ export class DatabaseStorage implements IStorage {
 
     // Recalculate totals to ensure accuracy
     let partsSubtotal = 0;
-    let totalLaborHours = 0;
+    let perPartLaborHours = 0;
 
     items.forEach(item => {
       const itemTotal = parseFloat(String(item.totalPrice));
       const itemLaborHours = parseFloat(String(item.laborHours));
       partsSubtotal += itemTotal;
-      totalLaborHours += itemLaborHours;
+      perPartLaborHours += itemLaborHours;
     });
 
     // Prefer SNAPSHOT appliedLaborRate so a converted estimate cannot be
     // repriced after customer/estimate laborRate changes downstream.
     const laborRate = parseFloat(String(estimate.appliedLaborRate ?? estimate.laborRate));
+    // Task #396 — honor flat mode using persisted totalLaborHours.
+    const totalLaborHours = estimate.laborMode === 'flat'
+      ? parseFloat(String(estimate.totalLaborHours ?? 0)) || 0
+      : perPartLaborHours;
     const laborSubtotal = totalLaborHours * laborRate;
     const totalAmount = partsSubtotal + laborSubtotal;
 
@@ -2465,6 +2477,11 @@ export class DatabaseStorage implements IStorage {
       estimatedTotal: estimate.totalAmount, // Original estimate total for comparison
       totalAmount: estimate.totalAmount,
       totalItems: estimate.items?.length || 0,
+      // Task #396 — preserve labor mode + aggregate hours across the
+      // estimate→work-order conversion so the field tech sees the same
+      // labor breakdown the customer approved.
+      laborMode: (estimate as unknown as { laborMode?: string }).laborMode ?? 'flat',
+      totalHours: (estimate as unknown as { totalLaborHours?: string }).totalLaborHours ?? null,
     };
 
     const [newWorkOrder] = await db.insert(workOrders).values(toDrizzleInsert<DrizzleWorkOrderInsert>(workOrderData)).returning();

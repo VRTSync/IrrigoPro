@@ -202,6 +202,10 @@ export const billingSheets = pgTable("billing_sheets", {
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  // Task #396 — labor entry mode for the sheet. 'flat' means use the single
+  // totalHours field for all labor; 'per_part' means sum per-line laborHours.
+  // Default 'flat' for new sheets; existing sheets are backfilled to 'per_part'.
+  laborMode: text("labor_mode").notNull().default("flat"),
   // Snapshot of customer.laborRate at creation (mirrors work_orders).
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
   // Invoice linkage - prevents double billing
@@ -263,7 +267,9 @@ export const billingSheetItems = pgTable("billing_sheet_items", {
   quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
-  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  // Task #396 — per-line labor hours are 0 in flat mode (the sheet's
+  // totalHours is authoritative). Default 0 so flat-mode payloads can omit it.
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   notes: text("notes"),
 });
 
@@ -364,6 +370,11 @@ export const estimates = pgTable("estimates", {
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }).notNull(),
+  // Task #396 — labor entry mode. 'flat' uses totalLaborHours; 'per_part'
+  // sums per-line laborHours. New estimates default to 'flat'; existing
+  // estimates are backfilled to 'per_part' to preserve their per-row labor.
+  laborMode: text("labor_mode").notNull().default("flat"),
+  totalLaborHours: decimal("total_labor_hours", { precision: 6, scale: 2 }).notNull().default("0.00"),
   // Snapshot of customer.laborRate at creation (mirrors work_orders).
   appliedLaborRate: decimal("applied_labor_rate", { precision: 10, scale: 2 }),
   approvedAt: timestamp("approved_at"),
@@ -398,7 +409,9 @@ export const estimateItems = pgTable("estimate_items", {
   partName: text("part_name").notNull(),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
-  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  // Task #396 — per-line labor hours are 0 in flat mode. Default 0 so
+  // flat-mode payloads can omit them.
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
 });
@@ -545,7 +558,11 @@ export const workOrders = pgTable("work_orders", {
   completedByUserName: text("completed_by_user_name"),
   workSummary: text("work_summary"), // Summary of work completed
   customerNotes: text("customer_notes"), // Notes to share with customer
-  totalHours: decimal("total_hours", { precision: 5, scale: 2 }), // Hours worked
+  totalHours: decimal("total_hours", { precision: 5, scale: 2 }), // Hours worked (flat-mode authoritative value)
+  // Task #396 — labor entry mode for this work order. 'flat' uses totalHours;
+  // 'per_part' sums per-line actualLaborHours. Default 'flat' for new work
+  // orders; existing/converted work orders are backfilled to 'per_part'.
+  laborMode: text("labor_mode").notNull().default("flat"),
   totalPartsCost: decimal("total_parts_cost", { precision: 10, scale: 2 }), // Cost of parts used
   // Financial snapshot fields - explicit pricing for billing
   laborRate: decimal("labor_rate", { precision: 10, scale: 2 }), // Rate used for this job (legacy alias for appliedLaborRate)
@@ -599,7 +616,9 @@ export const workOrderItems = pgTable("work_order_items", {
   partName: text("part_name").notNull(),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
-  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  // Task #396 — per-line labor hours are 0 in flat mode. Default 0 so
+  // flat-mode payloads can omit them.
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
   actualQuantityUsed: integer("actual_quantity_used"),
   actualLaborHours: decimal("actual_labor_hours", { precision: 5, scale: 2 }),
@@ -1070,6 +1089,12 @@ export const wetChecks = pgTable("wet_checks", {
   // in_progress | submitted | approved | partially_converted | converted
   weather: text("weather"),
   notes: text("notes"),
+  // Task #396 — labor mode for findings on this wet check. 'flat' uses
+  // totalLaborHours as the authoritative aggregate; 'per_part' sums per-finding
+  // laborHours. Default 'flat' for new wet checks; existing are backfilled to
+  // 'per_part'.
+  laborMode: text("labor_mode").notNull().default("flat"),
+  totalLaborHours: decimal("total_labor_hours", { precision: 6, scale: 2 }).notNull().default("0.00"),
   startedAt: timestamp("started_at").defaultNow().notNull(),
   submittedAt: timestamp("submitted_at"),
   approvedAt: timestamp("approved_at"),
@@ -1119,7 +1144,9 @@ export const wetCheckFindings = pgTable("wet_check_findings", {
   partName: text("part_name"),
   partPrice: decimal("part_price", { precision: 10, scale: 2 }),
   quantity: integer("quantity").notNull(),
-  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull(),
+  // Task #396 — per-finding labor hours; in flat mode the parent wet check's
+  // totalLaborHours is authoritative and findings may default to 0.
+  laborHours: decimal("labor_hours", { precision: 5, scale: 2 }).notNull().default("0.00"),
   notes: text("notes"),
   resolution: text("resolution").notNull().default("pending"),
   // pending | repaired_in_field | sent_to_estimate | deferred_to_work_order | documented_only
