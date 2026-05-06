@@ -317,6 +317,43 @@ export function PartsListSkeleton() {
   );
 }
 
+// Slice 10b polish — column-shaped skeleton for the Estimates board view.
+// Mirrors the 5-column desktop layout (collapsing to md:3 / sm:1) with
+// three placeholder cards per column so the loading state matches the
+// final board geometry instead of the list-shaped EstimateListSkeleton.
+const BOARD_SKELETON_COLUMNS: { key: string; headerBg: string }[] = [
+  { key: "draft", headerBg: "bg-gray-100" },
+  { key: "pending_review", headerBg: "bg-amber-50" },
+  { key: "sent", headerBg: "bg-blue-50" },
+  { key: "approved", headerBg: "bg-green-50" },
+  { key: "rejected", headerBg: "bg-red-50" },
+];
+
+export function EstimateBoardSkeleton() {
+  return (
+    <div
+      className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2"
+      data-testid="estimate-board-skeleton"
+    >
+      {BOARD_SKELETON_COLUMNS.map((c) => (
+        <div key={c.key} className="flex flex-col">
+          <div
+            className={`h-9 rounded-t-md ${c.headerBg} border border-b-0 border-gray-200`}
+          />
+          <div className="border border-gray-200 rounded-b-md bg-white p-2 space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-14 rounded-md bg-gray-100 animate-pulse"
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Component-level loading skeletons
 export function TableRowSkeleton({ columns = 4 }: { columns?: number }) {
   return (
