@@ -12,7 +12,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, FileText, Loader2 } from "lucide-react";
+import { ChevronLeft, ClipboardList, Loader2 } from "lucide-react";
+import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Customer, WorkOrder } from "@shared/schema";
@@ -382,7 +383,39 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
     }
   };
 
-  const progressPct = Math.round((step / 5) * 100);
+  const headerContextLine = useMemo(() => {
+    const parts: string[] = [];
+    const customerLabel = customerStep.customer?.name
+      ? customerStep.branchName
+        ? `${customerStep.customer.name} · ${customerStep.branchName}`
+        : customerStep.customer.name
+      : null;
+    if (customerLabel) parts.push(customerLabel);
+    if (locationStep.projectName.trim()) parts.push(locationStep.projectName.trim());
+    if (step >= 4 && scheduleStep.scheduledDate) {
+      const d = new Date(scheduleStep.scheduledDate);
+      if (!isNaN(d.getTime())) {
+        parts.push(
+          d.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
+        );
+      }
+    }
+    if (step >= 4 && scheduleStep.assignedTechnicianName) {
+      parts.push(scheduleStep.assignedTechnicianName);
+    }
+    return parts.length ? parts.join(" · ") : null;
+  }, [
+    customerStep.customer?.name,
+    customerStep.branchName,
+    locationStep.projectName,
+    scheduleStep.scheduledDate,
+    scheduleStep.assignedTechnicianName,
+    step,
+  ]);
 
   const customerBranches: string[] = Array.isArray(customerStep.customer?.branches)
     ? (customerStep.customer!.branches as string[])
@@ -478,49 +511,39 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
           "
           aria-describedby={undefined}
         >
-          <div className="sticky top-0 z-20 bg-white border-b">
-            <div className="flex items-center gap-2 px-4 py-3">
-              {step > 1 && !isEdit && (
+          <WizardHeader
+            icon={ClipboardList}
+            kindLabel="Work Order"
+            mode={isEdit ? "edit" : "new"}
+            recordIdentifier={isEdit && workOrderId ? `#${workOrderId}` : null}
+            currentStep={step}
+            totalSteps={5}
+            stepTitles={[
+              STEP_TITLES[1],
+              STEP_TITLES[2],
+              STEP_TITLES[3],
+              STEP_TITLES[4],
+              STEP_TITLES[5],
+            ]}
+            contextLine={headerContextLine}
+            loading={isEdit && existingLoading && !hydratedRef.current}
+            loadingLabel="Loading work order…"
+            accent="blue"
+            leading={
+              step > 1 && !isEdit ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-8 p-0 sm:hidden"
+                  className="h-8 w-8 p-0 sm:hidden -ml-1"
                   onClick={goBack}
                   aria-label="Back"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
-              )}
-              <div className="bg-blue-50 p-2 rounded-md hidden sm:block">
-                <FileText className="w-4 h-4 text-blue-600" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs text-gray-500">
-                  Step {step} of 5 · {STEP_TITLES[step]}
-                </div>
-                <div className="text-base sm:text-lg font-semibold text-gray-900 truncate flex items-center gap-2">
-                  {isEdit ? `Edit Work Order #${workOrderId}` : "New Work Order"}
-                  {isEdit && existingLoading && !hydratedRef.current && (
-                    <span className="inline-flex items-center gap-1 text-xs font-normal text-gray-500">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      Loading…
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="h-1 bg-gray-100">
-              <div
-                className="h-1 bg-blue-600 transition-all"
-                style={{ width: `${progressPct}%` }}
-                role="progressbar"
-                aria-valuenow={progressPct}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              />
-            </div>
-          </div>
+              ) : null
+            }
+          />
 
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
             {isEdit && existingLoading && !hydratedRef.current ? (
