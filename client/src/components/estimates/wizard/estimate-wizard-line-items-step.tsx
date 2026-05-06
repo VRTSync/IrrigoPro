@@ -14,7 +14,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import type { Part } from "@shared/schema";
-import { EstimateWizardPartPicker } from "./estimate-wizard-part-picker";
+import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 
 export interface WizardLineItem {
   rowId: string;
@@ -529,14 +529,18 @@ export function EstimateWizardLineItemsStep({
         </div>
       </div>
 
-      <EstimateWizardPartPicker
+      <PartsSearchModal
         open={pickerOpen}
         onOpenChange={(open) => {
           setPickerOpen(open);
           if (!open) setChangeRowId(null);
         }}
-        mode={pickerMode}
-        onPick={handlePartPicked}
+        onSelectPart={handlePartPicked}
+        presentation="sheet"
+        selectMode={pickerMode === "add" ? "multi" : "single"}
+        showCategoryChips
+        keyboardNav
+        title={pickerMode === "add" ? "Add part" : "Change part"}
       />
     </div>
   );
