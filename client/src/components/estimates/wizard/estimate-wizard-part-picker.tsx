@@ -29,6 +29,7 @@ export function EstimateWizardPartPicker({ open, onOpenChange, mode, onPick }: E
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Reset state when picker opens.
   useEffect(() => {
@@ -87,6 +88,11 @@ export function EstimateWizardPartPicker({ open, onOpenChange, mode, onPick }: E
   useEffect(() => {
     setActiveIdx((i) => (visible.length === 0 ? 0 : Math.min(i, visible.length - 1)));
   }, [visible.length]);
+
+  // Keep the keyboard-active row in view as the user arrows up/down.
+  useEffect(() => {
+    rowRefs.current[activeIdx]?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx]);
 
   const handlePick = (p: Part) => {
     onPick(p);
@@ -195,6 +201,13 @@ export function EstimateWizardPartPicker({ open, onOpenChange, mode, onPick }: E
               </button>
             ))}
           </div>
+          <div className="text-xs text-gray-500" data-testid="part-picker-count">
+            {filtered.length === 0
+              ? "No matches"
+              : overflow
+              ? `Showing first ${RENDER_CAP} of ${filtered.length} matches — refine your search to narrow down`
+              : `Showing ${filtered.length} of ${parts.length} parts`}
+          </div>
         </div>
 
         <div ref={listRef} className="flex-1 overflow-y-auto">
@@ -211,6 +224,9 @@ export function EstimateWizardPartPicker({ open, onOpenChange, mode, onPick }: E
                   <li key={p.id}>
                     <button
                       type="button"
+                      ref={(el) => {
+                        rowRefs.current[idx] = el;
+                      }}
                       onClick={() => handlePick(p)}
                       onMouseEnter={() => setActiveIdx(idx)}
                       className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
@@ -237,11 +253,6 @@ export function EstimateWizardPartPicker({ open, onOpenChange, mode, onPick }: E
                 );
               })}
             </ul>
-          )}
-          {overflow && (
-            <div className="p-3 text-center text-xs text-gray-500 border-t">
-              Refine your search to see more
-            </div>
           )}
         </div>
 

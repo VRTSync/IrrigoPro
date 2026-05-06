@@ -62,7 +62,7 @@ interface BillingSheet {
 
 export default function Operations() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [estimateModalOpen, setEstimateModalOpen] = useState(false);
+  const [estimateWizardOpen, setEstimateWizardOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'estimates' | 'workorders' | 'billingsheets'>('all');
   const [showWorkOrderForm, setShowWorkOrderForm] = useState(false);
   
@@ -121,7 +121,7 @@ export default function Operations() {
 
   const handleCreateEstimate = () => {
     setCreateModalOpen(false);
-    setEstimateModalOpen(true);
+    setEstimateWizardOpen(true);
   };
 
   const handleCreateWorkOrder = () => {
@@ -399,8 +399,8 @@ export default function Operations() {
 
       {/* Estimate Wizard */}
       <EstimateWizard
-        open={estimateModalOpen}
-        onOpenChange={setEstimateModalOpen}
+        open={estimateWizardOpen}
+        onOpenChange={setEstimateWizardOpen}
       />
 
       {/* Detail Modals */}

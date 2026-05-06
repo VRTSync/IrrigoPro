@@ -77,7 +77,7 @@ export default function ManagerDashboard() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [showCreateSheet, setShowCreateSheet] = useState(false);
-  const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [showEstimateWizard, setShowEstimateWizard] = useState(false);
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [showBillingSheetModal, setShowBillingSheetModal] = useState(false);
 
@@ -481,7 +481,7 @@ export default function ManagerDashboard() {
             icon={<FileText className="w-5 h-5" />}
             onClick={() => {
               setShowCreateSheet(false);
-              setShowEstimateModal(true);
+              setShowEstimateWizard(true);
             }}
           >
             New Estimate
@@ -509,9 +509,9 @@ export default function ManagerDashboard() {
 
       {/* Modals */}
       <EstimateWizard
-        open={showEstimateModal}
+        open={showEstimateWizard}
         onOpenChange={(open) => {
-          setShowEstimateModal(open);
+          setShowEstimateWizard(open);
           if (!open) invalidateAll();
         }}
       />

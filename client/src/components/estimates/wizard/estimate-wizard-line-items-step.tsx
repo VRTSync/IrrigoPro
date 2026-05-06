@@ -3,12 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   Plus,
   Trash2,
   Pencil,
@@ -139,9 +133,14 @@ export function EstimateWizardLineItemsStep({
     setPickerOpen(true);
   };
 
-  // Native HTML5 drag-and-drop reorder on desktop.
+  // Native HTML5 drag-and-drop reorder on desktop. We keep `onDragOver` as a
+  // no-op preventDefault (required for drop targets) and only commit the
+  // splice on `onDrop`, so hovering between rows never thrashes the list.
   const onDragStart = (rowId: string) => () => setDragRowId(rowId);
-  const onDragOver = (rowId: string) => (e: React.DragEvent) => {
+  const onDragOver = () => (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+  const onDrop = (rowId: string) => (e: React.DragEvent) => {
     e.preventDefault();
     if (!dragRowId || dragRowId === rowId) return;
     const fromIdx = items.findIndex((i) => i.rowId === dragRowId);
@@ -280,7 +279,8 @@ export function EstimateWizardLineItemsStep({
                         className="border-b last:border-b-0 align-top"
                         draggable
                         onDragStart={onDragStart(it.rowId)}
-                        onDragOver={onDragOver(it.rowId)}
+                        onDragOver={onDragOver()}
+                        onDrop={onDrop(it.rowId)}
                         onDragEnd={onDragEnd}
                         data-testid={`wizard-row-${it.rowId}`}
                       >
@@ -321,7 +321,7 @@ export function EstimateWizardLineItemsStep({
                               onChange={(e) =>
                                 updateItem(it.rowId, { quantity: Math.max(1, parseInt(e.target.value || "1") || 1) })
                               }
-                              className="h-7 w-12 text-center border-0 px-0 focus-visible:ring-0"
+                              className="h-7 w-12 text-center border-0 px-0 focus-visible:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                               data-testid={`wizard-row-qty-${it.rowId}`}
                             />
                             <button
@@ -344,7 +344,7 @@ export function EstimateWizardLineItemsStep({
                             onChange={(e) =>
                               updateItem(it.rowId, { laborHours: Math.max(0, parseFloat(e.target.value || "0") || 0) })
                             }
-                            className="h-8 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                            className="h-8 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                             data-testid={`wizard-row-labor-${it.rowId}`}
                           />
                           <div className="text-[10px] text-gray-500 mt-1">
@@ -427,7 +427,7 @@ export function EstimateWizardLineItemsStep({
                     placeholder="Description (optional)"
                     className="h-9 text-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                   />
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 max-[400px]:grid-cols-1 gap-2">
                     <div>
                       <div className="text-[10px] text-gray-500 uppercase mb-1">Qty</div>
                       <div className="inline-flex items-center border rounded-md">
@@ -446,7 +446,7 @@ export function EstimateWizardLineItemsStep({
                           onChange={(e) =>
                             updateItem(it.rowId, { quantity: Math.max(1, parseInt(e.target.value || "1") || 1) })
                           }
-                          className="h-8 w-12 text-center border-0 px-0 focus-visible:ring-0"
+                          className="h-8 w-12 text-center border-0 px-0 focus-visible:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                         <button
                           type="button"
@@ -474,7 +474,7 @@ export function EstimateWizardLineItemsStep({
                         onChange={(e) =>
                           updateItem(it.rowId, { laborHours: Math.max(0, parseFloat(e.target.value || "0") || 0) })
                         }
-                        className="h-9 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                        className="h-9 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
                       <div className="text-[10px] text-gray-500 mt-1">
                         × {fmt(laborRate)}/hr = {fmt(it.laborHours * it.quantity * laborRate)}
@@ -507,28 +507,26 @@ export function EstimateWizardLineItemsStep({
       )}
 
       {/* Desktop footer (mobile uses sheet footer) */}
-      <div className="hidden sm:flex justify-between gap-3 pt-2">
+      <div className="hidden sm:flex justify-between items-center gap-3 pt-2">
         <Button type="button" variant="outline" onClick={onBack} data-testid="wizard-back-2">
           ← Back
         </Button>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button
-                  type="button"
-                  onClick={onContinue}
-                  disabled={empty}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  data-testid="wizard-continue-2"
-                >
-                  Continue to Review
-                </Button>
-              </span>
-            </TooltipTrigger>
-            {empty && <TooltipContent>Add at least one part to continue</TooltipContent>}
-          </Tooltip>
-        </TooltipProvider>
+        <div className="flex items-center gap-3">
+          {empty && (
+            <span className="text-xs text-gray-500" data-testid="wizard-continue-2-helper">
+              Add at least one part to continue.
+            </span>
+          )}
+          <Button
+            type="button"
+            onClick={onContinue}
+            disabled={empty}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+            data-testid="wizard-continue-2"
+          >
+            Continue to Review
+          </Button>
+        </div>
       </div>
 
       <EstimateWizardPartPicker

@@ -39,7 +39,7 @@ interface CustomerProfileProps {
 export function CustomerProfile({ customer, onBack, userRole = "company_admin" }: CustomerProfileProps) {
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
-  const [estimateModalOpen, setEstimateModalOpen] = useState(false);
+  const [estimateWizardOpen, setEstimateWizardOpen] = useState(false);
   const [workOrderModalOpen, setWorkOrderModalOpen] = useState(false);
   const [showSiteMaps, setShowSiteMaps] = useState(false);
   const [billedWOExpanded, setBilledWOExpanded] = useState(false);
@@ -361,7 +361,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                       <Card key={estimate.id} className="group hover:shadow-lg transition-all duration-200 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600 bg-gradient-to-r from-blue-50/30 to-transparent" 
                             onClick={() => {
                               setSelectedEstimateId(estimate.id);
-                              setEstimateModalOpen(true);
+                              setEstimateWizardOpen(true);
                             }}>
                         <CardContent className="p-4 sm:p-6">
                           <div className="space-y-4">
@@ -623,11 +623,11 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
       </div>
 
       {/* Modals */}
-      {estimateModalOpen && selectedEstimateId && (
+      {estimateWizardOpen && selectedEstimateId && (
         <EstimateDetailModal
-          open={estimateModalOpen}
+          open={estimateWizardOpen}
           onOpenChange={(open) => {
-            setEstimateModalOpen(open);
+            setEstimateWizardOpen(open);
             if (!open) setSelectedEstimateId(null);
           }}
           estimateId={selectedEstimateId}

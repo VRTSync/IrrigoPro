@@ -49,6 +49,7 @@ interface EstimateApiPayloadEstimate {
   workLocationAddress: string | null;
   controllerLetter: string | null;
   zoneNumber: number | null;
+  internalStatus?: string;
 }
 
 interface EstimateApiPayloadItem {
@@ -201,6 +202,22 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     enabled: isEdit && open,
   });
 
+  // Load the real customer record so the "Use customer address" toggle
+  // reverts to the customer's stored address (not a synthesised one).
+  const { data: realCustomer } = useQuery<Customer>({
+    queryKey: ["/api/customers", existing?.customerId],
+    enabled: isEdit && open && !!existing?.customerId,
+  });
+
+  useEffect(() => {
+    if (!realCustomer) return;
+    setCustomerStep((s) => {
+      if (!s.customer || s.customer.id !== realCustomer.id) return s;
+      if (s.customer === realCustomer) return s;
+      return { ...s, customer: realCustomer };
+    });
+  }, [realCustomer]);
+
   useEffect(() => {
     if (!isEdit || !existing || !open || hydratedRef.current) return;
     const lr = parseFloat(existing.laborRate ?? "45") || 45;
@@ -212,7 +229,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       phone: existing.customerPhone,
       address: existing.projectAddress,
     } as Customer;
-    const usingDifferent = false;
+    // If the estimate has a recorded projectAddress, default the toggle to
+    // "different address" so the field is fully editable on open. The user
+    // can flip back to "Use customer address" to lock it to the customer
+    // record's address.
+    const usingDifferent = !!(existing.projectAddress && existing.projectAddress.trim());
     const lat = existing.workLocationLat != null ? parseFloat(String(existing.workLocationLat)) : NaN;
     const lng = existing.workLocationLng != null ? parseFloat(String(existing.workLocationLng)) : NaN;
     const wl = Number.isFinite(lat) && Number.isFinite(lng)
@@ -320,6 +341,13 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       locationNotes: customerStep.locationNotes.trim() || "",
       accessInstructions: customerStep.accessInstructions.trim() || "",
       status: existing?.status ?? "pending",
+      // Round-trip the manager-internal review status when editing so an
+      // already-approved estimate doesn't silently bounce back to
+      // "pending_approval". New estimates omit this field and the server
+      // defaults to "pending_approval".
+      ...(isEdit && existing?.internalStatus
+        ? { internalStatus: existing.internalStatus }
+        : {}),
       partsSubtotal: totals.partsSubtotal.toFixed(2),
       laborSubtotal: totals.laborSubtotal.toFixed(2),
       totalAmount: totals.totalAmount.toFixed(2),
@@ -357,17 +385,13 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     if (e.key === "Enter") {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      if (tag === "TEXTAREA") return;
+      // Never let Enter inside a text/number/select input or textarea
+      // advance the wizard — it's a foot-gun for users typing in fields.
+      // Buttons/links handle their own Enter activation.
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (target?.isContentEditable) return;
-      // Don't fire while a button or link inside is focused — let it click itself.
       if (tag === "BUTTON" || tag === "A") return;
-      if (step === 1 && customerStep.customer && customerStep.projectName.trim()) {
-        e.preventDefault();
-        setStep(2);
-      } else if (step === 2 && items.length > 0) {
-        e.preventDefault();
-        setStep(3);
-      } else if (step === 3 && !saveMutation.isPending) {
+      if (step === 3 && !saveMutation.isPending) {
         e.preventDefault();
         handleSubmit();
       }
@@ -377,7 +401,16 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const progressPct = Math.round((step / 3) * 100);
 
   const stickyMobileFooter = (
-    <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-3 bg-white border-t z-10 flex items-center gap-2">
+    <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
+      {step === 2 && items.length === 0 && (
+        <p
+          className="text-xs text-gray-500 text-center"
+          data-testid="wizard-continue-2-helper-mobile"
+        >
+          Add at least one part to continue.
+        </p>
+      )}
+      <div className="flex items-center gap-2">
       {step === 1 && (
         <>
           <Button type="button" variant="outline" onClick={requestClose} className="flex-1">
@@ -403,9 +436,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
             onClick={() => setStep(3)}
             disabled={items.length === 0}
             className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-            title={items.length === 0 ? "Add at least one part to continue" : undefined}
           >
-            Review
+            Continue
           </Button>
         </>
       )}
@@ -425,6 +457,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           </Button>
         </>
       )}
+      </div>
     </div>
   );
 
@@ -479,8 +512,14 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 <div className="text-xs text-gray-500">
                   Step {step} of 3 · {STEP_TITLES[step]}
                 </div>
-                <div className="text-base sm:text-lg font-semibold text-gray-900 truncate">
+                <div className="text-base sm:text-lg font-semibold text-gray-900 truncate flex items-center gap-2">
                   {isEdit ? `Edit Estimate #${estimateId}` : "New Estimate"}
+                  {isEdit && existingLoading && !hydratedRef.current && (
+                    <span className="inline-flex items-center gap-1 text-xs font-normal text-gray-500">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Loading estimate…
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -554,13 +593,17 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isEdit ? "Discard your edits?" : "Discard this estimate?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              You have unsaved changes. Closing the wizard will discard them.
+              {isEdit
+                ? "You have unsaved changes to this estimate. Closing now will discard them and keep the saved version."
+                : "You have unsaved work on this new estimate. Closing now will discard it and nothing will be saved."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogCancel>{isEdit ? "Keep editing" : "Keep working"}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setDiscardOpen(false);
@@ -568,7 +611,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
               }}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              Discard
+              {isEdit ? "Discard edits" : "Discard estimate"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

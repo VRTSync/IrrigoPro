@@ -39,7 +39,7 @@ interface DashboardStats {
 }
 
 export default function Dashboard() {
-  const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [showEstimateWizard, setShowEstimateWizard] = useState(false);
 
   const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
@@ -123,7 +123,7 @@ export default function Dashboard() {
             <p className="text-gray-600 mt-1">Manage your irrigation estimates and track your business</p>
           </div>
           <div className="mt-4 sm:mt-0 flex space-x-3">
-            <Button onClick={() => setShowEstimateModal(true)} className="bg-primary text-white hover:bg-blue-700">
+            <Button onClick={() => setShowEstimateWizard(true)} className="bg-primary text-white hover:bg-blue-700">
               <Plus className="w-4 h-4 mr-2" />
               New Estimate
             </Button>
@@ -281,7 +281,7 @@ export default function Dashboard() {
             <CardContent className="p-6">
               <div className="space-y-3">
                 <Button
-                  onClick={() => setShowEstimateModal(true)}
+                  onClick={() => setShowEstimateWizard(true)}
                   className="w-full justify-between bg-blue-50 text-blue-700 hover:bg-blue-100 border-0"
                   variant="outline"
                 >
@@ -368,8 +368,8 @@ export default function Dashboard() {
 
       {/* Estimate Wizard */}
       <EstimateWizard
-        open={showEstimateModal}
-        onOpenChange={setShowEstimateModal}
+        open={showEstimateWizard}
+        onOpenChange={setShowEstimateWizard}
       />
     </div>
   );

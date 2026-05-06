@@ -14,7 +14,7 @@ interface EstimatesManagerProps {
 }
 
 export function EstimatesManager({ onBack }: EstimatesManagerProps) {
-  const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [showEstimateWizard, setShowEstimateWizard] = useState(false);
   const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -79,7 +79,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
           </Button>
           <h1 className="text-3xl font-bold text-gray-900">Estimates</h1>
         </div>
-        <Button onClick={() => setShowEstimateModal(true)} className="bg-blue-600 hover:bg-blue-700">
+        <Button onClick={() => setShowEstimateWizard(true)} className="bg-blue-600 hover:bg-blue-700">
           <Plus className="w-4 h-4 mr-2" />
           New Estimate
         </Button>
@@ -95,7 +95,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
           <Card>
             <CardContent className="text-center py-8">
               <p className="text-gray-500 mb-4">No estimates found</p>
-              <Button onClick={() => setShowEstimateModal(true)}>
+              <Button onClick={() => setShowEstimateWizard(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Create First Estimate
               </Button>
@@ -129,7 +129,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                     </div>
                     
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                      <Button variant="outline" size="sm" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateWizard(true); }}>
                         <Eye className="w-4 h-4 mr-2" />
                         View
                       </Button>
@@ -159,9 +159,9 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
 
       {/* Estimate Wizard */}
       <EstimateWizard
-        open={showEstimateModal}
+        open={showEstimateWizard}
         onOpenChange={(open) => {
-          setShowEstimateModal(open);
+          setShowEstimateWizard(open);
           if (!open) setEditEstimateId(null);
         }}
         estimateId={editEstimateId}

@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Estimate } from "@shared/schema";
 
 export default function Estimates() {
-  const [showEstimateModal, setShowEstimateModal] = useState(false);
+  const [showEstimateWizard, setShowEstimateWizard] = useState(false);
   const [selectedEstimateId, setSelectedEstimateId] = useState<number | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [editEstimateId, setEditEstimateId] = useState<number | null>(null);
@@ -43,7 +43,7 @@ export default function Estimates() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('create') === 'true') {
-      setShowEstimateModal(true);
+      setShowEstimateWizard(true);
       // Clean up URL
       window.history.replaceState({}, '', window.location.pathname);
     }
@@ -192,7 +192,7 @@ export default function Estimates() {
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
               {refreshing ? 'Checking...' : 'Check Status'}
             </Button>
-            <Button onClick={() => setShowEstimateModal(true)} className="bg-primary text-white hover:bg-blue-700">
+            <Button onClick={() => setShowEstimateWizard(true)} className="bg-primary text-white hover:bg-blue-700">
               <Plus className="w-4 h-4 mr-2" />
               New Estimate
             </Button>
@@ -285,7 +285,7 @@ export default function Estimates() {
                                             {creatingWorkOrder === estimate.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wrench className="w-4 h-4" />}
                                           </Button>
                                         )}
-                                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                        <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateWizard(true); }}>
                                           <Edit2 className="w-4 h-4" />
                                         </Button>
                                         <Button variant="ghost" size="sm" className="text-green-600 hover:text-green-800" onClick={() => handleCheckStatus(estimate.id)} title="Check Status">
@@ -346,7 +346,7 @@ export default function Estimates() {
                                   )}
                                 </div>
                                 <div className="flex items-center justify-center gap-2">
-                                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateWizard(true); }}>
                                     <Edit2 className="w-4 h-4 mr-1" />Edit
                                   </Button>
                                   <Button variant="outline" size="sm" className="text-green-600 hover:text-green-800 flex-1" onClick={() => handleCheckStatus(estimate.id)}>
@@ -438,7 +438,7 @@ export default function Estimates() {
                                         </Button>
                                         {estimate.status !== 'converted_to_work_order' ? (
                                           <>
-                                            <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                            <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-800" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateWizard(true); }}>
                                               <Edit2 className="w-4 h-4" />
                                             </Button>
                                             <Button variant="ghost" size="sm" className="text-green-600 hover:text-green-800" onClick={() => handleCheckStatus(estimate.id)} title="Check Status">
@@ -498,7 +498,7 @@ export default function Estimates() {
                                 </div>
                                 {estimate.status !== 'converted_to_work_order' ? (
                                   <div className="flex items-center justify-center gap-2">
-                                    <Button variant="outline" size="sm" className="flex-1" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateModal(true); }}>
+                                    <Button variant="outline" size="sm" className="flex-1" onClick={() => { setEditEstimateId(estimate.id); setShowEstimateWizard(true); }}>
                                       <Edit2 className="w-4 h-4 mr-1" />Edit
                                     </Button>
                                     <Button variant="outline" size="sm" className="text-green-600 hover:text-green-800 flex-1" onClick={() => handleCheckStatus(estimate.id)}>
@@ -532,9 +532,9 @@ export default function Estimates() {
 
       {/* Estimate Wizard */}
       <EstimateWizard
-        open={showEstimateModal}
+        open={showEstimateWizard}
         onOpenChange={(open) => {
-          setShowEstimateModal(open);
+          setShowEstimateWizard(open);
           if (!open) {
             setEditEstimateId(null);
           }
@@ -550,7 +550,7 @@ export default function Estimates() {
         onEdit={(estimateId) => {
           setEditEstimateId(estimateId);
           setShowDetailModal(false);
-          setShowEstimateModal(true);
+          setShowEstimateWizard(true);
         }}
       />
     </div>
