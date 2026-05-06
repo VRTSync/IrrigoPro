@@ -87,6 +87,8 @@ function urlToUploadedFile(url: string): UploadedFile {
 
 interface DraftSnapshot {
   customerId: number | null;
+  customerEmail: string;
+  customerPhone: string;
   projectName: string;
   projectAddress: string;
   locationNotes: string;
@@ -106,6 +108,8 @@ function snapshot(
 ): DraftSnapshot {
   return {
     customerId: cs.customer?.id ?? null,
+    customerEmail: cs.customerEmail.trim(),
+    customerPhone: cs.customerPhone.trim(),
     projectName: cs.projectName.trim(),
     projectAddress: cs.projectAddress.trim(),
     locationNotes: cs.locationNotes.trim(),
@@ -132,6 +136,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const [step, setStep] = useState<Step>(isEdit ? 2 : 1);
   const [customerStep, setCustomerStep] = useState<CustomerStepValue>({
     customer: null,
+    customerEmail: "",
+    customerPhone: "",
     projectName: "",
     projectAddress: "",
     useDifferentAddress: false,
@@ -154,6 +160,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       if (!isEdit) {
         setCustomerStep({
           customer: null,
+          customerEmail: "",
+          customerPhone: "",
           projectName: "",
           projectAddress: "",
           useDifferentAddress: false,
@@ -167,6 +175,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
         initialSnapshotRef.current = snapshot(
           {
             customer: null,
+            customerEmail: "",
+            customerPhone: "",
             projectName: "",
             projectAddress: "",
             useDifferentAddress: false,
@@ -202,6 +212,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     const usingDifferent = false;
     const cs: CustomerStepValue = {
       customer: cust,
+      customerEmail: existing.customerEmail ?? "",
+      customerPhone: existing.customerPhone ?? "",
       projectName: existing.projectName ?? "",
       projectAddress: existing.projectAddress ?? "",
       useDifferentAddress: usingDifferent,
@@ -290,8 +302,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     const estimate: EstimateApiPayloadEstimate = {
       customerId: customerStep.customer.id,
       customerName: customerStep.customer.name,
-      customerEmail: customerStep.customer.email,
-      customerPhone: customerStep.customer.phone || "",
+      customerEmail: customerStep.customerEmail.trim(),
+      customerPhone: customerStep.customerPhone.trim(),
       projectName: customerStep.projectName.trim(),
       projectAddress: customerStep.projectAddress.trim() || "",
       locationNotes: customerStep.locationNotes.trim() || "",
@@ -495,6 +507,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
             ) : (
               <EstimateWizardReviewStep
                 customer={customerStep.customer}
+                customerEmail={customerStep.customerEmail}
+                customerPhone={customerStep.customerPhone}
                 projectName={customerStep.projectName}
                 projectAddress={customerStep.projectAddress}
                 locationNotes={customerStep.locationNotes}

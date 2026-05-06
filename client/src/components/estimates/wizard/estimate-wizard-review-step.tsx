@@ -13,6 +13,8 @@ import { computeTotals, type WizardLineItem } from "./estimate-wizard-line-items
 
 interface EstimateWizardReviewStepProps {
   customer: Customer | null;
+  customerEmail: string;
+  customerPhone: string;
   projectName: string;
   projectAddress: string;
   locationNotes: string;
@@ -34,6 +36,8 @@ const fmt = (n: number) =>
 
 export function EstimateWizardReviewStep({
   customer,
+  customerEmail,
+  customerPhone,
   projectName,
   projectAddress,
   locationNotes,
@@ -66,8 +70,8 @@ export function EstimateWizardReviewStep({
           </div>
           <div className="text-sm text-gray-700">
             <div className="font-semibold text-gray-900">{customer?.name}</div>
-            <div>{customer?.email}</div>
-            {customer?.phone && <div>{customer.phone}</div>}
+            {customerEmail && <div>{customerEmail}</div>}
+            {customerPhone && <div>{customerPhone}</div>}
           </div>
         </CardContent>
       </Card>

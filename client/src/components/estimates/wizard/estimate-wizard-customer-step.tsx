@@ -12,6 +12,8 @@ import type { Customer } from "@shared/schema";
 
 export interface CustomerStepValue {
   customer: Customer | null;
+  customerEmail: string;
+  customerPhone: string;
   projectName: string;
   projectAddress: string;
   useDifferentAddress: boolean;
@@ -97,7 +99,13 @@ export function EstimateWizardCustomerStep({
 
   const handleSelectCustomer = (c: Customer) => {
     const nextAddress = value.useDifferentAddress ? value.projectAddress : (c.address || "");
-    onChange({ ...value, customer: c, projectAddress: nextAddress });
+    onChange({
+      ...value,
+      customer: c,
+      customerEmail: c.email ?? "",
+      customerPhone: c.phone ?? "",
+      projectAddress: nextAddress,
+    });
     form.setValue("projectAddress", nextAddress, { shouldDirty: false });
     setShowCustomerPicker(false);
   };
@@ -132,28 +140,52 @@ export function EstimateWizardCustomerStep({
               placeholder="Search and select a customer..."
             />
           ) : value.customer ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="text-base font-semibold text-gray-900" data-testid="wizard-customer-name">
                 {value.customer.name}
               </div>
-              <div className="text-sm text-gray-700 space-y-1">
-                <div className="flex items-center gap-2">
-                  <Mail className="w-3.5 h-3.5 text-gray-400" />
-                  <span>{value.customer.email}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="wizard-customer-email"
+                    className="text-xs text-gray-600 flex items-center gap-1.5"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-gray-400" /> Email
+                  </Label>
+                  <Input
+                    id="wizard-customer-email"
+                    type="email"
+                    value={value.customerEmail}
+                    onChange={(e) => onChange({ ...value, customerEmail: e.target.value })}
+                    placeholder="customer@example.com"
+                    className="focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                    data-testid="wizard-customer-email"
+                  />
                 </div>
-                {value.customer.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-gray-400" />
-                    <span>{value.customer.phone}</span>
-                  </div>
-                )}
-                {value.customer.address && (
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                    <span className="truncate">{value.customer.address}</span>
-                  </div>
-                )}
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="wizard-customer-phone"
+                    className="text-xs text-gray-600 flex items-center gap-1.5"
+                  >
+                    <Phone className="w-3.5 h-3.5 text-gray-400" /> Phone
+                  </Label>
+                  <Input
+                    id="wizard-customer-phone"
+                    type="tel"
+                    value={value.customerPhone}
+                    onChange={(e) => onChange({ ...value, customerPhone: e.target.value })}
+                    placeholder="(555) 555-5555"
+                    className="focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                    data-testid="wizard-customer-phone"
+                  />
+                </div>
               </div>
+              {value.customer.address && (
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                  <span className="truncate">{value.customer.address}</span>
+                </div>
+              )}
               {!customerLocked && (
                 <button
                   type="button"
