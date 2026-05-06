@@ -166,6 +166,18 @@ export function EstimateWizardCustomerStep({
     // contact info, project address (snap back to the customer's address
     // even if a previous selection had toggled "use different address"),
     // map pin, and controller/zone. The user never has to re-select.
+    //
+    // Important: don't call form.setValue("projectAddress", ...) here. Doing
+    // so would synchronously fire the form.watch subscription below, which
+    // calls onChange({ ...valueRef.current, projectAddress, ... }). At this
+    // point valueRef.current is still the *previous* render's value (the
+    // ref is only refreshed on the next render), so its customer is null
+    // and that stale onChange queues *after* our customer-setting onChange,
+    // clobbering it. The result was a dropped first click that required a
+    // second tap to actually select the customer. The useEffect on
+    // `value.projectAddress` mirrors the new address into the form on the
+    // next render, after valueRef has been refreshed, so the watch is a
+    // no-op.
     const nextAddress = c.address || "";
     onChange({
       ...value,
@@ -178,16 +190,17 @@ export function EstimateWizardCustomerStep({
       controllerLetter: null,
       zoneNumber: null,
     });
-    form.setValue("projectAddress", nextAddress, { shouldDirty: false });
     setShowCustomerPicker(false);
     setShowLocationPicker(false);
   };
 
   const handleToggleAddress = () => {
+    // Same reasoning as handleSelectCustomer: rely on the value.projectAddress
+    // useEffect to push the new address into the form on the next render,
+    // instead of calling form.setValue inline and racing the watch callback.
     const newUseDifferent = !value.useDifferentAddress;
     const nextAddress = newUseDifferent ? value.projectAddress : (value.customer?.address || "");
     onChange({ ...value, useDifferentAddress: newUseDifferent, projectAddress: nextAddress });
-    form.setValue("projectAddress", nextAddress, { shouldDirty: false });
   };
 
   const handleLocationSelect = (loc: WorkLocation) => {
