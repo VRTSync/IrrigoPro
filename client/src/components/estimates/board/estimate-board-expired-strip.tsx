@@ -1,13 +1,9 @@
 import { useState } from "react";
 import type { Estimate } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, ChevronDown } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { ChevronRight, ChevronDown, Send } from "lucide-react";
+import { useEstimateResend } from "@/hooks/use-estimate-resend";
+import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
 
 interface EstimateBoardExpiredStripProps {
   estimates: Estimate[];
@@ -36,7 +32,23 @@ export function EstimateBoardExpiredStrip({
   onCardClick,
 }: EstimateBoardExpiredStripProps) {
   const [expanded, setExpanded] = useState(false);
+  const [resendDialogEstimate, setResendDialogEstimate] = useState<Estimate | null>(null);
+  const { resendEstimate, isResending } = useEstimateResend();
+
   if (estimates.length === 0) return null;
+
+  const handleConfirmResend = async () => {
+    if (!resendDialogEstimate) return;
+    try {
+      await resendEstimate(
+        resendDialogEstimate.id,
+        resendDialogEstimate.customerEmail ?? "",
+      );
+      setResendDialogEstimate(null);
+    } catch {
+      // Error toast surfaced by hook; keep dialog open for retry.
+    }
+  };
 
   return (
     <div className="border border-orange-200 bg-orange-50 rounded-md overflow-hidden">
@@ -90,27 +102,20 @@ export function EstimateBoardExpiredStrip({
                       </div>
                     </button>
                     <div className="mt-2 pt-2 border-t border-gray-100">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span tabIndex={0} className="inline-block w-full">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                disabled
-                                className="w-full text-xs h-7"
-                                data-testid={`board-expired-resend-${est.id}`}
-                              >
-                                Resend
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            Available in next update
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="w-full text-xs h-7"
+                        data-testid={`board-expired-resend-${est.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setResendDialogEstimate(est);
+                        }}
+                      >
+                        <Send className="w-3 h-3 mr-1" />
+                        Resend
+                      </Button>
                     </div>
                   </div>
                 );
@@ -119,6 +124,15 @@ export function EstimateBoardExpiredStrip({
           </div>
         </div>
       )}
+      <ResendConfirmDialog
+        estimate={resendDialogEstimate}
+        open={resendDialogEstimate !== null}
+        onOpenChange={(open) => {
+          if (!open) setResendDialogEstimate(null);
+        }}
+        onConfirm={handleConfirmResend}
+        isResending={isResending}
+      />
     </div>
   );
 }

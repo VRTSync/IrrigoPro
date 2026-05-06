@@ -15,6 +15,7 @@ interface Props {
   lifecycle: LifecycleStatus;
   onOpen: (id: number) => void;
   onEdit: (id: number) => void;
+  onResendClick?: (estimate: Estimate) => void;
 }
 
 const fmt = (n: number) =>
@@ -31,7 +32,7 @@ function ageLabel(date: string | Date | null | undefined): string {
   return `${Math.floor(days / 30)}mo`;
 }
 
-export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit }: Props) {
+export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendClick }: Props) {
   const isExpired = lifecycle === "expired";
   return (
     <div
@@ -71,8 +72,12 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit }: Props) 
             <DropdownMenuItem onClick={() => onOpen(estimate.id)}>Open</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onEdit(estimate.id)}>Edit</DropdownMenuItem>
             <DropdownMenuItem
-              disabled
-              title={isExpired ? "Resend coming next" : "Only available for expired estimates"}
+              disabled={!isExpired || !onResendClick}
+              title={isExpired ? "Resend to customer" : "Only available for expired estimates"}
+              onClick={() => {
+                if (isExpired && onResendClick) onResendClick(estimate);
+              }}
+              data-testid={`list-row-resend-${estimate.id}`}
             >
               Resend
             </DropdownMenuItem>

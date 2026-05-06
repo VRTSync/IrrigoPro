@@ -13,6 +13,8 @@ import { LIFECYCLE_ORDER, type LifecycleStatus } from "@shared/lifecycle";
 import type { Estimate } from "@shared/schema";
 import { EstimateListRow } from "./estimate-list-row";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
+import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
+import { useEstimateResend } from "@/hooks/use-estimate-resend";
 
 export interface EstimateFilterState {
   customerIds: number[];
@@ -50,6 +52,21 @@ function ageLabel(date: string | Date | null | undefined): string {
 export function EstimateList({ estimates, filters, onOpen, onEdit }: Props) {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [resendDialogEstimate, setResendDialogEstimate] = useState<Estimate | null>(null);
+  const { resendEstimate, isResending } = useEstimateResend();
+
+  const handleConfirmResend = async () => {
+    if (!resendDialogEstimate) return;
+    try {
+      await resendEstimate(
+        resendDialogEstimate.id,
+        resendDialogEstimate.customerEmail ?? "",
+      );
+      setResendDialogEstimate(null);
+    } catch {
+      // Error toast surfaced by hook; keep dialog open for retry.
+    }
+  };
 
   const filtered = useMemo(() => {
     return estimates.filter((e) => {
@@ -157,6 +174,7 @@ export function EstimateList({ estimates, filters, onOpen, onEdit }: Props) {
                 lifecycle={lifecycleOf(e)}
                 onOpen={onOpen}
                 onEdit={onEdit}
+                onResendClick={(est) => setResendDialogEstimate(est)}
               />
             ))
           )}
@@ -218,6 +236,16 @@ export function EstimateList({ estimates, filters, onOpen, onEdit }: Props) {
           })
         )}
       </div>
+
+      <ResendConfirmDialog
+        estimate={resendDialogEstimate}
+        open={resendDialogEstimate !== null}
+        onOpenChange={(open) => {
+          if (!open) setResendDialogEstimate(null);
+        }}
+        onConfirm={handleConfirmResend}
+        isResending={isResending}
+      />
     </>
   );
 }

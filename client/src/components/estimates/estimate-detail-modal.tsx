@@ -6,9 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@shared/schema";
+import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
+import { useEstimateResend } from "@/hooks/use-estimate-resend";
 
 interface EstimateDetailModalProps {
   open: boolean;
@@ -20,11 +22,24 @@ interface EstimateDetailModalProps {
 export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: EstimateDetailModalProps) {
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
+  const [showResendDialog, setShowResendDialog] = useState(false);
+  const { resendEstimate, isResending } = useEstimateResend();
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
     enabled: !!estimateId && open,
   });
+
+  const handleConfirmResend = async () => {
+    if (!estimate || !estimateId) return;
+    try {
+      await resendEstimate(estimateId, estimate.customerEmail ?? "");
+      setShowResendDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
+    } catch {
+      // Error toast surfaced by hook; keep dialog open for retry.
+    }
+  };
 
   const approveEstimateMutation = useMutation({
     mutationFn: async () => {
@@ -449,6 +464,17 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 >
                   Close
                 </Button>
+                {estimate.lifecycleStatus === 'expired' && (
+                  <Button
+                    onClick={() => setShowResendDialog(true)}
+                    variant="outline"
+                    className="border-orange-200 text-orange-700 hover:bg-orange-50 w-full sm:w-auto"
+                    data-testid="detail-modal-resend"
+                  >
+                    <Send className="w-4 h-4 mr-2" />
+                    Resend
+                  </Button>
+                )}
                 {estimate.status !== 'converted_to_work_order' && onEdit && (
                   <Button
                     onClick={() => {
@@ -515,6 +541,13 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           </div>
         )}
       </DialogContent>
+      <ResendConfirmDialog
+        estimate={estimate ?? null}
+        open={showResendDialog}
+        onOpenChange={setShowResendDialog}
+        onConfirm={handleConfirmResend}
+        isResending={isResending}
+      />
     </Dialog>
   );
 }
