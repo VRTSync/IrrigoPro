@@ -361,6 +361,15 @@ export const estimates = pgTable("estimates", {
   workOrderId: integer("work_order_id"), // References work order created from this estimate
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
+  // Pinned work location captured via the estimate wizard map picker.
+  // Optional — older estimates may have only an address.
+  workLocationLat: decimal("work_location_lat", { precision: 10, scale: 7 }),
+  workLocationLng: decimal("work_location_lng", { precision: 10, scale: 7 }),
+  workLocationAddress: text("work_location_address"),
+  // Optional irrigation context: which controller letter (A..Z) and zone
+  // number from the customer's controller setup this estimate is for.
+  controllerLetter: text("controller_letter"),
+  zoneNumber: integer("zone_number"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -537,6 +546,15 @@ export const workOrders = pgTable("work_orders", {
   photos: text("photos").array().default([]), // JSON array of photo URLs
   attachments: text("attachments").array().default([]), // JSON array of attachment URLs (landscape plans, etc.)
   branchName: text("branch_name"), // Selected branch for multi-location customers
+  // Pinned work location (carried forward from estimate when auto-converted,
+  // or set directly on the work order form). Optional.
+  workLocationLat: decimal("work_location_lat", { precision: 10, scale: 7 }),
+  workLocationLng: decimal("work_location_lng", { precision: 10, scale: 7 }),
+  workLocationAddress: text("work_location_address"),
+  // Optional irrigation context — which controller letter / zone this work
+  // is for, mirrored from the originating estimate when applicable.
+  controllerLetter: text("controller_letter"),
+  zoneNumber: integer("zone_number"),
   // AI-generated description fields (populated during completion)
   aiInputs: text("ai_inputs"), // JSON blob of structured inputs used for AI generation
   aiShortDescription: text("ai_short_description"), // Final accepted short description

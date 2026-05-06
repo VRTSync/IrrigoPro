@@ -1,14 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Form } from "@/components/ui/form";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { LocationFields } from "@/components/location/location-fields";
-import { User, Mail, Phone, MapPin, Pencil, Briefcase } from "lucide-react";
-import type { Customer } from "@shared/schema";
+import { LocationPicker } from "@/components/ui/location-picker";
+import {
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  Pencil,
+  Briefcase,
+  Cpu,
+  Droplets,
+} from "lucide-react";
+import type { Customer, PropertyController } from "@shared/schema";
+
+export interface WorkLocation {
+  lat: number;
+  lng: number;
+  address?: string;
+}
 
 export interface CustomerStepValue {
   customer: Customer | null;
@@ -19,6 +43,9 @@ export interface CustomerStepValue {
   useDifferentAddress: boolean;
   locationNotes: string;
   accessInstructions: string;
+  workLocation: WorkLocation | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
 }
 
 interface EstimateWizardCustomerStepProps {
@@ -44,6 +71,7 @@ export function EstimateWizardCustomerStep({
 }: EstimateWizardCustomerStepProps) {
   const projectNameRef = useRef<HTMLInputElement | null>(null);
   const [showCustomerPicker, setShowCustomerPicker] = useState(!value.customer);
+  const [showLocationPicker, setShowLocationPicker] = useState(!!value.workLocation);
   // valueRef avoids stale closures inside the form `watch` subscription.
   const valueRef = useRef(value);
   valueRef.current = value;
@@ -97,17 +125,57 @@ export function EstimateWizardCustomerStep({
     }
   }, [value.customer?.id]);
 
+  // Load the customer's controllers (A, B, ...) once a customer is picked.
+  const { data: controllers = [] } = useQuery<PropertyController[]>({
+    queryKey: ["/api/properties", value.customer?.id, "controllers"],
+    enabled: !!value.customer,
+  });
+
+  const selectedController = controllers.find(
+    (c) => c.controllerLetter === value.controllerLetter,
+  );
+  const zoneCount = selectedController?.zoneCount ?? 0;
+
+  // If the chosen controller no longer exists in the customer's list (e.g.
+  // customer changed), clear the controller/zone state.
+  useEffect(() => {
+    if (!value.controllerLetter) return;
+    if (controllers.length === 0) return; // not loaded yet
+    const stillThere = controllers.some(
+      (c) => c.controllerLetter === value.controllerLetter,
+    );
+    if (!stillThere) {
+      onChange({ ...valueRef.current, controllerLetter: null, zoneNumber: null });
+    }
+  }, [controllers, value.controllerLetter, onChange]);
+
+  // If the chosen zone is now out of range for the (possibly changed)
+  // controller, clear it.
+  useEffect(() => {
+    if (value.zoneNumber == null) return;
+    if (!selectedController) return;
+    if (value.zoneNumber > zoneCount) {
+      onChange({ ...valueRef.current, zoneNumber: null });
+    }
+  }, [selectedController, zoneCount, value.zoneNumber, onChange]);
+
   const handleSelectCustomer = (c: Customer) => {
     const nextAddress = value.useDifferentAddress ? value.projectAddress : (c.address || "");
+    // Reset the map pin and controller/zone whenever the customer changes —
+    // those choices are scoped to the previous customer's setup.
     onChange({
       ...value,
       customer: c,
       customerEmail: c.email ?? "",
       customerPhone: c.phone ?? "",
       projectAddress: nextAddress,
+      workLocation: null,
+      controllerLetter: null,
+      zoneNumber: null,
     });
     form.setValue("projectAddress", nextAddress, { shouldDirty: false });
     setShowCustomerPicker(false);
+    setShowLocationPicker(false);
   };
 
   const handleToggleAddress = () => {
@@ -117,8 +185,32 @@ export function EstimateWizardCustomerStep({
     form.setValue("projectAddress", nextAddress, { shouldDirty: false });
   };
 
+  const handleLocationSelect = (loc: WorkLocation) => {
+    onChange({ ...valueRef.current, workLocation: loc });
+  };
+
+  const handleClearLocation = () => {
+    onChange({ ...valueRef.current, workLocation: null });
+  };
+
+  const handleControllerChange = (letter: string) => {
+    const next = letter === "__none__" ? null : letter;
+    onChange({ ...valueRef.current, controllerLetter: next, zoneNumber: null });
+  };
+
+  const handleZoneChange = (zone: string) => {
+    const next = zone === "__none__" ? null : Number(zone);
+    onChange({ ...valueRef.current, zoneNumber: next });
+  };
+
   const canContinue = !!value.customer && value.projectName.trim().length > 0;
   const addressReadOnly = !!value.customer && !value.useDifferentAddress;
+
+  const mapDefaultAddress =
+    value.workLocation?.address ||
+    value.projectAddress ||
+    value.customer?.address ||
+    "";
 
   return (
     <div className="space-y-4">
@@ -244,6 +336,133 @@ export function EstimateWizardCustomerStep({
           <Form {...form}>
             <LocationFields control={form.control} readOnlyAddress={addressReadOnly} />
           </Form>
+
+          {/* Map picker — mirrors the work order form pattern */}
+          {value.customer && (
+            <div className="border-t pt-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-medium text-gray-900">Work Location on Map</span>
+                </div>
+                <Button
+                  type="button"
+                  variant={showLocationPicker ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setShowLocationPicker((s) => !s)}
+                  data-testid="wizard-toggle-map"
+                >
+                  {showLocationPicker ? "Hide Map" : "Select Location on Map"}
+                </Button>
+              </div>
+
+              {!showLocationPicker && !value.workLocation && (
+                <p className="text-xs text-gray-500">
+                  Optional — pick a precise spot on the map so the field tech can navigate
+                  straight to the work area.
+                </p>
+              )}
+
+              {showLocationPicker && (
+                <LocationPicker
+                  key={value.customer.id}
+                  defaultAddress={mapDefaultAddress}
+                  onLocationSelect={handleLocationSelect}
+                  selectedLocation={value.workLocation}
+                />
+              )}
+
+              {value.workLocation && (
+                <div
+                  className="bg-green-50 border border-green-200 rounded-lg p-3"
+                  data-testid="wizard-location-confirmation"
+                >
+                  <p className="text-sm font-medium text-green-900">Pinned Location:</p>
+                  <p className="text-sm text-green-800 mt-1">
+                    {value.workLocation.address ||
+                      `${value.workLocation.lat.toFixed(6)}, ${value.workLocation.lng.toFixed(6)}`}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearLocation}
+                    className="mt-2 text-green-700 hover:text-green-900"
+                    data-testid="wizard-clear-location"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Controller + Zone selectors */}
+          {value.customer && (
+            <div className="border-t pt-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium text-gray-900">
+                  Controller &amp; Zone <span className="text-xs text-gray-500 font-normal">(optional)</span>
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600">Controller</Label>
+                  <Select
+                    value={value.controllerLetter ?? "__none__"}
+                    onValueChange={handleControllerChange}
+                    disabled={controllers.length === 0}
+                  >
+                    <SelectTrigger data-testid="wizard-controller-select">
+                      <SelectValue
+                        placeholder={
+                          controllers.length === 0
+                            ? "No controllers on file"
+                            : "Select controller"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— None —</SelectItem>
+                      {controllers.map((c) => (
+                        <SelectItem key={c.controllerLetter} value={c.controllerLetter}>
+                          Controller {c.controllerLetter}{" "}
+                          <span className="text-gray-500">({c.zoneCount} zones)</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600 flex items-center gap-1">
+                    <Droplets className="w-3 h-3" /> Zone
+                  </Label>
+                  <Select
+                    value={value.zoneNumber == null ? "__none__" : String(value.zoneNumber)}
+                    onValueChange={handleZoneChange}
+                    disabled={!selectedController || zoneCount === 0}
+                  >
+                    <SelectTrigger data-testid="wizard-zone-select">
+                      <SelectValue
+                        placeholder={
+                          !selectedController ? "Pick a controller first" : "Select zone"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— None —</SelectItem>
+                      {Array.from({ length: zoneCount }, (_, i) => i + 1).map((z) => (
+                        <SelectItem key={z} value={String(z)}>
+                          Zone {z}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

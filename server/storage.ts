@@ -2442,6 +2442,14 @@ export class DatabaseStorage implements IStorage {
       projectAddress: estimate.projectAddress,
       locationNotes: estimate.locationNotes,
       accessInstructions: estimate.accessInstructions,
+      // Carry the pinned map location and irrigation context forward so
+      // the field tech sees the same pin / controller / zone the estimate
+      // was scoped to.
+      workLocationLat: estimate.workLocationLat,
+      workLocationLng: estimate.workLocationLng,
+      workLocationAddress: estimate.workLocationAddress,
+      controllerLetter: estimate.controllerLetter,
+      zoneNumber: estimate.zoneNumber,
       workType: 'estimate_based',
       status: 'pending',
       priority: 'medium',

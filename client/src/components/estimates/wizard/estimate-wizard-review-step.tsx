@@ -6,7 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChevronDown, ChevronRight, Image as ImageIcon, Paperclip, User, Briefcase, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Image as ImageIcon, Paperclip, User, Briefcase, Loader2, MapPin, Cpu } from "lucide-react";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import type { Customer } from "@shared/schema";
 import { computeTotals, type WizardLineItem } from "./estimate-wizard-line-items-step";
@@ -17,6 +17,9 @@ interface EstimateWizardReviewStepProps {
   customerPhone: string;
   projectName: string;
   projectAddress: string;
+  workLocation: { lat: number; lng: number; address?: string } | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
   locationNotes: string;
   accessInstructions: string;
   laborRate: number;
@@ -40,6 +43,9 @@ export function EstimateWizardReviewStep({
   customerPhone,
   projectName,
   projectAddress,
+  workLocation,
+  controllerLetter,
+  zoneNumber,
   locationNotes,
   accessInstructions,
   laborRate,
@@ -88,6 +94,36 @@ export function EstimateWizardReviewStep({
           <div className="text-sm text-gray-700 space-y-1">
             <div><span className="text-gray-500">Name: </span>{projectName}</div>
             {projectAddress && <div><span className="text-gray-500">Address: </span>{projectAddress}</div>}
+            {workLocation && (
+              <div className="flex items-start gap-1.5" data-testid="wizard-review-pinned-location">
+                <MapPin className="w-3.5 h-3.5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <span className="text-gray-500">Pinned: </span>
+                  {workLocation.address ||
+                    `${workLocation.lat.toFixed(6)}, ${workLocation.lng.toFixed(6)}`}
+                </div>
+              </div>
+            )}
+            {(controllerLetter || zoneNumber != null) && (
+              <div className="flex items-center gap-1.5" data-testid="wizard-review-controller-zone">
+                <Cpu className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                <div>
+                  {controllerLetter && (
+                    <>
+                      <span className="text-gray-500">Controller: </span>
+                      {controllerLetter}
+                    </>
+                  )}
+                  {controllerLetter && zoneNumber != null && <span className="mx-2 text-gray-300">•</span>}
+                  {zoneNumber != null && (
+                    <>
+                      <span className="text-gray-500">Zone: </span>
+                      {zoneNumber}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             {locationNotes && <div><span className="text-gray-500">Location notes: </span>{locationNotes}</div>}
             {accessInstructions && (
               <div><span className="text-gray-500">Access: </span>{accessInstructions}</div>

@@ -265,7 +265,26 @@ const createEstimateWithItemsSchema = z.object({
     partsSubtotal: z.union([z.string(), z.number()]).optional(),
     laborSubtotal: z.union([z.string(), z.number()]).optional(),
     totalAmount: z.union([z.string(), z.number()]).optional(),
-    laborRate: z.union([z.string(), z.number()])
+    laborRate: z.union([z.string(), z.number()]),
+    // Map picker / controller / zone fields are optional. Lat/Lng come from
+    // the LocationPicker as numbers; persist them as decimal strings.
+    workLocationLat: z
+      .union([z.string(), z.number()])
+      .nullish()
+      .transform((v) => (v === null || v === undefined || v === "" ? null : String(v))),
+    workLocationLng: z
+      .union([z.string(), z.number()])
+      .nullish()
+      .transform((v) => (v === null || v === undefined || v === "" ? null : String(v))),
+    workLocationAddress: z.string().nullish(),
+    controllerLetter: z
+      .string()
+      .nullish()
+      .transform((v) => (v ? v.toUpperCase() : null))
+      .refine((v) => v === null || (v.length === 1 && v >= "A" && v <= "Z"), {
+        message: "controllerLetter must be A-Z",
+      }),
+    zoneNumber: z.coerce.number().int().min(1).max(100).nullish(),
   }),
   items: z.array(z.object({
     description: z.string().optional().default(""),

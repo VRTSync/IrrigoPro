@@ -44,6 +44,11 @@ interface EstimateApiPayloadEstimate {
   laborRate: string;
   photos: string[];
   attachments: string[];
+  workLocationLat: number | null;
+  workLocationLng: number | null;
+  workLocationAddress: string | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
 }
 
 interface EstimateApiPayloadItem {
@@ -97,6 +102,9 @@ interface DraftSnapshot {
   items: Array<Pick<WizardLineItem, "partId" | "partName" | "partPrice" | "quantity" | "laborHours" | "description">>;
   photos: string[];
   attachments: string[];
+  workLocation: { lat: number; lng: number; address?: string } | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
 }
 
 function snapshot(
@@ -125,6 +133,9 @@ function snapshot(
     })),
     photos: photos.map((p) => p.url),
     attachments: attachments.map((a) => a.url),
+    workLocation: cs.workLocation,
+    controllerLetter: cs.controllerLetter,
+    zoneNumber: cs.zoneNumber,
   };
 }
 
@@ -143,6 +154,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     useDifferentAddress: false,
     locationNotes: "",
     accessInstructions: "",
+    workLocation: null,
+    controllerLetter: null,
+    zoneNumber: null,
   });
   const [items, setItems] = useState<WizardLineItem[]>([]);
   const [laborRate, setLaborRate] = useState<number>(45);
@@ -158,7 +172,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       setStep(isEdit ? 2 : 1);
       hydratedRef.current = false;
       if (!isEdit) {
-        setCustomerStep({
+        const blank: CustomerStepValue = {
           customer: null,
           customerEmail: "",
           customerPhone: "",
@@ -167,27 +181,16 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           useDifferentAddress: false,
           locationNotes: "",
           accessInstructions: "",
-        });
+          workLocation: null,
+          controllerLetter: null,
+          zoneNumber: null,
+        };
+        setCustomerStep(blank);
         setItems([]);
         setLaborRate(45);
         setPhotos([]);
         setAttachments([]);
-        initialSnapshotRef.current = snapshot(
-          {
-            customer: null,
-            customerEmail: "",
-            customerPhone: "",
-            projectName: "",
-            projectAddress: "",
-            useDifferentAddress: false,
-            locationNotes: "",
-            accessInstructions: "",
-          },
-          [],
-          45,
-          [],
-          [],
-        );
+        initialSnapshotRef.current = snapshot(blank, [], 45, [], []);
       }
     }
   }, [open, isEdit]);
@@ -210,6 +213,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       address: existing.projectAddress,
     } as Customer;
     const usingDifferent = false;
+    const lat = existing.workLocationLat != null ? parseFloat(String(existing.workLocationLat)) : NaN;
+    const lng = existing.workLocationLng != null ? parseFloat(String(existing.workLocationLng)) : NaN;
+    const wl = Number.isFinite(lat) && Number.isFinite(lng)
+      ? { lat, lng, address: existing.workLocationAddress ?? undefined }
+      : null;
     const cs: CustomerStepValue = {
       customer: cust,
       customerEmail: existing.customerEmail ?? "",
@@ -219,6 +227,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       useDifferentAddress: usingDifferent,
       locationNotes: existing.locationNotes ?? "",
       accessInstructions: existing.accessInstructions ?? "",
+      workLocation: wl,
+      controllerLetter: existing.controllerLetter ?? null,
+      zoneNumber: existing.zoneNumber ?? null,
     };
     setCustomerStep(cs);
     const loaded: WizardLineItem[] = (existing.items ?? []).map((it: EstimateItem) => {
@@ -315,6 +326,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       laborRate: laborRate.toFixed(2),
       photos: photos.map((p) => p.url),
       attachments: attachments.map((a) => a.url),
+      workLocationLat: customerStep.workLocation?.lat ?? null,
+      workLocationLng: customerStep.workLocation?.lng ?? null,
+      workLocationAddress: customerStep.workLocation?.address ?? null,
+      controllerLetter: customerStep.controllerLetter,
+      zoneNumber: customerStep.zoneNumber,
     };
     const itemsPayload: EstimateApiPayloadItem[] = items.map((it, index) => ({
       partId: it.partId,
@@ -511,6 +527,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 customerPhone={customerStep.customerPhone}
                 projectName={customerStep.projectName}
                 projectAddress={customerStep.projectAddress}
+                workLocation={customerStep.workLocation}
+                controllerLetter={customerStep.controllerLetter}
+                zoneNumber={customerStep.zoneNumber}
                 locationNotes={customerStep.locationNotes}
                 accessInstructions={customerStep.accessInstructions}
                 laborRate={laborRate}
