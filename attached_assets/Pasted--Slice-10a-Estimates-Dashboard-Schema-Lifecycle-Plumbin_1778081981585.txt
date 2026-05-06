@@ -1,0 +1,215 @@
+# Slice 10a — Estimates Dashboard: Schema + Lifecycle Plumbing
+
+**Date:** 2026-05-06
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Decisions locked:**
+- Q1 = **`'draft'` becomes a real `internalStatus` value.** It's already reserved in the schema comment from Slice 7. Promote it from comment to validator. No DB migration needed — `internal_status` is a free-text column.
+- Q2 = **A unified `lifecycleStatus` field is computed server-side and returned on every estimate read.** The frontend never reconstructs it from two columns. Possible values: `draft | pending_review | sent | approved | rejected | expired`.
+- Q3 = **Expiration is derived, not stored.** An estimate is `expired` when `status = 'pending'` AND `internalStatus = 'sent_to_customer'` AND `estimateDate < now() - 30 days`. No cron, no `expiresAt` field, no nightly job.
+- Q4 = **One workflow transition endpoint** (`POST /api/estimates/:id/transition`) handles validated lifecycle moves: `draft → pending_review`, `pending_review → sent` (which triggers the existing send pipeline), and `expired → sent` (resend). Invalid transitions reject with 400.
+- Q5 = **Backwards-compatible POST.** Estimates created via `POST /api/estimates` continue to default to `internal_status = 'pending_approval'` (Slice 7 default). Callers who want a draft pass `internalStatus: 'draft'` explicitly. The wizard's "Save as draft" UI lands in Slice 10c.
+- Q6 = **The board and list views read from `lifecycleStatus`** introduced here. Slice 10b consumes it.
+
+**Related:** Builds on Slice 7 (introduced the `internalStatus` track and `pending_approval` default) and Slice 8 (current wizard creates estimates with `internalStatus = 'pending_approval'`). Unblocks Slice 10b (Board view), 10c (List view + view toggle + draft save), and 10d (Resend flow for expired).
+
+---
+
+## Executive Summary
+
+Slice 10 is a small redesign of `/estimates` that adds a kanban-style **Estimates Dashboard** with five status columns — Drafts, Pending review, Sent, Approved, Rejected — plus a callout strip for expired estimates that are eligible to resend. Slice 10a is the foundation: schema-side normalization plus a single computed `lifecycleStatus` field returned by the API so the new frontend has one cleanly-typed string to switch on instead of having to reconstruct status from `status` and `internalStatus` together.
+
+This slice does **not** ship any UI. It ships:
+
+1. A real `'draft'` value in the `internalStatus` validator/zod schema (the schema comment in `shared/schema.ts:344-345` already reserves it; Slice 10a promotes it).
+2. A pure function `computeLifecycleStatus(estimate)` in `shared/lifecycle.ts` that maps `(status, internalStatus, estimateDate)` to one of `draft | pending_review | sent | approved | rejected | expired`.
+3. The same field returned on every estimate-shaped response from the server (single estimate, list, customer-facing approval lookup).
+4. A new endpoint `POST /api/estimates/:id/transition` that handles three explicit transitions: `submit_for_review` (draft → pending_review), `send_to_customer` (pending_review → sent, triggers existing email), and `resend` (expired → sent, resets `estimateDate`, triggers existing email). Invalid transitions return 400 with a human-readable error.
+5. Tests covering the lifecycle computation and the transition endpoint's authorization + transition-validity rules.
+
+**Slice 10a ships when:** every estimate shape returned by the API includes a `lifecycleStatus` string that matches the computed mapping; the existing wizard, customer-facing approval flow, and Slice 7 pending-approval queue all continue to work unchanged; the new transition endpoint accepts the three valid actions and rejects everything else; and the lifecycle computation has unit tests covering all six output values plus the boundary cases (29-day-old vs. 31-day-old sent estimates, etc.).
+
+---
+
+## Why Now
+
+Slice 10b (Board view) and 10c (List view) both need to render five mutually-exclusive lifecycle buckets. Doing the bucketing on the frontend means duplicating the rule across two components; doing it inline means querying both `status` and `internalStatus` and timestamps on every render and is brittle when a future state gets added. A single computed field on the backend is the right shape.
+
+A second motivation: drafts. Today every estimate created via the wizard immediately enters `pending_approval`, which means Slice 10b would render a Drafts column that's always empty. Promoting `'draft'` to a real value lets Slice 10c add a "Save as draft" affordance to the wizard without any further server work.
+
+A third motivation: expiration is currently invisible. The schema declares `'expired'` as a possible `status` value (`shared/schema.ts:342`) but nothing ever writes it. The customer-facing approval flow uses a token-based `tokenExpiresAt` for security, but there's no business-side expiration of "this estimate has been sitting unanswered for too long." Slice 10a derives that cleanly without storing it.
+
+---
+
+## What Lifecycle Becomes
+
+After Slice 10a, every estimate has exactly one `lifecycleStatus` value at any moment in time:
+
+| `lifecycleStatus` | Predicate | Who can move it forward |
+|---|---|---|
+| `draft` | `internalStatus = 'draft'` | Irrigation manager → submits for review |
+| `pending_review` | `internalStatus = 'pending_approval'` | Billing manager / company admin → approves and sends |
+| `sent` | `internalStatus = 'sent_to_customer'` AND `status = 'pending'` AND `estimateDate >= now() - 30d` | Customer (via approval link) |
+| `approved` | `status = 'approved'` | (terminal until conversion to work order) |
+| `rejected` | `status = 'rejected'` | (terminal) |
+| `expired` | `internalStatus = 'sent_to_customer'` AND `status = 'pending'` AND `estimateDate < now() - 30d` | Irrigation manager → resends |
+
+The mapping is deterministic and total — every (status, internalStatus, estimateDate) tuple maps to exactly one bucket. The function falls through to `pending_review` for any unrecognized internal state to fail closed (a partially-migrated estimate shouldn't disappear from the board).
+
+---
+
+## Scope of Slice 10a
+
+### In Scope
+
+1. **`shared/lifecycle.ts`** (new file): exports
+   - `type LifecycleStatus = 'draft' | 'pending_review' | 'sent' | 'approved' | 'rejected' | 'expired'`
+   - `LIFECYCLE_STATUSES` array constant for iteration
+   - `computeLifecycleStatus(estimate: Pick<Estimate, 'status' | 'internalStatus' | 'estimateDate'>, now?: Date): LifecycleStatus` — pure function, takes optional `now` for testability, default `new Date()`.
+   - `ESTIMATE_EXPIRATION_DAYS = 30` constant.
+
+2. **`shared/schema.ts`** updates:
+   - Add `'draft'` to the allowed values comment on `internalStatus` (line 344-345), and add it to the `insertEstimateSchema` zod validator if `internalStatus` is enumerated there. (If it's currently `z.string()` with no enum, no zod change is required — note this in the PR description.)
+   - **While in this file:** the comment block on lines 344-345 and 369-370 is corrupted — single-slash `/` instead of double-slash `//`. Fix to proper TS comments (`// ...`). Verify with `npm run check` (or whatever the project's tsc command is).
+
+3. **`server/storage.ts`** updates:
+   - Wherever an estimate is read out of the DB and returned to the API layer (single estimate, list, customer-token lookup), spread `lifecycleStatus: computeLifecycleStatus(estimate)` onto the response object.
+   - Specifically: `getEstimates`, `getEstimateById`, `getEstimateByToken` (or whatever the equivalent functions are named — match what's already there).
+
+4. **`server/routes.ts`** — new transition endpoint:
+   ```
+   POST /api/estimates/:id/transition
+   Body: { action: 'submit_for_review' | 'send_to_customer' | 'resend' }
+   ```
+   Behavior:
+   - `submit_for_review`: requires current `internalStatus = 'draft'`, sets it to `'pending_approval'`, sets `updatedAt = now()`. Returns the updated estimate (including new `lifecycleStatus`). 400 if current status isn't `draft`.
+   - `send_to_customer`: requires current `internalStatus = 'pending_approval'`. Sets `internalStatus = 'sent_to_customer'`, `approvalSentAt = now()`. Triggers the existing email-send pipeline in `server/email-service.ts` (whatever function the existing pending-approval flow already calls). Returns the updated estimate. 400 if current status isn't `pending_approval`.
+   - `resend`: requires `lifecycleStatus = 'expired'`. Sets `estimateDate = now()`, `approvalSentAt = now()`, triggers the same email-send pipeline. Does **not** change `internalStatus` or `status` (still `sent_to_customer` / `pending`). Returns the updated estimate. 400 if not expired.
+   - All three transitions are gated by the existing role check pattern (whatever `requireAuth`/`requireRole` middleware is already in use). `submit_for_review` allowed for irrigation_manager (and admin). `send_to_customer` allowed for billing_manager and company admin only. `resend` allowed for irrigation_manager and above.
+
+5. **API response surface audit:** any other endpoint that returns an estimate object — including embedded estimates inside `work_orders`, customer-facing approval responses, PDF generation payloads — should also include `lifecycleStatus`. Find them with `grep -rn "estimates" server/routes.ts` and confirm the response shape includes the field. The PDF generator does not need it (PDFs render the customer-facing `status`); skip it there.
+
+6. **Tests** in `tests/`:
+   - `tests/estimate-lifecycle.test.mjs` — unit tests for `computeLifecycleStatus` covering: each of the six outputs, the 30-day boundary (29 days = sent, 31 days = expired, exactly-30 = sent — boundary inclusive at the lower end), an unrecognized internal state falls through to `pending_review`.
+   - `tests/estimate-transition.test.mjs` — integration tests for the new endpoint covering: the three valid transitions succeed and update the row; each invalid transition (e.g. `submit_for_review` on a `pending_approval` estimate) returns 400; role checks reject unauthorized callers.
+
+### Out of Scope
+
+- The Estimates Dashboard UI itself (Slices 10b, 10c).
+- "Save as draft" UI in the wizard (Slice 10c).
+- Resend UI (Slice 10d) — the endpoint exists in 10a but no button calls it yet.
+- A `'needs_revision'` lifecycle state (still reserved for a future slice — the comment in `schema.ts` keeps the reservation).
+- Any change to the customer-facing `status` enum or the customer approval flow.
+- Auto-archiving of estimates older than some longer cutoff (60d, 90d). Could be a future slice; not now.
+- Drag-and-drop reordering between columns (would require server-side validation of arbitrary transitions; deliberately not in scope).
+- Notifications on transition (e.g. email the irrigation manager when their estimate is approved by the billing manager). Future slice.
+
+---
+
+## API Specification
+
+### Read-side: every estimate response includes `lifecycleStatus`
+
+```ts
+// Response shape, additive on every endpoint that returns an estimate
+{
+  id: 1042,
+  estimateNumber: "EST-1042",
+  status: "pending",
+  internalStatus: "sent_to_customer",
+  estimateDate: "2026-04-01T...",
+  // ... all existing fields ...
+  lifecycleStatus: "expired",  // NEW — computed server-side
+}
+```
+
+### Write-side: new transition endpoint
+
+```
+POST /api/estimates/:id/transition
+Authorization: existing session/cookie auth
+Content-Type: application/json
+
+Body:
+{
+  "action": "submit_for_review" | "send_to_customer" | "resend"
+}
+
+200 Response: the updated estimate (with new lifecycleStatus)
+400 Response: { error: "Invalid transition: cannot submit_for_review when lifecycleStatus is 'sent'" }
+401: not authenticated
+403: authenticated but role doesn't permit this action
+404: estimate not found or not visible to this user
+```
+
+### What the existing endpoints do not change
+
+- `POST /api/estimates` continues to default `internal_status` to `'pending_approval'` for backwards compatibility. A caller can pass `"internalStatus": "draft"` to opt into starting as a draft. Slice 10c's wizard will use this.
+- `PUT /api/estimates/:id` continues to update fields; lifecycle moves still go through the new transition endpoint.
+- `POST /api/estimates/:id/approve` (the existing internal-approval endpoint from Slice 7) — keep it. It currently does the `pending_approval → approved_internal` move and probably also kicks off the send. **Decision:** if the current approve endpoint already includes the send, keep it as-is; Slice 10a's `send_to_customer` transition is just a more explicit alias for the same operation. If they diverge, that's fine — both paths exist. Document the choice in the PR.
+- The customer-facing approval-link endpoints (which set `status = 'approved'` or `'rejected'` based on the customer's click) are unchanged. Their effect on `lifecycleStatus` is automatic via the computed field.
+
+---
+
+## Data & Schema
+
+**No DB migration.** Both columns involved (`status`, `internal_status`) are already `text` with defaults, so adding `'draft'` as a valid `internal_status` value requires only a validator/comment update.
+
+**Existing rows** are unaffected. An estimate currently sitting in `internal_status = 'pending_approval'` keeps its row exactly as it is and starts appearing in the "Pending review" column as soon as Slice 10b ships. An estimate in `'sent_to_customer'` for >30 days will start showing as `'expired'` in `lifecycleStatus` immediately on deploy of 10a — but since no UI consumes the field yet, this is invisible until 10b/10c.
+
+**Backfill:** none required. The default for new estimates remains `pending_approval` until Slice 10c flips the wizard's submit to start as `'draft'`.
+
+---
+
+## Risks and Rollback
+
+- **Computed-field drift:** if a future caller mutates `status` or `internalStatus` without going through the transition endpoint and forgets that the lifecycle is derived from both, the board could show a stale-looking value. Mitigation: the `computeLifecycleStatus` function is the single source of truth, called every time the estimate is read out. As long as no caller caches the field across writes (and the API layer doesn't), this is self-correcting.
+- **Boundary inconsistency on expiration:** "30 days" is computed against `estimateDate` not `approvalSentAt` — if those ever diverge significantly (they currently don't because the wizard sets `estimateDate = now()` on creation and the send happens shortly after), expiration could be off. Mitigation: the lifecycle function takes whichever timestamp the schema considers authoritative for the customer-facing clock. We use `estimateDate` because it's `notNull` and present from creation. If a future slice needs more precise per-event timing, switch to `approvalSentAt` then. Not now.
+- **Role-check regression on the new transition endpoint:** if the existing role middleware is loosely typed and we copy-paste it wrong, the transition endpoint could allow a field tech to send an estimate to a customer (bypassing the billing-manager review). Mitigation: the integration test for `send_to_customer` runs with each of the four user roles and asserts only billing_manager + admin succeed.
+- **Comment-block fix is a no-op for runtime but may reorder lines that other tools care about:** drizzle-kit may regenerate snapshots based on file content. Mitigation: run `drizzle-kit check` after the comment fix and commit any snapshot churn.
+
+**Rollback:** `git revert` the slice commit. Because no DB migration ran and the only behavior change is an additive response field plus a new endpoint, reverting is a single-step operation. Existing clients ignore the new `lifecycleStatus` field; no client breaks.
+
+---
+
+## Migration / Rollout
+
+Single deploy. No flag, no phased rollout. The slice is purely additive on read and adds one new endpoint on write. The wizard, customer approval flow, and pending-approval queue all continue to work because:
+
+- The wizard still sends `internalStatus: 'pending_approval'` (default) and gets back an estimate with `lifecycleStatus: 'pending_review'` — but it doesn't read that field yet, so nothing changes.
+- The pending-approval queue (Slice 7) reads `internal_status = 'pending_approval'` directly; the new computed field is ignored.
+- The customer approval flow reads/writes `status` directly; the new computed field is ignored.
+
+Slice 10b is what actually consumes `lifecycleStatus`. 10a just makes it available.
+
+---
+
+## Success Criteria
+
+Slice 10a ships when, in order:
+
+1. `shared/lifecycle.ts` exists, exports `LifecycleStatus`, `LIFECYCLE_STATUSES`, `computeLifecycleStatus`, and `ESTIMATE_EXPIRATION_DAYS`.
+2. The unit-test file `tests/estimate-lifecycle.test.mjs` exists and passes, covering all six output values plus the 30-day boundary and the unknown-internal-state fallback.
+3. `npm run check` (or equivalent tsc command) passes — no type errors introduced.
+4. Hitting `GET /api/estimates` returns a list where every estimate has a `lifecycleStatus` string field present and matching `computeLifecycleStatus(estimate)`.
+5. Hitting `GET /api/estimates/:id` returns a single estimate with the same field.
+6. The customer-facing approval-link lookup endpoint also returns the field. (Easier to verify by inspecting the route handler than by hitting it through a token.)
+7. `POST /api/estimates/:id/transition` with `{ action: 'submit_for_review' }` succeeds when the estimate is currently `internalStatus = 'draft'` and the caller has irrigation_manager+ role; returns 400 otherwise.
+8. `POST /api/estimates/:id/transition` with `{ action: 'send_to_customer' }` succeeds when currently `internalStatus = 'pending_approval'` and the caller has billing_manager+ role; triggers the existing send-email function; returns 400 if not pending_approval; returns 403 if role insufficient.
+9. `POST /api/estimates/:id/transition` with `{ action: 'resend' }` succeeds only when `lifecycleStatus = 'expired'`; resets `estimateDate = now()`; triggers send-email; returns the updated estimate with `lifecycleStatus = 'sent'`.
+10. The integration-test file `tests/estimate-transition.test.mjs` exists and passes, covering the three valid transitions, three representative invalid transitions, and role-check rejections.
+11. The Slice 7 pending-approval queue page still loads correctly and still shows the same set of estimates.
+12. The customer-facing approval-by-link page still works end-to-end on a freshly-created estimate (regression check that the read-side additions didn't break the token lookup).
+13. The corrupted comment lines in `shared/schema.ts` (single-slash `/` instead of `//`) are fixed.
+
+---
+
+## What This Unblocks
+
+After 10a:
+
+- **Slice 10b — Board view.** `EstimateBoard` component can render five columns by grouping the existing `/api/estimates` response by `lifecycleStatus`. No new server work needed.
+- **Slice 10c — List view + view toggle + draft save.** The existing `/estimates` page gets a Board/List toggle. The wizard gains a "Save as draft" button that posts `internalStatus: 'draft'`, which 10a already accepts. The list view's color-coded status badges read `lifecycleStatus` directly.
+- **Slice 10d — Resend flow.** A "Resend" button on expired cards/rows calls `POST /api/estimates/:id/transition { action: 'resend' }`. The endpoint already exists from 10a; this slice is purely UI + a confirmation dialog.
+
+The estimates dashboard gets a real lifecycle foundation, and every subsequent slice slots into it without re-shaping the data model.

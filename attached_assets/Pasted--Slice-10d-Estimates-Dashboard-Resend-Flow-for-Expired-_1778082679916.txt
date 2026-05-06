@@ -1,0 +1,251 @@
+# Slice 10d — Estimates Dashboard: Resend Flow for Expired
+
+**Date:** 2026-05-06
+**Status:** Ready for Replit implementation
+**Author:** Engineering planning
+**Decisions locked:**
+- Q1 = **Two entry points to Resend.** From the board: the Resend button on each card inside the expanded Expired strip (the placeholder shipped in 10b). From the list: the "Resend" item in the three-dot menu on rows whose `lifecycleStatus === 'expired'` (placeholder shipped in 10c). Both call the same handler.
+- Q2 = **Resend opens a confirmation dialog before firing.** Copy: "Resend estimate to {customer name}? This resets the 30-day window and sends a new email to {customer email}." Two buttons: Cancel and Resend (primary). Esc cancels.
+- Q3 = **Resend is a single API call** to `POST /api/estimates/:id/transition { action: 'resend' }` (endpoint already exists from 10a). On success: toast "Estimate resent to {customer email}", refetch the estimates query, the estimate moves out of Expired and into Sent on the next render. On failure: toast with the server error, stay in the dialog so the user can retry or cancel.
+- Q4 = **No edit-before-resend in 10d.** The resend is the identical estimate, just with a refreshed `estimateDate` server-side. If the irrigation manager wants to change line items first, they Cancel the dialog, click Edit, save changes, and then Resend. A future polish slice can add an "Edit and resend" combined CTA.
+- Q5 = **Detail modal also gets a Resend button** when the open estimate has `lifecycleStatus === 'expired'`. Same dialog, same handler.
+- Q6 = **Optimistic UI: no.** The dialog blocks until the API responds (with a small spinner on the Resend button) and only updates state after the success response. This is a low-frequency action and the round-trip is fast; optimistic complexity isn't worth it.
+- Q7 = **Auditing:** the existing email-send pipeline already logs sends; the transition endpoint should add `updatedAt = now()` and (if the schema has a `resendCount` field — it doesn't today) increment it. Decision: do not add a new field in 10d. The existing `approvalSentAt` timestamp + the implicit "estimateDate moved forward" combination is enough to reconstruct resend history if anyone asks. A future slice can add a proper resend-event log if needed.
+
+**Related:** Depends on Slice 10a (transition endpoint with `action: 'resend'` already implemented), Slice 10b (Expired strip with placeholder Resend buttons), and Slice 10c (List view's three-dot menu with placeholder Resend item). Frontend-only slice.
+
+---
+
+## Executive Summary
+
+Slice 10b shipped the Expired callout strip on the board with placeholder Resend buttons. Slice 10c shipped the list view with a Resend item in the three-dot menu, also a placeholder. Slice 10d wires both placeholders to the existing `POST /api/estimates/:id/transition { action: 'resend' }` endpoint introduced in 10a, fronted by a confirmation dialog so the operator doesn't accidentally re-send an estimate to the customer.
+
+The slice is small and frontend-only. There are no new endpoints, no new database fields, no schema changes. The transition endpoint already handles the lifecycle move (`expired → sent`), refreshes `estimateDate` to `now()`, sets `approvalSentAt`, and triggers the existing `server/email-service.ts` send pipeline. 10d's job is purely the UI plumbing — replacing two placeholder buttons with real handlers and adding a confirmation dialog.
+
+The detail modal also picks up a Resend button in 10d, so an operator who has clicked through to look at an expired estimate can resend it without backing out to the board.
+
+**Slice 10d ships when:** clicking Resend from any of three entry points (board card, list-view menu, detail modal) opens the confirm dialog with the right copy; confirming fires the transition endpoint and on success refetches the list, surfacing a toast; the estimate visibly moves from Expired to Sent on next render; the existing email pipeline correctly delivers the resent email; the customer's approval-by-link still works for the resent estimate.
+
+---
+
+## Why Now
+
+Two motivations.
+
+First, **expired estimates are deadweight without resend.** Today (and after 10b/10c without 10d), an irrigation manager can see that an estimate has expired but can't act on it from the dashboard. The only paths to "resend" are either (a) edit and re-trigger the existing send-email flow if the modal exposes that, or (b) recreate the estimate from scratch. Both are friction the dashboard exists to eliminate.
+
+Second, **the backend work is already done.** Slice 10a shipped the transition endpoint with the `resend` action, including the `estimateDate` reset, the `approvalSentAt` update, and the email-pipeline trigger. 10d is the smallest possible UI slice on top of that.
+
+---
+
+## What Resend Becomes
+
+After Slice 10d, an irrigation manager can resend an expired estimate from three places:
+
+**From the board's Expired strip** (10b):
+- Click the strip to expand it (already works).
+- Click the Resend button on a card.
+- Confirm dialog appears: "Resend estimate to {customer name}? This resets the 30-day window and sends a new email to {customer email}."
+- Click Resend → button shows a spinner → on success, dialog closes, toast "Estimate resent to {customer email}" appears, board refetches; the card disappears from Expired and reappears in Sent on the next render.
+
+**From the list view** (10c):
+- Click the three-dot menu on an expired row.
+- Click "Resend".
+- Same dialog, same handler, same outcome. After refetch, the row's status badge changes from Expired (gray with strikethrough) to Sent (blue, no strikethrough), and its position in the table updates per the active sort.
+
+**From the detail modal**:
+- Open any expired estimate.
+- A new Resend button appears in the modal's action footer (or wherever the existing modal renders its primary actions).
+- Clicking it opens the same dialog. On success, the modal stays open but its lifecycle badge in-modal updates to Sent.
+
+**Confirm dialog**:
+- Built from the existing `AlertDialog` shadcn component (the same one used for the wizard's discard-changes confirmation).
+- Title: "Resend estimate?"
+- Body: "Resend estimate to {customer name}? This resets the 30-day window and sends a new email to {customer email}."
+- Primary CTA: "Resend" (blue-600). Secondary: "Cancel".
+- Esc and clicking outside both cancel.
+- While the request is in flight: Resend button shows a small spinner and is disabled; Cancel remains enabled.
+
+**Failure handling**:
+- On 4xx/5xx response, the dialog stays open, the spinner clears, and a toast appears with the error message. The user can click Resend again or Cancel.
+- On network error, same behavior.
+
+---
+
+## Scope of Slice 10d
+
+### In Scope
+
+1. New shared hook `client/src/hooks/use-estimate-resend.ts` — exports a `useEstimateResend()` hook that returns:
+   ```ts
+   {
+     resendEstimate: (estimateId: number, customerEmail: string, customerName: string) => Promise<void>,
+     isResending: boolean,
+     resendingId: number | null,  // for per-row spinners if any caller needs them
+   }
+   ```
+   - Internally uses `apiRequest('/api/estimates/:id/transition', 'POST', { action: 'resend' })` and `useToast` for success/error toasts and `useQueryClient` to invalidate `['/api/estimates']` on success.
+   - The hook does **not** show the confirm dialog itself; it's a thin wrapper around the API call. The dialog is rendered by each call site so each can shape its own dialog content (the dialog body needs the customer's name/email which the hook doesn't know).
+
+2. New shared component `client/src/components/estimates/resend-confirm-dialog.tsx`:
+   ```tsx
+   <ResendConfirmDialog
+     estimate={Estimate | null}
+     open={boolean}
+     onOpenChange={(open) => void}
+     onConfirm={() => void}
+     isResending={boolean}
+   />
+   ```
+   - Renders the AlertDialog with the body text using `estimate.customerName` and `estimate.customerEmail`.
+   - The Confirm button shows a spinner when `isResending` is true.
+   - Reused by all three call sites.
+
+3. **Update** `client/src/components/estimates/board/estimate-board-expired-strip.tsx`:
+   - Replace the disabled Resend placeholder with a real button.
+   - Track `resendDialogEstimate: Estimate | null` state at the component level.
+   - On Resend click → set state and open dialog.
+   - On confirm → call `resendEstimate` from the hook.
+
+4. **Update** `client/src/components/estimates/list/estimate-list-row.tsx`:
+   - The "Resend" three-dot menu item is no longer disabled for expired rows.
+   - Click handler: same shape — open dialog with the row's estimate.
+   - The dialog itself is rendered at the `EstimateList` level (not per-row) to avoid mounting N dialogs; on row Resend click, the row fires `onResendClick(estimate)` upward.
+
+5. **Update** `client/src/components/estimates/list/estimate-list.tsx`:
+   - Add `resendDialogEstimate: Estimate | null` state.
+   - Render `<ResendConfirmDialog>` at the bottom of the component.
+   - Pass `onResendClick` to each row.
+
+6. **Update** `client/src/components/estimates/estimate-detail-modal.tsx`:
+   - Add a Resend button in the existing action footer, conditionally rendered only when `estimate.lifecycleStatus === 'expired'`.
+   - Clicking it opens the confirm dialog (same component) with the modal's estimate.
+   - On success: invalidate the query (the hook does this) and update the modal's locally-displayed status badge to "Sent" (or just re-fetch the single estimate via its existing query if the modal has one).
+
+7. **Toast copy**:
+   - Success: "Estimate resent to {customer email}" (use the existing `useToast` from the page).
+   - Failure (server-side error message): the API's error string passed straight through. If the API didn't return one: "Couldn't resend estimate. Please try again."
+
+8. **Loading state on the Resend button**:
+   - In the dialog: spinner inside the button, button text changes to "Resending…", button disabled.
+   - On the row in the list view (since the dialog is in front of the list anyway, this isn't strictly needed — but the hook exposes `resendingId` for symmetry).
+
+9. **Keyboard accessibility**:
+   - Dialog opens focused on Cancel (per AlertDialog default).
+   - Tab order: Cancel → Resend.
+   - Enter on Resend confirms.
+   - Esc cancels.
+
+### Out of Scope
+
+- Edit-before-resend (a combined "Edit and resend" CTA). Future slice.
+- Customizing the resend email template per resend (e.g. "Just following up on the estimate I sent last month"). Future slice.
+- Bulk-resend (select multiple expired estimates, resend all). Future slice.
+- A per-estimate resend-history audit trail (beyond what `approvalSentAt` already records). Future slice if anyone needs it.
+- Notifying the irrigation manager when a resent estimate is approved. Future slice.
+- Any backend changes — endpoint, schema, email template — all already in place from 10a.
+
+---
+
+## UI Specification
+
+### Confirm dialog
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Resend estimate?                                         │
+│                                                          │
+│ Resend estimate to Hillside Ranch?                       │
+│ This resets the 30-day window and sends a new email      │
+│ to billing@hillsideranch.com.                            │
+│                                                          │
+│                            [Cancel]   [Resend ●]         │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Wrapped in the existing `AlertDialog` component.
+- Title: `text-base font-semibold`.
+- Body: `text-sm text-gray-600` with the customer name and email rendered as plain text (not links).
+- Footer aligned right: Cancel (`variant="outline"`), Resend (`variant="default"` blue-600). The Resend button shows a small `Loader2` spinner from lucide rotated when `isResending`.
+
+### Board: Expired strip card with Resend
+
+```
+┌─────────────────────────┐
+│ Bridgeport Estate       │
+│ $4,890           35d    │
+│                         │
+│ [Resend]                │  ← new in 10d
+└─────────────────────────┘
+```
+
+- The Resend button is a small ghost button with a `Send` lucide icon: `text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded`.
+- Click on the button does NOT propagate to the card's open-detail-modal click handler.
+
+### List view three-dot menu
+
+- "Resend" item in the menu becomes enabled (no longer disabled placeholder).
+- Click closes the menu and opens the dialog.
+
+### Detail modal Resend button
+
+- Sits in the modal's existing action footer alongside whatever other actions the modal already exposes (Edit, Convert to Work Order, etc.).
+- Same `<Button variant="default">` styling as the other primary modal actions.
+- Conditional render — only shows when `estimate.lifecycleStatus === 'expired'`.
+
+---
+
+## API & Data
+
+**No changes.** Slice 10d only consumes:
+
+- `POST /api/estimates/:id/transition` body `{ action: 'resend' }` — already shipped in Slice 10a. Returns the updated estimate including the new `lifecycleStatus: 'sent'`.
+
+The hook invalidates `['/api/estimates']` on success, which triggers the existing query to refetch and re-render both the board and the list. The detail modal, if open, refetches its own estimate query if it has one (verify by checking the modal's data hooks).
+
+---
+
+## Risks and Rollback
+
+- **Email pipeline failure surfaced to user as opaque error.** If the email service is down, the transition endpoint may either succeed (DB updated, email queued, but the actual SMTP send fails async) or fail (server returns 500). Mitigation: the transition endpoint should not return success unless the email send call returns success. Verify this in 10a's implementation; if not, raise as a 10a follow-up before 10d ships. Otherwise, a successful resend toast may misrepresent reality.
+- **Customer email empty or invalid.** A few legacy estimates may have empty `customerEmail` strings. Mitigation: in the dialog, if `customerEmail` is empty, render a warning instead of a confirm: "This estimate has no customer email on file. Please add one before resending." Cancel-only dialog. Don't fire the API call.
+- **Double-click on Resend.** If the dialog button isn't disabled fast enough, two requests could fire. Mitigation: the hook's `isResending` flag and the button's `disabled={isResending}` prop prevent this. Confirm via manual test.
+- **Toast spam if multiple resends fire in rapid succession.** Mitigation: rare scenario; the existing toast component handles stacking gracefully. No special handling needed.
+- **List-view row position jitter on success.** When an estimate moves from Expired to Sent, its position in the list changes (since sort is by date desc and `estimateDate` just got updated). The row "jumps" to the top. Mitigation: this is correct behavior and tells the user the action took effect; don't try to suppress it.
+
+**Rollback:** `git revert` the slice commit. The Resend buttons revert to disabled placeholders. No data implications — any estimates resent before the revert are correctly in the Sent column with refreshed `estimateDate`.
+
+---
+
+## Migration / Rollout
+
+Single deploy. Pure frontend slice on top of an already-shipped backend endpoint. No flag needed.
+
+---
+
+## Success Criteria
+
+Slice 10d ships when, in order:
+
+1. Clicking the Resend button on a card in the board's expanded Expired strip opens the confirm dialog with the correct customer name and email in the body text.
+2. Clicking the Resend menu item in the list view's three-dot menu on an expired row opens the same dialog with the same content.
+3. Opening the detail modal on an expired estimate shows a Resend button in the action footer; clicking it opens the same dialog.
+4. Clicking Resend in the dialog shows a spinner on the button, disables Cancel? (Decision: keep Cancel enabled so the user can abort if it's hanging.) Disables only Resend, the API call fires, and on success the dialog closes.
+5. After a successful resend, the toast "Estimate resent to {customer email}" appears.
+6. The estimates query refetches; the resent estimate moves out of Expired and into Sent (board column / list-view sort position) on the next render.
+7. The customer receives the new email (verify via email-service logs or a test inbox).
+8. The customer's approval-by-link for the resent estimate still works end-to-end.
+9. On a server error (e.g. 500 from a deliberately broken transition endpoint test), the dialog stays open, the spinner clears, and an error toast appears with the server's error message.
+10. An estimate with an empty `customerEmail` shows the no-email warning dialog instead of the resend confirm; the Resend button is not present in this dialog.
+11. The Slice 7 manager queue and customer approval flows continue to work for non-expired estimates.
+
+---
+
+## What This Unblocks
+
+After 10d:
+
+- The estimates dashboard's full lifecycle is now interactive end-to-end. An irrigation manager can: create a draft (10c), submit it for review, see it land in Pending review (10b), watch the billing manager approve and send it, see customer responses move it to Approved/Rejected, and resend if it expires (10d). The full loop is closed.
+- A future **edit-and-resend** slice can chain Edit + Resend into a single combined action — the wizard's existing PUT path plus 10d's resend handler.
+- A future **bulk-resend** slice can extend the dialog to accept multiple estimates and call the transition endpoint in a loop (or a new bulk endpoint if that's cleaner).
+- A future **proper audit log** slice can replace the implicit `approvalSentAt`-based history with a real `estimate_events` table, capturing each resend (and other lifecycle events) as an immutable record. Useful when customers ask "which version of the estimate did I get?".
