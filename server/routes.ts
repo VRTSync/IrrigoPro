@@ -7924,6 +7924,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         customerName: billingSheetData.customerName,
         customerEmail: billingSheetData.customerEmail,
         propertyAddress: billingSheetData.propertyAddress || '',
+        workLocationLat:
+          billingSheetData.workLocationLat != null
+            ? String(billingSheetData.workLocationLat)
+            : null,
+        workLocationLng:
+          billingSheetData.workLocationLng != null
+            ? String(billingSheetData.workLocationLng)
+            : null,
+        workLocationAddress: billingSheetData.workLocationAddress ?? null,
+        controllerLetter: billingSheetData.controllerLetter ?? null,
+        zoneNumber:
+          billingSheetData.zoneNumber != null && billingSheetData.zoneNumber !== ''
+            ? Number(billingSheetData.zoneNumber)
+            : null,
         workDate: billingSheetData.workDate, // Let storage handle the conversion
         technicianName: billingSheetData.technicianName,
         technicianId: billingSheetData.technicianId || null,
@@ -8079,7 +8093,34 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
       }
 
-      const { items, workLocationLat, workLocationLng, workLocationAddress, companyId, ...billingSheetData } = req.body;
+      const { items, companyId, ...billingSheetData } = req.body;
+      // Normalize the optional pin / controller fields so they round-trip
+      // through the decimal/integer columns regardless of whether the client
+      // sent numbers, strings, or omitted them entirely.
+      if (billingSheetData.workLocationLat !== undefined) {
+        billingSheetData.workLocationLat =
+          billingSheetData.workLocationLat == null || billingSheetData.workLocationLat === ''
+            ? null
+            : String(billingSheetData.workLocationLat);
+      }
+      if (billingSheetData.workLocationLng !== undefined) {
+        billingSheetData.workLocationLng =
+          billingSheetData.workLocationLng == null || billingSheetData.workLocationLng === ''
+            ? null
+            : String(billingSheetData.workLocationLng);
+      }
+      if (billingSheetData.workLocationAddress !== undefined) {
+        billingSheetData.workLocationAddress = billingSheetData.workLocationAddress ?? null;
+      }
+      if (billingSheetData.controllerLetter !== undefined) {
+        billingSheetData.controllerLetter = billingSheetData.controllerLetter || null;
+      }
+      if (billingSheetData.zoneNumber !== undefined) {
+        billingSheetData.zoneNumber =
+          billingSheetData.zoneNumber == null || billingSheetData.zoneNumber === ''
+            ? null
+            : Number(billingSheetData.zoneNumber);
+      }
 
       // Task #207: enforce billing-sheet status enum on PATCH so the legacy
       // 'approved' value (and any other unknown status) cannot be persisted
@@ -10074,6 +10115,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         aiShortDescription: aiShortDescription || null,
         aiDetailedDescription: aiDetailedDescription || null,
         branchName: effectiveBranchName,
+        // Carry the parent work order's pin / pinned address / controller /
+        // zone forward to the new billing sheet so the resulting row has the
+        // same site context as the WO it converted from.
+        workLocationLat:
+          workOrder.workLocationLat != null ? String(workOrder.workLocationLat) : null,
+        workLocationLng:
+          workOrder.workLocationLng != null ? String(workOrder.workLocationLng) : null,
+        workLocationAddress: workOrder.workLocationAddress ?? null,
+        controllerLetter: workOrder.controllerLetter ?? null,
+        zoneNumber: workOrder.zoneNumber ?? null,
         items: resolvedItems.length > 0 ? resolvedItems : undefined,
       });
       console.log(`[AUDIT] work_order_converted_to_billing_sheet workOrderId=${workOrderId} billingSheetId=${newBillingSheet.id} sourceItemCount=${workOrderSourceItemCount} billingSheetItemsWritten=${resolvedItems.length}`);

@@ -10,7 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder } from "@shared/schema";
 import { Link } from "wouter";
 import { BilledBadge } from "@/components/ui/billed-indicator";
-import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
+import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 
 export default function FieldTechDashboard() {
   const [showBillingModal, setShowBillingModal] = useState(false);
@@ -164,9 +164,9 @@ export default function FieldTechDashboard() {
         </div>
 
         {/* Standalone Billing Sheet Modal */}
-        <StandaloneBillingSheet
+        <BillingSheetWizard
           open={showBillingModal}
-          onOpenChange={setShowBillingModal}
+          onClose={() => setShowBillingModal(false)}
         />
       </div>
     </div>

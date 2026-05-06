@@ -34,14 +34,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem } from "@shared/schema";
+import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@shared/schema";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { preparePhotoForUpload } from "@/lib/photo-prep";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
-import { History } from "lucide-react";
+import { History, Cpu, Droplets, Navigation } from "lucide-react";
+import { buildMapsUrl } from "@/lib/maps-url";
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -226,7 +227,7 @@ export function CompletedWorkDetailModal({
   });
 
   // Fetch the customer to compare their current labor rate vs stored rate on billing sheet
-  const { data: customerForRateCheck } = useQuery({
+  const { data: customerForRateCheck } = useQuery<Customer>({
     queryKey: ["/api/customers", bs?.customerId],
     enabled: open && type === "billing_sheet" && !!bs?.customerId && canSeePricing,
   });
@@ -610,6 +611,67 @@ export function CompletedWorkDetailModal({
                 <div className="space-y-3">
                   <InfoRow label="Customer" value={customerName} />
                   <InfoRow label="Property Address" value={address} />
+                  {(() => {
+                    const lat = isWorkOrder ? wo?.workLocationLat : bs?.workLocationLat;
+                    const lng = isWorkOrder ? wo?.workLocationLng : bs?.workLocationLng;
+                    const pinAddr = isWorkOrder ? wo?.workLocationAddress : bs?.workLocationAddress;
+                    if (lat == null && lng == null && !pinAddr) return null;
+                    const mapsUrl = buildMapsUrl({
+                      lat: lat ?? null,
+                      lng: lng ?? null,
+                      address: pinAddr ?? null,
+                      label: address,
+                    });
+                    const latNum = lat == null ? NaN : (typeof lat === "number" ? lat : parseFloat(String(lat)));
+                    const lngNum = lng == null ? NaN : (typeof lng === "number" ? lng : parseFloat(String(lng)));
+                    const pinLabel =
+                      pinAddr ||
+                      (Number.isFinite(latNum) && Number.isFinite(lngNum)
+                        ? `${latNum.toFixed(6)}, ${lngNum.toFixed(6)}`
+                        : "");
+                    if (!pinLabel) return null;
+                    return (
+                      <div>
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">
+                          Pinned Location
+                        </p>
+                        <div className="flex items-start gap-2">
+                          <p className="text-sm text-gray-900 leading-snug flex-1 min-w-0 break-words">
+                            {pinLabel}
+                          </p>
+                          {mapsUrl && (
+                            <a
+                              href={mapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 flex-shrink-0"
+                            >
+                              <Navigation className="w-3.5 h-3.5" /> Navigate
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const ctrl = isWorkOrder ? wo?.controllerLetter : bs?.controllerLetter;
+                    const zone = isWorkOrder ? wo?.zoneNumber : bs?.zoneNumber;
+                    if (!ctrl && zone == null) return null;
+                    return (
+                      <div className="flex flex-wrap gap-2">
+                        {ctrl && (
+                          <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                            <Cpu className="w-3 h-3" /> Controller {ctrl}
+                          </span>
+                        )}
+                        {zone != null && (
+                          <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <Droplets className="w-3 h-3" /> Zone {zone}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {locationNotes && <InfoRow label="Location Notes" value={locationNotes} />}
                 </div>
               </SectionCard>

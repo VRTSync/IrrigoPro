@@ -28,12 +28,10 @@ A full-stack business management system for irrigation companies, streamlining o
 - **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side.
 - **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
 - **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout.
-- **Estimate Wizard**: New/edit estimates use a 3-step wizard (Customer & Project → Line Items → Review & Send). Per-unit labor hours are stored in editor state and multiplied by quantity when serializing the API payload. Location picking and controller/zone selection are integrated.
-- **Work Order Wizard**: New/edit direct work orders use a 5-step wizard (Customer & Branch → Work Location & Site → Description → Schedule & Assign → Review). The pinned location is required.
-- **Maps URL helper**: Always prefers `lat,lng` pin over an encoded address for navigation links.
-- **"I'm here" affordance**: Work order completion modal includes an "I'm here" button to update the work location via GPS.
+- **Estimate Wizard**: A 3-step wizard for new/edit estimates (Customer & Project → Line Items → Review & Send).
+- **Work Order Wizard**: A 5-step wizard for new/edit direct work orders (Customer & Branch → Work Location & Site → Description → Schedule & Assign → Review).
+- **Billing Sheet Wizard**: A 5-step wizard for new/edit billing sheets (Customer & Work Date → Work Location & Site → Parts & Labor → Description & Photos → Review).
 - **Independent Parts Management**: Parts catalog operates independently from QuickBooks.
-- **IrrigoPro Display Name (`irrigoName`)**: A separate, prominent customer field for internal recognition.
 - **KML for Site Maps**: KML import is used for interactive irrigation maps.
 - **Monthly Invoice Consolidation**: All customer work consolidated into single QuickBooks invoices with tax-free totals.
 - **Phone-Based User Login**: New team members use their phone number as their login username.

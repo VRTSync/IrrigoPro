@@ -29,6 +29,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, WorkOrderItem, Customer } from "@shared/schema";
+import { buildMapsUrl } from "@/lib/maps-url";
 import logoPath from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
 
 const billingItemSchema = z.object({
@@ -248,6 +249,68 @@ export function BillingSheet({ workOrder, existingItems, onSave }: BillingSheetP
                   </CardContent>
                 </Card>
               )}
+
+              {/* Inherited Pinned Location (from parent work order) */}
+              {(workOrder.workLocationLat != null && workOrder.workLocationLng != null) ||
+              workOrder.workLocationAddress ||
+              workOrder.controllerLetter ||
+              workOrder.zoneNumber != null ? (
+                <Card className="border-l-4 border-l-blue-500 bg-blue-50/40">
+                  <CardContent className="p-4 space-y-2">
+                    {(workOrder.workLocationLat != null && workOrder.workLocationLng != null) ||
+                    workOrder.workLocationAddress ? (
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-blue-900">Pinned Location</p>
+                        <p className="text-sm text-blue-800">
+                          {workOrder.workLocationAddress ||
+                            (workOrder.workLocationLat != null && workOrder.workLocationLng != null
+                              ? `${Number(workOrder.workLocationLat).toFixed(6)}, ${Number(
+                                  workOrder.workLocationLng,
+                                ).toFixed(6)}`
+                              : "")}
+                        </p>
+                        {(() => {
+                          const url = buildMapsUrl({
+                            lat:
+                              workOrder.workLocationLat != null
+                                ? Number(workOrder.workLocationLat)
+                                : null,
+                            lng:
+                              workOrder.workLocationLng != null
+                                ? Number(workOrder.workLocationLng)
+                                : null,
+                            address: workOrder.workLocationAddress ?? null,
+                          });
+                          return url ? (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-blue-700 underline hover:text-blue-900"
+                            >
+                              Open in Maps
+                            </a>
+                          ) : null;
+                        })()}
+                      </div>
+                    ) : null}
+                    {(workOrder.controllerLetter || workOrder.zoneNumber != null) && (
+                      <div className="flex flex-wrap gap-2 text-xs text-blue-900">
+                        {workOrder.controllerLetter && (
+                          <span className="px-2 py-0.5 rounded bg-blue-100 border border-blue-200">
+                            Controller {workOrder.controllerLetter}
+                          </span>
+                        )}
+                        {workOrder.zoneNumber != null && (
+                          <span className="px-2 py-0.5 rounded bg-blue-100 border border-blue-200">
+                            Zone {workOrder.zoneNumber}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : null}
 
               {/* Tech Information */}
               <Card className="border-2 border-gray-200">

@@ -11,7 +11,7 @@ import { FileText, Wrench, Receipt, AlertCircle, CheckCircle2, ClipboardCheck, U
 import { useState } from "react";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
-import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
+import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
 import type { WorkOrder, BillingSheet } from "@shared/schema";
@@ -524,11 +524,11 @@ export default function ManagerDashboard() {
         />
       )}
 
-      <StandaloneBillingSheet
+      <BillingSheetWizard
         open={showBillingSheetModal}
-        onOpenChange={(open) => {
-          setShowBillingSheetModal(open);
-          if (!open) invalidateAll();
+        onClose={() => {
+          setShowBillingSheetModal(false);
+          invalidateAll();
         }}
       />
 

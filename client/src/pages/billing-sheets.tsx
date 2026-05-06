@@ -11,7 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { MetricTile, MetricGrid } from "@/components/ui/metric-tile";
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { FAB } from "@/components/ui/fab";
-import { StandaloneBillingSheet } from "@/components/billing/standalone-billing-sheet";
+import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
 import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
@@ -1028,17 +1028,17 @@ export default function BillingSheets() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Standalone Billing Sheet Modal */}
-      <StandaloneBillingSheet
+      {/* New Billing Sheet Wizard */}
+      <BillingSheetWizard
         open={showBillingModal}
-        onOpenChange={setShowBillingModal}
+        onClose={() => setShowBillingModal(false)}
       />
 
-      {/* Edit Draft Modal */}
+      {/* Edit Draft Wizard */}
       {editingDraft && (
-        <StandaloneBillingSheet
+        <BillingSheetWizard
           open={!!editingDraft}
-          onOpenChange={() => setEditingDraft(null)}
+          onClose={() => setEditingDraft(null)}
           draftData={editingDraft}
         />
       )}

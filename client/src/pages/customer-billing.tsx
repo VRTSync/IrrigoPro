@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
-import { EditBillingSheetModal } from "@/components/billing/edit-billing-sheet-modal";
+import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { BilledBadge, BilledIndicator } from "@/components/ui/billed-indicator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -2519,13 +2519,13 @@ export default function CustomerBilling() {
         />
       )}
 
-      {/* Edit Billing Sheet Modal */}
+      {/* Edit Billing Sheet Wizard */}
       {selectedBillingSheet && showEditBillingSheet && (
-        <EditBillingSheetModal
-          billingSheet={selectedBillingSheet}
+        <BillingSheetWizard
           open={showEditBillingSheet}
+          billingSheetId={selectedBillingSheet.id}
           onClose={() => { setShowEditBillingSheet(false); setSelectedBillingSheet(null); }}
-          onSuccess={() => {
+          onCreated={() => {
             queryClient.invalidateQueries({ queryKey: ["/api/customers/billing-preview"] });
             queryClient.invalidateQueries({ queryKey: ["/api/customers", selectedCustomerId, "billing"] });
           }}
