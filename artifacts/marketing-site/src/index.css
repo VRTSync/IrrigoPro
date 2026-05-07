@@ -69,6 +69,35 @@
   --destructive-foreground: 0 0% 100%;
 }
 
+.dark {
+  /* Mirrors the dark theme from the main IrrigoPro app for token parity */
+  --background: 222 47% 6%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 9%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222 47% 9%;
+  --popover-foreground: 210 40% 98%;
+
+  --primary: 199 92% 59%;
+  --primary-foreground: 222 47% 6%;
+  --primary-light: 199 95% 70%;
+  --primary-dark: 200 95% 45%;
+
+  --accent: 168 76% 50%;
+  --accent-foreground: 222 47% 6%;
+
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 65%;
+  --border: 217 33% 20%;
+  --input: 217 33% 20%;
+  --ring: 199 92% 59%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 210 40% 98%;
+}
+
 @layer base {
   * {
     border-color: hsl(var(--border));

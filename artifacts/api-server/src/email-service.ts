@@ -362,6 +362,16 @@ Questions? Reply to this email or call us directly.
       `Message:`,
       data.message || '(none)',
     ];
+    const esc = (v: string | number | null | undefined): string => {
+      if (v === null || v === undefined || v === '') return '(not provided)';
+      return String(v).replace(/[&<>"']/g, (c) =>
+        c === '&' ? '&amp;' :
+        c === '<' ? '&lt;' :
+        c === '>' ? '&gt;' :
+        c === '"' ? '&quot;' : '&#39;',
+      );
+    };
+    const escEmail = encodeURIComponent(data.email);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background: linear-gradient(135deg, #0EA5E9, #14B8A6); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
@@ -370,14 +380,14 @@ Questions? Reply to this email or call us directly.
         </div>
         <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 24px;">
           <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280; width: 130px;">Company</td><td style="padding: 6px 0;">${data.companyName}</td></tr>
-            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Contact</td><td style="padding: 6px 0;">${data.contactName}</td></tr>
-            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Email</td><td style="padding: 6px 0;"><a href="mailto:${data.email}" style="color:#0EA5E9;">${data.email}</a></td></tr>
-            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Phone</td><td style="padding: 6px 0;">${data.phone || '(not provided)'}</td></tr>
-            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Technicians</td><td style="padding: 6px 0;">${data.numTechnicians ?? '(not provided)'}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280; width: 130px;">Company</td><td style="padding: 6px 0;">${esc(data.companyName)}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Contact</td><td style="padding: 6px 0;">${esc(data.contactName)}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Email</td><td style="padding: 6px 0;"><a href="mailto:${escEmail}" style="color:#0EA5E9;">${esc(data.email)}</a></td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Phone</td><td style="padding: 6px 0;">${esc(data.phone)}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Technicians</td><td style="padding: 6px 0;">${esc(data.numTechnicians)}</td></tr>
           </table>
           <h3 style="margin-top: 20px; color: #1f2937;">Message</h3>
-          <div style="white-space: pre-wrap; background: #f9fafb; border-radius: 8px; padding: 12px; color: #374151; font-size: 14px;">${(data.message || '(none)').replace(/[<>]/g, (c) => (c === '<' ? '&lt;' : '&gt;'))}</div>
+          <div style="white-space: pre-wrap; background: #f9fafb; border-radius: 8px; padding: 12px; color: #374151; font-size: 14px;">${data.message ? esc(data.message) : '(none)'}</div>
         </div>
       </div>`;
 

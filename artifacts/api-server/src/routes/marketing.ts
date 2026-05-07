@@ -9,14 +9,21 @@ const leadSchema = z.object({
   companyName: z.string().trim().min(1).max(200),
   contactName: z.string().trim().min(1).max(200),
   email: z.string().trim().email().max(200),
-  phone: z.string().trim().max(50).optional().or(z.literal("")),
+  phone: z.string().trim().min(1, "Phone is required").max(50),
   numTechnicians: z
     .union([z.number().int().nonnegative(), z.string()])
     .optional()
-    .transform((v) => {
+    .transform((v, ctx) => {
       if (v === undefined || v === "") return undefined;
-      const n = typeof v === "number" ? v : parseInt(v, 10);
-      return Number.isFinite(n) && n >= 0 ? n : undefined;
+      const n = typeof v === "number" ? v : Number(v);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "numTechnicians must be a non-negative integer",
+        });
+        return z.NEVER;
+      }
+      return n;
     }),
   message: z.string().trim().max(5000).optional().or(z.literal("")),
 });
