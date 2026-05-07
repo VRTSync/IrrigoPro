@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QuickBooks Direct Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        button { padding: 15px 30px; font-size: 16px; cursor: pointer; margin: 10px; }
+        .success { background: green; color: white; }
+    </style>
+</head>
+<body>
+    <h1>QuickBooks Direct Connection Test</h1>
+    <p>This page directly tests the QuickBooks connection without React.</p>
+    
+    <button onclick="testConnection()">Connect to QuickBooks (Direct)</button>
+    <div id="result"></div>
+    
+    <script>
+        function testConnection() {
+            console.log("Direct connection test started...");
+            document.getElementById('result').innerHTML = "Testing connection...";
+            
+            fetch('/api/quickbooks/auth')
+                .then(response => {
+                    console.log('Response received:', response.status);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Auth data:', data);
+                    document.getElementById('result').innerHTML = 
+                        '<div class="success">✓ Success! Redirecting to QuickBooks...</div>';
+                    
+                    // Redirect after showing success message
+                    setTimeout(() => {
+                        window.location.href = data.authUrl;
+                    }, 1000);
+                })
+                .catch(error => {
+                    console.error('Connection failed:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<div style="color: red;">✗ Error: ' + error.message + '</div>';
+                });
+        }
+    </script>
+</body>
+</html>

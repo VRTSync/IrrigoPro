@@ -1,0 +1,42 @@
+Slice 11 migration is failing on a Drizzle-generated redundancy: DROP TABLE estimate_zones CASCADE auto-drops the zone_id FKs, then the explicit DROP CONSTRAINT statements fail because the constraints are already gone. Fix by running the destructive operations manually as a single transaction, then publishing the additive parts.
+Step 1 — Run this transaction against the production database via the Replit SQL console
+sqlBEGIN;
+
+-- Drop the zone FK constraints explicitly (will succeed because they exist)
+ALTER TABLE work_order_items DROP CONSTRAINT IF EXISTS work_order_items_zone_id_estimate_zones_id_fk;
+ALTER TABLE estimate_items DROP CONSTRAINT IF EXISTS estimate_items_zone_id_estimate_zones_id_fk;
+
+-- Drop the zone_id columns
+ALTER TABLE work_order_items DROP COLUMN IF EXISTS zone_id;
+ALTER TABLE estimate_items DROP COLUMN IF EXISTS zone_id;
+
+-- Drop the estimate_zones table (no CASCADE needed now that FKs are gone)
+DROP TABLE IF EXISTS estimate_zones;
+
+-- Drop the old check constraint and the orphan index
+ALTER TABLE wet_check_findings DROP CONSTRAINT IF EXISTS one_routing_target;
+DROP INDEX IF EXISTS missing_photos_notifications_last_sms_sid_idx;
+
+-- Verify before commit
+SELECT to_regclass('estimate_zones') AS estimate_zones_should_be_null,
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='work_order_items' AND column_name='zone_id') AS work_order_zone_id_should_be_false,
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='estimate_items' AND column_name='zone_id') AS estimate_items_zone_id_should_be_false;
+
+COMMIT;
+All three columns in the verification SELECT should return null/false/false before you commit. If any returns the wrong value, ROLLBACK and report.
+Step 2 — Click Publish again
+With the destructive ops already done, Drizzle's regenerated diff will only need to handle:
+
+CREATE TABLE photo_late_additions
+ADD COLUMN work_location_* / controller_letter / zone_number on three tables
+The FK constraint renames (_fkey → fk on the wet_check* and property_controllers tables)
+ADD CONSTRAINT wet_check_finding_single_target
+
+No DROP TABLE, no DROP CONSTRAINT for the zone FKs, no DROP COLUMN. The publish should run clean.
+Step 3 — Smoke test
+sqlSELECT to_regclass('photo_late_additions') AS new_table,
+       to_regclass('estimate_zones') AS old_table_should_be_null,
+       (SELECT COUNT(*) FROM billing_number_counters) AS counter_rows;
+Then create one billing sheet through the app and confirm sequential numbering.
+Step 4 — Report
+Confirm the manual transaction committed cleanly, the Publish step succeeded, smoke tests passed, and Slice 10a is unblocked.

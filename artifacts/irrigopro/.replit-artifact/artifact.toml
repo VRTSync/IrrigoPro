@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "IrrigoPro"
+version = "1.0.0"
+id = "artifacts/irrigopro"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21025
+
+[services.development]
+run = "pnpm --filter @workspace/irrigopro run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/irrigopro", "run", "build" ]
+publicDir = "artifacts/irrigopro/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21025"
+BASE_PATH = "/"

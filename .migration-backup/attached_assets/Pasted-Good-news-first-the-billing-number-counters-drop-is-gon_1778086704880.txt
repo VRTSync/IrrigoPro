@@ -1,0 +1,35 @@
+Good news first: the billing_number_counters drop is gone. Slice 11's schema declaration worked — Drizzle now sees it as a tracked table and is no longer proposing to drop it. That's the critical save.
+What's left is what we expected, with one new thing to verify:
+Expected and safe:
+
+photo_late_additions create — correct
+estimate_zones drop + zone_id column drops — Slice 11 marked these as intentional Slice 1 cleanup
+work_location_* / controller_letter / zone_number column additions — match shared/schema.ts:366-372
+All the _fkey → _fk constraint renames — Drizzle naming normalization, benign
+photo_late_additions indexes and FKs — correct
+
+Two things to confirm before you approve:
+1. Did you dump the 18 zone_id rows to CSV? Per Slice 11, before approving you should have:
+sqlCOPY (
+  SELECT id, work_order_id, zone_id
+  FROM work_order_items
+  WHERE zone_id IS NOT NULL
+  ORDER BY work_order_id, id
+) TO STDOUT WITH CSV HEADER;
+saved as migrations/backups/work_order_items_zone_ids_pre_drop.csv. If you haven't yet, do that first. After the migration runs the zone_id column is gone and the data is unrecoverable without the CSV.
+2. The "Migrations failed validation" message. This is the new thing — it wasn't on the previous prompt. Most likely cause: the new wet_check_finding_single_target CHECK constraint (the one replacing one_routing_target at the bottom of the migration). It enforces that at most one of (billing_sheet_id, estimate_id, work_order_id) is non-null on wet_check_findings. If any existing row violates that, Postgres refuses to add the constraint and the whole migration fails atomically.
+Run this against production to find out:
+sqlSELECT id, billing_sheet_id, estimate_id, work_order_id, zone_record_id
+FROM wet_check_findings
+WHERE (
+  (CASE WHEN billing_sheet_id IS NULL THEN 0 ELSE 1 END)
+  + (CASE WHEN estimate_id IS NULL THEN 0 ELSE 1 END)
+  + (CASE WHEN work_order_id IS NULL THEN 0 ELSE 1 END)
+) > 1;
+Three possible outcomes:
+
+Zero rows returned → the validation failure is something else. Click into the Replit error to see the specific message, or check if it's just a generic "destructive changes need confirmation" warning rather than a hard fail.
+A few rows returned → those are the offenders. They have multiple routing targets set when the schema says they shouldn't. Decide per row: which target is correct, null out the others. Then re-run the migration.
+Many rows returned → the new constraint is wrong for your data. Don't force it — that means somewhere along the way wet_check_findings legitimately ended up linked to multiple targets and the schema needs to relax the constraint, not tighten it.
+
+Run the diagnostic query and tell me what comes back. Don't approve the migration yet.

@@ -1,0 +1,137 @@
+# Slice 11 Hotfix — Migration Constraint Drift
+
+**Date:** 2026-05-06
+**Status:** Active hotfix during Slice 11 deploy
+**Type:** Operational / one-shot Replit agent prompt
+
+The deploy migration failed on this statement:
+
+```
+ALTER TABLE "work_order_items" DROP CONSTRAINT "work_order_items_zone_id_estimate_zones_id_fk";
+constraint "work_order_items_zone_id_estimate_zones_id_fk" of relation "work_order_items" does not exist
+```
+
+Drizzle's snapshot expects the constraint under its new naming convention (`{table}_{col}_{ref_table}_{ref_col}_fk`), but the live DB has it under PostgreSQL's default name (almost certainly `work_order_items_zone_id_fkey`). The same drift likely exists for `estimate_items.zone_id` on the next migration line. This hotfix diagnoses, repairs, and re-runs the deploy.
+
+---
+
+## Replit agent prompt — paste this whole block
+
+> # Hotfix: migration failed on a missing FK constraint. Diagnose, repair, redeploy.
+>
+> Slice 11's migration failed at the `DROP CONSTRAINT work_order_items_zone_id_estimate_zones_id_fk` step with `constraint ... does not exist`. Drizzle expected the constraint under its new naming convention but the DB has it under the PostgreSQL default name. The same problem likely exists for `estimate_items.zone_id` on the next line. Do not approve any further deploys until this hotfix is complete.
+>
+> ## Step 1 — Diagnose. Run all three queries against the production database and report the output.
+>
+> Query A — find the actual constraint names on the two zone_id columns:
+> ```sql
+> SELECT conrelid::regclass AS table_name,
+>        conname AS constraint_name,
+>        pg_get_constraintdef(oid) AS definition
+> FROM pg_constraint
+> WHERE conrelid IN ('work_order_items'::regclass, 'estimate_items'::regclass)
+>   AND conname LIKE '%zone%';
+> ```
+>
+> Query B — confirm whether the failed migration left a half-applied state (atomicity check):
+> ```sql
+> SELECT to_regclass('photo_late_additions') AS photo_late_additions_exists,
+>        to_regclass('estimate_zones')        AS estimate_zones_still_exists;
+> ```
+>
+> Query C — confirm `billing_number_counters` is still intact (Slice 11's primary save):
+> ```sql
+> SELECT COUNT(*) AS counter_rows FROM billing_number_counters;
+> ```
+>
+> Report the results back before doing anything else. Do not edit any files yet.
+>
+> ## Step 2 — Pick the repair path based on Query A's output.
+>
+> **Path A — constraints exist with the `_fkey` naming convention.** The output of Query A shows constraint names like `work_order_items_zone_id_fkey` and `estimate_items_zone_id_fkey`. In this case, rename the constraints in the live DB to what Drizzle expects, then re-run the deploy. Use the actual constraint names from Query A in the RENAME statements:
+>
+> ```sql
+> BEGIN;
+>
+> ALTER TABLE work_order_items
+>   RENAME CONSTRAINT <actual_name_from_query_a>
+>   TO work_order_items_zone_id_estimate_zones_id_fk;
+>
+> ALTER TABLE estimate_items
+>   RENAME CONSTRAINT <actual_name_from_query_a>
+>   TO estimate_items_zone_id_estimate_zones_id_fk;
+>
+> COMMIT;
+> ```
+>
+> After running, verify by re-running Query A — you should see the constraints under the new names.
+>
+> **Path B — no zone-related constraints exist at all.** Query A returned zero rows. The constraints were already dropped at some point or never existed. Don't run any SQL; instead, edit the failed migration file in `migrations/` to make the two drops idempotent. Find the migration file (most recent `.sql` in `migrations/`, matching the failed statements) and change these two lines:
+>
+> ```sql
+> ALTER TABLE "work_order_items" DROP CONSTRAINT "work_order_items_zone_id_estimate_zones_id_fk";
+> ALTER TABLE "estimate_items" DROP CONSTRAINT "estimate_items_zone_id_estimate_zones_id_fk";
+> ```
+>
+> to:
+>
+> ```sql
+> ALTER TABLE "work_order_items" DROP CONSTRAINT IF EXISTS "work_order_items_zone_id_estimate_zones_id_fk";
+> ALTER TABLE "estimate_items" DROP CONSTRAINT IF EXISTS "estimate_items_zone_id_estimate_zones_id_fk";
+> ```
+>
+> Also scan the rest of that migration file for any other `DROP CONSTRAINT` statements without `IF EXISTS` — apply the same `IF EXISTS` defensive change to those, since the same drift may bite on other constraints (the `_fkey`-named ones lower in the migration).
+>
+> Commit the migration file change with the message: `Fix: make Slice 11 migration constraint drops idempotent for naming-convention drift`.
+>
+> **Path C — something unexpected.** Query A returned constraints with names that don't match either pattern, or returned more constraints than expected. Stop and report the full output. Don't proceed.
+>
+> ## Step 3 — Handle the half-applied state if any.
+>
+> Based on Query B:
+>
+> - If `photo_late_additions_exists` is `null` and `estimate_zones_still_exists` is `estimate_zones`: the migration was atomic and rolled back cleanly. Nothing to undo. Proceed to Step 4.
+> - If `photo_late_additions_exists` is `photo_late_additions` and `estimate_zones_still_exists` is `null`: the migration was non-atomic and partially applied. Rare for Drizzle, but possible. Report this and stop — the recovery path is more complex than this prompt covers and requires a second pair of eyes.
+> - Any other combination: report and stop.
+>
+> ## Step 4 — Re-run the deploy.
+>
+> Once Step 2 is complete (and Step 3 confirmed clean):
+>
+> 1. Trigger the Replit deploy / `db:push` / migration run again.
+> 2. Watch the migration output. It should run to completion this time.
+>
+> If it fails again on a different constraint name with the same `does not exist` error pattern: that's a third constraint with naming drift. Add it to the diagnostic, rename it (Path A) or make it `IF EXISTS` (Path B), re-run.
+>
+> ## Step 5 — Smoke test.
+>
+> After the migration completes successfully:
+>
+> 1. Run Query C again. The counter row count should be unchanged from the original Step 1 result. Slice 11's primary save must hold.
+> 2. Create one billing sheet through the app. Confirm it gets a sequential billing number (one greater than the previous max). This proves `getNextBillingNumber()` in `server/storage.ts` still works against the now-tracked counter table.
+> 3. Open the existing wet-check / estimate / work-order pages. Confirm they load without errors. Smoke-test creating a wet-check finding to confirm the new `wet_check_finding_single_target` CHECK constraint isn't blocking valid input.
+> 4. Confirm `to_regclass('estimate_zones')` returns `null` (the table was successfully dropped).
+> 5. Confirm `to_regclass('photo_late_additions')` returns `photo_late_additions` (the new table was created).
+>
+> ## Step 6 — Report.
+>
+> Final report should include:
+> - Which path was taken (A, B, or C).
+> - The before/after constraint names if Path A, or the migration diff if Path B.
+> - Confirmation that all five Step 5 smoke tests passed.
+> - The current count of `billing_number_counters` rows compared to the pre-deploy count.
+>
+> Once everything's green, Slice 11 is officially deployed and Slice 10a's deploy is unblocked.
+
+---
+
+## Why this happens
+
+Drizzle's migration generator works off two snapshots: the schema file and Drizzle's internal `migrations/meta/_journal.json` history. When a constraint was originally created via raw SQL or via an older Drizzle version that used PostgreSQL's default naming (`{table}_{col}_fkey`), the live DB ends up with one name while Drizzle's snapshot assumes the new convention (`{table}_{col}_{ref_table}_{ref_col}_fk`). The `DROP CONSTRAINT` then references a name that doesn't exist.
+
+Two long-term mitigations, both out of scope for this hotfix:
+
+1. **Audit and rename all `_fkey`-named FK constraints to the Drizzle naming convention.** A one-time DB cleanup that removes this class of drift permanently. Worth a follow-up slice.
+2. **Tell Drizzle to introspect the live DB** before generating a migration, so the snapshot reflects reality. `drizzle-kit introspect` can produce a fresh schema file from the live DB, which can then be diffed against the desired schema. More work, more reliable.
+
+For now, the `IF EXISTS` defensive pattern (Path B) plus selective renames (Path A) gets the deploy unstuck.

@@ -1,0 +1,85 @@
+modules = ["nodejs-20", "web", "python-3.11", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["chromium"]
+
+[deployment]
+deploymentTarget = "autoscale"
+build = ["npm", "run", "build"]
+run = ["npm", "run", "start"]
+
+[env]
+PORT = "5000"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Run Tests"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "qb-token-tests"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Run Tests"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node --import tsx/esm --test --test-concurrency=1 tests/invoice-pdf-qa.test.mjs tests/parts-lifecycle.test.mjs tests/billing-sheet-photos.test.mjs tests/billing-pricing-authoritative.test.mjs tests/billing-reprice-notes-immutability.test.mjs tests/photo-pipeline.test.mjs tests/work-orders-no-photos-needed.test.mjs tests/work-orders-photos-after-billing.test.mjs tests/work-order-wizard.test.mjs tests/pricing-history-auth.test.mjs tests/missing-photos-excludes-billed.test.mjs tests/status-transition-audit.test.mjs tests/email-render.test.mjs tests/estimate-create.test.mjs tests/billing-number-resilience.test.mjs tests/wet-checks-idempotency.test.mjs tests/wet-checks-seed.test.mjs tests/wet-checks-finding-immutability.test.mjs tests/wet-checks-auto-bill.test.mjs tests/wet-check-admin-delete.test.mjs tests/offline-queue-sort.test.mjs tests/offline-queue-replay.test.mjs tests/estimate-pending-approval.test.mjs tests/estimate-lifecycle.test.mjs tests/estimate-transition.test.mjs tests/estimates-list-ui.test.mjs tests/estimates-view-toggle.test.mjs tests/estimates-save-as-draft.test.mjs"
+
+[[workflows.workflow]]
+name = "qb-token-tests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node --import tsx/esm --test tests/qb-token-resilience.test.mjs"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5904
+externalPort = 3000
+
+[agent]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[userenv]
+
+[userenv.production]
+QUICKBOOKS_REDIRECT_URI = "https://irrigopro.com/api/quickbooks/callback"

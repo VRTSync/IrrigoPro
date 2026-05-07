@@ -1,0 +1,540 @@
+You're right — the issue is that one tilted ring still reads as "a ring that wobbles a bit." A real gyroscope has two perpendicular rings precessing in 3D — that's the visual cue. So I'm going to:
+
+Add a second ring perpendicular to the first (one in the local XY plane, one in the XZ plane). They cross in 3D like the hoops of a gyroscope.
+Crank the tilt amplitude from ~0.55 rad to ~0.95 rad so the rings clearly compress into ellipses.
+Drop perspective from 720 to 420 → much stronger depth foreshortening (front particles ~2× the size of back ones).
+Counter-rotate the two rings on their own Z-axes for visual interest.
+
+Replace client/src/pages/login.tsx with this:
+tsximport { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Lock, LogIn, Mail } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { safeSet } from "@/utils/safeStorage";
+import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
+import PoweredByFooter from "@/components/layout/powered-by-footer";
+
+interface LoginCredentials {
+  username: string;
+  password: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Static backdrop                                                            */
+/* -------------------------------------------------------------------------- */
+
+function StaticBackdrop() {
+  const baseStyle: CSSProperties = {
+    background:
+      "radial-gradient(140% 100% at 50% 0%, #ffffff 0%, #f5fbff 38%, #eaf6ff 72%, #dceffd 100%)",
+  };
+  return (
+    <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
+      <div className="absolute inset-0" style={baseStyle} />
+      <div
+        className="absolute -top-32 -left-20 h-[520px] w-[520px] rounded-full blur-3xl opacity-60"
+        style={{
+          background:
+            "radial-gradient(circle at 30% 30%, rgba(186,230,253,0.55), transparent 65%)",
+        }}
+      />
+      <div
+        className="absolute top-1/3 -right-24 h-[460px] w-[460px] rounded-full blur-3xl opacity-50"
+        style={{
+          background:
+            "radial-gradient(circle at 30% 30%, rgba(147,197,253,0.45), transparent 65%)",
+        }}
+      />
+      <div
+        className="absolute -bottom-24 left-1/4 h-[560px] w-[560px] rounded-full blur-3xl opacity-50"
+        style={{
+          background:
+            "radial-gradient(circle at 30% 30%, rgba(165,243,252,0.45), transparent 65%)",
+        }}
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_50%,rgba(255,255,255,0)_55%,rgba(186,230,253,0.18)_100%)]" />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Gyroscopic ring particle field                                             */
+/*                                                                            */
+/* TWO perpendicular bands that precess in 3D — like the hoops of a real      */
+/* gyroscope. Each band:                                                      */
+/*   - is a thick ring (rows × perRow particles)                              */
+/*   - spins on its own local Z axis (counter-rotating between bands)         */
+/*   - shares the same parent gyroscope tilt (X+Y rotations)                  */
+/*   - shape-morphs on the radius via overlapping sines                       */
+/*   - stretches in the direction of cursor velocity                          */
+/* -------------------------------------------------------------------------- */
+
+type Particle = {
+  band: 0 | 1;
+  a: number; // angle along the ring (radians)
+  r: number; // radius (px)
+  size: number; // base draw size (px, before depth scaling)
+  alpha: number;
+};
+
+function RingParticleField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const reduced =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const isMobile =
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 640px)").matches;
+
+  const cfg = useMemo(() => {
+    const baseRadius = isMobile ? 95 : 130;
+    const thickness = isMobile ? 28 : 42;
+    const rows = isMobile ? 4 : 6;
+    // Slightly fewer per-row vs. the single-band version since we now render two.
+    const perRow = isMobile ? 52 : 80;
+    return { baseRadius, thickness, rows, perRow };
+  }, [isMobile]);
+
+  const particles = useMemo<Particle[]>(() => {
+    const out: Particle[] = [];
+    for (let band = 0 as 0 | 1; band < 2; band = ((band + 1) as 0 | 1)) {
+      for (let row = 0; row < cfg.rows; row++) {
+        const t = cfg.rows === 1 ? 0 : row / (cfg.rows - 1); // 0..1
+        const radialBase = cfg.baseRadius + (t - 0.5) * cfg.thickness;
+        const angleOffset =
+          (row * Math.PI) / cfg.perRow + (band === 1 ? 0.13 : 0);
+        for (let i = 0; i < cfg.perRow; i++) {
+          const a = (i / cfg.perRow) * Math.PI * 2 + angleOffset;
+          const jitterSeed = i * (band === 0 ? 53 : 67) + row * 17;
+          const jitter = (jitterSeed % 11) - 5;
+          const r = radialBase + jitter * 0.45;
+          const edgeFalloff = 1 - Math.abs(t - 0.5) * 1.4;
+          const alpha = Math.max(0.2, 0.65 * edgeFalloff);
+          // Deterministic 0.9..2.1 size so SSR/CSR match
+          const size = 0.9 + ((i * 13 + row * 7 + band * 3) % 12) * 0.1;
+          out.push({ band, a, r, size, alpha });
+        }
+      }
+    }
+    return out;
+  }, [cfg]);
+
+  useEffect(() => {
+    if (reduced) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d", { alpha: true });
+    if (!ctx) return;
+
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+
+    const resize = () => {
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    // Pre-rendered particle stamp (drawImage is ~10× faster than per-frame gradients)
+    const STAMP = 64;
+    const stamp = document.createElement("canvas");
+    stamp.width = stamp.height = STAMP;
+    const sctx = stamp.getContext("2d")!;
+    const sg = sctx.createRadialGradient(
+      STAMP / 2,
+      STAMP / 2,
+      0,
+      STAMP / 2,
+      STAMP / 2,
+      STAMP / 2
+    );
+    sg.addColorStop(0, "rgba(30,64,175,1)"); // blue-800 core
+    sg.addColorStop(0.18, "rgba(37,99,235,0.85)"); // blue-600
+    sg.addColorStop(0.45, "rgba(96,165,250,0.35)"); // soft halo
+    sg.addColorStop(1, "rgba(96,165,250,0)");
+    sctx.fillStyle = sg;
+    sctx.fillRect(0, 0, STAMP, STAMP);
+
+    // Cursor + smoothed band-center + velocity
+    const target = { x: w / 2, y: h / 2, active: false };
+    const cur = { x: w / 2, y: h / 2 };
+    const lastCur = { x: cur.x, y: cur.y };
+    const vel = { x: 0, y: 0 };
+    let visible = 0;
+    let rotA = 0;
+    let rotB = 0;
+
+    const onMove = (e: PointerEvent) => {
+      target.x = e.clientX;
+      target.y = e.clientY;
+      if (!target.active) {
+        cur.x = e.clientX;
+        cur.y = e.clientY;
+        lastCur.x = cur.x;
+        lastCur.y = cur.y;
+      }
+      target.active = true;
+    };
+    const onLeave = () => {
+      target.active = false;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerleave", onLeave);
+
+    let raf = 0;
+    let last = performance.now();
+    const PERSPECTIVE = 420; // smaller = stronger 3D foreshortening
+
+    const tick = (now: number) => {
+      const dt = Math.min(64, now - last);
+      last = now;
+
+      // Smooth cursor follow
+      const k = 0.16;
+      cur.x += (target.x - cur.x) * k;
+      cur.y += (target.y - cur.y) * k;
+
+      // Low-pass velocity for stretch warp
+      vel.x = vel.x * 0.82 + (cur.x - lastCur.x) * 0.18;
+      vel.y = vel.y * 0.82 + (cur.y - lastCur.y) * 0.18;
+      lastCur.x = cur.x;
+      lastCur.y = cur.y;
+
+      // Visibility fade
+      const visTarget = target.active ? 1 : 0;
+      visible += (visTarget - visible) * 0.08;
+
+      // Counter-rotating Z spins so the two bands shear past each other
+      rotA += 0.00026 * dt;
+      rotB -= 0.00021 * dt;
+
+      // Strong gyroscope precession — large amplitude + slow primary freq
+      // so the ellipse foreshortening is held long enough to read as 3D.
+      const tiltX =
+        Math.sin(now * 0.00022) * 0.95 + Math.sin(now * 0.00041 + 1.7) * 0.25;
+      const tiltY =
+        Math.cos(now * 0.00026) * 0.95 + Math.cos(now * 0.00037 + 0.9) * 0.25;
+
+      const vmag = Math.hypot(vel.x, vel.y);
+      const vAngle = Math.atan2(vel.y, vel.x);
+      const stretch = Math.min(0.42, vmag * 0.014);
+
+      ctx.clearRect(0, 0, w, h);
+
+      if (visible <= 0.01) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = visible;
+      ctx.translate(cur.x, cur.y);
+
+      // Soft cursor halo (flat behind everything)
+      const halo = ctx.createRadialGradient(
+        0,
+        0,
+        0,
+        0,
+        0,
+        cfg.baseRadius + cfg.thickness * 1.4
+      );
+      halo.addColorStop(0, "rgba(96,165,250,0.13)");
+      halo.addColorStop(0.55, "rgba(125,211,252,0.06)");
+      halo.addColorStop(1, "rgba(125,211,252,0)");
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, cfg.baseRadius + cfg.thickness * 1.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      const cosTX = Math.cos(tiltX);
+      const sinTX = Math.sin(tiltX);
+      const cosTY = Math.cos(tiltY);
+      const sinTY = Math.sin(tiltY);
+
+      // Additive glow accumulation (and order-independent → no depth sort needed)
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        const ownSpin = p.band === 0 ? rotA : rotB;
+        const a = p.a + ownSpin;
+
+        // Edge morph
+        const wave =
+          Math.sin(p.a * 3 + now * 0.0009) * 5.5 +
+          Math.sin(p.a * 5 - now * 0.0013 + 1.1) * 3.5 +
+          Math.sin(p.a * 2 + now * 0.0006) * 2.0;
+
+        // Velocity warp
+        const align = Math.cos(a - vAngle);
+        const warpR = stretch * cfg.baseRadius * align;
+        const r = p.r + wave + warpR;
+
+        // Band-local 3D position.
+        // Band 0 lives in the local XY plane (z = 0).
+        // Band 1 lives in the local XZ plane (y = 0) — perpendicular to band 0.
+        let x0: number, y0: number, z0: number;
+        if (p.band === 0) {
+          x0 = Math.cos(a) * r;
+          y0 = Math.sin(a) * r;
+          z0 = 0;
+        } else {
+          x0 = Math.cos(a) * r;
+          y0 = 0;
+          z0 = Math.sin(a) * r;
+        }
+
+        // Parent gyroscope tilt: rotate around X, then Y.
+        const y1 = y0 * cosTX - z0 * sinTX;
+        const z1 = y0 * sinTX + z0 * cosTX;
+        const x2 = x0 * cosTY + z1 * sinTY;
+        const z2 = -x0 * sinTY + z1 * cosTY;
+        const y2 = y1;
+
+        // Perspective projection
+        const scale = PERSPECTIVE / (PERSPECTIVE - z2);
+        const px = x2 * scale;
+        const py = y2 * scale;
+
+        // Depth shading — front particles bigger/brighter, back ones smaller/dimmer
+        const depth = Math.max(0.25, Math.min(1.7, scale));
+        const finalAlpha = Math.min(1, p.alpha * depth);
+        const finalSize = p.size * depth;
+
+        const drawSize = finalSize * 7; // includes glow halo
+        ctx.globalAlpha = visible * finalAlpha;
+        ctx.drawImage(stamp, px - drawSize / 2, py - drawSize / 2, drawSize, drawSize);
+      }
+
+      ctx.restore();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerleave", onLeave);
+    };
+  }, [cfg, particles, reduced]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      className="pointer-events-none fixed inset-0 z-[1]"
+    />
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Login                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export default function Login() {
+  const [credentials, setCredentials] = useState<LoginCredentials>({
+    username: "",
+    password: "",
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailVerificationNeeded, setEmailVerificationNeeded] = useState<string | null>(null);
+  const [sendingVerification, setSendingVerification] = useState(false);
+  const { toast } = useToast();
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      const user = await apiRequest("/api/auth/login", "POST", credentials);
+      safeSet("user", JSON.stringify(user));
+      toast({
+        title: "Login Successful",
+        description: `Welcome back, ${user.name}!`,
+      });
+      window.location.href = "/";
+    } catch (error: any) {
+      if (
+        (error.message && error.message.includes("email verification")) ||
+        error.message?.includes("verify your email")
+      ) {
+        setEmailVerificationNeeded(credentials.username);
+        toast({
+          title: "Email Verification Required",
+          description: "Please verify your email address before logging in.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Login Failed",
+          description: error.message || "Invalid credentials",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!emailVerificationNeeded) return;
+    setSendingVerification(true);
+    try {
+      await apiRequest("/api/auth/resend-verification", "POST", {
+        email: emailVerificationNeeded,
+      });
+      toast({
+        title: "Verification Email Sent",
+        description: "Please check your email for the verification link.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send verification email",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingVerification(false);
+    }
+  };
+
+  return (
+    <div className="relative min-h-screen w-full overflow-hidden bg-[#f5fbff] text-slate-900 flex flex-col">
+      <StaticBackdrop />
+      <RingParticleField />
+
+      <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-5 md:p-8">
+        <Card className="w-full max-w-md bg-white/85 backdrop-blur-xl border border-sky-100 shadow-[0_20px_60px_-15px_rgba(59,130,246,0.25)] text-slate-900 rounded-3xl">
+          <CardHeader className="text-center pt-8 pb-4">
+            <div className="flex justify-center mb-6">
+              <img
+                src={irrigoProLogo}
+                alt="IrrigoPro Logo"
+                className="h-28 w-auto drop-shadow-2xl"
+              />
+            </div>
+            <CardTitle className="text-3xl font-bold text-slate-900 tracking-tight">
+              IrrigoPro
+            </CardTitle>
+            <p className="text-blue-700 mt-2 text-base">
+              Professional irrigation management
+            </p>
+          </CardHeader>
+          <CardContent className="px-6 pb-8">
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="username" className="text-slate-700 text-sm font-medium">
+                  Username
+                </Label>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="Enter your username"
+                  value={credentials.username}
+                  onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
+                  required
+                  data-testid="input-username"
+                  className="h-14 bg-white/90 border-2 border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl text-base focus:border-sky-500 focus:ring-2 focus:ring-sky-400/30"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-slate-700 text-sm font-medium">
+                  Password
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="Password"
+                  value={credentials.password}
+                  onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                  required
+                  data-testid="input-password"
+                  className="h-14 bg-white/90 border-2 border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl text-base focus:border-sky-500 focus:ring-2 focus:ring-sky-400/30"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                size="lg"
+                data-testid="button-login"
+                className="w-full h-14 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-semibold text-lg rounded-xl shadow-lg shadow-sky-500/30 transition-all duration-200 mt-2"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Lock className="w-5 h-5 mr-2 animate-spin" />
+                ) : (
+                  <LogIn className="w-5 h-5 mr-2" />
+                )}
+                Sign In
+              </Button>
+            </form>
+
+            {emailVerificationNeeded && (
+              <div className="mt-5 p-5 bg-amber-50 border border-amber-300 rounded-2xl">
+                <div className="flex items-center mb-3">
+                  <Mail className="w-5 h-5 mr-2 text-amber-600" />
+                  <span className="text-base text-amber-800 font-semibold">
+                    Email Verification Required
+                  </span>
+                </div>
+                <p className="text-sm text-amber-700 mb-4">
+                  Please verify your email address to access your account.
+                </p>
+                <Button
+                  onClick={handleResendVerification}
+                  disabled={sendingVerification}
+                  data-testid="button-resend-verification"
+                  className="w-full h-12 bg-amber-500 hover:bg-amber-600 text-white rounded-xl"
+                >
+                  {sendingVerification ? (
+                    <Lock className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Mail className="w-4 h-4 mr-2" />
+                  )}
+                  Resend Verification Email
+                </Button>
+              </div>
+            )}
+
+            <div className="mt-6 text-center">
+              <Button
+                variant="link"
+                onClick={() => (window.location.href = "/forgot-password")}
+                data-testid="link-forgot-password"
+                className="text-base text-blue-700 hover:text-blue-900 transition-colors"
+              >
+                Forgot your password?
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="relative z-10">
+        <PoweredByFooter />
+      </div>
+    </div>
+  );
+}
+Why this should actually feel gyroscopic:
+CueWhat's doing itTwo visible 3D rings crossingband === 0 lives in XY plane; band === 1 lives in XZ plane (perpendicular). They share the same parent tilt, so they rotate as a single rigid object.PrecessiontiltX = sin(t·0.00022)·0.95 + …, tiltY = cos(t·0.00026)·0.95 + … — the parent's tilt vector traces a wobbling cone around the cursor axis (~54° peak amplitude).Ellipse foreshorteningcos(0.95) ≈ 0.58, so each ring compresses down to ~58% of its width at peak tilt — clearly elliptical, not circular.Front-vs-back depthPERSPECTIVE = 420 with a band radius of 130 → front particles get up to ~1.45× scale, back particles down to ~0.76×. Combined with depth-alpha you can see the near side of each ring popping forward.Independent ring spinsBand A goes +0.00026 rad/ms, Band B goes −0.00021 rad/ms — counter-rotation makes them visibly shear past each other.
+Knobs:
+
+0.95 and 0.25 in tiltX/tiltY — precession amplitude (rad). Try 1.2 for nearly edge-on tilts.
+PERSPECTIVE = 420 — lower for stronger depth (try 320 if you want it really aggressive).
+0.00022 / 0.00026 for the primary tilt frequencies — slower = each tilt holds longer = ellipses are clearer.
+0.00026 / 0.00021 — per-band Z-spin speeds.
+cfg.perRow = 80 — drop to ~64 if perf is a concern (running 2 bands now).

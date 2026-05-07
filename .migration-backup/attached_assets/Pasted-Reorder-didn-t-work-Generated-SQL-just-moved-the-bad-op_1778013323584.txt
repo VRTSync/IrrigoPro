@@ -1,0 +1,30 @@
+Reorder didn't work. Generated SQL just moved the bad opclass from controller_letter to the COALESCE fragment:
+CREATE UNIQUE INDEX "uniq_property_ctrl_branch" ON "property_controllers" 
+  USING btree (customer_id int4_ops, controller_letter text_ops, COALESCE(branch_name, ''::text) int4_ops);
+                                                                                                 ^^^^^^^^
+                                                                                                 still wrong
+Confirms Drizzle Kit's generator defaults int4_ops for any raw sql\...`` expression in an index column list. We can't out-position the bug.
+Structural fix: drop the COALESCE entirely by making branch_name NOT NULL DEFAULT ''. That eliminates the raw SQL fragment from the index, which is what's tripping the generator.
+Schema change in shared/schema.ts:
+tsbranchName: text("branch_name").notNull().default(""),
+// ...
+uniqCustomerLetter: uniqueIndex("uniq_property_ctrl_branch")
+  .on(table.customerId, table.controllerLetter, table.branchName),
+Migration (forward-only, idempotent — fold into the boot SQL in server/index.ts:1402-1405):
+sql-- Backfill any NULL rows so the NOT NULL constraint can apply.
+UPDATE property_controllers SET branch_name = '' WHERE branch_name IS NULL;
+ALTER TABLE property_controllers ALTER COLUMN branch_name SET DEFAULT '';
+ALTER TABLE property_controllers ALTER COLUMN branch_name SET NOT NULL;
+-- Drop the broken index if it exists in any state, then let the regenerated
+-- Drizzle migration recreate it cleanly with three typed columns.
+DROP INDEX IF EXISTS uniq_property_ctrl_branch;
+Why this is the right fix: the COALESCE was only needed because Postgres treats NULLs in unique indexes as distinct. Once branch_name is NOT NULL DEFAULT '', the empty string serves the same uniqueness role with no expression. Drizzle Kit's generator now sees three regular typed columns and gets all opclasses right.
+Verify in dev before republishing:
+
+Backfill ran (no NULLs left in branch_name).
+Re-generated Drizzle migration shows CREATE UNIQUE INDEX ... (customer_id int4_ops, controller_letter text_ops, branch_name text_ops) — all three correct.
+Boot succeeds, no migration error.
+Inserting a duplicate (customer_id, controller_letter, branch_name) is still rejected.
+Re-publish, then verify prod boot logs are clean and \d property_controllers shows the three-column index.
+
+Application-code check: any code that reads branch_name and compares it to null needs to compare to '' instead. Quick grep for branch_name === null / branchName === null / branchName == null / IS NULL on branch_name will catch them.

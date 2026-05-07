@@ -1,87 +1,58 @@
 # IrrigoPro
-A full-stack business management system for irrigation companies, streamlining operations from estimates to billing.
+
+Production irrigation company management app: estimates → work orders → wet checks → billing → QuickBooks invoicing.
 
 ## Run & Operate
-- **Run Dev Server**: `npm run dev`
-- **Build**: `npm run build`
-- **Typecheck**: `npm run typecheck`
-- **DB Push**: `npm run db:push`
-- **Generate Drizzle Migrations**: `npm run db:generate`
-- **Required Env Vars**: `DATABASE_URL`, `POSTMARK_API_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `QB_CLIENT_ID`, `QB_CLIENT_SECRET`, `QB_WEBHOOK_TOKEN`, `QB_REDIRECT_URI`
+
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
+- `pnpm --filter @workspace/irrigopro run dev` — run the frontend (port set by env)
+- `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
-- **Frontend**: React (TypeScript, Vite, shadcn/ui, Tailwind CSS), TanStack React Query, Wouter, React Hook Form (Zod).
-- **Backend**: Node.js (Express.js), TypeScript.
-- **Database**: PostgreSQL (Neon Database).
-- **ORM**: Drizzle ORM.
-- **Authentication**: Session-based, TOTP MFA, email verification, phone-based login.
+
+- pnpm workspaces, Node.js 24, TypeScript 5.9
+- Frontend: React + Vite + Tailwind v3 + Wouter + React Query
+- API: Express 5
+- DB: PostgreSQL + Drizzle ORM
+- Validation: Zod, drizzle-zod
+- Build: esbuild (ESM bundle for API)
 
 ## Where things live
-- `client/`: Frontend application.
-- `server/`: Backend API and logic.
-- `drizzle/`: Drizzle ORM migrations.
-- `server/db/schema.ts`: Database schema.
-- `server/routes.ts`: API route definitions and middleware.
-- `client/src/styles/tailwind.css`: Main Tailwind CSS.
+
+- `artifacts/api-server/src/routes/routes.ts` — all API routes (~10 000+ lines, legacy monolith)
+- `artifacts/api-server/src/app.ts` — Express app setup, calls `registerRoutes(app)`
+- `artifacts/irrigopro/src/` — React frontend
+- `artifacts/irrigopro/src/shared/` — shared types & Zod schemas (lifecycle, schema)
+- `lib/db/src/schema/` — Drizzle ORM schema (source of truth for DB)
+- `attached_assets/` — static assets shared between frontend and backend
 
 ## Architecture decisions
-- **Role-based Pricing Visibility**: Financial data is hidden from field technicians, enforced server-side.
-- **Server-side Pricing Enforcement**: Catalog pricing for line items is strictly enforced server-side.
-- **Unified Work Order & Billing Sheet UI**: Edit/View modals share a consistent layout.
-- **Estimate Wizard**: A 3-step wizard for new/edit estimates (Customer & Project → Line Items → Review & Send).
-- **Work Order Wizard**: A 5-step wizard for new/edit direct work orders (Customer & Branch → Work Location & Site → Description → Schedule & Assign → Review).
-- **Billing Sheet Wizard**: A 5-step wizard for new/edit billing sheets (Customer & Work Date → Work Location & Site → Parts & Labor → Description & Photos → Review).
-- **Independent Parts Management**: Parts catalog operates independently from QuickBooks.
-- **KML for Site Maps**: KML import is used for interactive irrigation maps.
-- **Monthly Invoice Consolidation**: All customer work consolidated into single QuickBooks invoices with tax-free totals.
-- **Phone-Based User Login**: New team members use their phone number as their login username.
-- **Offline Photo Capture**: Wet check photos compress and persist as Blobs in IndexedDB, uploading through a mutation queue.
+
+- No OpenAPI spec / codegen for this legacy port — frontend uses direct `apiRequest`/`queryClient` fetch layer
+- `registerRoutes(app)` returns an HTTP Server directly — not converted to an Express Router
+- Express 5 (path-to-regexp v8) incompatible patterns fixed: removed `(\d+)` inline regex params and `(*)` wildcard modifiers; replaced wildcard segments with `{*name}` syntax
+- `@shared/*` alias in Vite points to `artifacts/irrigopro/src/shared/` — frontend-only copies of shared types
+- `virtual:pwa-register` stubbed in vite.config.ts via a custom Vite plugin (PWA not fully configured)
 
 ## Product
-- Manages estimates, customer approval, work orders, invoicing, and billing sheets.
-- Granular role-based access control for financial data, site maps, QuickBooks, customer management, work orders/billing sheets, and estimate approval.
-- Interactive site maps with KML import, controller management, and live GPS tracking.
-- Token-based customer email approval for estimates.
-- Database-driven and PWA push notifications.
-- Secure authentication with MFA and phone number-based login.
-- External Work Order API for CRM integration.
-- Photo uploads for work orders and billing sheets with role-based editing.
-- Authoritative pricing and auditing for catalog items and labor rates.
-- Animated loading skeletons for enhanced user experience.
-- Offline sync capabilities with UI for progress, conflicts, and errors.
-- Real-time GPS tracking and "Use My Location" feature in LocationPicker.
 
-## User preferences
-Preferred communication style: Simple, everyday language.
-Site Map Display Preferences: Default display mode set to solid markers with zone/controller identifiers in the center, enhanced popups with detailed information. Maintain original styling and functionality unless explicitly requested to change.
-App Branding: Updated to "IrrigoPro" with professional blue water droplet logo design featuring bright blue (#3B82F6) primary colors, dark gray borders, and light green accent details.
-Manager Dashboard: Show only Estimates, Work Orders, and Billing Sheets cards (Parts List removed per user request).
-Customer Approval System: Complete email approval workflow with individual estimate status check buttons, proper production domain URLs (irrigopro.com/estimate-approval), and professional customer-facing success pages that avoid admin interface confusion.
-Dashboard Navigation: All dashboard cards should use consistent navigation to main pages rather than internal view switching.
-Business Rules: No markup on parts (bill at cost), no tax calculations on any charges. Labor hours are per-part, not multiplied by quantity. Monthly invoice consolidation combines all customer work into single QuickBooks invoices with tax-free totals. Estimates automatically create work orders when approved - manual work order creation is only for direct billing (non-estimate) work.
-Labor Mode (Task #396): Every ticket type (estimate, work order, billing sheet, wet check) carries a `laborMode` column ('flat' | 'per_part'). Flat is the new default for new tickets and uses a single Total labor hours field on the parent record (`estimates.totalLaborHours`, `wet_checks.totalLaborHours`, `work_orders.totalHours`, `billing_sheets.totalHours`); per-line `laborHours` is forced to 0 in flat mode at the payload boundary. Per_part preserves the legacy per-row labor inputs and sums them. Existing rows were back-filled to `per_part`. The mode is preserved across estimate→work-order conversion and is audited on PATCH/complete. Server-side normalization lives in `server/estimate-payload.ts` and the POST/PATCH handlers for billing sheets and work orders in `server/routes.ts`. The estimate read paths in `server/storage.ts` honor flat mode when recomputing `laborSubtotal` so the totals shown match what was persisted.
-Admin Access Restriction: Company admin users should not have direct access to estimates and work orders pages - only view through modal previews in operations page. Removed navigation paths to /estimates and /work-orders for admin role.
-Navigation Improvements: Company admin navigation streamlined to 5 items with improved wording and Admin dropdown containing Team and Company management options for better alignment and organization. Irrigation manager navigation enhanced to include comprehensive business management: Estimates (full estimate system access), Work Orders, Billing Sheets, Customers (with site map viewing), Dashboard, and Parts (with catalog/list dropdown). Mobile navigation optimized for irrigation managers with smart prioritization: ensures access to all key business areas including the complete estimate management system.
-Site Map Access Control: Site map viewing (read-only) is available to company administrators, irrigation managers, and field technicians. Complete CRUD operations (create, update, delete) are restricted to company administrators only. All other roles including super admins and billing managers have no access to site maps. Backend API routes are protected with appropriate access control middleware: requireSiteMapViewAccess for viewing operations and requireCompanyAdminAccess for modification operations.
-Customer Management Permissions: Role-based access control for customer management. Billing managers can view all customers and edit existing customer details (name, address, contact info, etc.) but cannot create new customers, delete customers, or access the integrations tab. Irrigation managers and field technicians have strict view-only access. Only company admin and super admin users have full privileges including creation, deletion, integrations access, and property notes editing. Frontend UI shows Edit button for billing_manager in the customer list and customer profile, but not Delete, Add Customer, or Integrations tab.
-Production Security: All debug console.log statements removed from customer creation flow. Authentication uses session-based user lookup instead of localStorage for production compatibility. Form validation properly handles missing user data with graceful fallbacks.
-QuickBooks Access Restrictions: Complete QuickBooks access removal implemented for irrigation managers and field technicians. All QuickBooks API endpoints protected with role-based middleware, QuickBooks tab removed from estimates page for restricted roles, and backend routes return 403 access denied errors for unauthorized access attempts. Only company administrators, super administrators, and billing managers have QuickBooks integration access.
-Work Order and Billing Sheet Management: Company administrators and billing managers have full edit and delete permissions for work orders and billing sheets. Backend API routes are protected with role-based middleware (requireWorkOrderBillingAccess) ensuring only authorized users can modify or delete these critical business documents. Frontend UI provides Edit and Delete buttons for authorized roles with confirmation dialogs for destructive actions. Billing managers can edit work orders and billing sheets directly from the customer billing review page. EditWorkOrderModal and EditBillingSheetModal are fully redesigned to mirror the CompletedWorkDetailModal view layout — same gradient header, same section cards (Location, Job Info, Time & Labor, Parts & Materials, Photos, Financial Summary) — but with editable inputs instead of static text. Parts list editing uses a dedicated EditPartsModal sub-modal (client/src/components/billing/edit-parts-modal.tsx) that reuses the PartsSearchModal for library search (search/SKU/popular parts) and allows inline qty/price editing and row removal. Financial totals auto-calculate live as fields are edited.
-Parts Catalog Access: Billing managers and irrigation managers have comprehensive parts catalog access with full CRUD permissions. This includes viewing all parts with pricing information, creating and editing individual parts, advanced filtering and search, and QuickBooks integration for parts sync. Bulk import functionality is restricted to company administrators and super administrators only. Additionally, irrigation managers have access to both the full Parts Catalog and a simplified Parts List view through a dropdown navigation menu, providing flexibility for different use cases. The parts catalog provides extensive inventory management capabilities for all management-level personnel while maintaining appropriate permission controls.
-Work Order & Billing Sheet Photo Uploads: Photos can be attached during work order and billing sheet creation via the FileUpload component. Uploaded photos are stored in the `photos` array field (text[]) and displayed in the Photos section of the detail view for all statuses. Add/remove of photos AFTER creation is supported in the work order detail view AND in the billing sheet view modal (CompletedWorkDetailModal) via the "Add Photos" button and an "X" remove overlay (with a confirmation dialog). Allowed roles for post-creation photo edits: company_admin, super_admin, irrigation_manager, billing_manager (full access on any record), and field_tech (only on work orders assigned to them, and only on billing sheets they created). Edits are blocked once a record is billed/invoiced or cancelled. Photo changes save immediately via PATCH /api/work-orders/:id and PATCH /api/billing-sheets/:id. The middleware `requireWorkOrderUpdateAccess` and `requireBillingSheetUpdateAccess` allows a photos-only payload (single key `photos: string[]`) from field techs scoped to ownership/assignment, in addition to their existing status-only paths. Important fix: previously, photos uploaded during billing sheet creation were silently dropped because the `onSubmit` handler in standalone-billing-sheet.tsx did not include the `uploadedPhotos` state in its submission payload — this is now fixed for both new sheets and manager edits.
-Work Order Editing: Full work order editing available for irrigation managers and admins (company_admin, super_admin) on non-completed/non-cancelled work orders. An "Edit" button in the work order detail header opens the EditWorkOrderModal with all editable fields: project name, description, project address, location notes, scheduled date, priority, technician assignment, special instructions, and internal notes. Changes saved via PATCH /api/work-orders/:id. Field techs and billing managers do not see the edit button. Customer assignment and work order items are not editable through this form.
-Work Order Assignment: The assignment dropdown on work orders includes both irrigation managers and field technicians, grouped by role (Managers / Field Techs). The `/api/users/field-techs` endpoint returns both `field_tech` and `irrigation_manager` active users. Reassignment in work order details also shows grouped managers and field techs.
-Location Picker Enhancements: The LocationPicker component features a live GPS tracking dot (pulsing blue circle) that continuously shows the user's real-time position on the map. A "Use My Location" button snaps the work location pin to the user's GPS coordinates with reverse geocoding. The map automatically re-centers when the customer/community selection changes using `map.flyTo()` for smooth transitions.
+- Multi-company irrigation management with role-based access (super_admin, company_admin, manager, field_tech, billing_manager)
+- Full estimate lifecycle: draft → pending review → sent → approved/rejected/expired
+- Work orders with technician scheduling, field photos, wet check inspections
+- Billing sheets auto-generated from completed work orders; QuickBooks invoice export
+- Parts catalog, assembly management, bulk CSV import
+- Interactive site maps with controller and zone management
 
 ## Gotchas
-- Offline sync UI is gated by `VITE_OFFLINE_SYNC_UI`.
-- Field technicians cannot see any pricing information; this is enforced at the API level via `applyPricingVisibility()`.
-- Photos uploaded to billing sheets require the `uploadedPhotos` state in the submission payload for new sheets and manager edits to prevent silent dropping.
-- Estimates automatically create work orders upon approval; manual work order creation is for direct billing only.
-- Company admin users have limited direct access to estimates and work orders pages; they view through modals in the operations page.
+
+- Express 5 rejects inline regex route params — never use `/:param(\d+)` or `/:param(*)` patterns
+- `routes.ts` is a massive legacy file; build takes ~600ms via esbuild
+- `@shared/schema` is a copy of the drizzle schema — changes to `lib/db/src/schema/` must be mirrored there for frontend type safety
+- drizzle-orm / drizzle-zod added to frontend devDeps only for type imports (not bundled at runtime meaningfully)
 
 ## Pointers
-- **React Query Docs**: _Populate as you build_
-- **Drizzle ORM Docs**: _Populate as you build_
-- **Tailwind CSS Docs**: _Populate as you build_
-- **QuickBooks API Docs**: _Populate as you build_
+
+- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
