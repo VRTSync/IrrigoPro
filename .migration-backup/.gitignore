@@ -1,0 +1,27 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+
+# Logs
+*.log
+
+# Environment files (allow .env.example template)
+.env
+.env.*
+!.env.example
+
+# Runtime upload directory (kept on disk via uploads/.gitkeep)
+uploads/
+
+# attached_assets/ is kept tracked but slim. Only files imported via the
+# "@assets" Vite alias (see vite.config.ts) or otherwise shipped with the app
+# should live here. Chat-pasted screenshots, logs, PDFs, etc. should be
+# deleted or archived outside the repo rather than committed.
+
+# Coverage and editor directories
+coverage/
+.vscode/
+.idea/
