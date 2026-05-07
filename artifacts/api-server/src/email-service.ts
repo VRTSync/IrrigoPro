@@ -324,6 +324,80 @@ Questions? Reply to this email or call us directly.
     `;
   }
 
+  static async sendMarketingLeadNotification(data: {
+    companyName: string;
+    contactName: string;
+    email: string;
+    phone?: string | null;
+    numTechnicians?: number | null;
+    message?: string | null;
+  }): Promise<void> {
+    if (!process.env.POSTMARK_API_TOKEN) {
+      console.error('POSTMARK_API_TOKEN not configured — marketing lead email skipped');
+      return;
+    }
+    const toAddr =
+      process.env.MARKETING_LEAD_TO_EMAIL ||
+      process.env.LEADS_NOTIFY_EMAIL ||
+      process.env.FROM_EMAIL;
+    const fromAddr =
+      process.env.MARKETING_LEAD_FROM_EMAIL ||
+      process.env.POSTMARK_FROM_EMAIL ||
+      process.env.FROM_EMAIL ||
+      'noreply@irrigopro.com';
+    if (!toAddr) {
+      console.error(
+        'No recipient address for marketing lead email (set MARKETING_LEAD_TO_EMAIL, LEADS_NOTIFY_EMAIL, or FROM_EMAIL)',
+      );
+      return;
+    }
+
+    const lines = [
+      `Company:      ${data.companyName}`,
+      `Contact:      ${data.contactName}`,
+      `Email:        ${data.email}`,
+      `Phone:        ${data.phone || '(not provided)'}`,
+      `Technicians:  ${data.numTechnicians ?? '(not provided)'}`,
+      ``,
+      `Message:`,
+      data.message || '(none)',
+    ];
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #0EA5E9, #14B8A6); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
+          <h1 style="margin: 0; font-size: 22px;">New IrrigoPro demo request</h1>
+          <p style="margin: 6px 0 0 0; opacity: 0.9;">From the marketing site</p>
+        </div>
+        <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 24px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280; width: 130px;">Company</td><td style="padding: 6px 0;">${data.companyName}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Contact</td><td style="padding: 6px 0;">${data.contactName}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Email</td><td style="padding: 6px 0;"><a href="mailto:${data.email}" style="color:#0EA5E9;">${data.email}</a></td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Phone</td><td style="padding: 6px 0;">${data.phone || '(not provided)'}</td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Technicians</td><td style="padding: 6px 0;">${data.numTechnicians ?? '(not provided)'}</td></tr>
+          </table>
+          <h3 style="margin-top: 20px; color: #1f2937;">Message</h3>
+          <div style="white-space: pre-wrap; background: #f9fafb; border-radius: 8px; padding: 12px; color: #374151; font-size: 14px;">${(data.message || '(none)').replace(/[<>]/g, (c) => (c === '<' ? '&lt;' : '&gt;'))}</div>
+        </div>
+      </div>`;
+
+    try {
+      await client.sendEmail({
+        From: fromAddr,
+        To: toAddr,
+        ReplyTo: data.email,
+        Subject: `New IrrigoPro demo request — ${data.companyName}`,
+        HtmlBody: htmlBody,
+        TextBody: lines.join('\n'),
+        Tag: 'marketing-lead',
+        MessageStream: 'outbound',
+      });
+      console.log(`Marketing lead notification sent to ${toAddr}`);
+    } catch (error) {
+      console.error('Failed to send marketing lead notification:', error);
+    }
+  }
+
   static async sendApprovalConfirmation(customerEmail: string, estimateNumber: string, approved: boolean): Promise<void> {
     if (!process.env.POSTMARK_API_TOKEN) {
       console.error('POSTMARK_API_TOKEN not configured');

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { db, marketingLeads } from "@workspace/db";
-import { Client as PostmarkClient } from "postmark";
+import { EmailService } from "../email-service";
 
 const router: IRouter = Router();
 
@@ -42,44 +42,22 @@ router.post("/marketing-leads", async (req, res) => {
       })
       .returning();
 
-    const token = process.env.POSTMARK_API_TOKEN;
-    const toAddr =
-      process.env.MARKETING_LEAD_TO_EMAIL || process.env.LEADS_NOTIFY_EMAIL;
-    const fromAddr =
-      process.env.MARKETING_LEAD_FROM_EMAIL || process.env.POSTMARK_FROM_EMAIL;
-    if (token && toAddr && fromAddr) {
-      try {
-        const client = new PostmarkClient(token);
-        const lines = [
-          `Company: ${data.companyName}`,
-          `Contact: ${data.contactName}`,
-          `Email: ${data.email}`,
-          `Phone: ${data.phone || "(not provided)"}`,
-          `Technicians: ${data.numTechnicians ?? "(not provided)"}`,
-          ``,
-          `Message:`,
-          data.message || "(none)",
-        ];
-        await client.sendEmail({
-          From: fromAddr,
-          To: toAddr,
-          Subject: `New IrrigoPro demo request — ${data.companyName}`,
-          TextBody: lines.join("\n"),
-          ReplyTo: data.email,
-          MessageStream: "outbound",
-        });
-      } catch (mailErr) {
-        req.log.warn(
-          { err: mailErr },
-          "Failed to send marketing lead notification email",
-        );
-      }
-    } else {
-      req.log.info(
-        { hasToken: !!token, hasTo: !!toAddr, hasFrom: !!fromAddr },
-        "Marketing lead saved but email not sent (Postmark not fully configured)",
+    // Reuse the existing Postmark client/EmailService rather than spinning up
+    // a second client inline. Failures here are logged but don't fail the
+    // request — we already saved the lead in the database.
+    void EmailService.sendMarketingLeadNotification({
+      companyName: data.companyName,
+      contactName: data.contactName,
+      email: data.email,
+      phone: data.phone || null,
+      numTechnicians: data.numTechnicians ?? null,
+      message: data.message || null,
+    }).catch((err) => {
+      req.log.warn(
+        { err },
+        "Failed to send marketing lead notification email",
       );
-    }
+    });
 
     return res.status(201).json({ id: lead.id, ok: true });
   } catch (err) {

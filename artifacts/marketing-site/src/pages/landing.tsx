@@ -23,6 +23,7 @@ export default function Landing() {
       <SiteNav />
       <Hero />
       <TrustBar />
+      <ProductPreview />
       <Features />
       <Workflow />
       <FieldOfficeSplit />
@@ -202,6 +203,48 @@ function TicketRow({
         {status}
       </span>
     </div>
+  );
+}
+
+function ProductPreview() {
+  return (
+    <section className="bg-background">
+      <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:px-8 lg:py-24">
+        <div className="mx-auto max-w-2xl text-center">
+          <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+            The actual app
+          </span>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+            This is what your crew will sign in to.
+          </h2>
+          <p className="mt-3 text-lg text-muted-foreground">
+            No mock screens — IrrigoPro is in production today, running real
+            irrigation companies from the truck to the office.
+          </p>
+        </div>
+
+        <div className="relative mx-auto mt-12 max-w-4xl">
+          <div className="brand-glow absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl" />
+          <div className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+            <div className="flex items-center gap-2 border-b border-border bg-secondary/40 px-4 py-3">
+              <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+              <span className="ml-3 text-xs font-medium text-muted-foreground">
+                app.irrigopro.com / sign in
+              </span>
+            </div>
+            <img
+              src="/marketing/preview-app-home.jpg"
+              alt="IrrigoPro app sign-in screen"
+              className="block w-full"
+              loading="lazy"
+              data-testid="img-product-preview"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
