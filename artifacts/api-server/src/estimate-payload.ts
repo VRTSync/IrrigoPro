@@ -102,3 +102,42 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
 
   return { estimate, items };
 }
+
+// Documented fallback when a customer record has no master labor rate. The
+// POST and PUT /api/estimates handlers, the wet-check conversion engine, and
+// the labor-rate audit all share this constant so they can never drift.
+export const DEFAULT_LABOR_RATE = "45.00";
+
+// Authoritative create-time labor rate for a new estimate: always the
+// customer's master rate, falling back to DEFAULT_LABOR_RATE when the
+// customer has no rate on file. Encapsulating this in a tiny pure helper
+// lets the route handler AND tests share the same single source of truth.
+export function resolveCreateLaborRate(
+  customerLaborRate: string | number | null | undefined,
+): string {
+  if (customerLaborRate === null || customerLaborRate === undefined || customerLaborRate === "") {
+    return DEFAULT_LABOR_RATE;
+  }
+  return String(customerLaborRate);
+}
+
+// Authoritative update-time labor rate for an existing estimate.
+//   - If the customer was swapped, the new customer's master rate wins
+//     (DEFAULT_LABOR_RATE when null), so the stored rate tracks the new
+//     customer immediately.
+//   - If the customer is unchanged, the originally stamped rate is preserved
+//     regardless of what the client sent. We use appliedLaborRate ?? laborRate
+//     so legacy records where the two diverged stay in sync with the read-time
+//     totals computed by storage.getEstimate.
+export function resolvePutLaborRate(opts: {
+  customerChanged: boolean;
+  newCustomerLaborRate?: string | number | null;
+  existingAppliedLaborRate?: string | number | null;
+  existingLaborRate: string | number;
+}): string {
+  if (opts.customerChanged) {
+    return resolveCreateLaborRate(opts.newCustomerLaborRate);
+  }
+  const snapshot = opts.existingAppliedLaborRate ?? opts.existingLaborRate;
+  return String(snapshot);
+}
