@@ -16,7 +16,7 @@ import {
 import { LocationFields } from "@/components/location/location-fields";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { composeCustomerAddress } from "@/lib/customer-address";
-import { MapPin, Cpu, Droplets, AlertCircle, Briefcase } from "lucide-react";
+import { MapPin, Cpu, Droplets, Briefcase } from "lucide-react";
 import type { Customer, PropertyController } from "@shared/schema";
 
 export interface WorkLocation {
@@ -152,8 +152,6 @@ export function WizardLocationStep({
     value.projectAddress ||
     composeCustomerAddress(customer);
 
-  const canContinue = !!value.workLocation;
-
   return (
     <div className="space-y-4">
       {!hideProjectName && (
@@ -213,14 +211,15 @@ export function WizardLocationStep({
               <MapPin className="w-4 h-4 text-blue-600" />
             </div>
             <h2 className="text-base font-semibold text-gray-900">
-              Pin Work Location <span className="text-red-500">*</span>
+              Pin Work Location{" "}
+              <span className="text-xs text-gray-500 font-normal">(optional)</span>
             </h2>
           </div>
 
           {customer ? (
             <>
               <p className="text-xs text-gray-600">
-                Drop a pin on the map so the field tech navigates straight to the work area.
+                Optional — drop a pin on the map if you want the field tech to navigate straight to the work area.
               </p>
               <LocationPicker
                 key={customer.id}
@@ -231,7 +230,7 @@ export function WizardLocationStep({
                 selectedLocation={value.workLocation}
               />
 
-              {value.workLocation ? (
+              {value.workLocation && (
                 <div className="border-l-4 border-l-blue-500 bg-blue-50/50 border border-blue-200 rounded-lg p-3">
                   <p className="text-sm font-medium text-blue-900">Pinned Location:</p>
                   <p className="text-sm text-blue-800 mt-1">
@@ -247,13 +246,6 @@ export function WizardLocationStep({
                   >
                     Clear pin
                   </Button>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-amber-800">
-                    Drop a pin on the map above to continue.
-                  </p>
                 </div>
               )}
             </>
@@ -349,7 +341,6 @@ export function WizardLocationStep({
         <Button
           type="button"
           onClick={onContinue}
-          disabled={!canContinue}
           className="bg-blue-600 hover:bg-blue-700 text-white"
         >
           Continue

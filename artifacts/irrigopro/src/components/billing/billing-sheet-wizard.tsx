@@ -1275,13 +1275,6 @@ export function BillingSheetWizard({
     }
   };
 
-  const legacyAllowNoPin =
-    isEdit &&
-    !!existing &&
-    existing.workLocationLat == null &&
-    existing.workLocationLng == null &&
-    !locationStep.workLocation;
-
   const isDirty = useMemo(() => {
     const baseline = initialSnapshotRef.current;
     if (!baseline) return false;
@@ -1300,9 +1293,6 @@ export function BillingSheetWizard({
   const saveMutation = useMutation<unknown, Error, void>({
     mutationFn: async () => {
       if (!customerStep.customer) throw new Error("Customer required");
-      if (!locationStep.workLocation && !legacyAllowNoPin) {
-        throw new Error("Pin a work location to continue");
-      }
       if (!customerStep.workDate) throw new Error("Work date required");
       if (!descriptionStep.workDescription.trim()) throw new Error("Description required");
 
@@ -1434,7 +1424,7 @@ export function BillingSheetWizard({
       !!customerStep.customer &&
       (customerBranches.length === 0 || !!customerStep.branchName) &&
       !!customerStep.workDate,
-    2: !!locationStep.workLocation || legacyAllowNoPin,
+    2: true,
     3:
       partsLabor.items.length > 0 ||
       (partsLabor.laborMode === "per_part"
@@ -1496,11 +1486,6 @@ export function BillingSheetWizard({
 
   const stickyMobileFooter = (
     <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
-      {step === 2 && !locationStep.workLocation && !legacyAllowNoPin && (
-        <p className="text-xs text-gray-500 text-center">
-          Drop a pin on the map above to continue.
-        </p>
-      )}
       {step === 3 && !canContinueFrom[3] && (
         <p className="text-xs text-gray-500 text-center">
           Add at least one part or labor entry to continue.

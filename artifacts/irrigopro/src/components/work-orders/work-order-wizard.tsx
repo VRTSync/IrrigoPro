@@ -274,7 +274,6 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
   const saveMutation = useMutation<unknown, Error, void>({
     mutationFn: async () => {
       if (!customerStep.customer) throw new Error("Customer required");
-      if (!locationStep.workLocation) throw new Error("Pin a work location to continue");
       if (!locationStep.projectName.trim()) throw new Error("Project name required");
       if (!descriptionStep.description.trim()) throw new Error("Description required");
 
@@ -292,9 +291,9 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
         projectAddress: locationStep.projectAddress.trim(),
         locationNotes: locationStep.locationNotes.trim() || "",
         accessInstructions: locationStep.accessInstructions.trim() || "",
-        workLocationLat: locationStep.workLocation.lat,
-        workLocationLng: locationStep.workLocation.lng,
-        workLocationAddress: locationStep.workLocation.address ?? null,
+        workLocationLat: locationStep.workLocation?.lat ?? null,
+        workLocationLng: locationStep.workLocation?.lng ?? null,
+        workLocationAddress: locationStep.workLocation?.address ?? null,
         controllerLetter: locationStep.controllerLetter,
         zoneNumber: locationStep.zoneNumber,
         priority: scheduleStep.priority,
@@ -344,11 +343,6 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
     if (!customerStep.customer) {
       toast({ title: "Customer required", variant: "destructive" });
       setStep(1);
-      return;
-    }
-    if (!locationStep.workLocation) {
-      toast({ title: "Pin a work location to continue", variant: "destructive" });
-      setStep(2);
       return;
     }
     if (!locationStep.projectName.trim()) {
@@ -424,7 +418,7 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
     1:
       !!customerStep.customer &&
       (customerBranches.length === 0 || !!customerStep.branchName),
-    2: !!locationStep.workLocation,
+    2: true,
     3: descriptionStep.description.trim().length > 0,
     4: true,
     5: true,
@@ -439,11 +433,6 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
 
   const stickyMobileFooter = (
     <div className="sm:hidden sticky bottom-0 -mx-4 px-4 py-2 bg-white border-t z-10 flex flex-col gap-1.5">
-      {step === 2 && !locationStep.workLocation && (
-        <p className="text-xs text-gray-500 text-center">
-          Drop a pin on the map above to continue.
-        </p>
-      )}
       <div className="flex items-center gap-2">
         {step === 1 ? (
           <Button type="button" variant="outline" onClick={requestClose} className="flex-1">
