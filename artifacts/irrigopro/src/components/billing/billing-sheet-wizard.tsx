@@ -222,6 +222,7 @@ function CustomerDateStep({
               onSelectCustomer={handleSelect}
               hideLabel
               placeholder="Search and select a customer..."
+              autoOpen
             />
           ) : (
             <div className="space-y-3">
@@ -293,36 +294,40 @@ function CustomerDateStep({
         </Card>
       )}
 
-      <Card>
-        <CardContent className="p-4 sm:p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="bg-blue-50 p-2 rounded-md">
-              <Calendar className="w-4 h-4 text-blue-600" />
+      {/* Work Date card — gated until a customer is chosen so the customer
+          picker is the obvious first step (matches estimate wizard pattern). */}
+      {value.customer && (
+        <Card>
+          <CardContent className="p-4 sm:p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-50 p-2 rounded-md">
+                <Calendar className="w-4 h-4 text-blue-600" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">
+                Work Date <span className="text-red-500">*</span>
+              </h2>
             </div>
-            <h2 className="text-base font-semibold text-gray-900">
-              Work Date <span className="text-red-500">*</span>
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              type="date"
-              value={value.workDate}
-              onChange={(e) => onChange({ ...value, workDate: e.target.value })}
-              className="max-w-[220px]"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                onChange({ ...value, workDate: new Date().toISOString().split("T")[0] })
-              }
-            >
-              Today
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={value.workDate}
+                onChange={(e) => onChange({ ...value, workDate: e.target.value })}
+                className="max-w-[220px]"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  onChange({ ...value, workDate: new Date().toISOString().split("T")[0] })
+                }
+              >
+                Today
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="hidden sm:flex justify-end gap-3 pt-2">
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
@@ -1171,7 +1176,16 @@ export function BillingSheetWizard({
     | (BillingSheet & { items?: BillingSheetItem[] })
     | undefined;
 
-  const { data: realCustomer } = useQuery<Customer>({
+  // Wait for the real customer record before hydrating Step 1 so the wizard
+  // mounts the real customer in a single pass — never the synthetic fallback
+  // first, then a swap. `isFetched` (rather than `!realCustomer`) also lets
+  // hydration proceed if the customer query errors out so the user never
+  // sees an indefinite spinner.
+  const {
+    data: realCustomer,
+    isFetched: realCustomerFetched,
+    isLoading: realCustomerLoading,
+  } = useQuery<Customer>({
     queryKey: ["/api/customers", existing?.customerId],
     enabled: isEdit && open && !!existing?.customerId,
   });
@@ -1179,7 +1193,7 @@ export function BillingSheetWizard({
   // Hydrate from existing
   useEffect(() => {
     if (!isEdit || !existing || !open || hydratedRef.current) return;
-    if (existing.customerId && !realCustomer) return;
+    if (existing.customerId && !realCustomerFetched) return;
 
     const cust =
       realCustomer ??
@@ -1258,16 +1272,21 @@ export function BillingSheetWizard({
     setPhotos(ph);
     initialSnapshotRef.current = snapshot(cs, ls, pl, ds, ph);
     hydratedRef.current = true;
-  }, [isEdit, existing, realCustomer, open]);
+  }, [isEdit, existing, realCustomer, realCustomerFetched, open]);
 
-  // Customer change → clear pin/controller on Step 2
+  // Customer change → reset map pin / controller / zone, and snap the project
+  // address back to the new customer's address unless the user has explicitly
+  // toggled "use a different address" (in which case their typed address is
+  // preserved). Matches the estimate wizard pattern.
   const handleCustomerStepChange = (next: CustomerStepValue) => {
     const prev = customerStep;
     setCustomerStep(next);
     if (prev.customer?.id !== next.customer?.id) {
       setLocationStep((cur) => ({
         ...cur,
-        projectAddress: next.customer?.address || "",
+        projectAddress: cur.useDifferentAddress
+          ? cur.projectAddress
+          : next.customer?.address || "",
         workLocation: null,
         controllerLetter: null,
         zoneNumber: null,
@@ -1570,7 +1589,7 @@ export function BillingSheetWizard({
               STEP_TITLES[5],
             ]}
             contextLine={headerContextLine}
-            loading={isEdit && fetchedLoading && !hydratedRef.current}
+            loading={isEdit && (fetchedLoading || realCustomerLoading) && !hydratedRef.current}
             loadingLabel="Loading billing sheet…"
             accent="orange"
             leading={
@@ -1590,7 +1609,7 @@ export function BillingSheetWizard({
           />
 
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
-            {isEdit && fetchedLoading && !hydratedRef.current ? (
+            {isEdit && (fetchedLoading || realCustomerLoading) && !hydratedRef.current ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               </div>

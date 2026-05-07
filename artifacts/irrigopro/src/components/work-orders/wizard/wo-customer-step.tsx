@@ -74,6 +74,7 @@ export function WoCustomerStep({ value, onChange, onContinue, onCancel, customer
               onSelectCustomer={handleSelect}
               hideLabel
               placeholder="Search and select a customer..."
+              autoOpen
             />
           ) : value.customer ? (
             <div className="space-y-3">

@@ -198,14 +198,23 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
     enabled: isEdit && open && !!workOrderId,
   });
 
-  const { data: realCustomer } = useQuery<Customer>({
+  // Wait for the real customer record to load before hydrating Step 1 so the
+  // wizard mounts the real customer in a single pass — never the synthetic
+  // fallback first, then a swap. `isFetched` (rather than `!realCustomer`)
+  // also lets hydration proceed if the customer query errors out, so the
+  // user is never stuck on a spinner forever.
+  const {
+    data: realCustomer,
+    isFetched: realCustomerFetched,
+    isLoading: realCustomerLoading,
+  } = useQuery<Customer>({
     queryKey: ["/api/customers", existing?.customerId],
     enabled: isEdit && open && !!existing?.customerId,
   });
 
   useEffect(() => {
     if (!isEdit || !existing || !open || hydratedRef.current) return;
-    if (existing.customerId && !realCustomer) return;
+    if (existing.customerId && !realCustomerFetched) return;
 
     const cust = realCustomer ?? ({
       id: existing.customerId,
@@ -260,7 +269,7 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
     setPhotos(ph);
     initialSnapshotRef.current = snapshot(c, l, d, s, ph);
     hydratedRef.current = true;
-  }, [isEdit, existing, realCustomer, open]);
+  }, [isEdit, existing, realCustomer, realCustomerFetched, open]);
 
   const isDirty = useMemo(() => {
     const baseline = initialSnapshotRef.current;
@@ -515,7 +524,7 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
               STEP_TITLES[5],
             ]}
             contextLine={headerContextLine}
-            loading={isEdit && existingLoading && !hydratedRef.current}
+            loading={isEdit && (existingLoading || realCustomerLoading) && !hydratedRef.current}
             loadingLabel="Loading work order…"
             accent="blue"
             leading={
@@ -535,7 +544,7 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
           />
 
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
-            {isEdit && existingLoading && !hydratedRef.current ? (
+            {isEdit && (existingLoading || realCustomerLoading) && !hydratedRef.current ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               </div>
