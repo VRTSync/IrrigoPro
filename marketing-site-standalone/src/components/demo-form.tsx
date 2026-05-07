@@ -59,7 +59,10 @@ export function DemoForm() {
           : undefined,
         message: values.message || undefined,
       };
-      const res = await fetch("/api/marketing-leads", {
+      const apiBase = (
+        (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ""
+      ).replace(/\/$/, "");
+      const res = await fetch(`${apiBase}/api/marketing-leads`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

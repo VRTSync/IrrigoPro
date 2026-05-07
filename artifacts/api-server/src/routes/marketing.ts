@@ -1,9 +1,44 @@
 import { Router, type IRouter } from "express";
+import cors, { type CorsOptions } from "cors";
 import { z } from "zod";
 import { db, marketingLeads } from "@workspace/db";
 import { EmailService } from "../email-service";
 
 const router: IRouter = Router();
+
+// The marketing site lives on a different origin (irrigopro.com / www
+// .irrigopro.com) from the IrrigoPro app's API (app.irrigopro.com), so the
+// /marketing-leads endpoint needs explicit CORS. Other API routes stay
+// behind the global CORS middleware in app.ts.
+const MARKETING_LEADS_ALLOWED_ORIGINS = new Set<string>([
+  "https://irrigopro.com",
+  "https://www.irrigopro.com",
+  // Local dev for the standalone marketing site (Vite default port).
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+const marketingLeadsCorsOptions: CorsOptions = {
+  origin(origin, callback) {
+    // Same-origin / non-browser requests (no Origin header) are always allowed.
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (MARKETING_LEADS_ALLOWED_ORIGINS.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`Origin ${origin} is not allowed for /marketing-leads`));
+  },
+  methods: ["POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  credentials: false,
+  maxAge: 86400,
+};
+
+const marketingLeadsCors = cors(marketingLeadsCorsOptions);
+router.options("/marketing-leads", marketingLeadsCors);
 
 const leadSchema = z.object({
   companyName: z.string().trim().min(1).max(200),
@@ -28,7 +63,7 @@ const leadSchema = z.object({
   message: z.string().trim().max(5000).optional().or(z.literal("")),
 });
 
-router.post("/marketing-leads", async (req, res) => {
+router.post("/marketing-leads", marketingLeadsCors, async (req, res) => {
   const parsed = leadSchema.safeParse(req.body);
   if (!parsed.success) {
     return res

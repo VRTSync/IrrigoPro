@@ -24,10 +24,12 @@ Production irrigation company management app: estimates → work orders → wet 
 
 - `artifacts/api-server/src/routes/routes.ts` — all API routes (~10 000+ lines, legacy monolith)
 - `artifacts/api-server/src/app.ts` — Express app setup, calls `registerRoutes(app)`
+- `artifacts/api-server/src/routes/marketing.ts` — `/api/marketing-leads` endpoint, with explicit CORS allowlist for the standalone marketing site (irrigopro.com / www.irrigopro.com)
 - `artifacts/irrigopro/src/` — React frontend
 - `artifacts/irrigopro/src/shared/` — shared types & Zod schemas (lifecycle, schema)
 - `lib/db/src/schema/` — Drizzle ORM schema (source of truth for DB)
 - `attached_assets/` — static assets shared between frontend and backend
+- `marketing-site-standalone/` — snapshot of the marketing site as a fully standalone Vite project (no `@workspace/*` deps, base `/`). Drop into a separate Replit project for `irrigopro.com`. See `MARKETING_SITE_HANDOFF.md` for the full split + DNS plan.
 
 ## Architecture decisions
 

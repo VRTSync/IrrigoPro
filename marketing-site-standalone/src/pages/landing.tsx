@@ -235,7 +235,7 @@ function ProductPreview() {
               </span>
             </div>
             <img
-              src="/marketing/preview-app-home.jpg"
+              src="/preview-app-home.jpg"
               alt="IrrigoPro app sign-in screen"
               className="block w-full"
               loading="lazy"
