@@ -16,16 +16,53 @@ from `app.irrigopro.com` (IrrigoPro app + API).
   the monorepo (no `@workspace/*` imports), uses Vite `base = "/"`, and the
   demo form posts to `${VITE_API_BASE_URL}/api/marketing-leads`.
 
+## Handoff bundle
+
+A ready-to-drop-in zip of the standalone site lives at the repo root:
+**`marketing-site-standalone.zip`** (excludes `node_modules` and `dist`).
+Download it, unzip into the new Replit project's root, and proceed with
+the steps below.
+
+The bundle was verified on this monorepo with:
+
+```bash
+# Verified in an isolated copy (no monorepo workspace linking):
+pnpm install --ignore-workspace   # clean install, ~17s
+pnpm run typecheck                # passes
+pnpm run build                    # vite build → dist/, ~7s
+pnpm run dev                      # Vite dev server on $PORT (default 5173)
+```
+
+The demo form was smoke-tested against the locally running API server in
+this monorepo (`VITE_API_BASE_URL=http://localhost:80`) and a `POST` to
+`/api/marketing-leads` returned `201 {"id":N,"ok":true}` and the lead was
+written to the database.
+
+### Gotchas found during the sanity check
+
+- When running `pnpm install` from inside `marketing-site-standalone/`
+  *while it still lives inside this monorepo*, pass `--ignore-workspace`
+  so pnpm doesn't try to link it into the parent workspace. Once the
+  folder is dropped into its own Replit project, plain `pnpm install`
+  works because there is no parent `pnpm-workspace.yaml`.
+- esbuild prints an "Ignored build scripts" warning on install. It is
+  safe to ignore; if you want to silence it, run `pnpm approve-builds`
+  and approve `esbuild`.
+- `VITE_API_BASE_URL` must have **no trailing slash**. The demo form
+  strips one defensively, but keep it clean.
+
 ## How to ship this — step by step
 
 ### 1. Stand up the marketing site as its own Replit project
 
 1. Create a new Replit project (any blank pnpm-friendly template).
-2. Copy the contents of `marketing-site-standalone/` from this monorepo into
-   the new project's root.
+2. Download `marketing-site-standalone.zip` from this monorepo's root and
+   unzip its contents into the new project's root (or copy the
+   `marketing-site-standalone/` folder contents directly).
 3. In the new project run:
    ```bash
    pnpm install
+   pnpm run typecheck  # sanity-check types
    pnpm run build      # sanity-check the build
    pnpm run dev        # sanity-check locally
    ```

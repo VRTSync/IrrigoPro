@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "0DVgu4DiePIxvRdQGb8wX"
+uri = "file://marketing-site-standalone.zip"
+type = "unspecified"
+title = "Marketing site handoff bundle"
