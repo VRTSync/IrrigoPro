@@ -269,16 +269,14 @@ export default function Navigation() {
       <nav className="hidden lg:block bg-white shadow-sm border-b border-transparent relative after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/40 after:to-transparent">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            {/* Logo Button */}
+            {/* Logo */}
             <div className="flex-shrink-0">
               <Link href="/">
-                <div className="bg-white border border-gray-200 shadow-lg rounded-full w-12 h-12 flex items-center justify-center hover:shadow-xl hover:border-gray-300 transition-all duration-200 transform hover:scale-105">
-                  <img 
-                    src={irrigoProLogo} 
-                    alt="IrrigoPro Logo"
-                    className="max-h-8 max-w-8 w-auto h-auto cursor-pointer object-contain"
-                  />
-                </div>
+                <img
+                  src={irrigoProLogo}
+                  alt="IrrigoPro"
+                  className="h-9 w-auto cursor-pointer transition-opacity duration-200 hover:opacity-80"
+                />
               </Link>
             </div>
             
@@ -433,10 +431,10 @@ export default function Navigation() {
           <div className="flex justify-between items-center h-16 px-4">
             {/* Logo */}
             <div className="flex items-center">
-              <img 
-                src={irrigoProLogo} 
-                alt="IrrigoPro Logo"
-                className="h-10 w-auto"
+              <img
+                src={irrigoProLogo}
+                alt="IrrigoPro"
+                className="h-9 w-auto"
               />
             </div>
 

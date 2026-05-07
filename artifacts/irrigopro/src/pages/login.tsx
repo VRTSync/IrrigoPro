@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Lock, LogIn, Mail } from "lucide-react";
+import { ArrowRight, Lock, Mail, ShieldCheck, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { safeSet } from "@/utils/safeStorage";
-import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
+import irrigoProLockup from "@assets/IrrigoPro_2026-01_1778195033342.png";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 
 interface LoginCredentials {
@@ -52,13 +51,12 @@ function WaterDropletField() {
     const DAMPING = 0.92;
 
     const COLORS: Array<[number, number, number]> = [
-      [199, 78, 52], [199, 78, 62], [199, 78, 40],
-      [196, 88, 62], [196, 88, 72], [196, 88, 48],
-      [190, 72, 55], [199, 65, 75], [205, 68, 55],
-      [78, 65, 58], [78, 65, 68], [78, 58, 48],
+      [210, 67, 36], [210, 67, 46], [212, 77, 28],
+      [201, 70, 60], [201, 70, 70], [201, 80, 50],
+      [205, 68, 55], [199, 65, 75], [212, 60, 32],
+      [89, 50, 50], [89, 50, 60], [94, 57, 40],
     ];
 
-    // Deterministic jitter so SSR/CSR match (pure trig, no Math.random).
     const jitter = (i: number, salt: number) => {
       const v = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
       return v - Math.floor(v);
@@ -115,7 +113,6 @@ function WaterDropletField() {
     };
     initParticles();
 
-    // Reposition origins on resize so drops fill the new viewport.
     const onResize = () => {
       resize();
       for (let i = 0; i < particles.length; i++) {
@@ -292,7 +289,6 @@ function WaterDropletField() {
   );
 }
 
-
 export default function Login() {
   const [credentials, setCredentials] = useState<LoginCredentials>({
     username: "",
@@ -362,104 +358,253 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-[#e8f4fb] text-slate-900 flex flex-col">
+      {/* Animated water-drop particle field */}
       <WaterDropletField />
 
-      <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-5 md:p-8">
-        <Card className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-sky-100 shadow-[0_20px_60px_-15px_rgba(59,130,246,0.25)] text-slate-900 rounded-3xl">
-          <CardHeader className="text-center pt-8 pb-4">
-            <div className="flex justify-center mb-6">
-              <img
-                src={irrigoProLogo}
-                alt="IrrigoPro Logo"
-                className="h-28 w-auto drop-shadow-2xl"
+      {/* Spotlight wash behind the card */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-[2]"
+        style={{
+          background:
+            "radial-gradient(ellipse 70% 60% at 50% 45%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 70%)",
+        }}
+      />
+
+      <div className="pointer-events-auto relative z-10 flex-1 flex items-center justify-center p-4 md:p-8">
+        {/* ── Outer animated gradient frame ── */}
+        <div className="relative w-full max-w-5xl group">
+          {/* Rotating conic glow halo */}
+          <div
+            aria-hidden
+            className="absolute -inset-px rounded-[2rem] opacity-80 blur-[2px] [animation:spin_8s_linear_infinite]"
+            style={{
+              background:
+                "conic-gradient(from 0deg, #1E5A99, #7DC4E8, #7DBE3F, #0E3B6B, #1E5A99)",
+            }}
+          />
+          {/* Soft outer glow */}
+          <div
+            aria-hidden
+            className="absolute -inset-6 rounded-[2.5rem] opacity-50 blur-3xl"
+            style={{
+              background:
+                "radial-gradient(60% 60% at 30% 30%, rgba(30,90,153,0.55), transparent 70%), radial-gradient(60% 60% at 80% 70%, rgba(125,190,63,0.45), transparent 70%)",
+            }}
+          />
+
+          {/* ── The card itself ── */}
+          <div className="relative grid md:grid-cols-[5fr_6fr] overflow-hidden rounded-[1.95rem] bg-white/85 backdrop-blur-2xl shadow-[0_30px_80px_-20px_rgba(14,59,107,0.45)] ring-1 ring-white/40">
+
+            {/* ─── LEFT brand panel ─── */}
+            <div className="relative isolate flex flex-col items-center justify-center overflow-hidden p-8 md:p-12 text-white"
+              style={{
+                background:
+                  "radial-gradient(120% 100% at 50% 0%, #1E5A99 0%, #0E3B6B 55%, #08254A 100%)",
+              }}
+            >
+              {/* Subtle dot grid overlay */}
+              <div
+                aria-hidden
+                className="absolute inset-0 opacity-[0.18] mix-blend-screen"
+                style={{
+                  backgroundImage:
+                    "radial-gradient(rgba(255,255,255,0.7) 1.2px, transparent 1.2px)",
+                  backgroundSize: "22px 22px",
+                  maskImage:
+                    "radial-gradient(ellipse 80% 70% at 50% 50%, black 40%, transparent 100%)",
+                  WebkitMaskImage:
+                    "radial-gradient(ellipse 80% 70% at 50% 50%, black 40%, transparent 100%)",
+                }}
               />
-            </div>
-            <CardTitle className="text-3xl font-bold text-slate-900 tracking-tight">IrrigoPro</CardTitle>
-            <p className="text-blue-700 mt-2 text-base">Professional irrigation management</p>
-          </CardHeader>
-          <CardContent className="px-6 pb-8">
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="username" className="text-slate-700 text-sm font-medium">Username</Label>
-                <Input
-                  id="username"
-                  type="text"
-                  placeholder="Enter your username"
-                  value={credentials.username}
-                  onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
-                  required
-                  data-testid="input-username"
-                  className="h-14 bg-white/80 border-2 border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl text-base focus:border-sky-500 focus:ring-2 focus:ring-sky-400/30"
+              {/* Diagonal sheen */}
+              <div
+                aria-hidden
+                className="absolute inset-0 opacity-30 mix-blend-soft-light"
+                style={{
+                  background:
+                    "linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.35) 50%, transparent 70%)",
+                }}
+              />
+              {/* Green accent corner glow */}
+              <div
+                aria-hidden
+                className="absolute -bottom-20 -right-16 h-72 w-72 rounded-full opacity-60 blur-3xl"
+                style={{ background: "radial-gradient(circle, #7DBE3F 0%, transparent 65%)" }}
+              />
+
+              <div className="relative z-10 flex flex-col items-center text-center">
+                <img
+                  src={irrigoProLockup}
+                  alt="IrrigoPro — Smart Irrigation"
+                  className="w-56 md:w-72 h-auto drop-shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-slate-700 text-sm font-medium">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Password"
-                  value={credentials.password}
-                  onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
-                  required
-                  data-testid="input-password"
-                  className="h-14 bg-white/80 border-2 border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl text-base focus:border-sky-500 focus:ring-2 focus:ring-sky-400/30"
-                />
-              </div>
-
-              <Button
-                type="submit"
-                size="lg"
-                data-testid="button-login"
-                className="w-full h-14 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-semibold text-lg rounded-xl shadow-lg shadow-sky-500/30 transition-all duration-200 mt-2"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Lock className="w-5 h-5 mr-2 animate-spin" />
-                ) : (
-                  <LogIn className="w-5 h-5 mr-2" />
-                )}
-                Sign In
-              </Button>
-            </form>
-
-            {emailVerificationNeeded && (
-              <div className="mt-5 p-5 bg-amber-50 border border-amber-300 rounded-2xl">
-                <div className="flex items-center mb-3">
-                  <Mail className="w-5 h-5 mr-2 text-amber-600" />
-                  <span className="text-base text-amber-800 font-semibold">Email Verification Required</span>
-                </div>
-                <p className="text-sm text-amber-700 mb-4">
-                  Please verify your email address to access your account.
+                <p className="mt-7 text-[11px] font-semibold uppercase tracking-[0.32em] text-sky-200/90">
+                  Smart Irrigation Operations
                 </p>
-                <Button
-                  onClick={handleResendVerification}
-                  disabled={sendingVerification}
-                  data-testid="button-resend-verification"
-                  className="w-full h-12 bg-amber-500 hover:bg-amber-600 text-white rounded-xl"
-                >
-                  {sendingVerification ? (
-                    <Lock className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Mail className="w-4 h-4 mr-2" />
-                  )}
-                  Resend Verification Email
-                </Button>
-              </div>
-            )}
+                <h2 className="mt-3 text-2xl md:text-[1.65rem] font-bold leading-tight text-white max-w-xs">
+                  Run your whole crew from one badass app.
+                </h2>
+                <p className="mt-3 text-sm text-sky-100/75 max-w-xs leading-relaxed">
+                  Estimates, work orders, wet checks, billing — built for the field, dialed in for the office.
+                </p>
 
-            <div className="mt-6 text-center">
-              <Button
-                variant="link"
-                onClick={() => (window.location.href = "/forgot-password")}
-                data-testid="link-forgot-password"
-                className="text-base text-blue-700 hover:text-blue-900 transition-colors"
-              >
-                Forgot your password?
-              </Button>
+                <div className="mt-7 flex items-center gap-2 text-[11px] font-medium text-sky-100/80">
+                  <ShieldCheck className="h-4 w-4 text-[#7DBE3F]" />
+                  <span>Encrypted in transit · SOC-grade hosting</span>
+                </div>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+
+            {/* ─── RIGHT form panel ─── */}
+            <div className="relative bg-white/70 backdrop-blur-xl px-6 py-9 md:px-12 md:py-14">
+              {/* Brand bar accent */}
+              <div
+                aria-hidden
+                className="absolute left-0 top-0 h-full w-[3px] hidden md:block"
+                style={{
+                  background:
+                    "linear-gradient(180deg, transparent 0%, #1E5A99 30%, #7DBE3F 70%, transparent 100%)",
+                }}
+              />
+
+              <div className="mb-7 md:mb-9">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#1E5A99]/80">
+                  Welcome back
+                </p>
+                <h1 className="mt-2 text-3xl md:text-[2rem] font-bold tracking-tight text-slate-900">
+                  Sign in to <span className="text-[#1E5A99]">IrrigoPro</span>
+                </h1>
+                <p className="mt-2 text-sm text-slate-500">
+                  Pick up exactly where you left off in the field.
+                </p>
+              </div>
+
+              <form onSubmit={handleLogin} className="space-y-5">
+                {/* Username */}
+                <div className="group/field">
+                  <Label
+                    htmlFor="username"
+                    className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500"
+                  >
+                    Username
+                  </Label>
+                  <div className="relative mt-1.5">
+                    <User className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within/field:text-[#1E5A99] transition-colors" />
+                    <Input
+                      id="username"
+                      type="text"
+                      placeholder="your.username"
+                      autoComplete="username"
+                      value={credentials.username}
+                      onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
+                      required
+                      data-testid="input-username"
+                      className="h-14 pl-12 pr-4 bg-white/95 border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl text-base shadow-sm transition-all focus:border-[#1E5A99] focus:ring-4 focus:ring-[#1E5A99]/15 focus:shadow-[0_8px_24px_-8px_rgba(30,90,153,0.4)]"
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div className="group/field">
+                  <div className="flex items-baseline justify-between">
+                    <Label
+                      htmlFor="password"
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500"
+                    >
+                      Password
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => (window.location.href = "/forgot-password")}
+                      data-testid="link-forgot-password"
+                      className="text-xs font-medium text-[#1E5A99] hover:text-[#0E3B6B] transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative mt-1.5">
+                    <Lock className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within/field:text-[#1E5A99] transition-colors" />
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                      value={credentials.password}
+                      onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                      required
+                      data-testid="input-password"
+                      className="h-14 pl-12 pr-4 bg-white/95 border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl text-base shadow-sm transition-all focus:border-[#1E5A99] focus:ring-4 focus:ring-[#1E5A99]/15 focus:shadow-[0_8px_24px_-8px_rgba(30,90,153,0.4)]"
+                    />
+                  </div>
+                </div>
+
+                {/* Sign In button — gradient with arrow that slides on hover */}
+                <Button
+                  type="submit"
+                  size="lg"
+                  data-testid="button-login"
+                  disabled={isLoading}
+                  className="relative w-full h-14 overflow-hidden rounded-xl text-white font-semibold text-base tracking-wide shadow-[0_10px_30px_-8px_rgba(30,90,153,0.6)] transition-all duration-200 hover:shadow-[0_16px_36px_-10px_rgba(30,90,153,0.7)] hover:-translate-y-[1px] active:translate-y-0 disabled:opacity-80 disabled:cursor-not-allowed border-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #1E5A99 0%, #2A6EB8 50%, #0E3B6B 100%)",
+                  }}
+                >
+                  {/* Shine sweep */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full"
+                  />
+                  <span className="relative flex items-center justify-center gap-2">
+                    {isLoading ? (
+                      <>
+                        <span className="h-5 w-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                        Signing in…
+                      </>
+                    ) : (
+                      <>
+                        Sign in
+                        <ArrowRight className="h-5 w-5 transition-transform duration-200 group-hover:translate-x-1" />
+                      </>
+                    )}
+                  </span>
+                </Button>
+              </form>
+
+              {emailVerificationNeeded && (
+                <div className="mt-5 p-5 bg-amber-50 border border-amber-300 rounded-2xl">
+                  <div className="flex items-center mb-3">
+                    <Mail className="w-5 h-5 mr-2 text-amber-600" />
+                    <span className="text-base text-amber-800 font-semibold">Email Verification Required</span>
+                  </div>
+                  <p className="text-sm text-amber-700 mb-4">
+                    Please verify your email address to access your account.
+                  </p>
+                  <Button
+                    onClick={handleResendVerification}
+                    disabled={sendingVerification}
+                    data-testid="button-resend-verification"
+                    className="w-full h-12 bg-amber-500 hover:bg-amber-600 text-white rounded-xl"
+                  >
+                    {sendingVerification ? (
+                      <Lock className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4 mr-2" />
+                    )}
+                    Resend Verification Email
+                  </Button>
+                </div>
+              )}
+
+              <div className="mt-8 flex items-center gap-3 text-[11px] text-slate-400">
+                <span className="h-px flex-1 bg-slate-200" />
+                <span className="uppercase tracking-[0.22em]">Secure access</span>
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="relative z-10">

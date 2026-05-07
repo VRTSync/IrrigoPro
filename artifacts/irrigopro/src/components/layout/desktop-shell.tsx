@@ -54,6 +54,7 @@ import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { safeGet, safeSet, safeRemove } from "@/utils/safeStorage";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
+import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
 import type {
   NavConfig,
@@ -363,18 +364,18 @@ function DesktopSidebar({
     >
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
+          {/* Dot-icon mark for collapsed (icon-only) sidebar */}
+          <img
+            src={irrigoProMark}
+            alt="IrrigoPro"
+            className="h-8 w-8 object-contain shrink-0 hidden group-data-[collapsible=icon]:block"
+          />
+          {/* Full horizontal lockup when sidebar is expanded */}
           <img
             src={irrigoProLogo}
             alt="IrrigoPro"
-            className="h-8 w-8 object-contain shrink-0"
+            className="h-8 w-auto object-contain shrink-0 group-data-[collapsible=icon]:hidden"
           />
-          <span
-            className={`text-base font-semibold group-data-[collapsible=icon]:hidden ${
-              brandThemed ? "text-sidebar-foreground" : "text-gray-900"
-            }`}
-          >
-            IrrigoPro
-          </span>
         </div>
       </SidebarHeader>
       <SidebarContent>

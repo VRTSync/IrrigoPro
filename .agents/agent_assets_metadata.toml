@@ -6,3 +6,9 @@ id = "0DVgu4DiePIxvRdQGb8wX"
 uri = "file://marketing-site-standalone.zip"
 type = "unspecified"
 title = "Marketing site handoff bundle"
+
+[[outputs]]
+id = "qeQ2rHXgCnA6TSwduQr4m"
+uri = "file://marketing-site-standalone/public/opengraph.jpg"
+type = "image"
+title = "IrrigoPro 2026 Open Graph image"
