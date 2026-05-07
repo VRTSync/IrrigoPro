@@ -1,5 +1,16 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "p36scdJy5cR85nKjHQXN9"
+uri = "file://artifacts/pitch-deck/public/hero-field.png"
+type = "image"
+title = "irrigation tech hero"
+
+[[generated]]
+id = "CFIF_3Q0JhrzCHIRE18Tf"
+uri = "file://artifacts/pitch-deck/public/closing-aerial.png"
+type = "image"
+title = "aerial irrigation closing"
 
 [[outputs]]
 id = "0DVgu4DiePIxvRdQGb8wX"

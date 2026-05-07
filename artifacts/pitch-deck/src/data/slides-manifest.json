@@ -1,0 +1,90 @@
+[
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Cover.tsx",
+    "title": "Run your irrigation business end-to-end",
+    "description": "Cover slide with hero image and IrrigoPro positioning.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Problem.tsx",
+    "title": "The problem",
+    "description": "Paper, texts, and spreadsheets across disconnected tools.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Solution.tsx",
+    "title": "The solution",
+    "description": "One app from estimates to invoices.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/Workflow.tsx",
+    "title": "Estimate. Schedule. Service. Invoice.",
+    "description": "The four-step workflow.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Field.tsx",
+    "title": "Built for the truck, not the desk",
+    "description": "Mobile-first field app, photos, offline sync.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/Office.tsx",
+    "title": "Billing managers in control",
+    "description": "Server-authoritative pricing, reprice history, photo audit.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000007",
+    "position": 7,
+    "filepath": "src/pages/slides/Features.tsx",
+    "title": "Everything an irrigation company runs on",
+    "description": "Six-tile feature highlights grid.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000008",
+    "position": 8,
+    "filepath": "src/pages/slides/QuickBooks.tsx",
+    "title": "QuickBooks integration",
+    "description": "One-click push to QuickBooks Online.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000009",
+    "position": 9,
+    "filepath": "src/pages/slides/WhoFor.tsx",
+    "title": "Who it's for",
+    "description": "Owners, managers, field techs, billing managers.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000010",
+    "position": 10,
+    "filepath": "src/pages/slides/Pricing.tsx",
+    "title": "See IrrigoPro on your jobs",
+    "description": "30-minute live demo CTA.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "1d4f5b6a-0001-4a00-8a00-000000000011",
+    "position": 11,
+    "filepath": "src/pages/slides/Contact.tsx",
+    "title": "Talk to us",
+    "description": "Closing slide with contact details.",
+    "speakerNotes": ""
+  }
+]
