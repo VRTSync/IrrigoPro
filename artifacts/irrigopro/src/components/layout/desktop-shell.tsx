@@ -53,7 +53,7 @@ import Navigation from "@/components/layout/navigation";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { safeGet, safeSet, safeRemove } from "@/utils/safeStorage";
-import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
+import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
 import type {
   NavConfig,

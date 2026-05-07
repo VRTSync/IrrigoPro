@@ -99,7 +99,7 @@ export function buildEstimateHtml(estimate: EstimateWithItems): string {
   .total { background: #1f2937; color: white; padding: 12px 16px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
   .total .label { font-size: 12px; opacity: .9; }
   .total .amount { font-size: 22px; font-weight: 700; }
-  a { color: #2563eb; text-decoration: underline; word-break: break-all; }
+  a { color: #1E5A99; text-decoration: underline; word-break: break-all; }
 </style>
 </head>
 <body>

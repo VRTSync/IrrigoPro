@@ -23,6 +23,15 @@ A ready-to-drop-in zip of the standalone site lives at the repo root:
 Download it, unzip into the new Replit project's root, and proceed with
 the steps below.
 
+> **2026 rebrand (May 2026):** the bundle now ships the new IrrigoPro
+> brand — navy + fresh-green palette, the dot-icon favicon
+> (`public/favicon.png`), the horizontal lockup
+> (`public/irrigopro-logo.png`) used in the nav and Open Graph image,
+> and the vertical lockup (`public/irrigopro-wordmark.png`) for footer
+> usage. CSS tokens in `src/index.css` and `theme-color` in
+> `index.html` (`#1E5A99`) are already updated; no further visual work
+> is needed before deploying.
+
 The bundle was verified on this monorepo with:
 
 ```bash

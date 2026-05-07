@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Clock, MapPin, Plus, Trash2, Wrench, LogOut, Play, Square, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import companyLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
+import companyLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 
 interface User {
   id: string;

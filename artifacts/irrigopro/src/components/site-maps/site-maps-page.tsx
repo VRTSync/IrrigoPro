@@ -71,7 +71,7 @@ export function SiteMapsPage() {
 
   // Color palette for controllers
   const controllerColors = [
-    '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+    '#1E5A99', '#7DBE3F', '#f59e0b', '#ef4444', '#8b5cf6',
     '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1'
   ];
 

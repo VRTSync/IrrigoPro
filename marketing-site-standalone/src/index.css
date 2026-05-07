@@ -41,13 +41,13 @@
 }
 
 :root {
-  /* IrrigoPro brand tokens — mirrors artifacts/irrigopro/src/index.css */
-  --primary: 199 89% 48%;
+  /* IrrigoPro 2026 brand tokens — mirrors artifacts/irrigopro/src/index.css */
+  --primary: 210 67% 36%;
   --primary-foreground: 0 0% 100%;
-  --primary-light: 199 92% 59%;
-  --primary-dark: 200 95% 39%;
+  --primary-light: 201 70% 70%;
+  --primary-dark: 212 77% 24%;
 
-  --accent: 168 76% 40%;
+  --accent: 89 50% 50%;
   --accent-foreground: 0 0% 100%;
 
   --background: 210 40% 98%;
@@ -62,7 +62,7 @@
   --muted-foreground: 215 16% 47%;
   --border: 214 32% 91%;
   --input: 214 32% 91%;
-  --ring: 199 89% 48%;
+  --ring: 210 67% 36%;
   --radius: 0.875rem;
 
   --destructive: 0 84% 60%;
@@ -78,12 +78,12 @@
   --popover: 222 47% 9%;
   --popover-foreground: 210 40% 98%;
 
-  --primary: 199 92% 59%;
-  --primary-foreground: 222 47% 6%;
-  --primary-light: 199 95% 70%;
-  --primary-dark: 200 95% 45%;
+  --primary: 201 70% 70%;
+  --primary-foreground: 212 77% 14%;
+  --primary-light: 201 80% 80%;
+  --primary-dark: 210 67% 36%;
 
-  --accent: 168 76% 50%;
+  --accent: 89 50% 55%;
   --accent-foreground: 222 47% 6%;
 
   --secondary: 217 33% 17%;
@@ -92,7 +92,7 @@
   --muted-foreground: 215 20% 65%;
   --border: 217 33% 20%;
   --input: 217 33% 20%;
-  --ring: 199 92% 59%;
+  --ring: 201 70% 70%;
 
   --destructive: 0 72% 51%;
   --destructive-foreground: 210 40% 98%;
@@ -117,10 +117,10 @@
 
 @layer utilities {
   .brand-gradient {
-    background: linear-gradient(135deg, hsl(199 95% 52%) 0%, hsl(188 90% 48%) 50%, hsl(168 76% 40%) 100%);
+    background: linear-gradient(135deg, hsl(212 77% 24%) 0%, hsl(210 67% 36%) 50%, hsl(89 50% 50%) 100%);
   }
   .brand-text-gradient {
-    background: linear-gradient(135deg, hsl(199 95% 45%) 0%, hsl(188 90% 42%) 50%, hsl(168 76% 36%) 100%);
+    background: linear-gradient(135deg, hsl(212 77% 24%) 0%, hsl(210 67% 36%) 50%, hsl(89 50% 45%) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;

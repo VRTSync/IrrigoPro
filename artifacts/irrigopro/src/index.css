@@ -12,18 +12,18 @@
   }
 }
 
-/* Mobile-First Design Tokens */
+/* Mobile-First Design Tokens — IrrigoPro 2026 Rebrand */
 :root {
-  /* Primary - Water-inspired blues */
-  --primary: 199 89% 48%;
+  /* Primary - Wordmark navy + dot connection blue */
+  --primary: 210 67% 36%;
   --primary-foreground: 0 0% 100%;
-  --primary-light: 199 92% 59%;
-  --primary-dark: 200 95% 39%;
-  
-  /* Teal accent */
-  --accent: 168 76% 40%;
+  --primary-light: 201 70% 70%;
+  --primary-dark: 212 77% 24%;
+
+  /* Fresh-green accent (replaces teal) */
+  --accent: 89 50% 50%;
   --accent-foreground: 0 0% 100%;
-  
+
   /* Neutral palette */
   --background: 210 40% 98%;
   --foreground: 222 47% 11%;
@@ -37,23 +37,23 @@
   --muted-foreground: 215 16% 47%;
   --border: 214 32% 91%;
   --input: 214 32% 91%;
-  --ring: 199 89% 48%;
+  --ring: 210 67% 36%;
   --radius: 0.875rem;
-  
+
   /* Semantic colors */
-  --success: 160 84% 39%;
+  --success: 89 50% 45%;
   --success-foreground: 0 0% 100%;
   --warning: 38 92% 50%;
   --warning-foreground: 0 0% 100%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-  --shadow-glow: 0 8px 24px rgba(14, 165, 233, 0.25);
+  --shadow-glow: 0 8px 24px rgba(30, 90, 153, 0.25);
 }
 
 .dark {
@@ -63,19 +63,21 @@
   --card-foreground: 210 40% 98%;
   --popover: 222 47% 9%;
   --popover-foreground: 210 40% 98%;
-  --primary: 199 89% 48%;
-  --primary-foreground: 0 0% 100%;
+  --primary: 201 70% 70%;
+  --primary-foreground: 212 77% 14%;
+  --primary-light: 201 80% 80%;
+  --primary-dark: 210 67% 36%;
   --secondary: 217 33% 17%;
   --secondary-foreground: 210 40% 98%;
   --muted: 217 33% 17%;
   --muted-foreground: 215 20% 65%;
-  --accent: 168 76% 40%;
-  --accent-foreground: 0 0% 100%;
+  --accent: 89 50% 55%;
+  --accent-foreground: 222 47% 6%;
   --destructive: 0 62% 50%;
   --destructive-foreground: 0 0% 100%;
   --border: 217 33% 17%;
   --input: 217 33% 17%;
-  --ring: 199 89% 48%;
+  --ring: 201 70% 70%;
 }
 
 /* ============================================================
@@ -88,26 +90,26 @@
    - Vivid badge styling for pending counts
    ----------------------------------------------------------- */
 .sidebar-brand-blue {
-  /* Token fallbacks (used by Tailwind utilities) */
-  --sidebar-background: 222 47% 11%;
+  /* Token fallbacks (used by Tailwind utilities) — 2026 navy + green */
+  --sidebar-background: 212 60% 12%;
   --sidebar-foreground: 213 27% 88%;
-  --sidebar-primary: 188 95% 60%;
-  --sidebar-primary-foreground: 222 47% 8%;
-  --sidebar-accent: 188 95% 55%;
+  --sidebar-primary: 201 70% 70%;
+  --sidebar-primary-foreground: 212 77% 14%;
+  --sidebar-accent: 89 50% 55%;
   --sidebar-accent-foreground: 0 0% 100%;
   --sidebar-border: 217 33% 22%;
-  --sidebar-ring: 188 95% 65%;
+  --sidebar-ring: 201 70% 70%;
 }
 
 .dark .sidebar-brand-blue {
-  --sidebar-background: 222 47% 6%;
+  --sidebar-background: 212 60% 8%;
   --sidebar-foreground: 213 27% 92%;
-  --sidebar-primary: 188 95% 65%;
-  --sidebar-primary-foreground: 222 47% 5%;
-  --sidebar-accent: 188 95% 60%;
+  --sidebar-primary: 201 80% 78%;
+  --sidebar-primary-foreground: 212 77% 10%;
+  --sidebar-accent: 89 50% 60%;
   --sidebar-accent-foreground: 0 0% 100%;
   --sidebar-border: 217 33% 14%;
-  --sidebar-ring: 188 95% 70%;
+  --sidebar-ring: 201 80% 78%;
 }
 
 /* Sidebar surface — sophisticated diagonal gradient */
@@ -378,7 +380,7 @@
     height: 60px;
     right: 20px;
     bottom: calc(100px + env(safe-area-inset-bottom));
-    background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%);
+    background: linear-gradient(135deg, #1E5A99 0%, #0E3B6B 100%);
     box-shadow: 
       0 8px 24px rgba(14, 165, 233, 0.4),
       0 2px 8px rgba(0, 0, 0, 0.1);
@@ -501,7 +503,7 @@
 
   /* Gradient Text */
   .text-gradient-primary {
-    background: linear-gradient(135deg, #0EA5E9 0%, #14B8A6 100%);
+    background: linear-gradient(135deg, #1E5A99 0%, #7DBE3F 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;

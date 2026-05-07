@@ -1,12 +1,13 @@
 /**
  * Semantic design tokens for the IrrigoPro mobile app.
- * Mirrors the IrrigoPro web artifact (artifacts/irrigopro/src/index.css).
+ * Mirrors the IrrigoPro web artifact (artifacts/irrigopro/src/index.css)
+ * — 2026 rebrand: navy primary + fresh green accent.
  */
 
 const colors = {
   light: {
     text: "#0f172a",
-    tint: "#0ea5e9",
+    tint: "#1E5A99",
 
     background: "#f5f8fb",
     foreground: "#0f172a",
@@ -14,7 +15,7 @@ const colors = {
     card: "#ffffff",
     cardForeground: "#0f172a",
 
-    primary: "#0ea5e9",
+    primary: "#1E5A99",
     primaryForeground: "#ffffff",
 
     secondary: "#eef3f8",
@@ -23,7 +24,7 @@ const colors = {
     muted: "#eef3f8",
     mutedForeground: "#64748b",
 
-    accent: "#14b8a6",
+    accent: "#7DBE3F",
     accentForeground: "#ffffff",
 
     destructive: "#ef4444",
@@ -35,7 +36,7 @@ const colors = {
 
   dark: {
     text: "#f1f5f9",
-    tint: "#0ea5e9",
+    tint: "#7DC4E8",
 
     background: "#0a1220",
     foreground: "#f1f5f9",
@@ -43,8 +44,8 @@ const colors = {
     card: "#0f1a2c",
     cardForeground: "#f1f5f9",
 
-    primary: "#0ea5e9",
-    primaryForeground: "#ffffff",
+    primary: "#7DC4E8",
+    primaryForeground: "#0E3B6B",
 
     secondary: "#1e2a3d",
     secondaryForeground: "#f1f5f9",
@@ -52,8 +53,8 @@ const colors = {
     muted: "#1e2a3d",
     mutedForeground: "#94a3b8",
 
-    accent: "#14b8a6",
-    accentForeground: "#ffffff",
+    accent: "#7DBE3F",
+    accentForeground: "#0a1220",
 
     destructive: "#dc2626",
     destructiveForeground: "#ffffff",

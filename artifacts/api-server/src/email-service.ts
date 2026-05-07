@@ -166,7 +166,7 @@ export class EmailService {
   <title>Estimate Approval Required</title>
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+  <div style="background: linear-gradient(135deg, #1E5A99, #0E3B6B); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
     ${companyInfo.logo ? `
     <div style="margin-bottom: 20px;">
       <img src="${companyInfo.logo}" alt="${companyInfo.name} Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;">
@@ -205,7 +205,7 @@ export class EmailService {
           <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Pinned spot:</td>
           <td style="padding: 8px 0; color: #1f2937;">
             ${data.workLocationAddress ? `${data.workLocationAddress}<br/>` : ''}
-            <a href="https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}" style="color: #3b82f6;">View on map</a>
+            <a href="https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}" style="color: #1E5A99;">View on map</a>
             <span style="color: #6b7280; font-size: 12px;">(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)})</span>
           </td>
         </tr>
@@ -253,13 +253,13 @@ export class EmailService {
 
     <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px; text-align: center;">
       <p style="color: #6b7280; font-size: 14px; margin: 0;">
-        Need to review the full details? <a href="${viewUrl}" style="color: #3b82f6;">View Complete Estimate</a>
+        Need to review the full details? <a href="${viewUrl}" style="color: #1E5A99;">View Complete Estimate</a>
       </p>
       <div style="margin: 20px 0; color: #6b7280; font-size: 14px;">
         <p style="margin: 4px 0; font-weight: 600; color: #374151;">${companyInfo.name}</p>
         ${companyInfo.phone ? `<p style="margin: 4px 0;">📞 ${companyInfo.phone}</p>` : ''}
         ${companyInfo.email ? `<p style="margin: 4px 0;">✉️ ${companyInfo.email}</p>` : ''}
-        ${companyInfo.website ? `<p style="margin: 4px 0;">🌐 <a href="${companyInfo.website}" style="color: #3b82f6;">${companyInfo.website}</a></p>` : ''}
+        ${companyInfo.website ? `<p style="margin: 4px 0;">🌐 <a href="${companyInfo.website}" style="color: #1E5A99;">${companyInfo.website}</a></p>` : ''}
       </div>
       <p style="color: #6b7280; font-size: 12px; margin: 8px 0 0 0;">
         Questions? Reply to this email or call us directly.
@@ -374,7 +374,7 @@ Questions? Reply to this email or call us directly.
     const escEmail = encodeURIComponent(data.email);
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #0EA5E9, #14B8A6); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
+        <div style="background: linear-gradient(135deg, #1E5A99, #7DBE3F); color: white; padding: 24px; border-radius: 12px 12px 0 0;">
           <h1 style="margin: 0; font-size: 22px;">New IrrigoPro demo request</h1>
           <p style="margin: 6px 0 0 0; opacity: 0.9;">From the marketing site</p>
         </div>
@@ -382,7 +382,7 @@ Questions? Reply to this email or call us directly.
           <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
             <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280; width: 130px;">Company</td><td style="padding: 6px 0;">${esc(data.companyName)}</td></tr>
             <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Contact</td><td style="padding: 6px 0;">${esc(data.contactName)}</td></tr>
-            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Email</td><td style="padding: 6px 0;"><a href="mailto:${escEmail}" style="color:#0EA5E9;">${esc(data.email)}</a></td></tr>
+            <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Email</td><td style="padding: 6px 0;"><a href="mailto:${escEmail}" style="color:#1E5A99;">${esc(data.email)}</a></td></tr>
             <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Phone</td><td style="padding: 6px 0;">${esc(data.phone)}</td></tr>
             <tr><td style="padding: 6px 0; font-weight: 600; color: #6b7280;">Technicians</td><td style="padding: 6px 0;">${esc(data.numTechnicians)}</td></tr>
           </table>
@@ -483,7 +483,7 @@ Your Irrigation Team
             <title>Verify Your Account</title>
           </head>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+            <div style="background: linear-gradient(135deg, #1E5A99, #0E3B6B); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
               <h1 style="margin: 0; font-size: 28px;">Welcome to IrrigoPro</h1>
               <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">Verify Your Account</p>
             </div>
@@ -511,7 +511,7 @@ Your Irrigation Team
                 <p style="color: #6b7280; font-size: 14px; margin: 0;">
                   If the button doesn't work, copy and paste this link into your browser:
                 </p>
-                <p style="color: #3b82f6; font-size: 12px; word-break: break-all; margin: 8px 0;">
+                <p style="color: #1E5A99; font-size: 12px; word-break: break-all; margin: 8px 0;">
                   ${verifyUrl}
                 </p>
               </div>
@@ -596,7 +596,7 @@ The IrrigoPro Team
                 <p style="color: #6b7280; font-size: 14px; margin: 0;">
                   If the button doesn't work, copy and paste this link into your browser:
                 </p>
-                <p style="color: #3b82f6; font-size: 12px; word-break: break-all; margin: 8px 0;">
+                <p style="color: #1E5A99; font-size: 12px; word-break: break-all; margin: 8px 0;">
                   ${resetUrl}
                 </p>
                 <p style="color: #6b7280; font-size: 12px; margin-top: 16px;">
@@ -669,7 +669,7 @@ The IrrigoPro Team
             ${s.workDate ? `<div style="color:#6b7280;font-size:12px;">Worked ${fmtDate(s.workDate)}</div>` : ''}
           </td>
           <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;text-align:right;">
-            <a href="${url}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-weight:600;font-size:14px;">Add Photos</a>
+            <a href="${url}" style="display:inline-block;background:#1E5A99;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-weight:600;font-size:14px;">Add Photos</a>
           </td>
         </tr>`;
     }).join('');
@@ -769,7 +769,7 @@ ${companyName}
             <title>Invoice Detail Report</title>
           </head>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+            <div style="background: linear-gradient(135deg, #1E5A99, #0E3B6B); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
               <h1 style="margin: 0; font-size: 28px;">Invoice Detail Report</h1>
               <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">IrrigoPro</p>
             </div>

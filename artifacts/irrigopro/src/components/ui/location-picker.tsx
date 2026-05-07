@@ -24,7 +24,7 @@ const PULSING_DOT_CSS = `
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #3B82F6;
+  background: #1E5A99;
   border: 3px solid white;
   box-shadow: 0 0 0 rgba(59,130,246,0.4);
   animation: pulse-ring 2s ease-out infinite;

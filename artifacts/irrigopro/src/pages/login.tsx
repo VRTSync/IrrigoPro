@@ -7,7 +7,7 @@ import { Lock, LogIn, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { safeSet } from "@/utils/safeStorage";
-import irrigoProLogo from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
+import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 
 interface LoginCredentials {

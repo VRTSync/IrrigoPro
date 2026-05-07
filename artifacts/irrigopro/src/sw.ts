@@ -68,8 +68,8 @@ self.addEventListener("message", (event) => {
 self.addEventListener("push", (event: PushEvent) => {
   const defaults = {
     body: "You have new updates",
-    icon: "/irrigopro - logo - BLUE - FINAL_1756061385150.png",
-    badge: "/irrigopro - logo - BLUE - FINAL_1756061385150.png",
+    icon: "/IrrigoPro_2026-05_1778193170303.png",
+    badge: "/IrrigoPro_2026-05_1778193170303.png",
     vibrate: [200, 100, 200] as number[],
     data: { dateOfArrival: Date.now(), primaryKey: 1 },
     actions: [
@@ -129,8 +129,8 @@ async function syncNotifications(): Promise<void> {
     notifications.forEach((notification: { title: string; message: string }) => {
       self.registration.showNotification(notification.title, {
         body: notification.message,
-        icon: "/irrigopro - logo - BLUE - FINAL_1756061385150.png",
-        badge: "/irrigopro - logo - BLUE - FINAL_1756061385150.png",
+        icon: "/IrrigoPro_2026-05_1778193170303.png",
+        badge: "/IrrigoPro_2026-05_1778193170303.png",
         data: notification,
       });
     });

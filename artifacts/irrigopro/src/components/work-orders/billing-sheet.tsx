@@ -30,7 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { WorkOrder, WorkOrderItem, Customer } from "@shared/schema";
 import { buildMapsUrl } from "@/lib/maps-url";
-import logoPath from "@assets/irrigopro - logo - BLUE - FINAL_1756061385150.png";
+import logoPath from "@assets/IrrigoPro_2026-05_1778193170303.png";
 
 const billingItemSchema = z.object({
   description: z.string().min(1, "Description is required"),

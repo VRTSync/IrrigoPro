@@ -5609,7 +5609,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
                   border-left: 4px solid #059669;
                 }
                 .redirect-info { 
-                  background: #eff6ff; color: #1d4ed8; padding: 15px; 
+                  background: #eff6ff; color: #0E3B6B; padding: 15px; 
                   border-radius: 8px; margin-top: 20px; font-size: 14px;
                 }
               </style>
