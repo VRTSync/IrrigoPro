@@ -23,8 +23,10 @@ import {
   type CustomerStepValue,
 } from "./wizard/estimate-wizard-customer-step";
 import {
+  DEFAULT_LABOR_RATE,
   EstimateWizardLineItemsStep,
   computeTotals,
+  type LaborRateSource,
   type WizardLineItem,
 } from "./wizard/estimate-wizard-line-items-step";
 import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
@@ -173,6 +175,27 @@ interface DraftSnapshot {
   workLocation: { lat: number; lng: number; address?: string } | null;
   controllerLetter: string | null;
   zoneNumber: number | null;
+}
+
+// Task #399 — single source of truth for the wizard's labor-rate derivation.
+// Used both by the effect that sets `laborRate` after a customer change AND
+// by the helper line that explains the rate's origin to the user, so the
+// displayed provenance can never drift from the value actually applied.
+// `DEFAULT_LABOR_RATE` is exported from the line items step so the helper
+// text in the children always renders the same fallback number.
+function deriveCustomerLaborRate(customer: Customer | null | undefined): {
+  rate: number;
+  fromCustomer: boolean;
+} {
+  const raw = customer?.laborRate;
+  if (raw === null || raw === undefined || raw === "") {
+    return { rate: DEFAULT_LABOR_RATE, fromCustomer: false };
+  }
+  const parsed = parseFloat(String(raw));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { rate: DEFAULT_LABOR_RATE, fromCustomer: false };
+  }
+  return { rate: parsed, fromCustomer: true };
 }
 
 function snapshot(
@@ -394,8 +417,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       // Original customer unchanged in edit mode — preserve the stored rate.
       return;
     }
-    const lr = parseFloat(String(customerStep.customer.laborRate ?? "45")) || 45;
-    setLaborRate(lr);
+    const { rate } = deriveCustomerLaborRate(customerStep.customer);
+    setLaborRate(rate);
   }, [customerStep.customer?.id, isEdit, existing]);
 
   const isDirty = useMemo(() => {
@@ -404,6 +427,33 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     const current = snapshot(customerStep, items, laborRate, photos, attachments);
     return JSON.stringify(baseline) !== JSON.stringify(current);
   }, [customerStep, items, laborRate, photos, attachments]);
+
+  // Task #399 — single derivation of where the active labor rate came from.
+  // Uses the same `deriveCustomerLaborRate` helper as `setLaborRate`, then
+  // factors in edit mode: if the stored rate differs from the customer's
+  // current master rate, we tag it as "stored" so the helper text can
+  // explain that the server will reset it to the master rate on save.
+  // Tolerance keeps two-decimal money comparisons stable.
+  const { source: laborRateSource, masterRate: customerMasterRateForUi } =
+    useMemo<{ source: LaborRateSource; masterRate: number | undefined }>(() => {
+      const { rate: masterRate, fromCustomer } = deriveCustomerLaborRate(
+        customerStep.customer,
+      );
+      if (!fromCustomer) {
+        return { source: "default", masterRate: undefined };
+      }
+      const isUnchangedCustomerEdit =
+        isEdit &&
+        existing != null &&
+        customerStep.customer?.id === existing.customerId;
+      if (
+        isUnchangedCustomerEdit &&
+        Math.abs(laborRate - masterRate) > 0.005
+      ) {
+        return { source: "stored", masterRate };
+      }
+      return { source: "customer", masterRate: undefined };
+    }, [customerStep.customer, isEdit, existing, laborRate]);
 
   // Offer to restore a saved draft once the wizard is ready (immediately for
   // new estimates; after the existing estimate has hydrated for edits).
@@ -778,6 +828,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 customerName={customerStep.customer?.name ?? ""}
                 projectName={customerStep.projectName}
                 laborRate={laborRate}
+                laborRateSource={laborRateSource}
+                customerMasterRate={customerMasterRateForUi}
                 items={items}
                 onItemsChange={setItems}
                 onBack={() => setStep(1)}
@@ -806,6 +858,8 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 locationNotes={customerStep.locationNotes}
                 accessInstructions={customerStep.accessInstructions}
                 laborRate={laborRate}
+                laborRateSource={laborRateSource}
+                customerMasterRate={customerMasterRateForUi}
                 laborMode={laborMode}
                 flatTotalHours={flatTotalHours}
                 items={items}

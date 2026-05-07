@@ -9,7 +9,12 @@ import {
 import { ChevronDown, ChevronRight, Image as ImageIcon, Paperclip, User, Briefcase, Loader2, MapPin, Cpu } from "lucide-react";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import type { Customer } from "@shared/schema";
-import { computeTotals, type WizardLineItem } from "./estimate-wizard-line-items-step";
+import {
+  computeTotals,
+  DEFAULT_LABOR_RATE,
+  type LaborRateSource,
+  type WizardLineItem,
+} from "./estimate-wizard-line-items-step";
 import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 
 interface EstimateWizardReviewStepProps {
@@ -24,6 +29,13 @@ interface EstimateWizardReviewStepProps {
   locationNotes: string;
   accessInstructions: string;
   laborRate: number;
+  // Task #399 — origin of the active labor rate. See line items step for
+  // the same prop; rendered as a small helper line under the Labor row so
+  // the source of the rate is obvious on the final review screen too.
+  laborRateSource: LaborRateSource;
+  // When `laborRateSource === "stored"`, this is the customer's current
+  // master rate the server will snap back to on save.
+  customerMasterRate?: number;
   laborMode?: LaborMode;
   flatTotalHours?: number;
   items: WizardLineItem[];
@@ -58,6 +70,8 @@ export function EstimateWizardReviewStep({
   locationNotes,
   accessInstructions,
   laborRate,
+  laborRateSource,
+  customerMasterRate,
   laborMode = "per_part",
   flatTotalHours = 0,
   items,
@@ -189,7 +203,28 @@ export function EstimateWizardReviewStep({
               </tr>
               <tr className="bg-gray-50">
                 <td colSpan={colCount} className="py-2 pl-3 text-sm text-gray-600 text-right">
-                  Labor {isFlat ? "(flat) " : ""}({totals.totalLaborHours.toFixed(2)} h × {fmt(laborRate)}/hr)
+                  <div>
+                    Labor {isFlat ? "(flat) " : ""}({totals.totalLaborHours.toFixed(2)} h × {fmt(laborRate)}/hr)
+                  </div>
+                  {/* Task #399 — explain the source of the labor rate so
+                      reviewers know it's locked to the customer's master
+                      rate and any inline edit will be overridden on save. */}
+                  <div
+                    className="text-[11px] text-gray-500 font-normal"
+                    data-testid="estimate-review-labor-rate-source"
+                    data-source={laborRateSource}
+                  >
+                    {laborRateSource === "customer" &&
+                      `From ${customer?.name ?? "customer"}'s master rate`}
+                    {laborRateSource === "default" &&
+                      `Default fallback rate (${fmt(DEFAULT_LABOR_RATE)}/hr) — no master rate on customer record`}
+                    {laborRateSource === "stored" &&
+                      `Stored from previous save — will reset to ${customer?.name ?? "customer"}'s current master rate${
+                        typeof customerMasterRate === "number"
+                          ? ` (${fmt(customerMasterRate)}/hr)`
+                          : ""
+                      } on save`}
+                  </div>
                 </td>
                 <td className="py-2 pr-3 text-right text-sm font-medium">{fmt(totals.laborSubtotal)}</td>
               </tr>

@@ -17,6 +17,21 @@ import type { Part } from "@shared/schema";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { LaborModeToggle, type LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 
+// Task #399 — shared default so the helper text in this file, the review
+// step, and the parent wizard's `deriveCustomerLaborRate` can never drift
+// apart if the company-wide fallback ever changes.
+export const DEFAULT_LABOR_RATE = 45;
+
+// Task #399 — discriminator for where the active labor rate originated.
+// * "customer" — the selected customer has a valid master rate and the
+//   wizard is using it.
+// * "default"  — the customer has no master rate; we're using the system
+//   fallback (`DEFAULT_LABOR_RATE`).
+// * "stored"   — edit mode for an existing estimate whose stored rate
+//   differs from the customer's current master rate. The server will
+//   snap it back to the master rate on save (or on a customer swap).
+export type LaborRateSource = "customer" | "default" | "stored";
+
 export interface WizardLineItem {
   rowId: string;
   partId: number;
@@ -39,6 +54,14 @@ interface EstimateWizardLineItemsStepProps {
   customerName: string;
   projectName: string;
   laborRate: number;
+  // Task #399 — origin of the active labor rate. Drives a small helper line
+  // so managers know typing a different value here will be silently
+  // overridden on save by the customer's master rate.
+  laborRateSource: LaborRateSource;
+  // When `laborRateSource === "stored"`, this is the customer's current
+  // master rate that the server will snap back to on save. Ignored
+  // otherwise.
+  customerMasterRate?: number;
   items: WizardLineItem[];
   onItemsChange: (next: WizardLineItem[]) => void;
   onBack: () => void;
@@ -83,6 +106,8 @@ export function EstimateWizardLineItemsStep({
   customerName,
   projectName,
   laborRate,
+  laborRateSource,
+  customerMasterRate,
   items,
   onItemsChange,
   onBack,
@@ -239,6 +264,49 @@ export function EstimateWizardLineItemsStep({
             onChange={onLaborModeChange}
             testIdPrefix="estimate-labor-mode"
           />
+          {/* Task #399 — surface where the labor rate comes from so managers
+              don't try to override a value that the server will reset to the
+              customer's master labor rate on save. */}
+          <div
+            className="text-xs text-gray-600 flex flex-wrap items-center gap-x-1"
+            data-testid="estimate-labor-rate-source"
+            data-source={laborRateSource}
+          >
+            <span className="font-medium text-gray-700">Labor rate:</span>
+            <span className="font-semibold text-gray-900">{fmt(laborRate)}/hr</span>
+            <span className="text-gray-500">
+              {laborRateSource === "customer" && (
+                <>
+                  — from{" "}
+                  <span className="font-medium text-gray-700">
+                    {customerName || "this customer"}
+                  </span>
+                  's master rate. Change it on the customer record to update
+                  future estimates.
+                </>
+              )}
+              {laborRateSource === "default" && (
+                <>
+                  — default fallback ({fmt(DEFAULT_LABOR_RATE)}/hr). Set a
+                  labor rate on the customer record to override this for
+                  future estimates.
+                </>
+              )}
+              {laborRateSource === "stored" && (
+                <>
+                  — stored from a previous save. Will reset to{" "}
+                  <span className="font-medium text-gray-700">
+                    {customerName || "this customer"}
+                  </span>
+                  's current master rate
+                  {typeof customerMasterRate === "number"
+                    ? ` (${fmt(customerMasterRate)}/hr)`
+                    : ""}{" "}
+                  on save.
+                </>
+              )}
+            </span>
+          </div>
           {isFlat && (
             <div className="flex items-end gap-3 flex-wrap">
               <div>
