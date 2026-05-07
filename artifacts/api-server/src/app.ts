@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import { logger } from "./lib/logger";
 import { registerRoutes } from "./routes/routes";
+import marketingRouter from "./routes/marketing";
 import fileUpload from "express-fileupload";
 import type { Server } from "http";
 
@@ -36,6 +37,7 @@ export async function createApp(): Promise<{ app: Express; httpServer: Server }>
     useTempFiles: false,
   }));
 
+  app.use("/api", marketingRouter);
   const httpServer = await registerRoutes(app);
   return { app, httpServer };
 }
