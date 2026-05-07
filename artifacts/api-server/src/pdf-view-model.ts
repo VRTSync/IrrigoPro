@@ -97,9 +97,9 @@ export interface PdfBrandColors {
 }
 
 export const DEFAULT_BRAND_COLORS: PdfBrandColors = {
-  navy: '#2F4A7A',
+  navy: '#1E5A99',
   brown: '#8B4F2B',
-  green: '#7FB539',
+  green: '#7DBE3F',
   black: '#000000',
   gray: '#F5F5F5',
 };
