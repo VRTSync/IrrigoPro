@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/mobile/"
+title = "IrrigoPro Mobile"
+version = "1.0.0"
+id = "artifacts/irrigopro-mobile"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/mobile/" ]
+localPort = 23333
+
+[services.development]
+run = "pnpm --filter @workspace/irrigopro-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/irrigopro-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/irrigopro-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "23333"
+BASE_PATH = "/mobile/"
