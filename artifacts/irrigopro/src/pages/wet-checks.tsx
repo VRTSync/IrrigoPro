@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
 import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil, AlertTriangle } from "lucide-react";
+import { preparePhotoForUpload } from "@/lib/photo-prep";
 import {
   PHOTO_OFFLINE_MESSAGE,
   isProbablyOffline,
@@ -129,7 +130,10 @@ function PropertyContextHeader({
   );
 }
 
-// ─── Direct-to-storage photo upload (sign → PUT → finalize) ───────────────────
+// ─── Direct-to-storage photo upload (prep → sign → PUT → finalize) ───────────
+// Mirrors the billing-sheet upload path: shared `preparePhotoForUpload`
+// (HEIC→JPEG, ~1600px / ~0.35MB / q=0.80) + mandatory finalize so the
+// server generates `thumb` / `medium` variants for galleries / lightbox.
 async function uploadPhotoToStorage(file: File): Promise<string> {
   const signRes = await fetch(`/api/upload/photo?originalName=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -139,7 +143,13 @@ async function uploadPhotoToStorage(file: File): Promise<string> {
   if (!signRes.ok) throw new Error(`Failed to get upload URL (${signRes.status})`);
   const { signedUrl, url } = await signRes.json();
 
-  const putRes = await fetch(signedUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+  const { displayFile } = await preparePhotoForUpload(file);
+
+  const putRes = await fetch(signedUrl, {
+    method: "PUT",
+    body: displayFile,
+    headers: { "Content-Type": displayFile.type || "application/octet-stream" },
+  });
   if (!putRes.ok) throw new Error(`Upload to storage failed (${putRes.status})`);
 
   const finalizeRes = await fetch("/api/upload/photo/finalize", {
@@ -324,6 +334,9 @@ function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boo
     typeof photo.url === "string" &&
     (photo.url.startsWith("blob:") || photo.url.startsWith("data:"));
   const src = isLocalUrl ? photo.url : authedPhotoSrc(photo.url, "thumb");
+  // Lightbox: tap a thumb to open the medium variant in a new tab.
+  // Skipped for optimistic / local blobs which have no server variants yet.
+  const fullSrc = isLocalUrl || isOptimistic ? null : authedPhotoSrc(photo.url, "medium");
   const delMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/photos/${photo.id}`, "DELETE"),
     onSuccess: () => {
@@ -333,7 +346,13 @@ function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boo
   });
   return (
     <div className="relative inline-block w-20 h-20 rounded overflow-hidden border" data-testid={`photo-thumb-${photo.id}`}>
-      <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+      {fullSrc ? (
+        <a href={fullSrc} target="_blank" rel="noreferrer" className="block w-full h-full">
+          <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+        </a>
+      ) : (
+        <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+      )}
       {isOptimistic && (
         <div
           className="absolute inset-0 flex items-center justify-center bg-black/30"
@@ -1854,18 +1873,30 @@ function FindingSheet({
                         (p.url.startsWith("blob:") || p.url.startsWith("data:"));
                       const isOptimistic = p.id < 0;
                       const src = isLocal ? p.url : authedPhotoSrc(p.url, "thumb");
+                      const fullSrc = isLocal || isOptimistic ? null : authedPhotoSrc(p.url, "medium");
                       return (
                         <div
                           key={p.id}
                           className="relative inline-block w-20 h-20 rounded overflow-hidden border"
                           data-testid={`pending-photo-${p.id}`}
                         >
-                          <img
-                            src={src}
-                            alt=""
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
+                          {fullSrc ? (
+                            <a href={fullSrc} target="_blank" rel="noreferrer" className="block w-full h-full">
+                              <img
+                                src={src}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            </a>
+                          ) : (
+                            <img
+                              src={src}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          )}
                           {isOptimistic && (
                             <div
                               className="absolute inset-0 flex items-center justify-center bg-black/30"

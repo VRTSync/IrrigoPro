@@ -8,6 +8,9 @@ import imageCompression from "browser-image-compression";
 // variant).
 export interface PreparedPhoto {
   displayFile: File;
+  /** true when HEIC decode AND/OR display compression both threw and we're
+   *  shipping the (post-HEIC if it succeeded) input bytes unchanged. */
+  usedFallback: boolean;
 }
 
 // Best-effort client-side photo prep used by every upload entry point. Flow:
@@ -48,6 +51,7 @@ export async function preparePhotoForUpload(
   // Display copy — small enough to ship fast on weak LTE, sharp enough
   // to drive the 400px / 1200px server-generated variants.
   let displayFile: File;
+  let usedFallback = false;
   try {
     displayFile = await imageCompression(working, {
       maxSizeMB: 0.35,
@@ -60,10 +64,11 @@ export async function preparePhotoForUpload(
   } catch (err) {
     console.warn("[photo-prep] display compression failed, uploading working bytes", err);
     displayFile = working;
+    usedFallback = true;
     reportDisplay(100);
   }
 
-  return { displayFile };
+  return { displayFile, usedFallback };
 }
 
 // 4C — offline-capture compressor. Targets the spec's ≤1MB / ≤1920px JPEG

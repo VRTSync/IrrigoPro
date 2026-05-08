@@ -9,7 +9,7 @@
 // online-only in 4B with a "try when you're back online" message.
 
 import { apiRequest } from "@/lib/queryClient";
-import { compressPhoto } from "@/lib/photo-prep";
+import { preparePhotoForUpload } from "@/lib/photo-prep";
 import {
   deleteFindingMirror,
   enqueueMutation,
@@ -465,16 +465,34 @@ export interface QueuePhotoUploadResult {
 }
 export async function queuePhotoUpload(input: QueuePhotoUploadInput): Promise<QueuePhotoUploadResult> {
   const clientId = uuid();
-  const compressed = await compressPhoto(input.file);
+  // Share the billing-sheet prep pipeline so wet-check photos travel the
+  // same hardened envelope: HEIC→JPEG once, then ~1600px / ~0.35MB / q=0.80
+  // JPEG that drives the server-generated `thumb` / `medium` variants.
+  // `preparePhotoForUpload` falls back to the input bytes on any failure;
+  // we mirror that as `usedFallback` so the caller can warn on huge
+  // originals that didn't compress.
+  const originalSize = input.file.size;
+  let prepared: File;
+  let usedFallback = false;
+  try {
+    const out = await preparePhotoForUpload(input.file);
+    prepared = out.displayFile;
+    usedFallback = out.usedFallback;
+  } catch (err) {
+    console.warn("[offline] preparePhotoForUpload failed; queuing original bytes", err);
+    prepared = input.file;
+    usedFallback = true;
+  }
+  const compressedSize = prepared.size;
   const db = await openOfflineDB();
   await putPhotoBlob(db, {
     clientId,
-    blob: compressed.file,
-    contentType: compressed.file.type || "image/jpeg",
-    name: compressed.file.name || `photo-${clientId}.jpg`,
-    byteSize: compressed.file.size,
+    blob: prepared,
+    contentType: prepared.type || "image/jpeg",
+    name: prepared.name || `photo-${clientId}.jpg`,
+    byteSize: prepared.size,
     capturedAt: Date.now(),
-    compressed: !compressed.usedFallback,
+    compressed: !usedFallback,
   });
   // Most-specific parent precedence: finding > zoneRecord > wetCheck.
   // The engine's `readySet` only dispatches a mutation once its parent
@@ -512,15 +530,15 @@ export async function queuePhotoUpload(input: QueuePhotoUploadInput): Promise<Qu
   let localUrl = "";
   try {
     if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
-      localUrl = URL.createObjectURL(compressed.file);
+      localUrl = URL.createObjectURL(prepared);
     }
   } catch {}
   return {
     clientId,
     localUrl,
-    originalSize: compressed.originalSize,
-    compressedSize: compressed.compressedSize,
-    usedFallback: compressed.usedFallback,
+    originalSize,
+    compressedSize,
+    usedFallback,
   };
 }
 
