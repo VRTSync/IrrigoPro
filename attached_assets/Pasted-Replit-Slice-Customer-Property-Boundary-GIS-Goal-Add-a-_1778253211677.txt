@@ -1,0 +1,223 @@
+Replit Slice: Customer Property Boundary (GIS)
+Goal
+Add a per-customer property boundary feature to IrrigoPro:
+
+On each customer profile, give the user a slick drag-and-drop zone for uploading a property boundary as .kml or .kmz.
+Render that boundary as a glowing purple polygon (animated marching-ants stroke + soft outer glow + translucent fill) on top of an Esri World Imagery satellite + labels base layer.
+Use the saved boundary as the centering mechanism for every map shown after a customer is selected — work order location picker, estimate wizard location picker, standalone billing sheet location picker, and the customer site-maps map. The polygon also renders as a translucent overlay on those maps so techs can see they're working inside the right parcel.
+Visually polish all location pickers (slicker drop zones, gradient headers, satellite imagery, layer switcher).
+
+No code changes have been made yet. This is the scoped plan.
+
+Current state (read first)
+
+Stack: React 18 + Vite + TS, Express + Drizzle (Postgres/Neon), TanStack Query, Tailwind, Leaflet 1.9.4, xml2js + browser DOMParser.
+Customer schema (shared/schema.ts lines 52–77): no boundary fields today. irrigationZones.boundaries holds zone polygons but is unrelated.
+Existing KML pipeline (client/src/lib/kml-parser.ts): parses controllers + zones from KML for site-maps. We will not modify it; we'll add a parallel parser scoped to property boundaries.
+Existing maps:
+
+client/src/components/ui/location-picker.tsx — used by work-orders, estimate wizard, standalone billing sheet. Currently uses Google Satellite (mt1.google.com, no key — ToS-grey).
+client/src/components/site-maps/color-coded-map-viewer.tsx — used by customers/customer-site-maps.tsx. Layer-control with Carto Light + Google Satellite.
+client/src/components/site-maps/site-map-viewer.tsx, compact-map-viewer.tsx — orphaned (no importers).
+
+
+Existing routes (server/routes.ts):
+
+PUT /api/customers/:id (line 3241) and PATCH /api/customers/:id (line 3264) accept partial customer data via insertCustomerSchema.partial().
+Auth middleware: requireAuthentication, requireCustomerEditAccess, requireCompanyAdminAccess.
+applyBillingNotesVisibility(req, customer) is used to mask billing notes in responses.
+
+
+API helper (client/src/lib/queryClient.ts): apiRequest(url, method='GET', data?).
+Customer-profile UX (client/src/components/customers/customer-profile.tsx): renders <PropertyNotes> then <BillingRates> then <BillingNotes> then a tabbed view of estimates/work-orders/billing-sheets. The new Property Boundary card belongs between PropertyNotes and BillingRates.
+Color tokens (client/src/index.css): brand is cyan/sky blue. No purple in the system theme — we introduce purple specifically for the boundary so it pops on satellite imagery.
+
+
+Decisions already made (don't re-ask the user)
+
+File formats accepted: .kml and .kmz only.
+Polygon style: glowing purple (#B026FF) — stroke + outer glow halo + translucent fill + animated marching-ants dash.
+Base layer: Esri World Imagery + Esri Reference Labels overlay (free, keyless, ToS-clean) with a layer switcher to Streets / Light. This replaces the current Google Satellite tiles in LocationPicker and is added as a new option in ColorCodedMapViewer.
+Boundary scope: every customer-scoped map auto-centers on the saved boundary and renders the overlay.
+
+
+Task list (run in order)
+1. Schema migration
+File: shared/schema.ts
+Add eight nullable columns to the customers table, immediately after branches:
+ColumnTypeNotesproperty_boundarytextStringified GeoJSON Feature (Polygon or MultiPolygon)property_boundary_kmltextOriginal uploaded KML source (preserved for re-export)property_boundary_file_nametextOriginal upload filenameproperty_boundary_center_latdecimal(10,7)Precomputed centroidproperty_boundary_center_lngdecimal(10,7)Precomputed centroidproperty_boundary_zoominteger (default 18)Suggested initial zoomproperty_boundary_area_acresdecimal(12,4)Computed area for displayproperty_boundary_updated_attimestampWhen the boundary was last set
+Customer = typeof customers.$inferSelect will pick these up automatically. insertCustomerSchema is generated from the table — no schema edits beyond adding columns.
+Run: npm run db:push
+
+2. Reusable client libraries
+Create three new files in client/src/lib/:
+leaflet-base-layers.ts — factories for createSatelliteLayer() (Esri World Imagery), createReferenceLabelsLayer() (Esri reference labels), createStreetsLayer() (OSM), createCartoLightLayer(), plus addSatelliteHybrid(map, { withLabels }) and createBaseLayers() (record for L.control.layers).
+URLs:
+
+Satellite: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+Labels: https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x} (rendered into shadowPane so it floats above tiles but below markers)
+maxNativeZoom: 19, maxZoom: 22
+
+boundary-style.ts — exports:
+
+Color constants: BOUNDARY_PURPLE = "#B026FF", plus glow/fill rgba variants, and a yellow palette for future use.
+ensureBoundaryStyles() — injects a single <style> tag (id irrigopro-boundary-styles) once per session containing .boundary-glow-outer (drop-shadow filter), .boundary-glow-inner (animated marching ants), and @keyframes boundary-march { to { stroke-dashoffset: -24; } }.
+drawPropertyBoundary(map, geojson, { color: "purple" | "yellow", animated, filled, interactive }) — adds three layered Leaflet GeoJSON layers (translucent fill, soft glow stroke, crisp animated stroke) and returns a LayerGroup so callers can remove later.
+geoJsonBounds(geojson) — returns L.LatLngBounds | null for map.fitBounds().
+
+property-boundary.ts — KML/KMZ → GeoJSON. Exports:
+
+interface PropertyBoundary { geojson, kml, fileName, centerLat, centerLng, zoom, areaAcres, bounds }
+isBoundaryFile(file) — extension check.
+parseBoundaryFile(file) — async; if .kmz, extract doc.kml (or first *.kml) using a small native ZIP reader (parses local file headers + DecompressionStream("deflate-raw") for method-8 entries; handles method-0 stored entries directly). No JSZip dependency.
+parseBoundaryKmlString(kml, fileName) — DOMParser, extracts every Placemark > Polygon > outerBoundaryIs > LinearRing > coordinates (and inner rings), builds a single GeoJSON Feature<Polygon> if one polygon found or Feature<MultiPolygon> otherwise.
+Computes signed-area-weighted centroid, spherical-excess area in m² (then acres), tight bounds, and suggestZoom(bounds) (residential parcel → 19, large estate → 17, commercial → 15, etc.).
+hydrateStoredBoundary({ geojson, centerLat, ... }) — re-builds a PropertyBoundary from persisted customer fields.
+
+Coordinate convention: KML is lng,lat[,alt]; we store GeoJSON in standard [lng, lat]; we use [lat, lng] only for Leaflet APIs.
+
+3. Customer-boundary hook
+Create client/src/hooks/use-customer-boundary.ts:
+
+useCustomerBoundary(customerId) — TanStack Query hook hitting /api/customers/:id/property-boundary, with select that runs hydrateStoredBoundary(...).
+customerToBoundary(customer) — synchronous helper for cases where the caller already has the customer object loaded (e.g. selectedCustomer in the work order form).
+
+
+4. Property Boundary card (UI)
+Create client/src/components/customers/property-boundary.tsx exporting <PropertyBoundarySection customer userRole>.
+States:
+
+Empty + can edit → large gradient drop zone (from-purple-50 via-white to-fuchsia-50), Hexagon icon in a purple→fuchsia gradient pill, headline "Drop a KML or KMZ to set the boundary", browse button, accepted-files hint, soft radial-glow background. Drag-over scales 1.01 + brightens border.
+Empty + read-only → muted info card.
+File parsed (preview, not saved) → embedded satellite map with the glowing purple polygon, four-stat strip (acreage / centroid / source filename / status="Preview"), amber callout "Preview only — click Save Boundary".
+Saved → same map + stat strip showing "Saved", "Replace" and "Remove" buttons in the header, "Set" badge.
+
+Embedded map (<BoundaryMap> subcomponent):
+
+360–420px tall, dark #0a0f1a background.
+addSatelliteHybrid(map, { withLabels: true }).
+L.control.layers(createBaseLayers(), {}, { collapsed: true }).
+drawPropertyBoundary(map, geojson, { color: "purple", animated: true }).
+map.fitBounds(geoJsonBounds(geojson).pad(0.18)).
+Floating chip "● Property boundary" in top-left.
+ResizeObserver → map.invalidateSize() to handle reveal animations.
+
+Mutations:
+
+PUT /api/customers/:id/property-boundary with { propertyBoundary, propertyBoundaryKml, propertyBoundaryFileName, propertyBoundaryCenterLat, propertyBoundaryCenterLng, propertyBoundaryZoom, propertyBoundaryAreaAcres } (lat/lng/acreage stringified, zoom numeric).
+DELETE /api/customers/:id/property-boundary.
+On success invalidate ["/api/customers"], [\/api/customers/${id}`], [`/api/customers/${id}/property-boundary`]`.
+
+Edit permission: company_admin, super_admin, irrigation_manager.
+
+5. Wire into customer profile
+File: client/src/components/customers/customer-profile.tsx
+
+Import PropertyBoundarySection from ./property-boundary.
+Insert <div className="mb-8"><PropertyBoundarySection customer={customer} userRole={userRole} /></div> immediately after the existing <PropertyNotes /> block (line ~232).
+
+
+6. Server routes
+File: server/routes.ts
+After the DELETE /api/customers/:id handler (around line 3327), add:
+
+GET    /api/customers/:id(\d+)/property-boundary — requireAuthentication. Returns just the boundary fields (or null for each).
+PUT    /api/customers/:id(\d+)/property-boundary — requireCustomerEditAccess + requireAuthentication.
+DELETE /api/customers/:id(\d+)/property-boundary — requireCustomerEditAccess + requireAuthentication.
+
+PUT validates with a propertyBoundarySchema zod schema:
+
+propertyBoundary must be a string parseable as JSON whose root type is Polygon, MultiPolygon, Feature (with Polygon/MultiPolygon geometry), or non-empty FeatureCollection.
+Lat/lng/zoom/acres accept string | number, coerced before persisting.
+Sets propertyBoundaryUpdatedAt = new Date().
+
+DELETE calls storage.updateCustomer(id, { propertyBoundary: null, ...all boundary fields: null }).
+Both write endpoints respond with applyBillingNotesVisibility(req, customer).
+
+7. Boundary-aware location pickers
+File: client/src/components/ui/location-picker.tsx
+
+Add prop customerBoundary?: PropertyBoundary | null.
+Replace the Google Satellite tile layer with addSatelliteHybrid(map, { withLabels: true, maxZoom: 22 }) + L.control.layers(createBaseLayers(22), {}, { collapsed: true }).
+Centering preference (in order): selectedLocation pin → customerBoundary (use its center+zoom, then fitBounds(geoJsonBounds(...).pad(0.18))) → address geocoding → regional fallback.
+If customerBoundary set: drawPropertyBoundary(map, geojson, { color: "purple", animated: true }). Store the returned LayerGroup in a ref so a later boundary swap can remove it before drawing the new one (effect dep: customerBoundary?.geojson).
+"Reset to Address" button becomes "Reset to Property" when boundary is present, and the reset handler prefers boundary fitting over Nominatim geocoding.
+Helper text adapts when boundary is set.
+showEmptyState becomes !hasAddress && !selectedLocation && !hasBoundary.
+
+Callers to update — pass customerBoundary={customerToBoundary(selectedCustomer)}:
+
+client/src/components/work-orders/work-order-form.tsx (~line 257)
+client/src/components/estimates/wizard/estimate-wizard-customer-step.tsx (~line 367) — pass customerToBoundary(value.customer)
+client/src/components/billing/standalone-billing-sheet.tsx (~line 833)
+
+
+8. Boundary overlay on customer site-maps map
+File: client/src/components/site-maps/color-coded-map-viewer.tsx
+
+Add prop customerBoundary?: PropertyBoundary | null.
+After L.control.layers(...).addTo(map), if customerBoundary is set: ensureBoundaryStyles(), drawPropertyBoundary(...), and only fitBounds to the boundary if project.controllers.length === 0 (don't override KML-driven framing when controllers exist).
+
+File: client/src/components/customers/customer-site-maps.tsx
+
+Import customerToBoundary from @/hooks/use-customer-boundary.
+Pass customerBoundary={customerToBoundary(customer)} to <ColorCodedMapViewer> (~line 477).
+
+The orphaned site-map-viewer.tsx and compact-map-viewer.tsx don't need changes (no importers).
+
+9. Polish LocationFields
+File: client/src/components/location/location-fields.tsx
+
+Add optional prop customerBoundary?: PropertyBoundary | null.
+Wrap fields in a rounded gradient panel (from-blue-50/50 via-white to-indigo-50/40) with a small icon-pill header.
+When customerBoundary set, show a purple chip badge top-right: <Hexagon /> Maps centered on saved boundary · X.XX ac.
+Inputs get rounded-lg borders and uppercase tracking-wide labels.
+
+
+10. Final verification
+
+npm run check — TypeScript should pass with the new fields automatically inferred onto Customer and InsertCustomer.
+Manual smoke test:
+
+npm run db:push.
+Open a customer → drop a real KML → confirm purple polygon glows on satellite.
+Click Save Boundary → reload → polygon persists.
+Create a work order for that customer → open the location picker → confirm satellite tiles, polygon overlay, and that the map centers on the parcel.
+Visit the customer's Site Maps tab → confirm the polygon renders behind any controllers.
+Click Remove on the boundary card → confirm DELETE clears it everywhere.
+Try a .kmz from Google Earth → confirm extraction works.
+
+
+
+
+Files this slice touches
+New (6):
+
+client/src/lib/leaflet-base-layers.ts
+client/src/lib/boundary-style.ts
+client/src/lib/property-boundary.ts
+client/src/hooks/use-customer-boundary.ts
+client/src/components/customers/property-boundary.tsx
+
+Edited (8):
+
+shared/schema.ts — additive (eight columns)
+server/routes.ts — three new endpoints
+client/src/components/customers/customer-profile.tsx — one import + one block
+client/src/components/ui/location-picker.tsx — prop, satellite tiles, centering precedence, overlay, reset, helper text
+client/src/components/work-orders/work-order-form.tsx — one import + one prop
+client/src/components/estimates/wizard/estimate-wizard-customer-step.tsx — one import + one prop
+client/src/components/billing/standalone-billing-sheet.tsx — one import + one prop
+client/src/components/site-maps/color-coded-map-viewer.tsx — prop + overlay block
+client/src/components/customers/customer-site-maps.tsx — one import + one prop
+client/src/components/location/location-fields.tsx — visual polish + optional boundary chip
+
+
+Notes / gotchas
+
+No JSZip dependency: KMZ extraction uses native DecompressionStream("deflate-raw") (Chrome 80+, Safari 16.4+, Firefox 113+). Falls back to deflate with a synthesized zlib header if deflate-raw isn't present.
+GeoJSON namespace is provided transitively by @types/leaflet → @types/geojson, both already in package.json.
+No package.json changes required.
+Existing KMLParser in client/src/lib/kml-parser.ts is untouched — we add a parallel parser scoped to property boundaries (Polygon-first) so we don't risk regressing the controllers/zones pipeline.
+Drizzle decimal columns read back as string; the hydrate helper coerces to number.
+Auth: write endpoints reuse requireCustomerEditAccess (admins + billing managers); read endpoint is gated behind requireAuthentication only.
