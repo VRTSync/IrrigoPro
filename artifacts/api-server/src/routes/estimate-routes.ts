@@ -18,6 +18,7 @@ import {
   type EstimateWithItems,
   type InsertEstimate,
   type InsertEstimateItem,
+  type User,
 } from "@workspace/db";
 
 import {
@@ -32,6 +33,10 @@ import {
 export interface EstimateRoutesStorage {
   getCustomer(id: number): Promise<Customer | undefined>;
   getEstimate(id: number): Promise<EstimateWithItems | undefined>;
+  // Optional — when present, POST /api/estimates uses the authenticated
+  // user's `name` to stamp `createdBy` so the review queue and audit log
+  // show who actually drafted the estimate. Tests can omit this.
+  getUser?(id: number): Promise<User | undefined>;
   createEstimateFromPayload(payload: EstimatePayloadInput): Promise<EstimateWithItems>;
   updateEstimateWithItems(
     id: number,
@@ -93,7 +98,7 @@ export function registerEstimateRoutes(
   // (server/storage.ts → convertWetCheck) so both code paths compute prices
   // and totals identically. See server/estimate-payload.ts for details.
 
-  app.post("/api/estimates", requireAuthentication, async (req, res) => {
+  app.post("/api/estimates", requireAuthentication, async (req: any, res) => {
     try {
       const parsed = createEstimateWithItemsSchema.parse(req.body);
       // Defence-in-depth: only `draft` and `pending_approval` may be set on
@@ -105,6 +110,40 @@ export function registerEstimateRoutes(
         const estimateBody = parsed.estimate as { internalStatus?: string };
         const requested = estimateBody.internalStatus;
         estimateBody.internalStatus = requested === "draft" ? "draft" : "pending_approval";
+      }
+      // Stamp company + creator from the authenticated user. The wizard
+      // payload doesn't carry these, and trusting client-supplied values
+      // would let one company's user create estimates against another's
+      // queue. Without this stamp, `companyId` lands as NULL and the
+      // billing-manager review queue (filtered `WHERE company_id = ?`)
+      // silently excludes the row — which is the reported bug where
+      // submitted estimates never reach the reviewer.
+      {
+        const estimateBody = parsed.estimate as {
+          companyId?: number | null;
+          createdBy?: string;
+          createdByUserId?: number | null;
+        };
+        const authUserId: number | null =
+          typeof req.authenticatedUserId === "number" ? req.authenticatedUserId : null;
+        const authCompanyId: number | null =
+          typeof req.authenticatedUserCompanyId === "number"
+            ? req.authenticatedUserCompanyId
+            : null;
+        if (authCompanyId != null) {
+          estimateBody.companyId = authCompanyId;
+        }
+        if (authUserId != null) {
+          estimateBody.createdByUserId = authUserId;
+          if (storage.getUser) {
+            try {
+              const user = await storage.getUser(authUserId);
+              if (user?.name) estimateBody.createdBy = user.name;
+            } catch {
+              // Non-fatal — fall back to whatever the client/default supplies.
+            }
+          }
+        }
       }
       // Authoritative labor rate: the customer record is the master.
       // Override whatever the client sent on create so a tampered/stale
@@ -145,6 +184,20 @@ export function registerEstimateRoutes(
         return res.status(400).json({ message: "Invalid estimate ID" });
       }
       const parsed = createEstimateWithItemsSchema.parse(req.body);
+      // Strip ownership/audit fields from the update payload — these are
+      // stamped at create time from the authenticated user and must never
+      // be reassignable by the client. Without this, an edit could orphan
+      // an estimate (companyId → null) or rewrite the audit trail.
+      {
+        const estimateBody = parsed.estimate as {
+          companyId?: number | null;
+          createdBy?: string;
+          createdByUserId?: number | null;
+        };
+        delete estimateBody.companyId;
+        delete estimateBody.createdBy;
+        delete estimateBody.createdByUserId;
+      }
       // Authoritative labor rate on update: the customer record is the
       // master, but we only override the stored rate when the customer
       // actually changed. Editing an estimate without swapping the
