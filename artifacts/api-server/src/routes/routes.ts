@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage, WetCheckHasInvoicedRecordsError, ControllerHasZonesError, BillingSheetInvoicedError } from "../storage";
-import type { InsertInvoice } from "@workspace/db";
+import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "../email-service";
@@ -318,6 +318,52 @@ const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
 
     if (userRole !== 'company_admin' && userRole !== 'super_admin' && userRole !== 'billing_manager') {
       return res.status(403).json({ message: "Access denied. Customer editing is restricted to administrators and billing managers." });
+    }
+
+    next();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Authentication error" });
+  }
+};
+
+// Middleware to check if user can edit a customer's property boundary (GIS).
+//
+// Authorization policy (intentional divergence from `requireCustomerEditAccess`):
+//   - allowed: company_admin, super_admin, irrigation_manager
+//   - NOT allowed: billing_manager (boundary management is a field/operations
+//     responsibility, not a billing one — billing managers can still view
+//     boundaries via the standard customer-read paths)
+// The client-side allowlist in
+// `artifacts/irrigopro/src/components/customers/property-boundary.tsx`
+// (`EDIT_ROLES`) MUST stay in sync with this set.
+const requireBoundaryEditAccess = async (req: any, res: any, next: any) => {
+  try {
+    let userId = req.headers['x-user-id'];
+    let userRole = req.headers['x-user-role'];
+
+    if (!userId && req.session?.userId) {
+      userId = req.session.userId;
+      const user = await storage.getUser(parseInt(userId));
+      if (user) {
+        userRole = user.role;
+        req.userCompanyId = user.companyId;
+      }
+    }
+
+    if (!userId || !userRole) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    const allowed = new Set([
+      'company_admin',
+      'super_admin',
+      'irrigation_manager',
+    ]);
+    if (!allowed.has(userRole)) {
+      return res.status(403).json({
+        message: "Access denied. Property boundary editing is restricted to administrators and irrigation managers.",
+      });
     }
 
     next();
@@ -3284,6 +3330,187 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to delete customer" });
     }
   });
+
+  // ── Property Boundary (GIS) ────────────────────────────────────────────────
+  // NOTE: Express 5 / path-to-regexp v8 — do NOT use inline regex param syntax
+  // like `:id(\\d+)`. Validate manually below.
+  // Coerce a `string | number | null | undefined` payload value into a finite
+  // number, or return `null` if absent. Throws a ZodError-shaped error if the
+  // value is present but cannot be parsed as a finite number, so the route
+  // returns a 400 instead of a 500 on malformed input like `"abc"`.
+  const finiteNumber = (label: string) =>
+    z
+      .union([z.string(), z.number()])
+      .optional()
+      .nullable()
+      .transform((v, ctx) => {
+        if (v == null || v === "") return null;
+        const n = typeof v === "number" ? v : Number(v);
+        if (!Number.isFinite(n)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${label} must be a finite number`,
+          });
+          return z.NEVER;
+        }
+        return n;
+      });
+
+  const propertyBoundarySchema = z.object({
+    propertyBoundary: z.string().refine((s) => {
+      try {
+        const obj = JSON.parse(s);
+        if (!obj || typeof obj !== "object") return false;
+        const t = obj.type;
+        if (t === "Polygon" || t === "MultiPolygon") return true;
+        if (t === "Feature" && obj.geometry &&
+          (obj.geometry.type === "Polygon" || obj.geometry.type === "MultiPolygon")) {
+          return true;
+        }
+        if (t === "FeatureCollection" && Array.isArray(obj.features) && obj.features.length > 0) {
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }, { message: "propertyBoundary must be GeoJSON Polygon | MultiPolygon | Feature | non-empty FeatureCollection" }),
+    propertyBoundaryKml: z.string().optional().nullable(),
+    propertyBoundaryFileName: z.string().optional().nullable(),
+    propertyBoundaryCenterLat: finiteNumber("propertyBoundaryCenterLat").refine(
+      (v) => v == null || (v >= -90 && v <= 90),
+      { message: "propertyBoundaryCenterLat must be between -90 and 90" },
+    ),
+    propertyBoundaryCenterLng: finiteNumber("propertyBoundaryCenterLng").refine(
+      (v) => v == null || (v >= -180 && v <= 180),
+      { message: "propertyBoundaryCenterLng must be between -180 and 180" },
+    ),
+    propertyBoundaryZoom: finiteNumber("propertyBoundaryZoom").refine(
+      (v) => v == null || (v >= 0 && v <= 24),
+      { message: "propertyBoundaryZoom must be between 0 and 24" },
+    ),
+    propertyBoundaryAreaAcres: finiteNumber("propertyBoundaryAreaAcres").refine(
+      (v) => v == null || v >= 0,
+      { message: "propertyBoundaryAreaAcres must be non-negative" },
+    ),
+  });
+
+  // Multi-tenant guard for property-boundary routes: a customer record belongs
+  // to a company, and only super_admins can cross company boundaries. Returns
+  // the customer (or sends a 403/404 and returns null) so callers can branch.
+  const loadCustomerWithTenantCheck = async (req: any, res: any, id: number) => {
+    const customer = await storage.getCustomer(id);
+    if (!customer) {
+      res.status(404).json({ message: "Customer not found" });
+      return null;
+    }
+    const role = (req as any).authenticatedUserRole || req.headers['x-user-role'];
+    if (role !== 'super_admin') {
+      const userCompanyId = (req as any).authenticatedUserCompanyId
+        ?? (req.headers['x-user-company-id']
+          ? parseInt(String(req.headers['x-user-company-id']))
+          : null);
+      if (!userCompanyId || Number(userCompanyId) !== Number(customer.companyId)) {
+        res.status(403).json({ message: "Access denied for this customer" });
+        return null;
+      }
+    }
+    return customer;
+  };
+
+  app.get("/api/customers/:id/property-boundary", requireAuthentication, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid customer id" });
+      const customer = await loadCustomerWithTenantCheck(req, res, id);
+      if (!customer) return;
+      return res.json({
+        propertyBoundary: customer.propertyBoundary ?? null,
+        propertyBoundaryKml: customer.propertyBoundaryKml ?? null,
+        propertyBoundaryFileName: customer.propertyBoundaryFileName ?? null,
+        propertyBoundaryCenterLat: customer.propertyBoundaryCenterLat ?? null,
+        propertyBoundaryCenterLng: customer.propertyBoundaryCenterLng ?? null,
+        propertyBoundaryZoom: customer.propertyBoundaryZoom ?? null,
+        propertyBoundaryAreaAcres: customer.propertyBoundaryAreaAcres ?? null,
+        propertyBoundaryUpdatedAt: customer.propertyBoundaryUpdatedAt ?? null,
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Failed to fetch property boundary" });
+    }
+  });
+
+  app.put(
+    "/api/customers/:id/property-boundary",
+    requireAuthentication,
+    requireBoundaryEditAccess,
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid customer id" });
+        const guard = await loadCustomerWithTenantCheck(req, res, id);
+        if (!guard) return;
+        const parsed = propertyBoundarySchema.parse(req.body);
+        const updateData: Partial<InsertCustomer> = {
+          propertyBoundary: parsed.propertyBoundary,
+          propertyBoundaryKml: parsed.propertyBoundaryKml ?? null,
+          propertyBoundaryFileName: parsed.propertyBoundaryFileName ?? null,
+          propertyBoundaryCenterLat:
+            parsed.propertyBoundaryCenterLat == null ? null : String(parsed.propertyBoundaryCenterLat),
+          propertyBoundaryCenterLng:
+            parsed.propertyBoundaryCenterLng == null ? null : String(parsed.propertyBoundaryCenterLng),
+          propertyBoundaryZoom:
+            parsed.propertyBoundaryZoom == null
+              ? null
+              : typeof parsed.propertyBoundaryZoom === "number"
+                ? parsed.propertyBoundaryZoom
+                : parseInt(parsed.propertyBoundaryZoom, 10),
+          propertyBoundaryAreaAcres:
+            parsed.propertyBoundaryAreaAcres == null ? null : String(parsed.propertyBoundaryAreaAcres),
+          propertyBoundaryUpdatedAt: new Date(),
+        };
+        const customer = await storage.updateCustomer(id, updateData);
+        if (!customer) return res.status(404).json({ message: "Customer not found" });
+        return res.json(applyBillingNotesVisibility(req, customer));
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ message: "Invalid boundary data", errors: error.issues });
+        }
+        console.error(error);
+        return res.status(500).json({ message: "Failed to save property boundary" });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/customers/:id/property-boundary",
+    requireAuthentication,
+    requireBoundaryEditAccess,
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid customer id" });
+        const guard = await loadCustomerWithTenantCheck(req, res, id);
+        if (!guard) return;
+        const clearData: Partial<InsertCustomer> = {
+          propertyBoundary: null,
+          propertyBoundaryKml: null,
+          propertyBoundaryFileName: null,
+          propertyBoundaryCenterLat: null,
+          propertyBoundaryCenterLng: null,
+          propertyBoundaryZoom: null,
+          propertyBoundaryAreaAcres: null,
+          propertyBoundaryUpdatedAt: null,
+        };
+        const customer = await storage.updateCustomer(id, clearData);
+        if (!customer) return res.status(404).json({ message: "Customer not found" });
+        return res.json(applyBillingNotesVisibility(req, customer));
+      } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Failed to remove property boundary" });
+      }
+    },
+  );
 
   // Customer-related data endpoints
   app.get("/api/customers/:id/estimates", async (req, res) => {

@@ -17,6 +17,7 @@ import { CustomerSelector } from "@/components/ui/customer-selector";
 import { LocationFields } from "@/components/location/location-fields";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { composeCustomerAddress } from "@/lib/customer-address";
+import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import {
   User,
   Mail,
@@ -354,7 +355,11 @@ export function EstimateWizardCustomerStep({
           </div>
 
           <Form {...form}>
-            <LocationFields control={form.control} readOnlyAddress={addressReadOnly} />
+            <LocationFields
+              control={form.control}
+              readOnlyAddress={addressReadOnly}
+              propertyAcres={customerToBoundary(value.customer)?.areaAcres ?? null}
+            />
           </Form>
         </CardContent>
       </Card>
@@ -399,6 +404,7 @@ export function EstimateWizardCustomerStep({
                 defaultAddress={mapDefaultAddress}
                 onLocationSelect={handleLocationSelect}
                 selectedLocation={value.workLocation}
+                customerBoundary={customerToBoundary(value.customer)}
               />
             )}
 

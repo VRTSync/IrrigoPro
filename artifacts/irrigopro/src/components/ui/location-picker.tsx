@@ -4,6 +4,9 @@ import "leaflet/dist/leaflet.css";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MapPin, RotateCcw, Navigation, Loader2, AlertCircle } from "lucide-react";
+import { addSatelliteHybrid } from "@/lib/leaflet-base-layers";
+import { drawPropertyBoundary, geoJsonBounds } from "@/lib/boundary-style";
+import type { PropertyBoundary } from "@/lib/property-boundary";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -16,6 +19,7 @@ interface LocationPickerProps {
   defaultAddress?: string;
   onLocationSelect: (location: { lat: number; lng: number; address?: string }) => void;
   selectedLocation?: { lat: number; lng: number; address?: string } | null;
+  customerBoundary?: PropertyBoundary | null;
   className?: string;
 }
 
@@ -74,11 +78,13 @@ export function LocationPicker({
   defaultAddress,
   onLocationSelect,
   selectedLocation,
+  customerBoundary,
   className = ""
 }: LocationPickerProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
+  const boundaryLayerRef = useRef<L.LayerGroup | null>(null);
   const liveLocationMarkerRef = useRef<L.Marker | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const liveLocationRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -90,7 +96,8 @@ export function LocationPicker({
 
   const trimmedAddress = (defaultAddress ?? "").trim();
   const hasAddress = trimmedAddress.length > 0;
-  const showEmptyState = !hasAddress && !selectedLocation;
+  const hasBoundary = !!customerBoundary;
+  const showEmptyState = !hasAddress && !selectedLocation && !hasBoundary;
 
   const updateLiveLocationMarker = useCallback((lat: number, lng: number) => {
     const map = mapInstanceRef.current;
@@ -129,21 +136,22 @@ export function LocationPicker({
       setIsLoading(true);
       setGeocodeFailed(false);
 
-      // Centering preference: a previously saved pin wins (it's the most
-      // precise location we have — e.g. when editing an existing estimate),
-      // then customer address, then a regional fallback.
+      // Centering preference: a previously saved pin wins (most precise),
+      // then customer boundary, then customer address, then a regional fallback.
       let initialCenter: [number, number] = FALLBACK_CENTER;
       let initialZoom = FALLBACK_ZOOM;
       let usedAddress = false;
+      let fitToBoundary = false;
 
       if (selectedLocation) {
         initialCenter = [selectedLocation.lat, selectedLocation.lng];
         initialZoom = 20;
-        // Mark the address as "already handled" so the address-change effect
-        // below doesn't fly the map away from the pin on first render.
-        if (hasAddress) {
-          usedAddress = true;
-        }
+        if (hasAddress) usedAddress = true;
+      } else if (customerBoundary) {
+        initialCenter = [customerBoundary.centerLat, customerBoundary.centerLng];
+        initialZoom = customerBoundary.zoom;
+        fitToBoundary = true;
+        if (hasAddress) usedAddress = true;
       } else if (hasAddress) {
         const coords = await geocodeAddress(trimmedAddress);
         if (coords) {
@@ -159,17 +167,21 @@ export function LocationPicker({
         center: initialCenter,
         zoom: initialZoom,
         zoomControl: true,
-        maxZoom: 25,
-        minZoom: 10,
+        maxZoom: 22,
+        minZoom: 3,
         zoomSnap: 0.1,
         wheelPxPerZoomLevel: 20,
       });
 
-      L.tileLayer("https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", {
-        attribution: '© Google',
-        maxZoom: 25,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-      }).addTo(map);
+      addSatelliteHybrid(map, { withLabels: true, maxZoom: 22, withControl: true });
+
+      if (customerBoundary) {
+        boundaryLayerRef.current = drawPropertyBoundary(map, customerBoundary.geojson);
+        if (fitToBoundary && !selectedLocation) {
+          const b = geoJsonBounds(customerBoundary.geojson);
+          if (b) map.fitBounds(b.pad(0.18), { animate: false });
+        }
+      }
 
       map.on("click", async (e) => {
         const { lat, lng } = e.latlng;
@@ -223,6 +235,24 @@ export function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showEmptyState]);
 
+  // Swap boundary overlay when it changes (e.g. switching customer).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (boundaryLayerRef.current) {
+      map.removeLayer(boundaryLayerRef.current);
+      boundaryLayerRef.current = null;
+    }
+    if (customerBoundary) {
+      boundaryLayerRef.current = drawPropertyBoundary(map, customerBoundary.geojson);
+      if (!selectedLocation) {
+        const b = geoJsonBounds(customerBoundary.geojson);
+        if (b) map.fitBounds(b.pad(0.18), { animate: true, duration: 0.6 });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerBoundary?.geojson]);
+
   // Whenever the customer address changes, re-center the map on it — even
   // if a `selectedLocation` pin is already present. The pin stays visible.
   useEffect(() => {
@@ -232,6 +262,9 @@ export function LocationPicker({
     if (trimmedAddress === prevAddressRef.current) return;
 
     prevAddressRef.current = trimmedAddress;
+    // When the customer has a saved boundary, the boundary is the source of
+    // truth for centering — don't fly the map away from it on address change.
+    if (customerBoundary) return;
     setGeocodeFailed(false);
     (async () => {
       const coords = await geocodeAddress(trimmedAddress);
@@ -241,19 +274,26 @@ export function LocationPicker({
         setGeocodeFailed(true);
       }
     })();
-  }, [trimmedAddress, hasAddress]);
+  }, [trimmedAddress, hasAddress, customerBoundary]);
 
   const resetToDefault = async () => {
-    if (!mapInstanceRef.current || !hasAddress) return;
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (markerRef.current) {
+      map.removeLayer(markerRef.current);
+      markerRef.current = null;
+    }
+    if (customerBoundary) {
+      const b = geoJsonBounds(customerBoundary.geojson);
+      if (b) map.fitBounds(b.pad(0.18), { animate: true });
+      return;
+    }
+    if (!hasAddress) return;
     setIsLoading(true);
     setGeocodeFailed(false);
     const coords = await geocodeAddress(trimmedAddress);
     if (coords) {
-      mapInstanceRef.current.setView([coords.lat, coords.lng], 18);
-      if (markerRef.current) {
-        mapInstanceRef.current.removeLayer(markerRef.current);
-        markerRef.current = null;
-      }
+      map.setView([coords.lat, coords.lng], 18);
     } else {
       setGeocodeFailed(true);
     }
@@ -330,7 +370,7 @@ export function LocationPicker({
               )}
               {isLocating ? "Locating..." : "Use My Location"}
             </Button>
-            {hasAddress && (
+            {(hasAddress || hasBoundary) && (
               <Button
                 type="button"
                 variant="outline"
@@ -339,7 +379,7 @@ export function LocationPicker({
                 disabled={isLoading}
               >
                 <RotateCcw className="w-4 h-4 mr-2" />
-                Reset to Address
+                {hasBoundary ? "Reset to Property" : "Reset to Address"}
               </Button>
             )}
           </div>
@@ -379,9 +419,10 @@ export function LocationPicker({
             <div className="w-full h-64 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center px-4">
               <div className="text-center">
                 <MapPin className="w-6 h-6 text-gray-400 mx-auto mb-2" />
-                <p className="text-sm font-medium text-gray-700">No address on file for this customer</p>
+                <p className="text-sm font-medium text-gray-700">No address or property boundary on file</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Add an address to the customer profile to enable map centering.
+                  Add an address — or upload a property boundary on the customer profile —
+                  to enable map centering.
                 </p>
               </div>
             </div>

@@ -74,6 +74,15 @@ export const customers = pgTable("customers", {
   quickbooksId: text("quickbooks_id"), // QuickBooks customer ID for integration
   hiddenFromBilling: boolean("hidden_from_billing").default(false),
   branches: text("branches").array(), // Optional list of branch names for customers with multiple locations
+  // Property boundary (GIS) — uploaded KML/KMZ converted to GeoJSON
+  propertyBoundary: text("property_boundary"), // GeoJSON Feature (Polygon | MultiPolygon) as string
+  propertyBoundaryKml: text("property_boundary_kml"), // Original KML source text
+  propertyBoundaryFileName: text("property_boundary_file_name"),
+  propertyBoundaryCenterLat: decimal("property_boundary_center_lat", { precision: 10, scale: 7 }),
+  propertyBoundaryCenterLng: decimal("property_boundary_center_lng", { precision: 10, scale: 7 }),
+  propertyBoundaryZoom: integer("property_boundary_zoom").default(18),
+  propertyBoundaryAreaAcres: decimal("property_boundary_area_acres", { precision: 12, scale: 4 }),
+  propertyBoundaryUpdatedAt: timestamp("property_boundary_updated_at"),
 });
 
 // Site maps and controller management
@@ -879,7 +888,17 @@ export type Customer = typeof customers.$inferSelect;
 export type Part = typeof parts.$inferSelect;
 export type Assembly = typeof assemblies.$inferSelect;
 export type AssemblyPart = typeof assemblyParts.$inferSelect;
-import type { LifecycleStatus } from "./lifecycle";
+// `lifecycleStatus` is computed server-side and attached to Estimate rows
+// before they leave the API. Keep it as a narrow string-literal union here so
+// downstream consumers can `switch` on it exhaustively. Mirrors the canonical
+// list in `artifacts/api-server/src/lifecycle.ts`.
+export type LifecycleStatus =
+  | "draft"
+  | "pending_review"
+  | "sent"
+  | "approved"
+  | "rejected"
+  | "expired";
 export type Estimate = typeof estimates.$inferSelect & { lifecycleStatus?: LifecycleStatus };
 export type EstimateItem = typeof estimateItems.$inferSelect;
 export type PropertyZone = typeof propertyZones.$inferSelect;

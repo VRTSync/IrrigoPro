@@ -15,6 +15,9 @@ import {
   Navigation,
   MapPin
 } from "lucide-react";
+import { addSatelliteHybrid } from "@/lib/leaflet-base-layers";
+import { drawPropertyBoundary, geoJsonBounds } from "@/lib/boundary-style";
+import type { PropertyBoundary } from "@/lib/property-boundary";
 
 interface ColoredController {
   id: string;
@@ -49,15 +52,18 @@ interface ColorCodedMapViewerProps {
   project: SiteMapProject;
   onControllerClick?: (controller: ColoredController) => void;
   onZoneClick?: (zone: ColoredZone) => void;
+  customerBoundary?: PropertyBoundary | null;
 }
 
 export function ColorCodedMapViewer({ 
   project, 
   onControllerClick, 
-  onZoneClick 
+  onZoneClick,
+  customerBoundary,
 }: ColorCodedMapViewerProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+  const boundaryLayerRef = useRef<L.LayerGroup | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedController, setSelectedController] = useState<ColoredController | null>(null);
   const [selectedZone, setSelectedZone] = useState<ColoredZone | null>(null);
@@ -97,26 +103,13 @@ export function ColorCodedMapViewer({
     }).setView([40.7128, -74.0060], 18);
     mapInstanceRef.current = map;
 
-    // Simple two-option layer switcher: Clean Streets vs Google Satellite
-    const baseLayers = {
-      'Clean Streets': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CartoDB',
-        subdomains: 'abcd',
-        maxZoom: 25,
-        maxNativeZoom: 20
-      }),
-      'Google Satellite': L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-        attribution: '&copy; Google',
-        maxZoom: 25,
-        maxNativeZoom: 23
-      })
-    };
+    // Default layer: Esri satellite + labels hybrid (replaces Google Satellite)
+    addSatelliteHybrid(map, { withLabels: true, maxZoom: 22, withControl: true });
 
-    // Add clean streets layer as default
-    baseLayers['Clean Streets'].addTo(map);
-    
-    // Add layer control for switching between tile sources
-    L.control.layers(baseLayers).addTo(map);
+    // Draw saved customer property boundary, if any.
+    if (customerBoundary) {
+      boundaryLayerRef.current = drawPropertyBoundary(map, customerBoundary.geojson);
+    }
 
     // Set map options for enhanced zooming
     map.options.maxZoom = 25;
@@ -135,6 +128,30 @@ export function ColorCodedMapViewer({
   const markerRefs = useRef<Map<string, L.Marker>>(new Map());
   const circleRefs = useRef<Map<string, L.Circle>>(new Map());
   const zoneRefs = useRef<Map<string, L.Layer>>(new Map());
+
+  // Re-render the boundary if the customer changes.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (boundaryLayerRef.current) {
+      map.removeLayer(boundaryLayerRef.current);
+      boundaryLayerRef.current = null;
+    }
+    if (customerBoundary) {
+      boundaryLayerRef.current = drawPropertyBoundary(map, customerBoundary.geojson);
+      // If there are no controllers to anchor on, frame the boundary. Re-fit
+      // every time the boundary changes (not just first paint) so swapping the
+      // saved boundary while the map is open still reframes correctly.
+      if (project.controllers.length === 0) {
+        const b = geoJsonBounds(customerBoundary.geojson);
+        if (b) {
+          map.fitBounds(b.pad(0.18), { animate: false });
+          hasInitiallyFitted.current = true;
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerBoundary?.geojson, project.controllers.length]);
 
   useEffect(() => {
     if (!mapInstanceRef.current || project.controllers.length === 0) return;

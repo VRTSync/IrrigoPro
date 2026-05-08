@@ -16,6 +16,7 @@ import {
 import { LocationFields } from "@/components/location/location-fields";
 import { LocationPicker } from "@/components/ui/location-picker";
 import { composeCustomerAddress } from "@/lib/customer-address";
+import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import { MapPin, Cpu, Droplets, Briefcase } from "lucide-react";
 import type { Customer, PropertyController } from "@shared/schema";
 
@@ -151,6 +152,7 @@ export function WizardLocationStep({
     value.workLocation?.address ||
     value.projectAddress ||
     composeCustomerAddress(customer);
+  const customerBoundary = customerToBoundary(customer);
 
   return (
     <div className="space-y-4">
@@ -199,7 +201,11 @@ export function WizardLocationStep({
             )}
           </div>
           <Form {...form}>
-            <LocationFields control={form.control} readOnlyAddress={addressReadOnly} />
+            <LocationFields
+              control={form.control}
+              readOnlyAddress={addressReadOnly}
+              propertyAcres={customerBoundary?.areaAcres ?? null}
+            />
           </Form>
         </CardContent>
       </Card>
@@ -228,6 +234,7 @@ export function WizardLocationStep({
                   onChange({ ...valueRef.current, workLocation: loc })
                 }
                 selectedLocation={value.workLocation}
+                customerBoundary={customerBoundary}
               />
 
               {value.workLocation && (

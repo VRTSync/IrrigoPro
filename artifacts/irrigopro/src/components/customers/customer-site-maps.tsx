@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@shared/schema";
 import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
+import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";
 import { ZoneUpload } from "@/components/site-maps/zone-upload";
 import { ZonesDataView } from "@/components/site-maps/zones-data-view";
@@ -514,6 +515,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                 }}
                 onControllerClick={(controller) => {}}
                 onZoneClick={(zone) => {}}
+                customerBoundary={customerToBoundary(customer)}
               />
             </TabsContent>
 

@@ -27,6 +27,7 @@ import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shar
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
+import { PropertyBoundarySection } from "./property-boundary";
 import { BillingNotes } from "./billing-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
 
@@ -229,6 +230,11 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
         {/* Property Notes Section */}
         <div className="mb-8">
           <PropertyNotes customer={customer} userRole={userRole} />
+        </div>
+
+        {/* Property Boundary Section */}
+        <div className="mb-8">
+          <PropertyBoundarySection customer={customer} userRole={userRole} />
         </div>
 
         {/* Billing Rates Section - visible only to billing_manager, company_admin, super_admin */}
