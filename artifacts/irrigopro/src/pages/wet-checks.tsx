@@ -102,7 +102,7 @@ function PropertyContextHeader({
   if (zoneNumber != null) breadcrumb.push(`Zone ${zoneNumber}`);
   return (
     <div
-      className="sticky top-0 z-30 -mx-4 px-4 py-2 bg-white/95 backdrop-blur border-b shadow-sm"
+      className="sticky top-0 z-30 -mx-3 sm:-mx-4 px-3 sm:px-4 py-2 bg-white/95 backdrop-blur border-b shadow-sm"
       data-testid="property-context-header"
     >
       <div className="max-w-3xl mx-auto">
@@ -292,6 +292,7 @@ function PhotoCaptureButton({
         ref={inputRef}
         type="file"
         accept="image/*"
+        capture="environment"
         className="hidden"
         onChange={onPick}
         data-testid={`photo-input-${suffix}`}
@@ -302,6 +303,7 @@ function PhotoCaptureButton({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={busy}
+        className="min-h-[44px]"
         data-testid={`btn-photo-${suffix}`}
       >
         {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Camera className="w-4 h-4 mr-1" />}
@@ -313,12 +315,15 @@ function PhotoCaptureButton({
 
 function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boolean }) {
   const { toast } = useToast();
-  // The photoId is stored as "photos/<uuid>"; the public read endpoint serves it.
-  // `<img>` cannot send custom headers, so the proxy URL must carry auth
-  // identifiers as query params (mirrors the PDF/new-tab fallback in
-  // requireAuthentication). Without this, every photo request 401s in
-  // production even though the same session can POST the photo metadata.
-  const src = authedPhotoSrc(photo.url, "thumb");
+  // Optimistic photos created by the offline-photos queue carry a
+  // negative id and a local blob:/data: URL. We must not route those
+  // through the authed proxy (it would 404), and we hide the delete
+  // button until the upload resolves and the real id arrives.
+  const isOptimistic = photo.id < 0;
+  const isLocalUrl =
+    typeof photo.url === "string" &&
+    (photo.url.startsWith("blob:") || photo.url.startsWith("data:"));
+  const src = isLocalUrl ? photo.url : authedPhotoSrc(photo.url, "thumb");
   const delMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/photos/${photo.id}`, "DELETE"),
     onSuccess: () => {
@@ -329,7 +334,15 @@ function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boo
   return (
     <div className="relative inline-block w-20 h-20 rounded overflow-hidden border" data-testid={`photo-thumb-${photo.id}`}>
       <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
-      {canDelete && (
+      {isOptimistic && (
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-black/30"
+          data-testid={`photo-thumb-${photo.id}-uploading`}
+        >
+          <Loader2 className="w-5 h-5 text-white animate-spin" />
+        </div>
+      )}
+      {canDelete && !isOptimistic && (
         <button
           type="button"
           onClick={() => delMut.mutate()}
@@ -419,7 +432,7 @@ function WetCheckList() {
   });
 
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4">
+    <div className="max-w-3xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
       <OfflineStrip />
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Wet Checks</h1>
@@ -437,7 +450,7 @@ function WetCheckList() {
               placeholder="Search any customer..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
+              className="pl-10 h-11 text-base"
               data-testid="input-customer-search"
             />
           </div>
@@ -697,7 +710,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     const records = zonesByLetter(activeLetter);
     const recordsByZone = new Map(records.map(r => [r.zoneNumber, r]));
     return (
-      <div className="max-w-3xl mx-auto py-4 space-y-3 px-4">
+      <div className="max-w-3xl mx-auto py-4 space-y-3 px-3 sm:px-4 pb-safe">
         <PropertyContextHeader
           customerName={wc.customerName}
           propertyAddress={wc.propertyAddress}
@@ -707,7 +720,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
           <ChevronLeft className="w-4 h-4 mr-1" /> Back to Controllers
         </Button>
         <ControllerHeader controller={ctrl} customerId={wc.customerId} readOnly={isReadOnly} />
-        <div className="grid grid-cols-10 gap-1">
+        <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-1.5 sm:gap-1">
           {Array.from({ length: ctrl?.zoneCount ?? 100 }, (_, i) => i + 1).map(n => {
             const r = recordsByZone.get(n);
             const cls = r?.status === "checked_ok"
@@ -721,7 +734,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
               <button
                 key={n}
                 onClick={() => setActiveZone(n)}
-                className={`aspect-square text-xs rounded ${cls}`}
+                className={`aspect-square min-h-[44px] text-sm sm:text-xs font-medium rounded active:scale-95 transition-transform ${cls}`}
                 data-testid={`zone-${activeLetter}-${n}`}
               >
                 {n}
@@ -754,7 +767,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
         ? "Submit — all work completed"
         : "Submit for manager review";
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4 px-4">
+    <div className="max-w-3xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
       <PropertyContextHeader
         customerName={wc.customerName}
         propertyAddress={wc.propertyAddress}
@@ -774,30 +787,35 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
           the Slice 2 submit experience is restored verbatim. */}
       {!isReadOnly && autoBillEnabled && (
         <div
-          className="sticky top-2 z-20 flex flex-wrap items-center gap-1.5 bg-white/90 backdrop-blur border rounded px-2 py-1.5"
+          className="sticky top-2 z-20 -mx-3 sm:mx-0 px-3 sm:px-0 overflow-x-auto scrollbar-hide bg-white/90 backdrop-blur border-y sm:border sm:rounded py-1.5"
           data-testid="status-chip-row"
         >
-          <button
-            type="button"
-            onClick={() => document.getElementById("findings-group-complete")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            data-testid="chip-complete"
-          >
-            <Badge variant="default">✓ Complete · {completeCount}</Badge>
-          </button>
-          <button
-            type="button"
-            onClick={() => document.getElementById("findings-group-pending")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            data-testid="chip-pending"
-          >
-            <Badge variant="secondary">Needs decision · {pendingFindingCount}</Badge>
-          </button>
-          <button
-            type="button"
-            onClick={() => document.getElementById("findings-group-na")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            data-testid="chip-na"
-          >
-            <Badge variant="outline">N/A · {naCount}</Badge>
-          </button>
+          <div className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <button
+              type="button"
+              onClick={() => document.getElementById("findings-group-complete")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="min-h-[36px] inline-flex items-center"
+              data-testid="chip-complete"
+            >
+              <Badge variant="default">✓ Complete · {completeCount}</Badge>
+            </button>
+            <button
+              type="button"
+              onClick={() => document.getElementById("findings-group-pending")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="min-h-[36px] inline-flex items-center"
+              data-testid="chip-pending"
+            >
+              <Badge variant="secondary">Needs decision · {pendingFindingCount}</Badge>
+            </button>
+            <button
+              type="button"
+              onClick={() => document.getElementById("findings-group-na")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="min-h-[36px] inline-flex items-center"
+              data-testid="chip-na"
+            >
+              <Badge variant="outline">N/A · {naCount}</Badge>
+            </button>
+          </div>
         </div>
       )}
       <Card>
@@ -826,7 +844,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
       </Card>
 
       <h2 className="text-lg font-semibold">Controllers</h2>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {controllers.map(c => {
           const recs = zonesByLetter(c.controllerLetter);
           const ok = recs.filter(r => r.status === "checked_ok").length;
@@ -835,14 +853,17 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
           return (
             <Card
               key={c.controllerLetter}
-              className="cursor-pointer hover:bg-blue-50"
+              className="cursor-pointer hover:bg-blue-50 active:bg-blue-100 transition-colors"
               onClick={() => setActiveLetter(c.controllerLetter)}
               data-testid={`controller-${c.controllerLetter}`}
             >
-              <CardContent className="py-4">
-                <div className="text-2xl font-bold">Controller {c.controllerLetter}</div>
+              <CardContent className="py-3 px-3 sm:py-4 sm:px-6">
+                <div className="text-xl sm:text-2xl font-bold">
+                  <span className="sm:hidden">Ctrl {c.controllerLetter}</span>
+                  <span className="hidden sm:inline">Controller {c.controllerLetter}</span>
+                </div>
                 <div className="text-xs text-gray-600">{c.zoneCount} zones</div>
-                <div className="mt-2 text-xs flex gap-3">
+                <div className="mt-2 text-xs flex gap-2 sm:gap-3 flex-wrap">
                   <span className="text-green-700">✓ {ok}</span>
                   <span className="text-red-700">! {issues}</span>
                   <span className="text-gray-500">N/A {na}</span>
@@ -862,7 +883,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
 
       {!isReadOnly && (
         <Button
-          className="w-full"
+          className="w-full min-h-[48px]"
           size="lg"
           onClick={() => {
             // Flag-off → restore Slice 2 plain-submit (no preview, no
@@ -1091,11 +1112,12 @@ function ControllerHeader({
         <div className="flex items-center gap-2">
           <Input
             type="number"
+            inputMode="numeric"
             min={1}
             max={100}
             value={zc}
             onChange={(e) => setZc(e.target.value)}
-            className="w-20"
+            className="w-20 h-10 text-base"
             disabled={readOnly}
             data-testid="input-zone-count"
           />
@@ -1238,7 +1260,7 @@ function ZoneScreen({
   });
 
   return (
-    <div className="max-w-2xl mx-auto py-4 space-y-4 px-4">
+    <div className="max-w-2xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
       <PropertyContextHeader
         customerName={customerName}
         propertyAddress={propertyAddress}
@@ -1271,33 +1293,39 @@ function ZoneScreen({
           }</Badge></div>
           {!readOnly && (
             <>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                 <Button
                   variant={zoneRecord?.status === "checked_ok" ? "default" : "outline"}
-                  className={zoneRecord?.status === "checked_ok" ? "bg-green-600" : ""}
+                  className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "checked_ok" ? "bg-green-600" : ""}`}
                   onClick={() => setStatus.mutate("checked_ok")}
                   disabled={setStatus.isPending}
                   data-testid="btn-zone-yes"
                 >
-                  <CheckCircle2 className="w-4 h-4 mr-1" /> Ran OK
+                  <CheckCircle2 className="w-4 h-4 mr-1 shrink-0" />
+                  <span className="sm:hidden">OK</span>
+                  <span className="hidden sm:inline">Ran OK</span>
                 </Button>
                 <Button
                   variant={zoneRecord?.status === "checked_with_issues" ? "default" : "outline"}
-                  className={zoneRecord?.status === "checked_with_issues" ? "bg-red-600" : ""}
+                  className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "checked_with_issues" ? "bg-red-600" : ""}`}
                   onClick={() => setStatus.mutate("checked_with_issues")}
                   disabled={setStatus.isPending}
                   data-testid="btn-zone-no"
                 >
-                  <Wrench className="w-4 h-4 mr-1" /> Needs Work
+                  <Wrench className="w-4 h-4 mr-1 shrink-0" />
+                  <span className="sm:hidden">Issue</span>
+                  <span className="hidden sm:inline">Needs Work</span>
                 </Button>
                 <Button
                   variant={zoneRecord?.status === "not_applicable" ? "default" : "outline"}
-                  className={zoneRecord?.status === "not_applicable" ? "bg-gray-500" : ""}
+                  className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "not_applicable" ? "bg-gray-500" : ""}`}
                   onClick={() => setStatus.mutate("not_applicable")}
                   disabled={setStatus.isPending}
                   data-testid="btn-zone-na"
                 >
-                  <MinusCircle className="w-4 h-4 mr-1" /> Skip / Not Applicable
+                  <MinusCircle className="w-4 h-4 mr-1 shrink-0" />
+                  <span className="sm:hidden">N/A</span>
+                  <span className="hidden sm:inline">Skip / Not Applicable</span>
                 </Button>
               </div>
               {(!zoneRecord || zoneRecord.status === "not_checked") && (
@@ -1436,10 +1464,11 @@ function ZoneScreen({
                     )}
                   </div>
                   {!readOnly && f.resolution === "pending" && (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-9 w-9 p-0"
                         onClick={() => setFindingSheet({ open: true, mode: "edit", finding: f })}
                         data-testid={`edit-finding-${f.id}`}
                       >
@@ -1456,6 +1485,7 @@ function ZoneScreen({
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-9 w-9 p-0"
                         onClick={() => deleteFindingMut.mutate({ id: f.id, clientId: f.clientId ?? null })}
                         data-testid={`delete-finding-${f.id}`}
                       >
@@ -1709,7 +1739,7 @@ function FindingSheet({
 
   return (
     <Sheet open={open} onOpenChange={(b) => { if (!b) onClose(); }}>
-      <SheetContent side="bottom" className="h-[85vh] overflow-y-auto">
+      <SheetContent side="bottom" className="h-[90vh] sm:h-[85vh] overflow-y-auto pb-safe">
         <SheetHeader>
           <SheetTitle>
             {mode === "edit" ? "Edit finding · " : ""}
@@ -1719,8 +1749,8 @@ function FindingSheet({
         <div className="space-y-4 py-4">
           <div>
             <div className="text-sm font-medium mb-1">Part {cfg?.partCategoryFilter ? `(${cfg.partCategoryFilter})` : ""}</div>
-            <Input placeholder="Search parts..." value={search} onChange={(e) => setSearch(e.target.value)} data-testid="finding-part-search" />
-            <div className="max-h-64 overflow-y-auto mt-2 space-y-2 border rounded p-1">
+            <Input placeholder="Search parts..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 text-base" data-testid="finding-part-search" />
+            <div className="max-h-48 sm:max-h-64 overflow-y-auto mt-2 space-y-2 border rounded p-1">
               {filtered.length === 0 && <div className="text-center text-xs text-gray-500 py-4">No parts</div>}
               {recentParts.length > 0 && (
                 <div data-testid="parts-recent-section">
@@ -1745,17 +1775,17 @@ function FindingSheet({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="text-sm font-medium mb-1">Quantity</div>
-              <Input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} data-testid="finding-qty" />
+              <Input type="number" inputMode="numeric" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="h-11 text-base" data-testid="finding-qty" />
             </div>
             <div>
               <div className="text-sm font-medium mb-1">Labor hours</div>
-              <Input type="number" step="0.05" min={0} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} data-testid="finding-hours" />
+              <Input type="number" inputMode="decimal" step="0.05" min={0} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} className="h-11 text-base" data-testid="finding-hours" />
             </div>
           </div>
 
           <div>
             <div className="text-sm font-medium mb-1">Notes</div>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} data-testid="finding-notes" />
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="text-base" data-testid="finding-notes" />
           </div>
 
           {editing ? (
@@ -1799,8 +1829,11 @@ function FindingSheet({
                   {(zoneRecordId || (isOfflineQueueEnabled() && zoneRecordClientId)) && (
                     <PhotoCaptureButton
                       wetCheckId={wetCheckId}
-                      zoneRecordId={null}
+                      wetCheckClientId={wetCheckClientId}
+                      zoneRecordId={zoneRecordId}
+                      zoneRecordClientId={zoneRecordClientId}
                       findingId={null}
+                      findingClientId={null}
                       skipInvalidate
                       testIdSuffix="pending"
                       onUploaded={(photo) => setPendingPhotos(prev => [...prev, photo])}
@@ -1815,29 +1848,46 @@ function FindingSheet({
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-2" data-testid="pending-photos">
-                    {pendingPhotos.map(p => (
-                      <div
-                        key={p.id}
-                        className="relative inline-block w-20 h-20 rounded overflow-hidden border"
-                        data-testid={`pending-photo-${p.id}`}
-                      >
-                        <img
-                          src={authedPhotoSrc(p.url, "thumb")}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removePendingPhoto(p.id)}
-                          className="absolute top-0 right-0 bg-black/60 text-white p-0.5 rounded-bl"
-                          aria-label="Remove queued photo"
-                          data-testid={`remove-pending-photo-${p.id}`}
+                    {pendingPhotos.map(p => {
+                      const isLocal =
+                        typeof p.url === "string" &&
+                        (p.url.startsWith("blob:") || p.url.startsWith("data:"));
+                      const isOptimistic = p.id < 0;
+                      const src = isLocal ? p.url : authedPhotoSrc(p.url, "thumb");
+                      return (
+                        <div
+                          key={p.id}
+                          className="relative inline-block w-20 h-20 rounded overflow-hidden border"
+                          data-testid={`pending-photo-${p.id}`}
                         >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
+                          <img
+                            src={src}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                          {isOptimistic && (
+                            <div
+                              className="absolute inset-0 flex items-center justify-center bg-black/30"
+                              data-testid={`pending-photo-${p.id}-uploading`}
+                            >
+                              <Loader2 className="w-5 h-5 text-white animate-spin" />
+                            </div>
+                          )}
+                          {!isOptimistic && (
+                            <button
+                              type="button"
+                              onClick={() => removePendingPhoto(p.id)}
+                              className="absolute top-0 right-0 bg-black/60 text-white p-0.5 rounded-bl"
+                              aria-label="Remove queued photo"
+                              data-testid={`remove-pending-photo-${p.id}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1862,7 +1912,7 @@ function FindingSheet({
           </label>
 
           <Button
-            className="w-full"
+            className="w-full min-h-[48px]"
             size="lg"
             disabled={saveMut.isPending || (mode === "create" && !zoneRecordId && !(isOfflineQueueEnabled() && zoneRecordClientId))}
             onClick={() => saveMut.mutate()}

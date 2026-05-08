@@ -487,6 +487,16 @@
 }
 
 @layer utilities {
+  /* Hide scrollbar (cross-browser) — used for horizontally scrolling
+     mobile chip rails so the scrollbar doesn't take vertical space. */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Touch Target Utilities */
   .touch-target {
     @apply min-h-[48px] min-w-[48px];
