@@ -13,6 +13,7 @@ export interface WetCheckCardData {
   autoBilledTotal: string;
   pendingCount: number;
   pendingTotal: string;
+  dispositionCounts?: { completed_in_field: number; needs_review: number };
 }
 
 const AGING_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -92,6 +93,24 @@ export function WetCheckCard({ wc }: { wc: WetCheckCardData }) {
                   <AlertTriangle className="w-3 h-3 mr-1" />
                   {wc.pendingCount} to decide
                 </Badge>
+                {wc.dispositionCounts && wc.dispositionCounts.completed_in_field > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="bg-green-50 text-green-700 border-green-200 text-xs"
+                    data-testid={`manager-wc-card-${wc.id}-tech-completed`}
+                  >
+                    {wc.dispositionCounts.completed_in_field} tech-completed
+                  </Badge>
+                )}
+                {wc.dispositionCounts && wc.dispositionCounts.needs_review > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-50 text-amber-800 border-amber-300 text-xs"
+                    data-testid={`manager-wc-card-${wc.id}-tech-review`}
+                  >
+                    {wc.dispositionCounts.needs_review} flagged by tech
+                  </Badge>
+                )}
               </div>
             </div>
             <div className="text-right shrink-0">

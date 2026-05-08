@@ -81,6 +81,54 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+// ─── Property context header (Task #428) ──────────────────────────────────────
+// Sticky banner shown on every wet-check screen so the tech is never one tap
+// away from forgetting which property they're standing on. Drilling into a
+// controller / zone appends those breadcrumbs without losing the customer
+// + address line.
+function PropertyContextHeader({
+  customerName,
+  propertyAddress,
+  controllerLetter,
+  zoneNumber,
+}: {
+  customerName: string;
+  propertyAddress: string | null | undefined;
+  controllerLetter?: string | null;
+  zoneNumber?: number | null;
+}) {
+  const breadcrumb: string[] = [];
+  if (controllerLetter) breadcrumb.push(`Controller ${controllerLetter}`);
+  if (zoneNumber != null) breadcrumb.push(`Zone ${zoneNumber}`);
+  return (
+    <div
+      className="sticky top-0 z-30 -mx-4 px-4 py-2 bg-white/95 backdrop-blur border-b shadow-sm"
+      data-testid="property-context-header"
+    >
+      <div className="max-w-3xl mx-auto">
+        <div
+          className="text-sm font-semibold text-gray-900 truncate"
+          data-testid="property-context-customer"
+        >
+          {customerName}
+        </div>
+        <div
+          className="text-xs text-gray-600 truncate"
+          data-testid="property-context-address"
+        >
+          {propertyAddress ?? "—"}
+          {breadcrumb.length > 0 && (
+            <>
+              <span className="mx-1.5 text-gray-300">·</span>
+              <span data-testid="property-context-breadcrumb">{breadcrumb.join(" · ")}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Direct-to-storage photo upload (sign → PUT → finalize) ───────────────────
 async function uploadPhotoToStorage(file: File): Promise<string> {
   const signRes = await fetch(`/api/upload/photo?originalName=${encodeURIComponent(file.name)}`, {
@@ -626,6 +674,8 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
         wetCheckId={wc.id ?? id ?? 0}
         wetCheckClientId={wc.clientId ?? null}
         customerId={wc.customerId}
+        customerName={wc.customerName}
+        propertyAddress={wc.propertyAddress}
         letter={activeLetter}
         zoneNumber={activeZone}
         zoneCount={zoneCount}
@@ -647,7 +697,12 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     const records = zonesByLetter(activeLetter);
     const recordsByZone = new Map(records.map(r => [r.zoneNumber, r]));
     return (
-      <div className="max-w-3xl mx-auto py-4 space-y-3">
+      <div className="max-w-3xl mx-auto py-4 space-y-3 px-4">
+        <PropertyContextHeader
+          customerName={wc.customerName}
+          propertyAddress={wc.propertyAddress}
+          controllerLetter={activeLetter}
+        />
         <Button variant="ghost" onClick={() => setActiveLetter(null)} data-testid="btn-back">
           <ChevronLeft className="w-4 h-4 mr-1" /> Back to Controllers
         </Button>
@@ -687,8 +742,23 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
   const completeCount = allFindings.filter(f => f.resolution === "repaired_in_field").length;
   const pendingFindingCount = allFindings.filter(f => f.resolution === "pending").length;
   const naCount = wc.zoneRecords.filter(z => z.status === "not_applicable").length;
+  // Task #428 — submit CTA copy + intent counts. Disposition is the tech's
+  // self-reported intent and is decoupled from `resolution` (which carries
+  // billing/routing semantics).
+  const dispositionCompleted = allFindings.filter(f => f.techDisposition === "completed_in_field").length;
+  const dispositionNeedsReview = allFindings.filter(f => f.techDisposition !== "completed_in_field").length;
+  const submitCtaLabel =
+    allFindings.length === 0
+      ? "Submit — no issues found"
+      : dispositionNeedsReview === 0
+        ? "Submit — all work completed"
+        : "Submit for manager review";
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-4">
+    <div className="max-w-3xl mx-auto py-4 space-y-4 px-4">
+      <PropertyContextHeader
+        customerName={wc.customerName}
+        propertyAddress={wc.propertyAddress}
+      />
       <OfflineStrip />
       <div className="flex items-center justify-between gap-2">
         <Button variant="ghost" onClick={() => navigate("/wet-checks")}>
@@ -817,7 +887,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
           disabled={previewMut.isPending || submitMut.isPending}
           data-testid="btn-submit-wet-check"
         >
-          {(previewMut.isPending || submitMut.isPending) ? <Loader2 className="animate-spin" /> : "Submit for Review"}
+          {(previewMut.isPending || submitMut.isPending) ? <Loader2 className="animate-spin" /> : submitCtaLabel}
         </Button>
       )}
 
@@ -827,11 +897,19 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
       <Dialog open={confirmOpen} onOpenChange={(o) => { if (!o && !submitMut.isPending) setConfirmOpen(false); }}>
         <DialogContent data-testid="submit-confirm-dialog">
           <DialogHeader>
-            <DialogTitle>Submit wet check?</DialogTitle>
-            <DialogDescription>
-              {preview && preview.autoBilledCount === 0 && preview.pendingCount === 0
+            <DialogTitle>
+              {allFindings.length === 0
+                ? "Submit — no issues found?"
+                : dispositionNeedsReview === 0
+                  ? "Submit — all work completed?"
+                  : "Submit for manager review?"}
+            </DialogTitle>
+            <DialogDescription data-testid="submit-confirm-intent">
+              {allFindings.length === 0
                 ? "No findings recorded — this wet check will be marked complete."
-                : "Review what happens next, then confirm."}
+                : dispositionNeedsReview === 0
+                  ? `${dispositionCompleted} finding(s) marked completed in field.`
+                  : `${dispositionNeedsReview} finding(s) flagged for manager review${dispositionCompleted > 0 ? `, ${dispositionCompleted} completed in field` : ""}.`}
             </DialogDescription>
           </DialogHeader>
           {preview && (
@@ -1050,6 +1128,8 @@ function ZoneScreen({
   wetCheckId,
   wetCheckClientId,
   customerId,
+  customerName,
+  propertyAddress,
   letter,
   zoneNumber,
   zoneCount,
@@ -1062,6 +1142,8 @@ function ZoneScreen({
   wetCheckId: number;
   wetCheckClientId: string | null;
   customerId: number;
+  customerName: string;
+  propertyAddress: string | null;
   letter: string;
   zoneNumber: number;
   zoneCount: number;
@@ -1135,8 +1217,34 @@ function ZoneScreen({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
   });
 
+  // Task #428 — per-finding tech disposition (always visible regardless of
+  // WET_CHECK_AUTO_BILL). Patches `techDisposition` on the finding so the
+  // tech's intent survives manager rerouting downstream.
+  const dispositionMut = useMutation({
+    mutationFn: async (vars: {
+      id: number;
+      clientId: string | null;
+      disposition: "completed_in_field" | "needs_review";
+    }) => {
+      const patch = { techDisposition: vars.disposition };
+      if (isOfflineQueueEnabled() && vars.clientId) {
+        await offlineUpdateFinding(vars.clientId, vars.id, patch);
+        return;
+      }
+      await apiRequest(`/api/wet-checks/findings/${vars.id}`, "PATCH", patch);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
+    onError: (e: any) => toast({ title: "Failed", description: e?.message, variant: "destructive" }),
+  });
+
   return (
-    <div className="max-w-2xl mx-auto py-4 space-y-4">
+    <div className="max-w-2xl mx-auto py-4 space-y-4 px-4">
+      <PropertyContextHeader
+        customerName={customerName}
+        propertyAddress={propertyAddress}
+        controllerLetter={letter}
+        zoneNumber={zoneNumber}
+      />
       <Button variant="ghost" onClick={onBack}>
         <ChevronLeft className="w-4 h-4 mr-1" /> Back to Zone Grid
       </Button>
@@ -1261,6 +1369,69 @@ function ZoneScreen({
                         {autoBillEnabled
                           ? "Wet check work completed in field · auto-bills on submit"
                           : "Wet check work completed in field"}
+                      </Badge>
+                    )}
+                    {/* Task #428 — always-visible tech disposition. Decoupled
+                        from WET_CHECK_AUTO_BILL and from `resolution`: this
+                        captures intent only, with no billing side-effects.
+                        Shown for every editable finding regardless of whether
+                        Mark Complete (repaired_in_field) is on. */}
+                    {!readOnly && (
+                      <div
+                        className="mt-2 inline-flex rounded-md border overflow-hidden"
+                        role="group"
+                        aria-label="Tech disposition"
+                        data-testid={`finding-disposition-${f.id}`}
+                      >
+                        <button
+                          type="button"
+                          className={`px-2 py-1 text-xs ${
+                            f.techDisposition === "completed_in_field"
+                              ? "bg-green-600 text-white"
+                              : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                          onClick={() => dispositionMut.mutate({
+                            id: f.id,
+                            clientId: f.clientId ?? null,
+                            disposition: "completed_in_field",
+                          })}
+                          disabled={dispositionMut.isPending}
+                          data-testid={`finding-disposition-${f.id}-completed`}
+                        >
+                          Completed in field
+                        </button>
+                        <button
+                          type="button"
+                          className={`px-2 py-1 text-xs border-l ${
+                            f.techDisposition !== "completed_in_field"
+                              ? "bg-amber-500 text-white"
+                              : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                          onClick={() => dispositionMut.mutate({
+                            id: f.id,
+                            clientId: f.clientId ?? null,
+                            disposition: "needs_review",
+                          })}
+                          disabled={dispositionMut.isPending}
+                          data-testid={`finding-disposition-${f.id}-review`}
+                        >
+                          Needs manager review
+                        </button>
+                      </div>
+                    )}
+                    {readOnly && f.techDisposition && (
+                      <Badge
+                        variant="outline"
+                        className={`mt-1 ${
+                          f.techDisposition === "completed_in_field"
+                            ? "border-green-300 text-green-700 bg-green-50"
+                            : "border-amber-300 text-amber-700 bg-amber-50"
+                        }`}
+                        data-testid={`finding-disposition-badge-${f.id}`}
+                      >
+                        {f.techDisposition === "completed_in_field"
+                          ? "Completed in field"
+                          : "Needs manager review"}
                       </Badge>
                     )}
                   </div>
@@ -1437,6 +1608,10 @@ function FindingSheet({
         laborHours: laborHours || "0",
         notes: notes || null,
         repairedInField,
+        // Task #428 — default tech disposition mirrors the Mark Complete
+        // toggle so an explicit completed-in-field repair is captured even
+        // when WET_CHECK_AUTO_BILL is off. Anything else flags for review.
+        techDisposition: repairedInField ? "completed_in_field" : "needs_review",
       };
       if (mode === "edit" && editing) {
         // Edit path goes through the offline wrapper so the patch is

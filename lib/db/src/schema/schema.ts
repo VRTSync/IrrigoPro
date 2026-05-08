@@ -1150,6 +1150,11 @@ export const wetCheckFindings = pgTable("wet_check_findings", {
   notes: text("notes"),
   resolution: text("resolution").notNull().default("pending"),
   // pending | repaired_in_field | sent_to_estimate | deferred_to_work_order | documented_only
+  // Task #428 — tech intent, decoupled from `resolution` so manager rerouting
+  // (e.g. → sent_to_estimate) does not erase what the field tech said about
+  // the work. Values: needs_review | completed_in_field. Null on legacy rows
+  // is treated as needs_review by the UI.
+  techDisposition: text("tech_disposition"),
   resolutionDecidedAt: timestamp("resolution_decided_at"),
   resolutionDecidedBy: integer("resolution_decided_by").references(() => users.id),
   billingSheetId: integer("billing_sheet_id").references(() => billingSheets.id),

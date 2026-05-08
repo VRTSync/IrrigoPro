@@ -692,6 +692,8 @@ export interface IStorage {
     autoBilledTotal: string;
     pendingCount: number;
     pendingTotal: string;
+    // Task #428 — tech intent rollup, independent of routing/billing.
+    dispositionCounts: { completed_in_field: number; needs_review: number };
   }>>;
   // Cheap status lookup used by the route layer to choose role policy
   // for a finding edit (tech vs manager) without a full join.
@@ -5377,6 +5379,7 @@ export class DatabaseStorage implements IStorage {
     autoBilledTotal: string;
     pendingCount: number;
     pendingTotal: string;
+    dispositionCounts: { completed_in_field: number; needs_review: number };
   }>> {
     // Queue is status-based by default (Slice 2 behavior). With Slice 3's
     // WET_CHECK_AUTO_BILL flag ON we additionally narrow the result to
@@ -5437,9 +5440,12 @@ export class DatabaseStorage implements IStorage {
       let autoBilledTotal = 0;
       let pendingCount = 0;
       let pendingTotal = 0;
+      const dispositionCounts = { completed_in_field: 0, needs_review: 0 };
       for (const f of fs) {
         const g = (f.issueGroup as keyof typeof counts) ?? "advanced";
         if (g === "quick_fix" || g === "advanced" || g === "zone_issue") counts[g]++;
+        if (f.techDisposition === "completed_in_field") dispositionCounts.completed_in_field++;
+        else dispositionCounts.needs_review++;
         const partPrice = parseFloat(String(f.partPrice ?? 0));
         const qty = Number(f.quantity ?? 0);
         const laborHours = parseFloat(String(f.laborHours ?? 0));
@@ -5470,6 +5476,7 @@ export class DatabaseStorage implements IStorage {
         autoBilledTotal: autoBilledTotal.toFixed(2),
         pendingCount,
         pendingTotal: pendingTotal.toFixed(2),
+        dispositionCounts,
       };
     });
   }

@@ -19,6 +19,7 @@ type PendingReviewRow = WetCheck & {
   autoBilledTotal: string;
   pendingCount: number;
   pendingTotal: string;
+  dispositionCounts: { completed_in_field: number; needs_review: number };
 };
 
 function isToday(raw: string | Date | null | undefined): boolean {
@@ -172,6 +173,7 @@ export default function ManagerWetChecksPage() {
               autoBilledTotal: wc.autoBilledTotal,
               pendingCount: wc.pendingCount,
               pendingTotal: wc.pendingTotal,
+              dispositionCounts: wc.dispositionCounts,
             };
             return <WetCheckCard key={wc.id} wc={data} />;
           })}

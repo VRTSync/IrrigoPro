@@ -12159,6 +12159,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     laborHours: z.union([z.string(), z.number()]).default("0.00"),
     notes: z.string().nullish(),
     repairedInField: z.boolean().optional(),
+    // Task #428 — tech intent, persisted independently of `resolution`.
+    techDisposition: z.enum(["needs_review", "completed_in_field"]).optional(),
     clientId: z.string().uuid().nullish(),
   });
 
@@ -12184,6 +12186,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         resolution: body.repairedInField ? "repaired_in_field" : "pending",
         resolutionDecidedAt: body.repairedInField ? new Date() : null,
         resolutionDecidedBy: body.repairedInField ? userId : null,
+        // Task #428 — tech intent. Explicit value wins; otherwise infer from
+        // repairedInField; otherwise default to needs_review.
+        techDisposition:
+          body.techDisposition
+          ?? (body.repairedInField ? "completed_in_field" : "needs_review"),
         clientId: body.clientId ?? null,
       });
       res.status(201).json(created);
@@ -12200,6 +12207,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     laborHours: z.union([z.string(), z.number()]).optional(),
     notes: z.string().nullish(),
     repairedInField: z.boolean().optional(),
+    // Task #428 — tech intent, persisted independently of `resolution`.
+    techDisposition: z.enum(["needs_review", "completed_in_field"]).optional(),
   }).partial();
 
   app.patch("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
@@ -12241,6 +12250,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       patch.resolution = body.repairedInField ? "repaired_in_field" : "pending";
       patch.resolutionDecidedAt = body.repairedInField ? new Date() : null;
       patch.resolutionDecidedBy = body.repairedInField ? userId : null;
+      // Mirror tech intent unless caller is explicitly setting it below.
+      if (body.techDisposition === undefined) {
+        patch.techDisposition = body.repairedInField ? "completed_in_field" : "needs_review";
+      }
+    }
+    if (body.techDisposition !== undefined) {
+      patch.techDisposition = body.techDisposition;
     }
     try {
       const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);

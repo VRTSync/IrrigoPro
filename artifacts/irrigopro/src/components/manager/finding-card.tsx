@@ -88,6 +88,19 @@ export function FindingCard({
             <h2 className="text-lg font-semibold text-gray-900 truncate" data-testid={`wizard-finding-${finding.id}-title`}>
               {displayLabel(finding, issueConfig)}
             </h2>
+            {finding.techDisposition && (
+              <Badge
+                variant="outline"
+                className={`mt-1 text-xs ${
+                  finding.techDisposition === "completed_in_field"
+                    ? "border-green-300 text-green-700 bg-green-50"
+                    : "border-amber-300 text-amber-800 bg-amber-50"
+                }`}
+                data-testid={`wizard-finding-${finding.id}-disposition`}
+              >
+                Tech: {finding.techDisposition === "completed_in_field" ? "Completed in field" : "Needs manager review"}
+              </Badge>
+            )}
           </div>
         </div>
 
