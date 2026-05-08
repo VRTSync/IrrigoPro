@@ -1,14 +1,6 @@
-import puppeteer from 'puppeteer';
-import { execSync } from 'child_process';
+import puppeteer from 'puppeteer-core';
 import type { EstimateWithItems, EstimateItem } from '@workspace/db';
-
-function getChromiumPath(): string {
-  try {
-    return execSync('which chromium').toString().trim();
-  } catch {
-    return '';
-  }
-}
+import { resolveChromiumExecutable } from './chromium-resolver';
 
 function escapeHtml(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -158,10 +150,9 @@ export function buildEstimateHtml(estimate: EstimateWithItems): string {
 
 export async function renderEstimatePdf(estimate: EstimateWithItems): Promise<Buffer> {
   const html = buildEstimateHtml(estimate);
-  const chromiumPath = getChromiumPath();
   const browser = await puppeteer.launch({
     headless: true,
-    executablePath: chromiumPath || undefined,
+    executablePath: resolveChromiumExecutable(),
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
   try {

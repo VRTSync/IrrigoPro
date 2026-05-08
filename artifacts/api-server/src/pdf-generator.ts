@@ -1,6 +1,6 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+import { resolveChromiumExecutable } from './chromium-resolver';
 import { readFileSync, existsSync } from 'fs';
-import { execSync } from 'child_process';
 import { join, basename } from 'path';
 import type { PdfViewModel, PdfBrandColors } from './pdf-view-model';
 import { DEFAULT_BRAND_COLORS } from './pdf-view-model';
@@ -128,21 +128,14 @@ async function preloadPhotos(urls: string[], port: number): Promise<string[]> {
 }
 
 function getChromiumPath(): string {
-  try {
-    const chromiumPath = execSync('which chromium').toString().trim();
-    return chromiumPath;
-  } catch {
-    console.warn('System chromium not found, using bundled Chrome');
-    return '';
-  }
+  return resolveChromiumExecutable();
 }
 
 export class PDFGenerator {
   static async generateInvoicePDF(invoiceHtmlPath: string): Promise<Buffer> {
-    const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
-      executablePath: chromiumPath || undefined,
+      executablePath: getChromiumPath(),
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
@@ -162,10 +155,9 @@ export class PDFGenerator {
   }
 
   static async generateInvoicePDFFromUrl(url: string): Promise<Buffer> {
-    const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
-      executablePath: chromiumPath || undefined,
+      executablePath: getChromiumPath(),
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
@@ -207,10 +199,9 @@ export class PDFGenerator {
       bsPhotoMaps.push(result);
     }
 
-    const chromiumPath = getChromiumPath();
     const browser = await puppeteer.launch({
       headless: true,
-      executablePath: chromiumPath || undefined,
+      executablePath: getChromiumPath(),
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
