@@ -109,7 +109,6 @@ const statusColors: Record<string, string> = {
   submitted: "bg-yellow-100 text-yellow-800",
   pending_manager_review: "bg-orange-100 text-orange-800",
   approved_passed_to_billing: "bg-teal-100 text-teal-800",
-  approved: "bg-green-100 text-green-800",
   billed: "bg-purple-100 text-purple-800",
 };
 
@@ -482,7 +481,7 @@ export function CompletedWorkDetailModal({
           <DialogHeader className="flex-shrink-0 p-0">
             <div
               className={`px-5 py-4 border-b ${
-                status === "work_completed" || status === "approved" || status === "billed"
+                status === "work_completed" || status === "billed"
                   ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-100"
                   : "bg-gradient-to-r from-blue-50 to-slate-50 border-gray-100"
               }`}
@@ -491,12 +490,12 @@ export function CompletedWorkDetailModal({
                 <div className="flex items-center gap-3 min-w-0">
                   <div
                     className={`p-2.5 rounded-xl flex-shrink-0 ${
-                      status === "work_completed" || status === "approved" || status === "billed"
+                      status === "work_completed" || status === "billed"
                         ? "bg-green-100"
                         : "bg-blue-100"
                     }`}
                   >
-                    {status === "work_completed" || status === "approved" || status === "billed" ? (
+                    {status === "work_completed" || status === "billed" ? (
                       <CheckCircle className="w-5 h-5 text-green-600" />
                     ) : (
                       <FileText className="w-5 h-5 text-blue-600" />

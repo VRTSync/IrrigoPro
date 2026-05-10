@@ -130,7 +130,7 @@ export default function FieldTechDashboard() {
                 </div>
                 <div className="flex justify-between text-xs sm:text-sm">
                   <span className="text-gray-600">Approved:</span>
-                  <span className="font-medium">{billingSheets?.filter((bs: any) => bs.status === 'approved' || bs.status === 'billed').length || 0}</span>
+                  <span className="font-medium">{billingSheets?.filter((bs: any) => bs.status === 'billed').length || 0}</span>
                 </div>
               </div>
               <div className="flex gap-2">

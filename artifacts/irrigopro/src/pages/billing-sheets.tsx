@@ -143,14 +143,14 @@ export default function BillingSheets() {
   const isBilledSheet = (sheet: BillingSheet) => sheet.status === 'billed' || !!sheet.invoiceId;
 
   // Active: draft (user's own) + submitted + pending_manager_review
-  // Completed: approved_passed_to_billing + approved (not billed)
+  // Completed: approved_passed_to_billing (not billed)
   // Billed: status === 'billed' or has invoiceId
   const activeSheets = scopedSheets?.filter(sheet => {
     if (sheet.status === 'draft') return sheet.technicianId === currentUser?.id;
     return sheet.status === 'submitted' || sheet.status === 'pending_manager_review';
   }) || [];
   const completedSheets = scopedSheets?.filter(sheet =>
-    (sheet.status === 'approved_passed_to_billing' || sheet.status === 'approved') && !isBilledSheet(sheet)
+    sheet.status === 'approved_passed_to_billing' && !isBilledSheet(sheet)
   ) || [];
   const billedSheets = scopedSheets?.filter(sheet => isBilledSheet(sheet)) || [];
 
@@ -172,8 +172,6 @@ export default function BillingSheets() {
         return <Badge className="bg-orange-100 text-orange-800">Pending Manager Review</Badge>;
       case 'approved_passed_to_billing':
         return <Badge className="bg-teal-100 text-teal-800">Approved / Passed to Billing</Badge>;
-      case 'approved':
-        return <Badge className="bg-green-100 text-green-800">Approved</Badge>;
       case 'billed':
         return <Badge className="bg-purple-100 text-purple-800">Billed</Badge>;
       default:
@@ -406,7 +404,7 @@ export default function BillingSheets() {
           />
           <MetricTile
             label="Approved"
-            value={submittedSheets.filter(s => s.status === 'approved' || s.status === 'billed').length}
+            value={submittedSheets.filter(s => s.status === 'billed').length}
             icon={Check}
             variant="success"
             testId="metric-approved"
