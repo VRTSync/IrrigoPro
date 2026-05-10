@@ -367,6 +367,7 @@ export const estimates = pgTable("estimates", {
   projectAddress: text("project_address"),
   locationNotes: text("location_notes"), // Additional location details
   accessInstructions: text("access_instructions"), // How to access the property
+  workDescription: text("work_description"), // Free-form scope of work captured in the estimate wizard
   createdBy: text("created_by").notNull().default("Irrigation Manager"), // Who created the estimate
   createdByUserId: integer("created_by_user_id").references(() => users.id), // User who created
   estimateDate: timestamp("estimate_date").defaultNow().notNull(), // Date of estimate creation

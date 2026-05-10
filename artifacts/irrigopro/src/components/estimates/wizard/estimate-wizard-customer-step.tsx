@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Form } from "@/components/ui/form";
@@ -45,6 +46,7 @@ export interface CustomerStepValue {
   useDifferentAddress: boolean;
   locationNotes: string;
   accessInstructions: string;
+  workDescription: string;
   workLocation: WorkLocation | null;
   controllerLetter: string | null;
   zoneNumber: number | null;
@@ -361,6 +363,24 @@ export function EstimateWizardCustomerStep({
               propertyAcres={customerToBoundary(value.customer)?.areaAcres ?? null}
             />
           </Form>
+
+          <div className="space-y-2">
+            <Label htmlFor="wizard-work-description" className="text-sm">
+              Work Description
+            </Label>
+            <Textarea
+              id="wizard-work-description"
+              value={value.workDescription}
+              onChange={(e) => onChange({ ...value, workDescription: e.target.value })}
+              placeholder="Describe the work to be performed"
+              rows={4}
+              className="focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+              data-testid="wizard-work-description"
+            />
+            <p className="text-xs text-gray-500">
+              Optional — a short summary of the scope of work for this estimate.
+            </p>
+          </div>
         </CardContent>
       </Card>
       )}

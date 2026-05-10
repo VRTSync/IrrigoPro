@@ -23,6 +23,7 @@ interface EstimateWizardReviewStepProps {
   customerPhone: string;
   projectName: string;
   projectAddress: string;
+  workDescription?: string;
   workLocation: { lat: number; lng: number; address?: string } | null;
   controllerLetter: string | null;
   zoneNumber: number | null;
@@ -64,6 +65,7 @@ export function EstimateWizardReviewStep({
   customerPhone,
   projectName,
   projectAddress,
+  workDescription,
   workLocation,
   controllerLetter,
   zoneNumber,
@@ -153,6 +155,12 @@ export function EstimateWizardReviewStep({
             {locationNotes && <div><span className="text-gray-500">Location notes: </span>{locationNotes}</div>}
             {accessInstructions && (
               <div><span className="text-gray-500">Access: </span>{accessInstructions}</div>
+            )}
+            {workDescription && workDescription.trim() && (
+              <div data-testid="wizard-review-work-description">
+                <div className="text-gray-500">Work description:</div>
+                <div className="whitespace-pre-wrap mt-0.5">{workDescription}</div>
+              </div>
             )}
           </div>
         </CardContent>

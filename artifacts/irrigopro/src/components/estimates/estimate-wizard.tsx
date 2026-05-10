@@ -43,6 +43,7 @@ interface EstimateApiPayloadEstimate {
   projectAddress: string;
   locationNotes: string;
   accessInstructions: string;
+  workDescription: string;
   status: string;
   partsSubtotal: string;
   laborSubtotal: string;
@@ -168,6 +169,7 @@ interface DraftSnapshot {
   projectAddress: string;
   locationNotes: string;
   accessInstructions: string;
+  workDescription: string;
   laborRate: number;
   items: Array<Pick<WizardLineItem, "partId" | "partName" | "partPrice" | "quantity" | "laborHours" | "description">>;
   photos: string[];
@@ -213,6 +215,7 @@ function snapshot(
     projectAddress: cs.projectAddress.trim(),
     locationNotes: cs.locationNotes.trim(),
     accessInstructions: cs.accessInstructions.trim(),
+    workDescription: cs.workDescription.trim(),
     laborRate,
     items: items.map((it) => ({
       partId: it.partId,
@@ -245,6 +248,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     useDifferentAddress: false,
     locationNotes: "",
     accessInstructions: "",
+    workDescription: "",
     workLocation: null,
     controllerLetter: null,
     zoneNumber: null,
@@ -281,6 +285,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
           useDifferentAddress: false,
           locationNotes: "",
           accessInstructions: "",
+          workDescription: "",
           workLocation: null,
           controllerLetter: null,
           zoneNumber: null,
@@ -380,6 +385,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       useDifferentAddress: usingDifferent,
       locationNotes: existing.locationNotes ?? "",
       accessInstructions: existing.accessInstructions ?? "",
+      workDescription: existing.workDescription ?? "",
       workLocation: wl,
       controllerLetter: existing.controllerLetter ?? null,
       zoneNumber: existing.zoneNumber ?? null,
@@ -598,6 +604,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       projectAddress: customerStep.projectAddress.trim() || "",
       locationNotes: customerStep.locationNotes.trim() || "",
       accessInstructions: customerStep.accessInstructions.trim() || "",
+      workDescription: customerStep.workDescription.trim() || "",
       status: existing?.status ?? "pending",
       // Slice 10c — Save as draft sets internalStatus="draft". For
       // edit/submit we round-trip the existing review status; for new
@@ -852,6 +859,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
                 customerPhone={customerStep.customerPhone}
                 projectName={customerStep.projectName}
                 projectAddress={customerStep.projectAddress}
+                workDescription={customerStep.workDescription}
                 workLocation={customerStep.workLocation}
                 controllerLetter={customerStep.controllerLetter}
                 zoneNumber={customerStep.zoneNumber}
