@@ -268,14 +268,14 @@ export default function Navigation() {
       {/* Desktop Navigation - Top */}
       <nav className="hidden lg:block bg-white shadow-sm border-b border-transparent relative after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/40 after:to-transparent">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex justify-between items-center h-20">
             {/* Logo */}
             <div className="flex-shrink-0">
               <Link href="/">
                 <img
                   src={irrigoProLogo}
                   alt="IrrigoPro"
-                  className="h-9 w-auto cursor-pointer transition-opacity duration-200 hover:opacity-80"
+                  className="h-14 w-auto cursor-pointer transition-opacity duration-200 hover:opacity-80"
                 />
               </Link>
             </div>
@@ -428,13 +428,13 @@ export default function Navigation() {
       <div className="lg:hidden m-0 p-0">
         {/* Top Bar with Logo and Notifications */}
         <div className="bg-white shadow-sm border-b border-gray-200 m-0 p-0">
-          <div className="flex justify-between items-center h-16 px-4">
+          <div className="flex justify-between items-center h-20 px-4">
             {/* Logo */}
             <div className="flex items-center">
               <img
                 src={irrigoProLogo}
                 alt="IrrigoPro"
-                className="h-9 w-auto"
+                className="h-14 w-auto"
               />
             </div>
 

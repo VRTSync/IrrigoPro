@@ -368,13 +368,13 @@ function DesktopSidebar({
           <img
             src={irrigoProMark}
             alt="IrrigoPro"
-            className="h-8 w-8 object-contain shrink-0 hidden group-data-[collapsible=icon]:block"
+            className="h-12 w-12 object-contain shrink-0 hidden group-data-[collapsible=icon]:block"
           />
           {/* Full horizontal lockup when sidebar is expanded */}
           <img
             src={irrigoProLogo}
             alt="IrrigoPro"
-            className="h-8 w-auto object-contain shrink-0 group-data-[collapsible=icon]:hidden"
+            className="h-12 w-auto object-contain shrink-0 group-data-[collapsible=icon]:hidden"
           />
         </div>
       </SidebarHeader>
