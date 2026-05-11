@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage, WetCheckHasInvoicedRecordsError, ControllerHasZonesError, BillingSheetInvoicedError } from "../storage";
 import { classifyWetCheckPhotoError as _classifyWetCheckPhotoError, logPhotoErrorContext as _logPhotoErrorContext } from "./wet-check-photo-errors";
+import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -7641,8 +7642,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
               invoiceId: e.invoiceId,
             });
           } else {
-            console.error(e);
-            results.push({ id, status: 'error', message: e?.message ?? 'Failed' });
+            // SQL-leak guard (Task #502): never echo Drizzle's
+            // "Failed query: ..." string in the per-row outcome.
+            // classifyAndLog logs full pg/cause context server-side
+            // and returns a curated tech-friendly fallback message.
+            const cls = classifyAndLog(req, e, {
+              op: 'bulkDeleteBillingSheet',
+              ctx: { id },
+              fallbackMessage: "Couldn't delete — please retry",
+            });
+            results.push({ id, status: 'error', message: cls.message });
           }
         }
       }
@@ -10963,7 +10972,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const rows = await storage.listIssueTypeConfigs(cid);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listIssueTypeConfigs",
+        ctx: { cid },
+        fallbackMessage: "Couldn't load issue types — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // ─── Admin CRUD for issue type configs (Task #268, #277, #336) ───────────
@@ -11009,7 +11025,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const rows = await storage.listAllIssueTypeConfigs(cid);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listAllIssueTypeConfigs",
+        ctx: { cid },
+        fallbackMessage: "Couldn't load issue types — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   app.post("/api/admin/issue-types", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
@@ -11023,12 +11046,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const row = await storage.createIssueTypeConfig(cid, parsed.data);
       res.status(201).json(row);
     } catch (e: any) {
-      const msg = String(e?.message ?? "");
-      if (e?.code === "23505" || /unique/i.test(msg)) {
-        res.status(409).json({ message: "An issue type with that key already exists for this company." });
-        return;
-      }
-      res.status(500).json({ message: msg || "Failed" });
+      const { status, message } = classifyAndLog(req, e, {
+        op: "createIssueTypeConfig",
+        ctx: { cid },
+        fallbackMessage: "Couldn't create issue type — please retry",
+        recognized: [
+          {
+            test: (err, raw) => err?.code === "23505" || /unique/i.test(raw),
+            status: 409,
+            message: "An issue type with that key already exists for this company.",
+          },
+        ],
+      });
+      res.status(status).json({ message });
     }
   });
 
@@ -11047,12 +11077,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!row) { res.status(404).json({ message: "Not found" }); return; }
       res.json(row);
     } catch (e: any) {
-      const msg = String(e?.message ?? "");
-      if (e?.code === "23505" || /unique/i.test(msg)) {
-        res.status(409).json({ message: "An issue type with that key already exists for this company." });
-        return;
-      }
-      res.status(500).json({ message: msg || "Failed" });
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateIssueTypeConfig",
+        ctx: { cid, id },
+        fallbackMessage: "Couldn't update issue type — please retry",
+        recognized: [
+          {
+            test: (err, raw) => err?.code === "23505" || /unique/i.test(raw),
+            status: 409,
+            message: "An issue type with that key already exists for this company.",
+          },
+        ],
+      });
+      res.status(status).json({ message });
     }
   });
 
@@ -11065,7 +11102,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const row = await storage.updateIssueTypeConfig(cid, id, { isActive: false });
       if (!row) { res.status(404).json({ message: "Not found" }); return; }
       res.json(row);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "deactivateIssueTypeConfig",
+        ctx: { cid, id },
+        fallbackMessage: "Couldn't deactivate issue type — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const issueTypeReorderSchema = z.object({
@@ -11081,7 +11125,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const rows = await storage.reorderIssueTypeConfigs(cid, parsed.data.orderedIds);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "reorderIssueTypeConfigs",
+        ctx: { cid },
+        fallbackMessage: "Couldn't reorder issue types — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   app.get("/api/wet-checks/parts/by-issue", requireAuthentication, async (req, res) => {
@@ -11092,7 +11143,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const result = await storage.getPartsByIssueType(cid, issueType, customerId);
       res.json(result);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "getPartsByIssueType",
+        ctx: { cid, issueType, customerId },
+        fallbackMessage: "Couldn't load parts for that issue — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   app.get("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
@@ -11116,7 +11174,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           .filter(r => (r.branchName ?? "") === "")
           .map(r => ({ ...r, branchName: null })),
       );
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listPropertyControllers",
+        ctx: { cid, customerId },
+        fallbackMessage: "Couldn't load controllers — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // PATCH /api/properties/:customerId/controllers — body identifies the
@@ -11163,7 +11228,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Preserve pre-Task-#320 wire shape: customer-level bucket is
       // exposed as branchName: null even though it's stored as ''.
       res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "patchPropertyController",
+        ctx: { cid, customerId, controllerLetter },
+        fallbackMessage: "Couldn't save controller — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // Manager inbox aggregate: submitted wet checks with per-row issueGroup
@@ -11175,7 +11247,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const rows = await storage.listWetChecksPendingReview(cid);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listWetChecksPendingReview",
+        ctx: { cid },
+        fallbackMessage: "Couldn't load pending review — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   app.get("/api/wet-checks", requireAuthentication, async (req, res) => {
@@ -11186,7 +11265,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (req.query.mine === "1" && req.authenticatedUserId) opts.technicianId = req.authenticatedUserId;
       const rows = await storage.listWetChecks(cid, opts);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listWetChecks",
+        ctx: { cid },
+        fallbackMessage: "Couldn't load wet checks — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // Company-admin-only company-wide management list. Returns every wet
@@ -11207,7 +11293,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (req.query.status) opts.status = String(req.query.status);
       const rows = await storage.listWetChecksForAdmin(cid, opts);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listWetChecksForAdmin",
+        ctx: { cid },
+        fallbackMessage: "Couldn't load wet checks — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // Bulk hard delete — company_admin only. Each id is processed
@@ -11259,9 +11352,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             blockers: e.blockers,
           });
         } else {
-          const msg = e?.message ?? 'Failed';
-          const status: Outcome['status'] = /not found for company/.test(msg) ? 'not_found' : 'error';
-          results.push({ id, status, message: msg });
+          const raw = typeof e?.message === 'string' ? e.message : '';
+          if (/not found for company/.test(raw)) {
+            results.push({ id, status: 'not_found', message: 'Not found' });
+          } else {
+            // SQL-leak guard (Task #502): never echo Drizzle's
+            // "Failed query: ..." string in the per-row outcome.
+            const cls = classifyAndLog(req, e, {
+              op: 'bulkDeleteWetCheck',
+              ctx: { cid, id },
+              fallbackMessage: "Couldn't delete — please retry",
+            });
+            results.push({ id, status: 'error', message: cls.message });
+          }
         }
       }
     }
@@ -11301,9 +11404,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
         return;
       }
-      const msg = e?.message ?? "Failed";
-      const status = /not found for company/.test(msg) ? 404 : 500;
-      res.status(status).json({ message: msg });
+      const { status, message } = classifyAndLog(req, e, {
+        op: "deleteWetCheck",
+        ctx: { cid, id },
+        fallbackMessage: "Couldn't delete wet check — please retry",
+        recognized: [
+          { test: (_e, raw) => /not found for company/.test(raw), status: 404, message: "Not found" },
+        ],
+      });
+      res.status(status).json({ message });
     }
   });
 
@@ -11313,7 +11422,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const wc = await storage.getWetCheck(parseInt(req.params.id), cid);
       if (!wc) { res.status(404).json({ message: "Not found" }); return; }
       res.json(wc);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "getWetCheck",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Couldn't load wet check — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // numControllers is intentionally NOT accepted from the client — the
@@ -11366,7 +11482,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         clientId: body.clientId ?? null,
       });
       res.status(201).json(wc);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "createWetCheck",
+        ctx: { cid, customerId: body.customerId },
+        fallbackMessage: "Couldn't start wet check — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const wetCheckPatchBody = z.object({
@@ -11384,7 +11507,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const updated = await storage.updateWetCheck(parseInt(req.params.id), cid, parsed.data);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateWetCheck",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Couldn't save wet check — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const submitBody = z.object({ clientId: z.string().uuid().nullish() }).partial();
@@ -11409,9 +11539,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         pendingCount: result.pendingCount,
       });
     } catch (e: any) {
-      const msg = e?.message ?? "Failed";
-      const status = /zero zones checked/.test(msg) ? 400 : 500;
-      res.status(status).json({ message: msg });
+      const { status, message } = classifyAndLog(req, e, {
+        op: "submitWetCheck",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Couldn't submit wet check — please retry",
+        recognized: [
+          { test: (_e, raw) => /zero zones checked/.test(raw), status: 400, message: (_e, raw) => raw },
+        ],
+      });
+      res.status(status).json({ message });
     }
   });
 
@@ -11436,7 +11572,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const preview = await storage.previewWetCheckSubmit(parseInt(req.params.id), cid);
       if (!preview) { res.status(404).json({ message: "Not found" }); return; }
       res.json(preview);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "previewWetCheckSubmit",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackMessage: "Couldn't preview submit — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const zoneRecordBody = z.object({
@@ -11491,7 +11634,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         clientId: body.clientId ?? null,
       });
       res.status(201).json(created);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "upsertWetCheckZoneRecord",
+        ctx: { cid, wetCheckId: req.params.id, controllerLetter: body.controllerLetter, zoneNumber: body.zoneNumber },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save zone — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // PATCH zone-record: strict allow-list — protected linkage fields
@@ -11549,7 +11700,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const updated = await storage.updateWetCheckZoneRecord(parseInt(req.params.id), cid, patch);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateWetCheckZoneRecord",
+        ctx: { cid, zoneRecordId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save zone — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const findingCreateBody = z.object({
@@ -11605,7 +11764,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         clientId: body.clientId ?? null,
       });
       res.status(201).json(created);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "createWetCheckFinding",
+        ctx: { cid, zoneRecordId: req.params.id, issueType: body.issueType },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save finding — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   app.patch("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
@@ -11620,7 +11787,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       wcStatus = await storage.getWetCheckStatusForFinding(findingId, cid);
     } catch (e: any) {
-      res.status(500).json({ message: e?.message ?? "Failed" });
+      const { status, message } = classifyAndLog(req, e, {
+        op: "getWetCheckStatusForFinding",
+        ctx: { cid, findingId },
+        fallbackMessage: "Couldn't load finding — please retry",
+      });
+      res.status(status).json({ message });
       return;
     }
     if (wcStatus == null) { res.status(404).json({ message: "Not found" }); return; }
@@ -11641,7 +11813,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "updateWetCheckFinding",
+        ctx: { cid, findingId },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't save finding — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   app.delete("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
@@ -11650,7 +11830,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const ok = await storage.deleteWetCheckFinding(parseInt(req.params.id), cid);
       res.json({ ok });
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "deleteWetCheckFinding",
+        ctx: { cid, findingId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't delete finding — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const photoBody = z.object({
@@ -11674,6 +11862,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // the whole 10k-line routes file.
   const classifyWetCheckPhotoError = _classifyWetCheckPhotoError;
   const logPhotoErrorContext = _logPhotoErrorContext;
+  // Task #502 — Generalized SQL-leak guard for the rest of the
+  // wet-check / finding / zone-record / submit handlers.
+  const classifyAndLog = _classifyAndLog;
 
   app.post("/api/wet-checks/:id/photos", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
@@ -11779,7 +11970,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const updated = await storage.approveWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name });
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "approveWetCheck",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't approve wet check — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const findingRouteBody = z.object({
@@ -11799,7 +11998,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const updated = await storage.routeWetCheckFinding(parseInt(req.params.id), cid, parsed.data.resolution, { id: me.id, name: me.name });
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "routeWetCheckFinding",
+        ctx: { cid, findingId: req.params.id, resolution: parsed.data.resolution },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't route finding — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const convertBody = z.object({
@@ -11824,7 +12031,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!me) { res.status(401).json({ message: "User not found" }); return; }
       const result = await storage.convertWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name }, scheduledDates);
       res.json(result);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "convertWetCheck",
+        ctx: { cid, wetCheckId: req.params.id },
+        fallbackStatus: 400,
+        fallbackMessage: "Couldn't convert wet check — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // ── Admin: per-customer controllers & per-controller zones management ────
@@ -11847,7 +12062,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const rows = await storage.listCustomerControllersOverview(cid);
       res.json(rows);
-    } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listCustomerControllersOverview",
+        ctx: { cid },
+        fallbackMessage: "Couldn't load controllers — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const setControllerCountBody = z.object({
@@ -11887,9 +12109,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
         return;
       }
-      const msg = e?.message ?? "Failed";
-      const status = /not found/i.test(msg) ? 404 : /must be between/i.test(msg) ? 400 : 500;
-      res.status(status).json({ message: msg });
+      const { status, message } = classifyAndLog(req, e, {
+        op: "setCustomerControllerCount",
+        ctx: { cid, customerId, count: parsed.data.count },
+        fallbackMessage: "Couldn't update controller count — please retry",
+        recognized: [
+          { test: (_e, raw) => /not found/i.test(raw), status: 404, message: "Not found" },
+          { test: (_e, raw) => /must be between/i.test(raw), status: 400, message: (_e, raw) => raw },
+        ],
+      });
+      res.status(status).json({ message });
     }
   });
 
@@ -11921,7 +12150,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         if (!updated) { res.status(404).json({ message: "Controller not found" }); return; }
         // Preserve pre-Task-#320 wire shape: customer-level → null.
         res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
-      } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
+      } catch (e: any) {
+        const { status, message } = classifyAndLog(req, e, {
+          op: "updatePropertyControllerZones",
+          ctx: { cid, customerId, letter },
+          fallbackMessage: "Couldn't save zones — please retry",
+        });
+        res.status(status).json({ message });
+      }
     },
   );
 
