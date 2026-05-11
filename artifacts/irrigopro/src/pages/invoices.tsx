@@ -23,6 +23,24 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 import { InvoiceAuditModal } from "@/components/billing/invoice-audit-modal";
+import { exportSingleInvoiceCsv } from "@/lib/invoice-csv";
+import { safeGet } from "@/utils/safeStorage";
+
+const CSV_EXPORT_ROLES = new Set([
+  "company_admin",
+  "billing_manager",
+]);
+
+function getCurrentUserRole(): string | null {
+  try {
+    const raw = safeGet("user");
+    if (!raw) return null;
+    const u = JSON.parse(raw);
+    return typeof u?.role === "string" ? u.role : null;
+  } catch {
+    return null;
+  }
+}
 
 interface Invoice {
   id: number;
@@ -169,6 +187,25 @@ export default function InvoicesPage() {
   const [monthFilter, setMonthFilter] = useState("all");
   const [pdfModal, setPdfModal] = useState<{ id: number; number: string; email: string } | null>(null);
   const [auditInvoice, setAuditInvoice] = useState<{ id: number; label: string; total: string } | null>(null);
+  const [exportingInvoiceId, setExportingInvoiceId] = useState<number | null>(null);
+  const userRole = getCurrentUserRole();
+  const canExportSingleCsv = !!userRole && CSV_EXPORT_ROLES.has(userRole);
+
+  const handleExportSingleCsv = async (invoice: Invoice) => {
+    if (!canExportSingleCsv) return;
+    setExportingInvoiceId(invoice.id);
+    try {
+      await exportSingleInvoiceCsv(invoice);
+    } catch (err) {
+      toast({
+        title: "Export failed",
+        description: err instanceof Error ? err.message : "Unable to export CSV",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingInvoiceId(null);
+    }
+  };
 
   const { data: invoices = [], isLoading, error } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices"],
@@ -482,6 +519,23 @@ export default function InvoicesPage() {
                             <FileText className="w-3.5 h-3.5 mr-1" />
                             View PDF
                           </Button>
+                          {canExportSingleCsv && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 text-xs"
+                              disabled={exportingInvoiceId === invoice.id}
+                              onClick={() => handleExportSingleCsv(invoice)}
+                              data-testid={`button-export-invoice-csv-${invoice.id}`}
+                            >
+                              {exportingInvoiceId === invoice.id ? (
+                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <Download className="w-3.5 h-3.5 mr-1" />
+                              )}
+                              Export CSV
+                            </Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -501,6 +555,15 @@ export default function InvoicesPage() {
           customerEmail={pdfModal.email}
           open={!!pdfModal}
           onOpenChange={(open) => { if (!open) setPdfModal(null); }}
+          onExportCsv={
+            canExportSingleCsv
+              ? async () => {
+                  const inv = invoices.find((i) => i.id === pdfModal.id);
+                  if (inv) await handleExportSingleCsv(inv);
+                }
+              : undefined
+          }
+          isExportingCsv={exportingInvoiceId === pdfModal.id}
         />
       )}
 

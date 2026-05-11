@@ -23,6 +23,8 @@ interface InvoicePdfPreviewModalProps {
   customerEmail: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onExportCsv?: () => void | Promise<void>;
+  isExportingCsv?: boolean;
 }
 
 interface InvoicePdf {
@@ -65,6 +67,8 @@ export function InvoicePdfPreviewModal({
   customerEmail,
   open,
   onOpenChange,
+  onExportCsv,
+  isExportingCsv,
 }: InvoicePdfPreviewModalProps) {
   const { toast } = useToast();
   const [showEmailConfirm, setShowEmailConfirm] = useState(false);
@@ -194,6 +198,25 @@ export function InvoicePdfPreviewModal({
           </DialogHeader>
 
           <div className="py-6">
+            {onExportCsv && (
+              <div className="flex justify-end mb-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onExportCsv()}
+                  disabled={!!isExportingCsv}
+                  data-testid="button-export-invoice-csv-modal"
+                >
+                  {isExportingCsv ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 mr-2" />
+                  )}
+                  Export CSV
+                </Button>
+              </div>
+            )}
+
             {isLoading && (
               <div className="flex items-center justify-center">
                 <div className="text-center">
