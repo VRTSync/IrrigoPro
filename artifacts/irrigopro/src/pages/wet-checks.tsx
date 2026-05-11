@@ -2103,8 +2103,8 @@ function FindingSheet({
   };
 
   const renderPartButton = (p: Part) => {
-    const eff = effectivePart();
-    const isSel = (selectedPart?.id ?? eff.id) === p.id;
+    const effId = selectedPart?.id ?? partFromEdit?.id ?? null;
+    const isSel = effId === p.id;
     return (
       <button
         key={p.id}
