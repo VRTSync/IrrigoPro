@@ -123,6 +123,12 @@ export function buildEstimateHtml(estimate: EstimateWithItems): string {
 
   ${pinSection}
 
+  ${estimate.workDescription ? `
+  <section class="card">
+    <h2>Work Description</h2>
+    <div style="white-space: pre-wrap;">${escapeHtml(estimate.workDescription)}</div>
+  </section>` : ''}
+
   <section class="card">
     <h2>Line Items</h2>
     <table>

@@ -5265,6 +5265,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       estimateDate: new Date(estimateWithItems.estimateDate).toLocaleDateString(),
       createdBy: estimateWithItems.createdBy,
       companyId: estimateWithItems.companyId!,
+      workDescription: estimateWithItems.workDescription ?? null,
       items: items.map(item => ({
         description: item.description || item.partName,
         partName: item.partName,

@@ -22,6 +22,7 @@ export interface EstimateEmailData {
   estimateDate: string;
   createdBy: string;
   companyId: number;
+  workDescription?: string | null;
   items?: Array<{
     description: string;
     partName: string;
@@ -99,6 +100,15 @@ export class EmailService {
       console.error('Failed to send estimate approval email:', error);
       throw error;
     }
+  }
+
+  private static escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private static getCompanyLogoUrl(logoPath: string): string {
@@ -227,6 +237,13 @@ export class EmailService {
       </table>
     </div>
 
+    ${data.workDescription ? `
+    <div style="margin: 20px 0;">
+      <h3 style="color: #374151; margin-bottom: 16px;">Work Description</h3>
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px 20px; color: #1f2937; white-space: pre-wrap; font-size: 14px; line-height: 1.5;">${this.escapeHtml(data.workDescription)}</div>
+    </div>
+    ` : ''}
+
     ${itemsHTML ? `
     <div style="margin: 20px 0;">
       <h3 style="color: #374151; margin-bottom: 16px;">Line Items</h3>
@@ -303,6 +320,10 @@ ${data.controllerLetter || data.zoneNumber ? `- Controller/Zone: ${data.controll
 - Date: ${data.estimateDate}
 - Prepared by: ${data.createdBy}
 
+${data.workDescription ? `
+WORK DESCRIPTION:
+${data.workDescription}
+` : ''}
 ${itemsText ? `
 LINE ITEMS:
 ${itemsText}
