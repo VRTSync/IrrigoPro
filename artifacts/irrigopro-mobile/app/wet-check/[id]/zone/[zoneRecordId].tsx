@@ -23,6 +23,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { ApiError, apiRequest } from "@/lib/api";
 import {
+  captureZonePhoto,
+  deleteLocalPhoto,
+  ensureCameraPermission,
+  type LocalPhoto,
+  uploadLocalPhotoToStorage,
+} from "@/lib/photo-upload";
+import {
   WetCheckConflictError,
   wetCheckDetailQueryKey,
   wetCheckIssueTypesQueryKey,
@@ -172,6 +179,18 @@ export default function ZoneDetailScreen() {
   // language).
   const [statusError, setStatusError] = useState<string | null>(null);
   const [findingError, setFindingError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  // Local-first photo state. Each pending entry is a captured-but-not-yet-
+  // uploaded photo we've already written into the docs directory; rendering
+  // merges these with the server's photo list so the user sees the new
+  // thumbnail instantly. On a successful upload we delete the local file
+  // and let the server query refetch.
+  type PendingPhoto = LocalPhoto & {
+    status: "uploading" | "error";
+    error?: string;
+  };
+  const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
 
   const detailQuery = useQuery({
     queryKey:
@@ -366,6 +385,196 @@ export default function ZoneDetailScreen() {
       if (m != null) setFindingError(m);
     },
   });
+
+  // ── Photo upload (POST sign → PUT → finalize → POST metadata) ──
+  const uploadPhotoMutation = useMutation({
+    mutationKey:
+      wetCheckId != null
+        ? wetCheckMutationKey(wetCheckId, "photo-add")
+        : ["wet-check", "mutation", -1, "photo-add"],
+    mutationFn: async (pending: PendingPhoto): Promise<WetCheckPhoto> => {
+      if (wetCheckId == null) throw new Error("Missing wet check id");
+      const url = await uploadLocalPhotoToStorage(pending.localUri);
+      // Re-use the shared mutation helper so the M8 offline queue can
+      // wrap the metadata POST later. Pass our own clientId (the same one
+      // anchoring the local file) so a retry is server-deduped.
+      const created = await wetCheckMutate<
+        WetCheckPhoto,
+        {
+          url: string;
+          takenAt: string;
+          zoneRecordId: number | null;
+          findingId: number | null;
+          clientId: string;
+        }
+      >({
+        path: `/api/wet-checks/${wetCheckId}/photos`,
+        method: "POST",
+        withClientId: false,
+        body: {
+          url,
+          takenAt: pending.takenAt,
+          zoneRecordId: pending.zoneRecordId,
+          findingId: pending.findingId,
+          clientId: pending.clientId,
+        },
+      });
+      return created;
+    },
+    onSuccess: (_created, pending) => {
+      setPhotoError(null);
+      deleteLocalPhoto(pending.localUri);
+      setPendingPhotos((prev) =>
+        prev.filter((p) => p.clientId !== pending.clientId),
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => undefined,
+      );
+      if (wetCheckId != null) {
+        queryClient.invalidateQueries({
+          queryKey: wetCheckDetailQueryKey(wetCheckId),
+        });
+      }
+    },
+    onError: (err, pending) => {
+      const m = errorMessage(err);
+      setPendingPhotos((prev) =>
+        prev.map((p) =>
+          p.clientId === pending.clientId
+            ? { ...p, status: "error", error: m ?? "Upload failed" }
+            : p,
+        ),
+      );
+      if (m != null) setPhotoError(m);
+    },
+  });
+
+  const onAddPhoto = useCallback(async () => {
+    if (wetCheckId == null || zoneRecordId == null) return;
+    if (isLocked) return;
+    setPhotoError(null);
+    const perm = await ensureCameraPermission();
+    if (perm !== "granted") {
+      setPhotoError(
+        perm === "blocked"
+          ? "Camera access is blocked. Enable it in Settings to add photos."
+          : "Camera permission is required to add photos.",
+      );
+      return;
+    }
+    let captured: LocalPhoto | null = null;
+    try {
+      captured = await captureZonePhoto({
+        wetCheckId,
+        zoneRecordId,
+        findingId: null,
+      });
+    } catch (err) {
+      const m = err instanceof Error ? err.message : "Couldn't open the camera";
+      setPhotoError(m);
+      return;
+    }
+    if (!captured) return; // user cancelled
+    const pending: PendingPhoto = { ...captured, status: "uploading" };
+    setPendingPhotos((prev) => [...prev, pending]);
+    uploadPhotoMutation.mutate(pending);
+  }, [wetCheckId, zoneRecordId, isLocked, uploadPhotoMutation]);
+
+  const onRetryPendingPhoto = useCallback(
+    (clientId: string) => {
+      setPendingPhotos((prev) =>
+        prev.map((p) =>
+          p.clientId === clientId
+            ? { ...p, status: "uploading", error: undefined }
+            : p,
+        ),
+      );
+      const target = pendingPhotos.find((p) => p.clientId === clientId);
+      if (target) {
+        uploadPhotoMutation.mutate({
+          ...target,
+          status: "uploading",
+          error: undefined,
+        });
+      }
+    },
+    [pendingPhotos, uploadPhotoMutation],
+  );
+
+  const onCancelPendingPhoto = useCallback((pending: PendingPhoto) => {
+    deleteLocalPhoto(pending.localUri);
+    setPendingPhotos((prev) =>
+      prev.filter((p) => p.clientId !== pending.clientId),
+    );
+  }, []);
+
+  // ── Delete server photo (optimistic) ──
+  const deletePhotoMutation = useMutation({
+    mutationKey:
+      wetCheckId != null
+        ? wetCheckMutationKey(wetCheckId, "photo-delete")
+        : ["wet-check", "mutation", -1, "photo-delete"],
+    mutationFn: async (photoId: number) => {
+      return wetCheckMutate<{ ok: boolean }>({
+        path: `/api/wet-checks/photos/${photoId}`,
+        method: "DELETE",
+      });
+    },
+    onMutate: async (photoId) => {
+      if (wetCheckId == null) return { previous: undefined };
+      await queryClient.cancelQueries({
+        queryKey: wetCheckDetailQueryKey(wetCheckId),
+      });
+      const previous = queryClient.getQueryData<WetCheckDetail>(
+        wetCheckDetailQueryKey(wetCheckId),
+      );
+      if (previous) {
+        queryClient.setQueryData<WetCheckDetail>(
+          wetCheckDetailQueryKey(wetCheckId),
+          {
+            ...previous,
+            photos: previous.photos.filter((p) => p.id !== photoId),
+          },
+        );
+      }
+      return { previous };
+    },
+    onSuccess: () => {
+      setPhotoError(null);
+      Haptics.selectionAsync().catch(() => undefined);
+    },
+    onError: (err, _photoId, ctx) => {
+      if (wetCheckId != null && ctx?.previous) {
+        queryClient.setQueryData(
+          wetCheckDetailQueryKey(wetCheckId),
+          ctx.previous,
+        );
+      }
+      const m = errorMessage(err);
+      if (m != null) setPhotoError(m);
+    },
+    onSettled: () => {
+      if (wetCheckId != null) {
+        queryClient.invalidateQueries({
+          queryKey: wetCheckDetailQueryKey(wetCheckId),
+        });
+      }
+    },
+  });
+
+  const onRemoveServerPhoto = useCallback(
+    (photo: WetCheckPhoto) => {
+      Alert.alert("Remove photo?", "Remove this photo from the wet check?", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => deletePhotoMutation.mutate(photo.id),
+        },
+      ]);
+    },
+    [deletePhotoMutation],
+  );
 
   const onRemoveFinding = useCallback(
     (finding: WetCheckFinding) => {
@@ -649,8 +858,18 @@ export default function ZoneDetailScreen() {
               ) : null}
             </Section>
 
-            <Section title={`Photos (${zonePhotos.length})`} colors={colors}>
-              {zonePhotos.length === 0 ? (
+            <Section
+              title={`Photos (${zonePhotos.length + pendingPhotos.length})`}
+              colors={colors}
+            >
+              {photoError ? (
+                <InlineErrorBanner
+                  colors={colors}
+                  message={photoError}
+                  onDismiss={() => setPhotoError(null)}
+                />
+              ) : null}
+              {zonePhotos.length === 0 && pendingPhotos.length === 0 ? (
                 <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                   No photos for this zone.
                 </Text>
@@ -660,6 +879,65 @@ export default function ZoneDetailScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.photoStrip}
                 >
+                  {pendingPhotos.map((p) => (
+                    <View
+                      key={`pending-${p.clientId}`}
+                      style={[
+                        styles.photoFrame,
+                        {
+                          borderColor:
+                            p.status === "error"
+                              ? colors.destructive
+                              : colors.border,
+                          borderRadius: colors.radius - 4,
+                          backgroundColor: colors.secondary,
+                        },
+                      ]}
+                    >
+                      <Image
+                        source={{ uri: p.localUri }}
+                        style={styles.photoImage}
+                        contentFit="cover"
+                        transition={120}
+                        cachePolicy="memory"
+                        accessibilityLabel="Pending wet check photo"
+                      />
+                      <View style={styles.photoOverlay} pointerEvents="box-none">
+                        {p.status === "uploading" ? (
+                          <View style={styles.photoOverlayCenter} pointerEvents="none">
+                            <ActivityIndicator color="#ffffff" />
+                          </View>
+                        ) : (
+                          <View style={styles.photoErrorOverlay}>
+                            <Pressable
+                              onPress={() => onRetryPendingPhoto(p.clientId)}
+                              accessibilityRole="button"
+                              accessibilityLabel="Retry photo upload"
+                              style={({ pressed }) => [
+                                styles.photoOverlayButton,
+                                { opacity: pressed ? 0.85 : 1 },
+                              ]}
+                            >
+                              <Feather name="refresh-cw" size={14} color="#ffffff" />
+                              <Text style={styles.photoOverlayButtonText}>Retry</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => onCancelPendingPhoto(p)}
+                              accessibilityRole="button"
+                              accessibilityLabel="Discard photo"
+                              hitSlop={6}
+                              style={({ pressed }) => [
+                                styles.photoOverlayDismiss,
+                                { opacity: pressed ? 0.7 : 1 },
+                              ]}
+                            >
+                              <Feather name="x" size={14} color="#ffffff" />
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  ))}
                   {zonePhotos.map((p) => (
                     <View
                       key={p.id}
@@ -680,10 +958,53 @@ export default function ZoneDetailScreen() {
                         cachePolicy="memory-disk"
                         accessibilityLabel={p.caption ?? "Wet check photo"}
                       />
+                      {!isLocked ? (
+                        <Pressable
+                          onPress={() => onRemoveServerPhoto(p)}
+                          disabled={
+                            deletePhotoMutation.isPending &&
+                            deletePhotoMutation.variables === p.id
+                          }
+                          accessibilityRole="button"
+                          accessibilityLabel="Remove photo"
+                          hitSlop={6}
+                          style={({ pressed }) => [
+                            styles.photoDeleteButton,
+                            { opacity: pressed ? 0.7 : 1 },
+                          ]}
+                        >
+                          {deletePhotoMutation.isPending &&
+                          deletePhotoMutation.variables === p.id ? (
+                            <ActivityIndicator size="small" color="#ffffff" />
+                          ) : (
+                            <Feather name="trash-2" size={12} color="#ffffff" />
+                          )}
+                        </Pressable>
+                      ) : null}
                     </View>
                   ))}
                 </ScrollView>
               )}
+              {!isLocked ? (
+                <Pressable
+                  onPress={onAddPhoto}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add photo"
+                  style={({ pressed }) => [
+                    styles.addFindingButton,
+                    {
+                      borderColor: colors.primary,
+                      borderRadius: colors.radius - 4,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="camera" size={16} color={colors.primary} />
+                  <Text style={[styles.addFindingText, { color: colors.primary }]}>
+                    Add photo
+                  </Text>
+                </Pressable>
+              ) : null}
             </Section>
 
             <View style={{ height: 24 }} />
@@ -1567,8 +1888,61 @@ const styles = StyleSheet.create({
     height: PHOTO_SIZE,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
+    position: "relative",
   },
   photoImage: { width: "100%", height: "100%" },
+  photoOverlay: {
+    position: "absolute",
+    inset: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoOverlayCenter: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  photoErrorOverlay: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(127,29,29,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 6,
+  },
+  photoOverlayButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  photoOverlayButtonText: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
+  photoOverlayDismiss: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  photoDeleteButton: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
   conflictBanner: {
     flexDirection: "row",
     alignItems: "center",

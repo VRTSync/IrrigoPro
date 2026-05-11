@@ -14,7 +14,11 @@
       "backgroundColor": "#1E5A99"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "IrrigoPro uses the camera to attach photos to wet check zones.",
+        "NSPhotoLibraryUsageDescription": "IrrigoPro accesses your photo library to attach existing photos to wet checks."
+      }
     },
     "android": {},
     "web": {
@@ -29,7 +33,14 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "IrrigoPro uses the camera to attach photos to wet check zones.",
+          "photosPermission": "IrrigoPro accesses your photo library to attach existing photos to wet checks."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

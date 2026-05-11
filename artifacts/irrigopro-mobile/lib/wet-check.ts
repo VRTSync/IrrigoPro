@@ -89,7 +89,9 @@ export type WetCheckMutationOp =
   | "submit"
   | "zone-status"
   | "finding-add"
-  | "finding-delete";
+  | "finding-delete"
+  | "photo-add"
+  | "photo-delete";
 
 export const wetCheckMutationKey = (
   wetCheckId: number,
