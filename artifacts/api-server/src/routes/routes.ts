@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage, WetCheckHasInvoicedRecordsError, ControllerHasZonesError, BillingSheetInvoicedError } from "../storage";
+import { classifyWetCheckPhotoError as _classifyWetCheckPhotoError, logPhotoErrorContext as _logPhotoErrorContext } from "./wet-check-photo-errors";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -11498,6 +11499,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     clientId: z.string().uuid().nullish(),
   });
 
+  // Task #495 — Wet check photo handlers must NEVER leak Drizzle's
+  // raw "Failed query: select ..." string to the field tech. The
+  // classify + log helpers live in ./wet-check-photo-errors so they can
+  // be exercised by route-level regression tests without mounting
+  // the whole 10k-line routes file.
+  const classifyWetCheckPhotoError = _classifyWetCheckPhotoError;
+  const logPhotoErrorContext = _logPhotoErrorContext;
+
   app.post("/api/wet-checks/:id/photos", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
@@ -11506,8 +11515,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const body = parsed.data;
     const takenBy = req.authenticatedUserId;
     if (!takenBy) { res.status(401).json({ message: "Authentication required" }); return; }
+    const wetCheckId = parseInt(req.params.id);
+    if (!Number.isFinite(wetCheckId)) {
+      res.status(400).json({ message: "Invalid wet check id" });
+      return;
+    }
     try {
-      const wetCheckId = parseInt(req.params.id);
       const takenAt = body.takenAt != null ? new Date(body.takenAt as string | number | Date) : new Date();
       const created = await storage.attachWetCheckPhoto(wetCheckId, cid, {
         zoneRecordId: body.zoneRecordId ?? null,
@@ -11519,7 +11532,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         clientId: body.clientId ?? null,
       });
       res.status(201).json(created);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const { status, message } = classifyWetCheckPhotoError(e);
+      logPhotoErrorContext(req, e, {
+        op: "attachWetCheckPhoto",
+        wetCheckId,
+        photoClientId: body.clientId ?? null,
+        zoneRecordId: body.zoneRecordId ?? null,
+        findingId: body.findingId ?? null,
+      });
+      res.status(status).json({ message });
+    }
   });
 
   const photoLinkBody = z.object({
@@ -11531,24 +11554,49 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = photoLinkBody.safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
+    const photoId = parseInt(req.params.id);
+    if (!Number.isFinite(photoId)) {
+      res.status(400).json({ message: "Invalid photo id" });
+      return;
+    }
     try {
       const updated = await storage.linkWetCheckPhotoToFinding(
-        parseInt(req.params.id),
+        photoId,
         parsed.data.findingId,
         cid,
       );
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const cls = classifyWetCheckPhotoError(e);
+      // PATCH-specific message override so the toast reads naturally.
+      const message = cls.status === 500 ? "Couldn't attach photo — please retry" : cls.message;
+      logPhotoErrorContext(req, e, {
+        op: "linkWetCheckPhotoToFinding",
+        photoId,
+        findingId: parsed.data.findingId,
+      });
+      res.status(cls.status).json({ message });
+    }
   });
 
   app.delete("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const photoId = parseInt(req.params.id);
+    if (!Number.isFinite(photoId)) {
+      res.status(400).json({ message: "Invalid photo id" });
+      return;
+    }
     try {
-      const ok = await storage.deleteWetCheckPhoto(parseInt(req.params.id), cid);
+      const ok = await storage.deleteWetCheckPhoto(photoId, cid);
       res.json({ ok });
-    } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
+    } catch (e: any) {
+      const cls = classifyWetCheckPhotoError(e);
+      const message = cls.status === 500 ? "Couldn't remove photo — please retry" : cls.message;
+      logPhotoErrorContext(req, e, { op: "deleteWetCheckPhoto", photoId });
+      res.status(cls.status).json({ message });
+    }
   });
 
   // ─── Manager review / routing / approve / convert ────────────────────────

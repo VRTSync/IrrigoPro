@@ -6120,17 +6120,62 @@ export class DatabaseStorage implements IStorage {
       }
     }
     if (insert.clientId) {
-      // Scope dedupe to the same wet check (already verified to belong to
-      // this company) so a colliding clientId from another tenant cannot
-      // surface a foreign photo row.
-      const [existing] = await db.select().from(wetCheckPhotos).where(and(
+      // Dedupe must match the partial unique index `uniq_photo_client_id`
+      // (on `client_id` alone, WHERE client_id IS NOT NULL). Looking up
+      // by clientId only ensures a retry of the same metadata POST — even
+      // when the previous attempt's response was lost on the wire — finds
+      // the row we already wrote and returns it idempotently, instead of
+      // missing it and falling through to an INSERT that then dies on the
+      // unique constraint with a raw "duplicate key" error. Multi-tenant
+      // safety: clientIds are UUIDv4 (collisions are practically nil) and
+      // the wet check itself was already verified to belong to this
+      // company. If we ever did see a UUID collision across wet checks,
+      // we surface it as a clear error rather than silently returning a
+      // foreign row.
+      const [existing] = await db.select().from(wetCheckPhotos).where(
         eq(wetCheckPhotos.clientId, insert.clientId),
-        eq(wetCheckPhotos.wetCheckId, wetCheckId),
-      ));
-      if (existing) return existing;
+      );
+      if (existing) {
+        if (existing.wetCheckId !== wetCheckId) {
+          const err = new Error(
+            "Photo client id already used on another wet check",
+          ) as Error & { code?: string };
+          err.code = "WET_CHECK_PHOTO_CLIENT_ID_COLLISION";
+          throw err;
+        }
+        return existing;
+      }
     }
-    const [created] = await db.insert(wetCheckPhotos).values({ ...insert, wetCheckId }).returning();
-    return created;
+    try {
+      const [created] = await db.insert(wetCheckPhotos).values({ ...insert, wetCheckId }).returning();
+      return created;
+    } catch (e: any) {
+      // Belt-and-suspenders: if a concurrent retry (same clientId) raced
+      // past the SELECT above, the INSERT will fail with the partial
+      // unique index. Re-read by clientId and return the winner so the
+      // caller still sees a successful, idempotent attach.
+      const pgCode = e?.cause?.code ?? e?.code;
+      if (insert.clientId && pgCode === "23505") {
+        const [winner] = await db.select().from(wetCheckPhotos).where(
+          eq(wetCheckPhotos.clientId, insert.clientId),
+        );
+        if (winner) {
+          if (winner.wetCheckId === wetCheckId) return winner;
+          // The 23505 winner belongs to a different wet check — same
+          // collision case as the pre-INSERT SELECT path above. Surface
+          // a clean tagged error so the route handler maps it to a 409
+          // with a user-safe message instead of rethrowing the raw
+          // Drizzle "Failed query: insert into wet_check_photos..."
+          // string.
+          const err = new Error(
+            "Photo client id already used on another wet check",
+          ) as Error & { code?: string };
+          err.code = "WET_CHECK_PHOTO_CLIENT_ID_COLLISION";
+          throw err;
+        }
+      }
+      throw e;
+    }
   }
 
   async deleteWetCheckPhoto(id: number, companyId: number): Promise<boolean> {

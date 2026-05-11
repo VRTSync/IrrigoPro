@@ -278,7 +278,7 @@ function relTime(now: number, ts: number): string {
   return `${h}h ago`;
 }
 
-function MutationRow({
+export function MutationRow({
   m,
   onCancel,
   onRetry,
