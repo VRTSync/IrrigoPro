@@ -25,6 +25,11 @@
 // In dry-run mode the script reports per-object and total bytes that would
 // be freed without touching the bucket or the marker key.
 
+// Force blocking writes so progress lines hit disk even when stdout is
+// redirected to a file and the script ends with process.exit().
+try { (process.stdout as any)._handle?.setBlocking?.(true); } catch {}
+try { (process.stderr as any)._handle?.setBlocking?.(true); } catch {}
+
 import sharp from "sharp";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
