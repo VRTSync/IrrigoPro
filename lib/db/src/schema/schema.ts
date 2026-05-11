@@ -1289,6 +1289,28 @@ export function deriveIssueGroup(issueType: string): "quick_fix" | "advanced" | 
   return (seed?.issueGroup ?? "advanced");
 }
 
+// Long-lived bearer tokens used by the mobile app to stay signed in
+// across launches. Tokens are stored hashed (sha256); the raw token is only
+// returned to the client at login time. See the M1 mobile-auth task for the
+// surrounding endpoint contract.
+export const mobileTokens = pgTable("mobile_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  deviceName: text("device_name"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+}, (table) => ({
+  userIdx: index("mobile_tokens_user_id_idx").on(table.userId),
+  tokenHashIdx: index("mobile_tokens_token_hash_idx").on(table.tokenHash),
+}));
+
+export const insertMobileTokenSchema = createInsertSchema(mobileTokens);
+export type MobileToken = typeof mobileTokens.$inferSelect;
+export type InsertMobileToken = z.infer<typeof insertMobileTokenSchema>;
+
 // Internal migration-tracking table — must be declared here so drizzle-kit
 // does not treat it as an unknown table and attempt to drop it during db:push.
 export const appSettings = pgTable("app_settings", {

@@ -36,6 +36,32 @@ import type {
 
 /// <reference path="./types/express.d.ts" />
 
+// ── Legacy header-auth gating (M1) ─────────────────────────────────────────
+// Production must not trust unsigned `x-user-*` identity headers/query
+// params. Routes and middleware that historically read those values
+// directly must go through these helpers so the gating is applied
+// uniformly. The bearer-token / session paths in `requireAuthentication`
+// remain the only auth surfaces in production unless the operator opts
+// back in with `ALLOW_HEADER_AUTH=1`.
+function isHeaderAuthAllowed(): boolean {
+  return process.env.NODE_ENV !== 'production' || process.env.ALLOW_HEADER_AUTH === '1';
+}
+function headerUserId(req: Request): string | undefined {
+  if (!isHeaderAuthAllowed()) return undefined;
+  const v = req.headers['x-user-id'];
+  return typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined;
+}
+function headerUserRole(req: Request): string | undefined {
+  if (!isHeaderAuthAllowed()) return undefined;
+  const v = req.headers['x-user-role'];
+  return typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined;
+}
+function headerUserCompanyId(req: Request): string | undefined {
+  if (!isHeaderAuthAllowed()) return undefined;
+  const v = req.headers['x-user-company-id'];
+  return typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined;
+}
+
 // ============================================================================
 // FIELD TECH PRICING VISIBILITY - Critical Security Feature
 // Field technicians must NEVER see pricing/money values anywhere in the app
@@ -75,7 +101,7 @@ function sanitizePricingFields(data: any): any {
 
 // Helper to check if user is field tech and strip pricing if needed
 function applyPricingVisibility(req: Request, data: any): any {
-  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+  const userRole = req.authenticatedUserRole || headerUserRole(req);
   if (userRole === 'field_tech') {
     return sanitizePricingFields(data);
   }
@@ -277,14 +303,14 @@ const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
   try {
     // Production-ready authentication using session lookup
     // First try header-based auth (for development compatibility)
-    let userId = req.headers['x-user-id'];
-    let userRole = req.headers['x-user-role'];
+    let userId = headerUserId(req);
+    let userRole = headerUserRole(req);
     
     // If headers not available, try to get from session (production approach)
     if (!userId && req.session?.userId) {
       userId = req.session.userId;
       // Get user from database to verify role
-      const user = await storage.getUser(parseInt(userId));
+      const user = await storage.getUser(parseInt(String(userId)));
       if (user) {
         userRole = user.role;
         req.userCompanyId = user.companyId; // Store for later use
@@ -318,12 +344,12 @@ const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
 // Middleware to allow company admins AND billing managers to edit customer records
 const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
   try {
-    let userId = req.headers['x-user-id'];
-    let userRole = req.headers['x-user-role'];
+    let userId = headerUserId(req);
+    let userRole = headerUserRole(req);
 
     if (!userId && req.session?.userId) {
       userId = req.session.userId;
-      const user = await storage.getUser(parseInt(userId));
+      const user = await storage.getUser(parseInt(String(userId)));
       if (user) {
         userRole = user.role;
         req.userCompanyId = user.companyId;
@@ -360,12 +386,12 @@ const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
 // (`EDIT_ROLES`) MUST stay in sync with this set.
 const requireBoundaryEditAccess = async (req: any, res: any, next: any) => {
   try {
-    let userId = req.headers['x-user-id'];
-    let userRole = req.headers['x-user-role'];
+    let userId = headerUserId(req);
+    let userRole = headerUserRole(req);
 
     if (!userId && req.session?.userId) {
       userId = req.session.userId;
-      const user = await storage.getUser(parseInt(userId));
+      const user = await storage.getUser(parseInt(String(userId)));
       if (user) {
         userRole = user.role;
         req.userCompanyId = user.companyId;
@@ -399,7 +425,7 @@ const requireBoundaryEditAccess = async (req: any, res: any, next: any) => {
 
 // Middleware to check if user can edit/delete work orders and billing sheets
 const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+  const userRole = req.authenticatedUserRole || headerUserRole(req);
   
   if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
     res.status(403).json({ 
@@ -453,8 +479,8 @@ const requireBillingAccess = (req: any, res: any, next: any) => {
 
 // More granular middleware for work order updates that allows field techs to start their own work orders
 const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
-  const userId = req.authenticatedUserId || req.headers['x-user-id'];
+  const userRole = req.authenticatedUserRole || headerUserRole(req);
+  const userId = req.authenticatedUserId || headerUserId(req);
   const workOrderId = parseInt(req.params.id);
   const updateData = req.body;
   
@@ -516,8 +542,8 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
 
 // More granular middleware for billing sheet updates that allows field techs to submit for approval
 const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
-  const userId = req.authenticatedUserId || req.headers['x-user-id'];
+  const userRole = req.authenticatedUserRole || headerUserRole(req);
+  const userId = req.authenticatedUserId || headerUserId(req);
   const updateData = req.body;
 
   // Managers have full access
@@ -576,7 +602,7 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
 const requireNotificationAccess = async (req: any, res: any, next: any) => {
   try {
     // Get authenticated user ID - prefer session-based auth
-    let authenticatedUserId = req.authenticatedUserId || req.headers['x-user-id'];
+    let authenticatedUserId = req.authenticatedUserId || headerUserId(req);
     
     // If headers not available, try to get from session (production approach)
     if (!authenticatedUserId && req.session && req.session.userId) {
@@ -628,8 +654,8 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
       hasSession: !!req.session,
       sessionUserId: req.session?.userId,
       headers: {
-        'x-user-id': req.headers['x-user-id'],
-        'x-user-role': req.headers['x-user-role']
+        'x-user-id': headerUserId(req),
+        'x-user-role': headerUserRole(req)
       }
     });
     res.status(500).json({ 
@@ -642,11 +668,41 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
 // General authentication middleware that validates user identity and role
 const requireAuthentication = async (req: any, res: any, next: any) => {
   try {
-    // Get authenticated user ID and role from headers
-    let userId = req.headers['x-user-id'];
-    let userRole = req.headers['x-user-role'];
-    let userCompanyId = req.headers['x-user-company-id'];
-    
+    let userId: any;
+    let userRole: any;
+    let userCompanyId: any;
+
+    // Step 1 — bearer-token path (mobile clients). Checked FIRST so an
+    // attacker cannot strip the bearer header and fall through to the
+    // legacy header bypass. If a bearer header IS present but invalid
+    // or expired, fail closed with 401 instead of falling through.
+    const authHeader = req.headers['authorization'];
+    if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+      const rawToken = authHeader.slice(7).trim();
+      if (!rawToken) {
+        res.status(401).json({ message: "Invalid bearer token" });
+        return;
+      }
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const tokenRow = await storage.getActiveMobileTokenByHash(tokenHash);
+      // Belt-and-suspenders: even if the storage layer somehow returned a
+      // revoked or expired row, refuse it here.
+      if (!tokenRow || tokenRow.revokedAt != null || tokenRow.expiresAt.getTime() <= Date.now()) {
+        res.status(401).json({ message: "Invalid or expired token" });
+        return;
+      }
+      const user = await storage.getUser(tokenRow.userId);
+      if (!user || !user.isActive) {
+        res.status(401).json({ message: "Invalid or expired token" });
+        return;
+      }
+      req.authenticatedUserId = user.id;
+      req.authenticatedUserRole = user.role;
+      req.authenticatedUserCompanyId = user.companyId ?? null;
+      next();
+      return;
+    }
+
     // Production session-based authentication
     if (req.session && req.session.userId) {
       try {
@@ -660,9 +716,24 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
         // Continue to fallback on database error
       }
     }
-    
-    // Query parameter fallback (for PDF viewing in new tabs)
-    if (!userId && req.query['x-user-id']) {
+
+    // Legacy header-based auth path (unsigned x-user-* headers). Disabled
+    // in production unless ALLOW_HEADER_AUTH=1 is explicitly set as an
+    // escape hatch. In dev this remains the primary path used by the
+    // web client until session-based auth fully replaces it.
+    const headerAuthAllowed =
+      process.env.NODE_ENV !== 'production' || process.env.ALLOW_HEADER_AUTH === '1';
+    if (!userId && headerAuthAllowed) {
+      userId = headerUserId(req);
+      userRole = headerUserRole(req);
+      userCompanyId = headerUserCompanyId(req);
+    }
+
+    // Query parameter fallback (for PDF viewing in new tabs). Same env
+    // gating as the header path — unsigned identity in the URL is exactly
+    // as dangerous as in a header, so disable it in production unless the
+    // ALLOW_HEADER_AUTH=1 escape hatch is set.
+    if (!userId && headerAuthAllowed && req.query['x-user-id']) {
       userId = req.query['x-user-id'];
       userRole = req.query['x-user-role'];
       userCompanyId = req.query['x-user-company-id'];
@@ -690,7 +761,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     }
     
     // Validate user ID is a number
-    const parsedUserId = parseInt(userId);
+    const parsedUserId = parseInt(String(userId));
     if (isNaN(parsedUserId)) {
       console.log(`Invalid user ID format: ${userId}`);
       res.status(400).json({ 
@@ -712,8 +783,8 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       hasSession: !!req.session,
       sessionUserId: req.session?.userId,
       headers: {
-        'x-user-id': req.headers['x-user-id'],
-        'x-user-role': req.headers['x-user-role']
+        'x-user-id': headerUserId(req),
+        'x-user-role': headerUserRole(req)
       }
     });
     res.status(500).json({ 
@@ -732,7 +803,7 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
     console.log('Site map authentication check:', {
       hasSession: !!req.session,
       sessionUserId: req.session?.userId,
-      hasHeaders: !!(req.headers['x-user-id'] && req.headers['x-user-role'])
+      hasHeaders: !!(headerUserId(req) && headerUserRole(req))
     });
     
     // Prioritize session authentication (production-safe)
@@ -746,9 +817,9 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
     }
     
     // Fallback to headers for development only
-    if (!userId && req.headers['x-user-id'] && req.headers['x-user-role']) {
-      userId = req.headers['x-user-id'] as string;
-      userRole = req.headers['x-user-role'] as string;
+    if (!userId && headerUserId(req) && headerUserRole(req)) {
+      userId = headerUserId(req) as string;
+      userRole = headerUserRole(req) as string;
       console.log('Header authentication fallback:', { userId, userRole });
     }
     
@@ -781,7 +852,7 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
 
 // QuickBooks access control middleware - irrigation managers and field techs cannot access QuickBooks
 const requireQuickBooksAccess = (req: any, res: any, next: any) => {
-  const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
+  const userRole = req.authenticatedUserRole || headerUserRole(req);
   
   if (userRole === 'irrigation_manager' || userRole === 'field_tech') {
     res.status(403).json({ 
@@ -1155,8 +1226,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check if company profile setup is complete
   const requireCompanySetup = async (req: any, res: any, next: any) => {
     try {
-      let userRole = req.authenticatedUserRole || req.headers['x-user-role'];
-      let userCompanyId = req.authenticatedUserCompanyId || (req.headers['x-user-company-id'] ? parseInt(req.headers['x-user-company-id'] as string) : null);
+      let userRole = req.authenticatedUserRole || headerUserRole(req);
+      let userCompanyId = req.authenticatedUserCompanyId || (headerUserCompanyId(req) ? parseInt(headerUserCompanyId(req) as string) : null);
 
       // Production session-based fallback
       if (!userRole && req.session && req.session.userId) {
@@ -1837,6 +1908,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Mobile bearer-token auth (M1) ─────────────────────────────────────────
+  // POST /api/auth/mobile-login — issues a long-lived (90 day) bearer token
+  // for field techs and irrigation managers signing in from the mobile app.
+  // Mirrors the web /api/auth/login checks (bcrypt, isActive, email
+  // verification) and additionally restricts by role.
+  const MOBILE_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+  const MOBILE_LOGIN_ALLOWED_ROLES = new Set(['field_tech', 'irrigation_manager']);
+
+  function safeUserShape(user: any) {
+    const {
+      password: _pw,
+      mfaSecret: _mfaSecret,
+      mfaBackupCodes: _mfaBackup,
+      passwordResetToken: _prt,
+      passwordResetExpires: _pre,
+      emailVerificationToken: _evt,
+      emailVerificationExpires: _eve,
+      ...safe
+    } = user ?? {};
+    return safe;
+  }
+
+  app.post("/api/auth/mobile-login", async (req, res) => {
+    try {
+      const { username, password, deviceName } = req.body ?? {};
+      if (!username || !password) {
+        res.status(400).json({ message: "Username and password are required" });
+        return;
+      }
+
+      const user = await storage.getUserByUsername(String(username));
+      if (!user || !user.isActive) {
+        res.status(401).json({ message: "Invalid credentials" });
+        return;
+      }
+
+      const passwordValid = await bcrypt.compare(String(password), user.password);
+      if (!passwordValid) {
+        res.status(401).json({ message: "Invalid credentials" });
+        return;
+      }
+
+      if (user.email && !user.emailVerified) {
+        res.status(403).json({
+          message: "Email verification required",
+          requiresVerification: true,
+          email: user.email,
+        });
+        return;
+      }
+
+      if (!MOBILE_LOGIN_ALLOWED_ROLES.has(user.role)) {
+        res.status(403).json({
+          message: "Mobile sign-in is restricted to field technicians and irrigation managers",
+        });
+        return;
+      }
+
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + MOBILE_TOKEN_TTL_MS);
+
+      await storage.createMobileToken({
+        userId: user.id,
+        tokenHash,
+        deviceName: typeof deviceName === 'string' && deviceName.length > 0 ? deviceName : null,
+        expiresAt,
+      });
+
+      res.json({
+        token: rawToken,
+        expiresAt: expiresAt.toISOString(),
+        user: safeUserShape(user),
+      });
+    } catch (error) {
+      console.error('Mobile login error:', error);
+      res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  // POST /api/auth/mobile-logout — idempotent; always returns { ok: true }.
+  app.post("/api/auth/mobile-logout", async (req, res) => {
+    try {
+      const authHeader = req.headers['authorization'];
+      if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+        const rawToken = authHeader.slice(7).trim();
+        if (rawToken) {
+          const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+          await storage.revokeMobileToken(tokenHash);
+        }
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Mobile logout error:', error);
+      res.json({ ok: true });
+    }
+  });
+
   // Password reset request
   app.post("/api/auth/forgot-password", async (req, res) => {
     try {
@@ -1954,7 +2123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/company/:companyId/users/:userId/resend-verification", requireWorkOrderBillingAccess, async (req, res) => {
     try {
       const { companyId, userId } = req.params;
-      const user = await storage.getUser(parseInt(userId));
+      const user = await storage.getUser(parseInt(String(userId)));
       
       if (!user || user.companyId !== parseInt(companyId)) {
         res.status(404).json({ message: "User not found" });
@@ -3229,11 +3398,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(404).json({ message: "Customer not found" });
       return null;
     }
-    const role = (req as any).authenticatedUserRole || req.headers['x-user-role'];
+    const role = (req as any).authenticatedUserRole || headerUserRole(req);
     if (role !== 'super_admin') {
       const userCompanyId = (req as any).authenticatedUserCompanyId
-        ?? (req.headers['x-user-company-id']
-          ? parseInt(String(req.headers['x-user-company-id']))
+        ?? (headerUserCompanyId(req)
+          ? parseInt(String(headerUserCompanyId(req)))
           : null);
       if (!userCompanyId || Number(userCompanyId) !== Number(customer.companyId)) {
         res.status(403).json({ message: "Access denied for this customer" });
@@ -4276,7 +4445,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       const state = crypto.randomBytes(16).toString('hex');
       // Store state + company ID in memory store for CSRF verification in the callback (10 min TTL)
-      const authCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const authCompanyId = (headerUserCompanyId(req) as string) || null;
       oauthStateStore.set(state, { expiry: Date.now() + 10 * 60 * 1000, companyId: authCompanyId });
       
       // QuickBooks OAuth URL
@@ -4465,7 +4634,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // Clear QuickBooks connection (for reconnecting)
   app.post("/api/quickbooks/disconnect", requireQuickBooksAccess, async (req, res) => {
     try {
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       if (!userCompanyId) {
         res.status(400).json({ success: false, message: "Company context is required to disconnect QuickBooks." });
         return;
@@ -4491,7 +4660,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/quickbooks/status", requireQuickBooksAccess, async (req, res) => {
     try {
       // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       
       // Get from database for this user's company
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
@@ -4513,7 +4682,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/quickbooks/customers", requireQuickBooksAccess, async (req, res) => {
     try {
       // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
       
@@ -4587,7 +4756,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       
       // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       
       // Get from database for this user's company
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
@@ -4647,7 +4816,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       
       // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       
       // Get actual QuickBooks integration data - resolve realmId from companyId then fetch canonically
       const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
@@ -4789,7 +4958,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // QuickBooks Parts Sync - Only irrigation-related items
   app.post('/api/quickbooks/sync-parts', requireAuthentication, async (req, res) => {
     try {
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
@@ -4909,7 +5078,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       
       // Get QuickBooks integration data - resolve realmId from companyId then fetch canonically
-      const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
+      const userCompanyId = (headerUserCompanyId(req) as string) || null;
       const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
@@ -6693,7 +6862,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         }
       }
 
-      const userId = parseInt(String(req.authenticatedUserId ?? req.headers['x-user-id']));
+      const userId = parseInt(String(req.authenticatedUserId ?? headerUserId(req)));
       if (!userId || isNaN(userId)) {
         res.status(401).json({ message: "Authentication required - user ID not found." });
         return;
@@ -6814,7 +6983,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // customer's Ready-to-Invoice list (Task #206 fixed the previous
       // dead-end 'approved' status; Task #207 removed it from the schema).
       // field_tech => 'submitted' (goes to manager for review).
-      const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      const creatorRole = req.authenticatedUserRole || headerUserRole(req);
       let resolvedStatus: BillingSheetStatus;
       if (
         creatorRole === 'irrigation_manager' ||
@@ -6882,8 +7051,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         ? billingSheetData.items
         : [];
       const postCompanyId = req.authenticatedUserCompanyId
-        ?? (req.headers['x-user-company-id']
-          ? parseInt(req.headers['x-user-company-id'] as string)
+        ?? (headerUserCompanyId(req)
+          ? parseInt(headerUserCompanyId(req) as string)
           : (customerForRate.companyId ?? null));
       const pricingResult = await resolveAuthoritativePartPricing(rawClientItems, postCompanyId);
       if (pricingResult.error) {
@@ -7114,7 +7283,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
       // Lock after manager approval — only admins and billing managers can proceed
-      const patchUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      const patchUserRole = req.authenticatedUserRole || headerUserRole(req);
       if (!isBsPhotosOnlyPatch && existingBsForLockCheck?.status === 'approved_passed_to_billing' &&
           patchUserRole !== 'company_admin' && patchUserRole !== 'super_admin' && patchUserRole !== 'billing_manager') {
         res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
@@ -7313,8 +7482,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         // Server-side authoritative pricing (Task #160): rewrite catalog line items
         // with the catalog price before persisting. Manual line items pass through.
         const patchCompanyIdForPricing = req.authenticatedUserCompanyId
-          ?? (req.headers['x-user-company-id']
-            ? parseInt(req.headers['x-user-company-id'] as string)
+          ?? (headerUserCompanyId(req)
+            ? parseInt(headerUserCompanyId(req) as string)
             : null);
         const patchPricingResult = await resolveAuthoritativePartPricing(items as RawBillingItem[], patchCompanyIdForPricing);
         if (patchPricingResult.error) {
@@ -8002,7 +8171,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      const userId = parseInt(String(req.authenticatedUserId ?? req.headers['x-user-id']));
+      const userId = parseInt(String(req.authenticatedUserId ?? headerUserId(req)));
       if (!userId || isNaN(userId)) {
         res.status(401).json({ message: "Authentication required - user ID not found." });
         return;
@@ -8105,8 +8274,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       let auditedZerosForLog: Array<{ partId: number; partName: string; clientUnitPrice: number; catalogUnitPrice: number }> = [];
       if (items !== undefined && Array.isArray(items) && items.length > 0) {
         const woCreateCompanyId = req.authenticatedUserCompanyId
-          ?? (req.headers['x-user-company-id']
-            ? parseInt(req.headers['x-user-company-id'] as string)
+          ?? (headerUserCompanyId(req)
+            ? parseInt(headerUserCompanyId(req) as string)
             : null);
         const woCreatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woCreateCompanyId);
         if (woCreatePricing.error) {
@@ -8213,7 +8382,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
       // Lock after manager approval — only admins and billing managers can proceed
-      const woUpdateUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      const woUpdateUserRole = req.authenticatedUserRole || headerUserRole(req);
       if (!isWoPhotosOnlyPatch && existingForLockCheck?.status === 'approved_passed_to_billing' &&
           woUpdateUserRole !== 'company_admin' && woUpdateUserRole !== 'super_admin' && woUpdateUserRole !== 'billing_manager') {
         res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
@@ -8388,8 +8557,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         // Server-side authoritative pricing (Task #160): rewrite catalog line items
         // with the catalog price. Reject 4xx if a partId points at no part / wrong company.
         const woUpdateCompanyId = req.authenticatedUserCompanyId
-          ?? (req.headers['x-user-company-id']
-            ? parseInt(req.headers['x-user-company-id'] as string)
+          ?? (headerUserCompanyId(req)
+            ? parseInt(headerUserCompanyId(req) as string)
             : null);
         const woUpdatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woUpdateCompanyId);
         if (woUpdatePricing.error) {
@@ -8563,8 +8732,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Server-side authoritative pricing (Task #160): if the body references a
       // catalog partId, overwrite partPrice from the catalog (and 4xx if invalid).
       const woItemCompanyId = req.authenticatedUserCompanyId
-        ?? (req.headers['x-user-company-id']
-          ? parseInt(req.headers['x-user-company-id'] as string)
+        ?? (headerUserCompanyId(req)
+          ? parseInt(headerUserCompanyId(req) as string)
           : null);
       // The work-order-item shape uses `partPrice` not `unitPrice`; map both ways.
       const probeItem: RawBillingItem = {
@@ -8729,18 +8898,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     let role = fromAuth.role;
     let companyId = fromAuth.companyId;
     if (userId == null) {
-      const raw = req.headers?.['x-user-id'];
-      const parsed = raw != null ? Number(Array.isArray(raw) ? raw[0] : raw) : NaN;
+      const raw = headerUserId(req);
+      const parsed = raw != null ? Number(raw) : NaN;
       if (Number.isFinite(parsed)) userId = parsed;
     }
     if (!role) {
-      const raw = req.headers?.['x-user-role'];
+      const raw = headerUserRole(req);
       if (typeof raw === 'string' && raw.length > 0) role = raw;
-      else if (Array.isArray(raw) && typeof raw[0] === 'string') role = raw[0];
     }
     if (companyId == null) {
-      const raw = req.headers?.['x-user-company-id'];
-      const parsed = raw != null ? Number(Array.isArray(raw) ? raw[0] : raw) : NaN;
+      const raw = headerUserCompanyId(req);
+      const parsed = raw != null ? Number(raw) : NaN;
       if (Number.isFinite(parsed)) companyId = parsed;
     }
     let name: string | null = fromAuth.name;
@@ -9141,7 +9309,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // super_admin) self-approve at conversion time and route directly to
       // 'approved_passed_to_billing' so the resulting billing sheet immediately
       // surfaces in the customer's Ready-to-Invoice list (Task #206).
-      const creatorRole = req.authenticatedUserRole || req.headers['x-user-role'];
+      const creatorRole = req.authenticatedUserRole || headerUserRole(req);
       let resolvedStatus: BillingSheetStatus;
       if (
         creatorRole === 'irrigation_manager' ||
@@ -9226,8 +9394,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // unit prices from the catalog before persisting. 4xx-reject if a partId
       // points at no part / wrong company.
       const woCompanyIdForPricing = req.authenticatedUserCompanyId
-        ?? (req.headers['x-user-company-id']
-          ? parseInt(req.headers['x-user-company-id'] as string)
+        ?? (headerUserCompanyId(req)
+          ? parseInt(headerUserCompanyId(req) as string)
           : (woCustomerForRate.companyId ?? null));
       const woPricingResult = await resolveAuthoritativePartPricing(rawRequestItems as RawBillingItem[], woCompanyIdForPricing);
       if (woPricingResult.error) {
@@ -10138,7 +10306,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/company/:companyId/api-keys", requireCompanyAdminAccess, async (req, res) => {
     try {
       const companyId = parseInt(req.params.companyId);
-      const userId = parseInt(req.headers['x-user-id'] as string) || Number(req.session?.userId) || 0;
+      const userId = parseInt(headerUserId(req) as string) || Number(req.session?.userId) || 0;
       const { name, expiresAt } = req.body;
 
       if (!name || name.trim().length === 0) {

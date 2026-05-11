@@ -19,6 +19,9 @@ import {
   billingSheets,
   billingSheetItems,
   manualPartReviews,
+  mobileTokens,
+  type MobileToken,
+  type InsertMobileToken,
   missingPhotosNotifications,
   aiGenerationLogs,
   notifications,
@@ -258,7 +261,13 @@ export interface IStorage {
     notificationCount: number;
   }>;
   hardDeleteUserWithCascade(userId: number): Promise<boolean>;
-  
+
+  // Mobile bearer-token auth (M1)
+  createMobileToken(token: InsertMobileToken): Promise<MobileToken>;
+  getActiveMobileTokenByHash(tokenHash: string): Promise<MobileToken | undefined>;
+  revokeMobileToken(tokenHash: string): Promise<boolean>;
+  revokeAllMobileTokensForUser(userId: number): Promise<number>;
+
   // Customers
   getCustomers(companyId?: number): Promise<Customer[]>;
   getCustomer(id: number): Promise<Customer | undefined>;
@@ -1220,6 +1229,66 @@ export class DatabaseStorage implements IStorage {
       console.error('Transaction failed:', error);
       return false;
     }
+  }
+
+  // ── Mobile bearer-token auth (M1) ─────────────────────────────────────────
+  // Tokens are stored hashed (sha256). The raw token is only returned to the
+  // client at login time. `getActiveMobileTokenByHash` performs the lookup
+  // and the `lastUsedAt` bump in a single transaction so a revoked or
+  // expired token cannot slip through under contention.
+  async createMobileToken(token: InsertMobileToken): Promise<MobileToken> {
+    const [row] = await db.insert(mobileTokens).values(token).returning();
+    return row;
+  }
+
+  async getActiveMobileTokenByHash(tokenHash: string): Promise<MobileToken | undefined> {
+    // Atomic lookup + lastUsedAt bump. The active-row predicate
+    // (revokedAt IS NULL AND expiresAt > now) is evaluated by the same
+    // UPDATE statement that performs the bump, so a concurrent
+    // revokeMobileToken cannot slip a revoked token through between a
+    // separate SELECT and UPDATE. Belt-and-suspenders re-check on the
+    // returned row guards against any future driver/RETURNING quirks.
+    const now = new Date();
+    const [bumped] = await db
+      .update(mobileTokens)
+      .set({ lastUsedAt: now })
+      .where(
+        and(
+          eq(mobileTokens.tokenHash, tokenHash),
+          isNull(mobileTokens.revokedAt),
+          gt(mobileTokens.expiresAt, now),
+        ),
+      )
+      .returning();
+    if (!bumped) return undefined;
+    if (bumped.revokedAt != null || bumped.expiresAt <= now) return undefined;
+    return bumped;
+  }
+
+  async revokeMobileToken(tokenHash: string): Promise<boolean> {
+    const result = await db
+      .update(mobileTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(mobileTokens.tokenHash, tokenHash),
+          isNull(mobileTokens.revokedAt),
+        ),
+      );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async revokeAllMobileTokensForUser(userId: number): Promise<number> {
+    const result = await db
+      .update(mobileTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(mobileTokens.userId, userId),
+          isNull(mobileTokens.revokedAt),
+        ),
+      );
+    return result.rowCount ?? 0;
   }
 
   // Customers
