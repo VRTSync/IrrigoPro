@@ -11,7 +11,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
-import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil, AlertTriangle } from "lucide-react";
+import { Loader2, ChevronLeft, Search, CheckCircle2, Wrench, MinusCircle, Trash2, Camera, Pencil, AlertTriangle, ImageIcon } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { preparePhotoForUpload } from "@/lib/photo-prep";
 import {
   PHOTO_OFFLINE_MESSAGE,
@@ -198,7 +204,8 @@ function PhotoCaptureButton({
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const libraryInputRef = useRef<HTMLInputElement | null>(null);
 
   const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -300,8 +307,12 @@ function PhotoCaptureButton({
   const suffix = testIdSuffix ?? `${zoneRecordId ?? findingId ?? "wc"}`;
   return (
     <>
+      {/* Camera input — `capture="environment"` opens the rear camera live.
+          Library input omits `capture` so the OS shows the photo picker. Both
+          paths share `onPick` so offline queueing, compression, EXIF
+          handling, and thumbnails behave identically. */}
       <input
-        ref={inputRef}
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
         capture="environment"
@@ -309,18 +320,45 @@ function PhotoCaptureButton({
         onChange={onPick}
         data-testid={`photo-input-${suffix}`}
       />
-      <Button
-        size="sm"
-        variant="outline"
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={busy}
-        className="min-h-[44px]"
-        data-testid={`btn-photo-${suffix}`}
-      >
-        {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Camera className="w-4 h-4 mr-1" />}
-        Photo
-      </Button>
+      <input
+        ref={libraryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={onPick}
+        data-testid={`photo-input-library-${suffix}`}
+      />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            disabled={busy}
+            className="min-h-[44px]"
+            data-testid={`btn-photo-${suffix}`}
+          >
+            {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Camera className="w-4 h-4 mr-1" />}
+            Photo
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onSelect={(e) => { e.preventDefault(); cameraInputRef.current?.click(); }}
+            data-testid={`btn-photo-${suffix}-camera`}
+          >
+            <Camera className="w-4 h-4 mr-2" />
+            Take Photo
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => { e.preventDefault(); libraryInputRef.current?.click(); }}
+            data-testid={`btn-photo-${suffix}-library`}
+          >
+            <ImageIcon className="w-4 h-4 mr-2" />
+            Choose from Library
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 }
@@ -1263,6 +1301,11 @@ function ZoneScreen({
   // Task #428 — per-finding tech disposition (always visible regardless of
   // WET_CHECK_AUTO_BILL). Patches `techDisposition` on the finding so the
   // tech's intent survives manager rerouting downstream.
+  // Task #454 — added optimistic update so the toggle visibly flips on tap
+  // even before the PATCH (or queued mutation) finishes draining, plus a
+  // proper revert + toast when the request fails so a silent failure
+  // can no longer make the button look broken.
+  const dispositionQueryKey: readonly unknown[] = ["/api/wet-checks", wetCheckId];
   const dispositionMut = useMutation({
     mutationFn: async (vars: {
       id: number;
@@ -1276,9 +1319,57 @@ function ZoneScreen({
       }
       await apiRequest(`/api/wet-checks/findings/${vars.id}`, "PATCH", patch);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
-    onError: (e: any) => toast({ title: "Failed", description: e?.message, variant: "destructive" }),
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: dispositionQueryKey });
+      const previous = queryClient.getQueryData<WetCheckWithDetails>(dispositionQueryKey);
+      if (previous) {
+        queryClient.setQueryData<WetCheckWithDetails>(dispositionQueryKey, {
+          ...previous,
+          zoneRecords: previous.zoneRecords.map((zr) => ({
+            ...zr,
+            findings: zr.findings.map((f) =>
+              f.id === vars.id ? { ...f, techDisposition: vars.disposition } : f,
+            ),
+          })),
+        });
+      }
+      return { previous };
+    },
+    onError: (e: any, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(dispositionQueryKey, ctx.previous);
+      }
+      toast({
+        title: "Couldn't update disposition",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
   });
+
+  // Task #454 — Mark Zone Complete from the Needs Work flow. The zone has
+  // already been moved to `checked_with_issues` by tapping Needs Work, so
+  // this is purely a wizard-advance: it reuses the same `onAdvance()` path
+  // as Ran OK / Skip without touching the zone status. If the tech hasn't
+  // logged any findings yet, we surface a tiny inline confirm so a stray
+  // tap doesn't lose context.
+  const [confirmMarkComplete, setConfirmMarkComplete] = useState(false);
+  const findingsCount = zoneRecord?.findings.length ?? 0;
+  const handleMarkZoneComplete = () => {
+    if (findingsCount === 0 && !confirmMarkComplete) {
+      setConfirmMarkComplete(true);
+      return;
+    }
+    setConfirmMarkComplete(false);
+    onAdvance();
+  };
+  // Reset the inline confirm when the tech navigates to a different zone
+  // (ZoneScreen is reused across zone numbers, so local state otherwise
+  // leaks between visits).
+  useEffect(() => {
+    setConfirmMarkComplete(false);
+  }, [zoneRecord?.id, zoneNumber, letter]);
 
   return (
     <div className="max-w-2xl mx-auto py-4 space-y-4 px-3 sm:px-4 pb-safe">
@@ -1352,6 +1443,28 @@ function ZoneScreen({
               {(!zoneRecord || zoneRecord.status === "not_checked") && (
                 <div className="text-xs text-gray-500" data-testid="needs-work-helper">
                   Tap <span className="font-semibold">Needs Work</span> to add parts, labor, and notes for this zone.
+                </div>
+              )}
+              {zoneRecord?.status === "checked_with_issues" && (
+                <div className="space-y-2" data-testid="mark-zone-complete-row">
+                  {confirmMarkComplete && (
+                    <div
+                      className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2"
+                      data-testid="mark-zone-complete-confirm"
+                    >
+                      No work added — mark this zone complete anyway? Tap again to confirm.
+                    </div>
+                  )}
+                  <Button
+                    type="button"
+                    className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={handleMarkZoneComplete}
+                    disabled={setStatus.isPending}
+                    data-testid="btn-mark-zone-complete"
+                  >
+                    <CheckCircle2 className="w-4 h-4 mr-2 shrink-0" />
+                    {confirmMarkComplete ? "Confirm — Mark Zone Complete" : "Mark Zone Complete"}
+                  </Button>
                 </div>
               )}
             </>
