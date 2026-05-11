@@ -147,6 +147,9 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
     : '';
 
   const locationLine = [wo.projectAddress, wo.locationNotes].filter(Boolean).join(' — ');
+  const branchLine = wo.branchName
+    ? `<div class="ticket-header-branch">&#127970; Branch: ${wo.branchName}</div>`
+    : '';
 
   const approvalHtml = (wo.approvedBy || wo.approvedAt)
     ? `<div class="ticket-approval">
@@ -172,6 +175,7 @@ export function ticketPageWO(wo: PdfWorkOrderRow, invoiceNumber: string, photoDa
         <div class="ticket-header-line1">Work Order #${wo.workOrderNumber} &nbsp;|&nbsp; Invoice #${invoiceNumber}</div>
         <div class="ticket-header-line2">Date: ${wo.completedAt ? formatDate(wo.completedAt) : 'N/A'} &nbsp;|&nbsp; Technician: ${wo.technicianName} &nbsp;|&nbsp; Hours: ${wo.totalHours} hrs</div>
         ${locationLine ? `<div class="ticket-header-line3">&#128205; ${locationLine}</div>` : ''}
+        ${branchLine}
         ${approvalHtml}
       </div>
     </div>
@@ -248,6 +252,7 @@ export function ticketPageBS(bs: PdfBillingSheetRow, invoiceNumber: string, phot
         <div class="ticket-header-line1">Billing Sheet #${bs.billingNumber} &nbsp;|&nbsp; Invoice #${invoiceNumber}</div>
         <div class="ticket-header-line2">Date: ${formatDate(bs.workDate)} &nbsp;|&nbsp; Technician: ${bs.technicianName} &nbsp;|&nbsp; Hours: ${bs.totalHours} hrs</div>
         ${bs.propertyAddress ? `<div class="ticket-header-line3">&#128205; ${bs.propertyAddress}</div>` : ''}
+        ${bs.branchName ? `<div class="ticket-header-branch">&#127970; Branch: ${bs.branchName}</div>` : ''}
         ${approvalHtml}
       </div>
     </div>
@@ -376,7 +381,81 @@ export function photoGridSection(dataUris: string[]): string {
 }
 
 export function reconciliationPage(vm: PdfViewModel): string {
-  const { workOrders, billingSheets, totals, validationWarning } = vm;
+  const { workOrders, billingSheets, totals, validationWarning, customerHasBranches, branchSubtotals } = vm;
+
+  const warningRow = validationWarning ? `
+    <tr class="recon-warning">
+      <td colspan="3">
+        <span class="recon-warning-icon">&#9888;</span>
+        ${validationWarning}
+      </td>
+    </tr>` : '';
+
+  if (customerHasBranches && branchSubtotals.length > 0) {
+    const branchBlocks = branchSubtotals.map(group => {
+      const woRowsB = group.workOrders.map(wo => `
+        <tr>
+          <td class="recon-ref recon-ref-wo">${wo.workOrderNumber}</td>
+          <td class="recon-type recon-type-wo">Work Order</td>
+          <td class="recon-total">${formatCurrency(wo.rowTotal)}</td>
+        </tr>`).join('');
+      const bsRowsB = group.billingSheets.map(bs => `
+        <tr>
+          <td class="recon-ref recon-ref-bs">${bs.billingNumber}</td>
+          <td class="recon-type recon-type-bs">Billing Sheet</td>
+          <td class="recon-total">${formatCurrency(bs.rowTotal)}</td>
+        </tr>`).join('');
+      return `
+        <tr class="recon-group-header recon-group-branch">
+          <td colspan="3">Branch: ${group.branchName}</td>
+        </tr>
+        ${woRowsB}
+        ${bsRowsB}
+        <tr class="recon-subtotal">
+          <td colspan="2" class="recon-subtotal-label">${group.branchName} Subtotal</td>
+          <td class="recon-total">${formatCurrency(group.subtotal)}</td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div class="recon-page">
+      <div class="recon-title">Invoice Reconciliation Summary</div>
+      <div class="recon-subtitle">Invoice #${vm.invoice.invoiceNumber} &nbsp;·&nbsp; ${formatDate(vm.invoice.periodStart)} – ${formatDate(vm.invoice.periodEnd)}</div>
+
+      <table class="recon-table">
+        <thead>
+          <tr>
+            <th class="recon-ref">Reference #</th>
+            <th class="recon-type">Type</th>
+            <th class="recon-total">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${branchBlocks}
+          ${warningRow}
+          <tr class="recon-grand-total">
+            <td colspan="2" class="recon-grand-label">GRAND TOTAL</td>
+            <td class="recon-total recon-grand-amount">${formatCurrency(totals.grandTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="recon-totals-box">
+        <div class="recon-totals-row">
+          <span>Total Labor</span>
+          <span>${formatCurrency(totals.laborSubtotal)}</span>
+        </div>
+        <div class="recon-totals-row">
+          <span>Total Parts</span>
+          <span>${formatCurrency(totals.partsSubtotal)}</span>
+        </div>
+        <div class="recon-totals-row recon-totals-grand">
+          <span>Invoice Total</span>
+          <span>${formatCurrency(totals.grandTotal)}</span>
+        </div>
+      </div>
+    </div>`;
+  }
 
   const woGroupTotal = workOrders.reduce((s, wo) => s + wo.rowTotal, 0);
   const bsGroupTotal = billingSheets.reduce((s, bs) => s + bs.rowTotal, 0);
@@ -415,14 +494,6 @@ export function reconciliationPage(vm: PdfViewModel): string {
     <tr class="recon-subtotal">
       <td colspan="2" class="recon-subtotal-label">Billing Sheets Subtotal</td>
       <td class="recon-total">${formatCurrency(bsGroupTotal)}</td>
-    </tr>` : '';
-
-  const warningRow = validationWarning ? `
-    <tr class="recon-warning">
-      <td colspan="3">
-        <span class="recon-warning-icon">&#9888;</span>
-        ${validationWarning}
-      </td>
     </tr>` : '';
 
   return `
@@ -823,6 +894,14 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     line-height: 1.3;
   }
 
+  .ticket-header-branch {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.95);
+    line-height: 1.3;
+    margin-top: 2px;
+  }
+
   .ticket-approval {
     display: flex;
     align-items: center;
@@ -1085,6 +1164,13 @@ export function buildFullCSS(colors: PdfBrandColors = DEFAULT_BRAND_COLORS): str
     background: ${gray};
     color: ${navy};
     border-top: 1px solid ${green};
+  }
+
+  .recon-group-branch td {
+    background: ${navy};
+    color: white;
+    border-top: 2px solid ${green};
+    font-size: 12px;
   }
 
   .recon-subtotal td {

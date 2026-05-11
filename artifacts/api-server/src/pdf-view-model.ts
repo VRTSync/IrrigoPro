@@ -35,6 +35,7 @@ export interface PdfWorkOrderRow {
   workOrderNumber: string;
   projectName: string;
   projectAddress: string;
+  branchName: string | null;
   locationNotes: string;
   technicianName: string;
   completedAt: Date | null;
@@ -66,6 +67,7 @@ export interface PdfBillingSheetRow {
   billingNumber: string;
   workDescription: string;
   propertyAddress: string;
+  branchName: string | null;
   technicianName: string;
   workDate: Date;
   totalHours: number;
@@ -104,6 +106,13 @@ export const DEFAULT_BRAND_COLORS: PdfBrandColors = {
   gray: '#F5F5F5',
 };
 
+export interface PdfBranchSubtotal {
+  branchName: string;
+  workOrders: PdfWorkOrderRow[];
+  billingSheets: PdfBillingSheetRow[];
+  subtotal: number;
+}
+
 export interface PdfViewModel {
   company: PdfCompanyHeader;
   invoice: PdfInvoiceHeader;
@@ -113,6 +122,8 @@ export interface PdfViewModel {
   totalJobs: number;
   validationWarning: string | null;
   brandColors: PdfBrandColors;
+  customerHasBranches: boolean;
+  branchSubtotals: PdfBranchSubtotal[];
 }
 
 // ── Raw input type ──────────────────────────────────────────────────────────
@@ -137,6 +148,7 @@ export interface InvoiceDetailData {
   }>;
   laborRate?: string;
   brandColors?: PdfBrandColors;
+  customerHasBranches?: boolean;
 }
 
 // ── Build result ────────────────────────────────────────────────────────────
@@ -226,6 +238,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       workOrderNumber: safeStr(workOrder.workOrderNumber),
       projectName: safeStr(workOrder.projectName, 'Service Work'),
       projectAddress: safeStr(workOrder.projectAddress),
+      branchName: workOrder.branchName && workOrder.branchName.trim().length > 0 ? workOrder.branchName.trim() : null,
       locationNotes: safeStr(workOrder.locationNotes),
       technicianName: safeStr(workOrder.completedByUserName || workOrder.assignedTechnicianName, 'N/A'),
       completedAt: workOrder.completedAt ? new Date(workOrder.completedAt) : null,
@@ -278,6 +291,7 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
       billingNumber: safeStr(billingSheet.billingNumber),
       workDescription: safeStr(billingSheet.workDescription, 'Additional Work'),
       propertyAddress: safeStr(billingSheet.propertyAddress),
+      branchName: billingSheet.branchName && billingSheet.branchName.trim().length > 0 ? billingSheet.branchName.trim() : null,
       technicianName: safeStr(billingSheet.technicianName, 'N/A'),
       workDate: new Date(billingSheet.workDate),
       totalHours,
@@ -324,6 +338,38 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     console.warn('[PDF View Model]', validationWarning);
   }
 
+  const customerHasBranches = data.customerHasBranches === true;
+
+  const branchSubtotals: PdfBranchSubtotal[] = [];
+  if (customerHasBranches) {
+    const groups = new Map<string, PdfBranchSubtotal>();
+    const getGroup = (label: string) => {
+      let g = groups.get(label);
+      if (!g) {
+        g = { branchName: label, workOrders: [], billingSheets: [], subtotal: 0 };
+        groups.set(label, g);
+      }
+      return g;
+    };
+    const UNASSIGNED = '(No branch)';
+    for (const wo of workOrderRows) {
+      const g = getGroup(wo.branchName ?? UNASSIGNED);
+      g.workOrders.push(wo);
+      g.subtotal += wo.rowTotal;
+    }
+    for (const bs of billingSheetRows) {
+      const g = getGroup(bs.branchName ?? UNASSIGNED);
+      g.billingSheets.push(bs);
+      g.subtotal += bs.rowTotal;
+    }
+    const sortedKeys = Array.from(groups.keys()).sort((a, b) => {
+      if (a === UNASSIGNED) return 1;
+      if (b === UNASSIGNED) return -1;
+      return a.localeCompare(b);
+    });
+    for (const k of sortedKeys) branchSubtotals.push(groups.get(k)!);
+  }
+
   const viewModel: PdfViewModel = {
     company: companyHeader,
     invoice: invoiceHeader,
@@ -333,6 +379,8 @@ export function buildPdfViewModel(data: InvoiceDetailData): BuildPdfViewModelRes
     totalJobs: workOrderRows.length + billingSheetRows.length,
     validationWarning,
     brandColors: data.brandColors ?? DEFAULT_BRAND_COLORS,
+    customerHasBranches,
+    branchSubtotals,
   };
 
   return { viewModel, validationWarning };

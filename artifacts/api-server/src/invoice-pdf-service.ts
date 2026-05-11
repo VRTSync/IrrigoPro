@@ -311,6 +311,8 @@ export class InvoicePdfService {
         ? await extractBrandColorsFromDataUri(logoDataUri)
         : DEFAULT_BRAND_COLORS;
 
+      const customerHasBranches = Array.isArray(customer.branches) && customer.branches.length > 0;
+
       const { viewModel } = buildPdfViewModel({
         invoice,
         company: {
@@ -325,6 +327,7 @@ export class InvoicePdfService {
         billingSheets,
         laborRate,
         brandColors,
+        customerHasBranches,
       });
 
       const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF(viewModel);
