@@ -254,6 +254,21 @@ function kindLabel(kind: QueuedMutationKind): string {
   }
 }
 
+// Task #469 — surface a plain "Couldn't reach server" line for HTML / edge
+// errors instead of the raw `<!doctype html>…` payload.
+function friendlyErrorMessage(raw: string): string {
+  const head = raw.trimStart().slice(0, 64).toLowerCase();
+  if (
+    head.startsWith("<!doctype") ||
+    head.startsWith("<html") ||
+    head.startsWith("<") ||
+    head.startsWith("edge_")
+  ) {
+    return "Couldn't reach server — will retry";
+  }
+  return raw.slice(0, 240);
+}
+
 function relTime(now: number, ts: number): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
   if (s < 60) return `${s}s ago`;
@@ -317,7 +332,7 @@ function MutationRow({
             className="text-[11px] text-red-700 mt-0.5 break-words"
             data-testid={`queue-error-${m.id}`}
           >
-            {m.lastError.slice(0, 240)}
+            {friendlyErrorMessage(m.lastError)}
           </div>
         )}
       </div>

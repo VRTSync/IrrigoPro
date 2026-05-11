@@ -30,6 +30,33 @@ import type {
   QueuedMutation,
 } from "./types";
 
+// Detect a 4xx response that almost certainly came from an upstream/edge
+// layer (deployment proxy, stale PWA shell, blocked-host page, generic
+// CDN/load-balancer error page) rather than from our Express API.
+//
+// Our API server only ever returns JSON 4xx, so anything else — HTML,
+// `text/plain` "Forbidden", an empty body, or any other non-JSON
+// content-type — should be treated as a transient network hiccup and
+// retried. (Task #469.)
+export function isLikelyEdgeError(contentType: string, body: string): boolean {
+  const ct = (contentType ?? "").toLowerCase();
+  // Anything our API would emit is application/json. If we see that, it's
+  // a real validation/permission error — not transient.
+  if (ct.includes("application/json")) return false;
+  // Otherwise, we're confident this came from a layer above Express:
+  //   - text/html → proxy login page, blocked-host page
+  //   - text/plain → generic LB / CDN "Forbidden" / "Bad Gateway"
+  //   - empty/missing content-type with empty body → preflight rejection
+  //   - anything else non-JSON → still not us
+  if (ct) return true;
+  // No content-type at all: treat as edge if body is empty or HTML-ish.
+  const head = (body ?? "").trimStart().slice(0, 64).toLowerCase();
+  if (!head) return true;
+  if (head.startsWith("<!doctype") || head.startsWith("<html") || head.startsWith("<")) return true;
+  // Last resort: try to parse as JSON; if it doesn't parse, treat as edge.
+  try { JSON.parse(body); return false; } catch { return true; }
+}
+
 export interface EngineOptions {
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -295,6 +322,10 @@ export class SyncEngine {
           body: m.method === "DELETE" || body === undefined ? undefined : JSON.stringify(body),
           credentials: "include",
           signal: ac?.signal,
+          // Task #469 — defense-in-depth: bypass any browser / service
+          // worker cache so a stale PWA shell can't return a generic
+          // HTML 403/login page for an /api/* mutation.
+          cache: "no-store",
         });
       }
 
@@ -342,22 +373,44 @@ export class SyncEngine {
         });
         await this.broadcastState();
       } else if (res.status >= 400 && res.status < 500) {
-        // Other 4xx — fail and surface, no auto-retry.
-        let message = `${res.status}`;
-        try { message = (await res.text()) || message; } catch {}
-        await updateMutation(db, m.id, {
-          status: "failed",
-          lastError: message,
-          attemptCount: m.attemptCount + 1,
-        });
-        this.emit({
-          type: "error",
-          mutationId: m.id,
-          kind: m.kind,
-          status: res.status,
-          message,
-        });
-        await this.broadcastState();
+        // Other 4xx. Two flavors:
+        //   • JSON 4xx from our API → real validation/permission error;
+        //     mark failed and surface so the UI can show it.
+        //   • HTML / non-JSON 4xx (typically a generic 401/403/blocked-host
+        //     page injected by the Replit edge proxy or a stale PWA shell
+        //     before the request reaches Express) → treat as a transient
+        //     network hiccup, keep the mutation pending, flip offline so
+        //     the heartbeat recovers us, and back off. (Task #469.)
+        let body = "";
+        try { body = await res.text(); } catch {}
+        const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
+        const looksLikeEdge = isLikelyEdgeError(ctype, body);
+        const message = body || `${res.status}`;
+        if (looksLikeEdge) {
+          this.setOnline(false);
+          await updateMutation(db, m.id, {
+            status: "pending",
+            attemptCount: m.attemptCount + 1,
+            lastError: `edge_${res.status}`,
+          });
+          await this.broadcastState();
+          const wait = backoffMs(m.attemptCount + 1);
+          setTimeout(() => this.scheduleTick(), wait);
+        } else {
+          await updateMutation(db, m.id, {
+            status: "failed",
+            lastError: message,
+            attemptCount: m.attemptCount + 1,
+          });
+          this.emit({
+            type: "error",
+            mutationId: m.id,
+            kind: m.kind,
+            status: res.status,
+            message,
+          });
+          await this.broadcastState();
+        }
       } else {
         // 5xx → retry with backoff.
         let message = `${res.status}`;

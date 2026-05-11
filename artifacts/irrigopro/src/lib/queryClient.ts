@@ -50,6 +50,11 @@ export async function apiRequest(
       headers,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
+      // Task #469 — defense-in-depth against a stale PWA shell or HTTP
+      // cache returning a generic HTML 403/login page for an /api/*
+      // request. `no-store` skips any browser/SW cache for this fetch
+      // so the real Express response is what the engine sees.
+      cache: "no-store",
     });
   } catch (e) {
     if (apiHeartbeat) try { apiHeartbeat(false); } catch {}

@@ -19,7 +19,34 @@ import {
   isOfflineQueueEnabled,
   isOfflineSyncUIEnabled,
 } from "@/lib/offline/engine";
-import type { EngineEvent } from "@/lib/offline/types";
+import type { EngineEvent, QueuedMutationKind } from "@/lib/offline/types";
+
+function kindLabel(kind: QueuedMutationKind): string {
+  switch (kind) {
+    case "wet_check.create":   return "Create wet check";
+    case "wet_check.update":   return "Update wet check";
+    case "wet_check.submit":   return "Submit wet check";
+    case "zone_record.upsert": return "Save zone status";
+    case "zone_record.update": return "Update zone";
+    case "finding.create":     return "Add finding";
+    case "finding.update":     return "Edit finding";
+    case "finding.delete":     return "Remove finding";
+    case "photo.link":         return "Attach photo";
+    case "photo.upload":       return "Upload photo";
+    case "photo.delete":       return "Remove photo";
+    default:                   return kind;
+  }
+}
+
+// Task #469 — recognize HTML / non-JSON error bodies so the toast can show
+// a friendly retry-style message instead of dumping raw markup.
+function isHtmlErrorMessage(msg: string | null | undefined): boolean {
+  if (!msg) return false;
+  const head = msg.trimStart().slice(0, 64).toLowerCase();
+  if (head.startsWith("<!doctype") || head.startsWith("<html") || head.startsWith("<")) return true;
+  if (head.startsWith("edge_")) return true;
+  return false;
+}
 
 export function ConflictToastBridge() {
   const { toast } = useToast();
@@ -73,12 +100,27 @@ export function ConflictToastBridge() {
           "[offline-engine] mutation failed",
           { mutationId: e.mutationId, kind: e.kind, status: e.status, message: e.message },
         );
-        toast({
-          title: "Sync failed",
-          description: `${e.kind} (${e.status ?? "?"}): ${(e.message ?? "").slice(0, 200)}`,
-          variant: "destructive",
-          duration: 12_000,
-        });
+        // Task #469 — if the error body is HTML or otherwise doesn't parse
+        // as JSON, it almost certainly came from an upstream/edge layer
+        // rather than our API. The engine already keeps these mutations
+        // pending and retries them, but if one slips through (or a future
+        // 4xx code path treats it as failed) show a friendly retry-style
+        // message instead of dumping raw HTML at the field tech.
+        const looksLikeHtml = isHtmlErrorMessage(e.message);
+        if (looksLikeHtml) {
+          toast({
+            title: "Couldn't reach server — will retry",
+            description: kindLabel(e.kind),
+            duration: 8_000,
+          });
+        } else {
+          toast({
+            title: "Sync failed",
+            description: `${kindLabel(e.kind)} (${e.status ?? "?"}): ${(e.message ?? "").slice(0, 200)}`,
+            variant: "destructive",
+            duration: 12_000,
+          });
+        }
       }
     });
     return () => { off(); };
