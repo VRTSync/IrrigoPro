@@ -2166,41 +2166,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get current authenticated user from session
-  app.get("/api/auth/user", async (req, res) => {
+  // Get current authenticated user.
+  // Accepts both session cookie (web) and bearer token (mobile) via the
+  // shared requireAuthentication middleware, which sets
+  // req.authenticatedUserId on success.
+  app.get("/api/auth/user", requireAuthentication, async (req: any, res) => {
     try {
-      // Check session for user ID
-      if (!req.session || !req.session.userId) {
-        res.status(401).json({ 
-          message: "No active session" 
-        });
+      const userId = req.authenticatedUserId;
+      if (!userId) {
+        res.status(401).json({ message: "Authentication required" });
         return;
       }
-      
-      // Get user from database
-      const user = await storage.getUser(parseInt(String(req.session.userId)));
+
+      const user = await storage.getUser(parseInt(String(userId)));
       if (!user) {
-        res.status(404).json({ 
-          message: "User not found" 
-        });
+        res.status(404).json({ message: "User not found" });
         return;
       }
-      
+
       // Return user data (excluding sensitive fields)
-      const { 
-        passwordResetToken, 
-        passwordResetExpires, 
+      const {
+        password,
+        passwordResetToken,
+        passwordResetExpires,
         emailVerificationToken,
+        emailVerificationExpires,
         mfaSecret,
         mfaBackupCodes,
-        ...safeUserData 
+        ...safeUserData
       } = user;
-      
+
       res.json(safeUserData);
     } catch (error) {
       console.error('Auth user endpoint error:', error);
-      res.status(500).json({ 
-        message: "Failed to get user session" 
+      res.status(500).json({
+        message: "Failed to get user session"
       });
     }
   });
@@ -8069,10 +8069,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   // Work Order routes - Enhanced
   // Note: Pricing fields are stripped for field_tech role via applyPricingVisibility
-  app.get("/api/work-orders", async (req, res) => {
+  app.get("/api/work-orders", requireAuthentication, async (req: any, res) => {
     try {
       const { technician, customer, status } = req.query;
-      
+      const userRole = req.authenticatedUserRole as string | undefined;
+      const userId = req.authenticatedUserId as number | undefined;
+
+      // Field techs can only ever see their own assignments. Any
+      // `technician` query param they pass is ignored — the authoritative
+      // filter is the authenticated user id. Other parametric filters
+      // (customer, status) are also disallowed for techs to avoid
+      // cross-tenant or cross-user enumeration.
+      if (userRole === 'field_tech') {
+        if (!userId) {
+          res.status(401).json({ message: "Authentication required" });
+          return;
+        }
+        const own = await storage.getWorkOrdersByTechnician(userId);
+        res.json(applyPricingVisibility(req, own));
+        return;
+      }
+
       let workOrders;
       if (technician) {
         workOrders = await storage.getWorkOrdersByTechnician(parseInt(technician as string));
@@ -8083,7 +8100,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       } else {
         workOrders = await storage.getWorkOrders();
       }
-      
+
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, workOrders));
     } catch (error) {
