@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
+import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778514028553.png";
 import { useState, useEffect } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
@@ -268,14 +268,14 @@ export default function Navigation() {
       {/* Desktop Navigation - Top */}
       <nav className="hidden lg:block bg-white shadow-sm border-b border-transparent relative after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/40 after:to-transparent">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
+          <div className="flex justify-between items-center h-24">
             {/* Logo */}
             <div className="flex-shrink-0">
               <Link href="/">
                 <img
                   src={irrigoProLogo}
                   alt="IrrigoPro"
-                  className="h-14 w-auto cursor-pointer transition-opacity duration-200 hover:opacity-80"
+                  className="h-20 w-auto cursor-pointer transition-opacity duration-200 hover:opacity-80"
                 />
               </Link>
             </div>
@@ -416,7 +416,7 @@ export default function Navigation() {
                 <img 
                   src={signedLogoUrl || companyLogoUrl} 
                   alt="Company Logo"
-                  className="h-16 w-auto object-contain"
+                  className="h-20 w-auto object-contain"
                 />
               </div>
             </div>
@@ -428,13 +428,13 @@ export default function Navigation() {
       <div className="lg:hidden m-0 p-0">
         {/* Top Bar with Logo and Notifications */}
         <div className="bg-white shadow-sm border-b border-gray-200 m-0 p-0">
-          <div className="flex justify-between items-center h-20 px-4">
+          <div className="flex justify-between items-center h-28 px-4">
             {/* Logo */}
-            <div className="flex items-center">
+            <div className="flex items-center min-w-0 flex-1 mr-2">
               <img
                 src={irrigoProLogo}
                 alt="IrrigoPro"
-                className="h-14 w-auto"
+                className="h-24 w-auto max-w-full object-contain"
               />
             </div>
 
@@ -488,11 +488,11 @@ export default function Navigation() {
         {/* Mobile Company Logo Banner */}
         {companyLogoUrl && (
           <div className="border-b border-gray-200 bg-gray-50">
-            <div className="flex justify-center items-center py-2 px-4">
+            <div className="flex justify-center items-center py-3 px-4">
               <img 
                 src={signedLogoUrl || companyLogoUrl} 
                 alt="Company Logo"
-                className="h-12 w-auto object-contain"
+                className="h-16 w-auto object-contain"
               />
             </div>
           </div>
