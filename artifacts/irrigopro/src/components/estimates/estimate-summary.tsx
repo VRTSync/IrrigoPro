@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Part } from "@shared/schema";
+import type { Part } from "@workspace/db/schema";
 
 interface EstimateItem {
   part: Part;

@@ -1,6 +1,6 @@
-import type { Estimate } from "@shared/schema";
+import type { Estimate } from "@workspace/db/schema";
 import { EstimateBoardCard } from "./estimate-board-card";
-import type { LifecycleStatus } from "@shared/lifecycle";
+import type { LifecycleStatus } from "@/lib/lifecycle";
 
 export interface ColumnTheme {
   status: LifecycleStatus;

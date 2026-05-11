@@ -10,7 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Estimate } from "@shared/schema";
+import type { Estimate } from "@workspace/db/schema";
 
 // AlertDialogContent's public type omits onPointerDownOutside / onInteractOutside,
 // but the underlying primitive still forwards them — re-expose them via a single

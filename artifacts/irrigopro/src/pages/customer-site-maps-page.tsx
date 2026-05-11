@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 export default function CustomerSiteMapsPage() {
   const { customerId } = useParams();

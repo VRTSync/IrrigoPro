@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Estimate } from "@shared/schema";
+import type { Estimate } from "@workspace/db/schema";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, ChevronDown, Send } from "lucide-react";
 import { useEstimateResend } from "@/hooks/use-estimate-resend";

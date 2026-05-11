@@ -17,7 +17,7 @@ import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Se
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { BillingSheet } from "@shared/schema";
+import type { BillingSheet } from "@workspace/db/schema";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
 export default function BillingSheets() {

@@ -14,7 +14,7 @@ import { EstimateBoardFilter } from "@/components/estimates/board/estimate-board
 import { useState, useEffect } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { safeGet, safeSet } from "@/utils/safeStorage";
-import type { Customer, Estimate } from "@shared/schema";
+import type { Customer, Estimate } from "@workspace/db/schema";
 
 const VIEW_PREF_KEY = "estimates_view_preference";
 

@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeft, MapPin, Upload, Eye, Edit, Trash2, Plus } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Customer, SiteMap, Controller, IrrigationZone } from "@shared/schema";
+import type { Customer, SiteMap, Controller, IrrigationZone } from "@workspace/db/schema";
 import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
 import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";

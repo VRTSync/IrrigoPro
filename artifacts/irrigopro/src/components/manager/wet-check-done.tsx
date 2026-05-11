@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, Check, FileText, Wrench, FileCheck, CheckCircle2 } from "lucide-react";
 import type {
   Customer, WetCheck, WetCheckFinding, WetCheckWithDetails, WetCheckZoneRecord,
-} from "@shared/schema";
+} from "@workspace/db/schema";
 
 interface FindingItem { f: WetCheckFinding; zr: WetCheckZoneRecord; }
 

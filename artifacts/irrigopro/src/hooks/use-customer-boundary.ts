@@ -4,7 +4,7 @@ import {
   type PropertyBoundary,
   type StoredBoundaryFields,
 } from "@/lib/property-boundary";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 export function useCustomerBoundary(customerId: number | null | undefined) {
   return useQuery<StoredBoundaryFields, Error, PropertyBoundary | null>({

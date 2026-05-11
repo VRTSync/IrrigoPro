@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
-import type { Estimate } from "@shared/schema";
+import type { Estimate } from "@workspace/db/schema";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
 import { useEstimateResend } from "@/hooks/use-estimate-resend";
 

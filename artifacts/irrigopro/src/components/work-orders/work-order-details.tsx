@@ -49,7 +49,7 @@ import {
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder, User as UserType } from "@shared/schema";
+import type { WorkOrder, User as UserType } from "@workspace/db/schema";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { buildMapsUrl } from "@/lib/maps-url";
 

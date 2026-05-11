@@ -10,7 +10,7 @@ import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import { useState, useEffect } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
-import type { Part, ManualPartReview, Estimate } from "@shared/schema";
+import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
 type NavDropdownItem = {
   path: string;

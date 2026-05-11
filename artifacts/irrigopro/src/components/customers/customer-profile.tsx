@@ -23,7 +23,7 @@ import {
   ChevronRight
 } from "lucide-react";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
-import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@shared/schema";
+import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@workspace/db/schema";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";

@@ -16,8 +16,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Plus, User, Building, Mail, Phone, MapPin, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { insertCustomerSchema } from "@shared/schema";
-import type { Customer } from "@shared/schema";
+import { insertCustomerSchema } from "@workspace/db/schema";
+import type { Customer } from "@workspace/db/schema";
 
 const newCustomerSchema = insertCustomerSchema.extend({
   laborRate: z.string().optional(),

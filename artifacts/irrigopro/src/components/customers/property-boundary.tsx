@@ -23,7 +23,7 @@ import {
 import {
   addSatelliteHybrid,
 } from "@/lib/leaflet-base-layers";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 interface PropertyBoundarySectionProps {
   customer: Customer;

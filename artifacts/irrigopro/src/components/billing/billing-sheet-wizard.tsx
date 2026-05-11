@@ -56,7 +56,7 @@ import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
-import type { Customer, Part, BillingSheet, BillingSheetItem } from "@shared/schema";
+import type { Customer, Part, BillingSheet, BillingSheetItem } from "@workspace/db/schema";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

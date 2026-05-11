@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink, ThumbsUp, RotateCcw, Clock, Shield, ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder } from "@shared/schema";
+import type { WorkOrder } from "@workspace/db/schema";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 

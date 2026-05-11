@@ -15,7 +15,7 @@ import {
 import { Calendar, Users, Camera, ChevronDown, ChevronRight } from "lucide-react";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import type { WorkLocation } from "./wo-location-step";
-import type { User as UserType } from "@shared/schema";
+import type { User as UserType } from "@workspace/db/schema";
 import { WizardSummaryStrip } from "./wo-summary-strip";
 
 export interface ScheduleStepValue {

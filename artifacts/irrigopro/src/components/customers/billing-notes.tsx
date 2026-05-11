@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EditIcon, SaveIcon, XIcon, ReceiptIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 interface BillingNotesProps {
   customer: Customer;

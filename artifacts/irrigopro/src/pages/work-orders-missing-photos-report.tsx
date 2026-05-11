@@ -21,7 +21,7 @@ import { Camera, CheckCircle2, Download, Search, User, Building2, Calendar, Chev
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { WorkOrder } from "@shared/schema";
+import type { WorkOrder } from "@workspace/db/schema";
 
 interface MissingPhotosResponse {
   cutoff: string;

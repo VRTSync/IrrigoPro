@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 // The picker dialog and the map picker pull data we don't need for this
 // test; stub them out with tiny components that just expose the shape

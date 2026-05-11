@@ -16,7 +16,7 @@ import { ChevronLeft, ClipboardList, Loader2 } from "lucide-react";
 import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { Customer, WorkOrder } from "@shared/schema";
+import type { Customer, WorkOrder } from "@workspace/db/schema";
 import type { UploadedFile } from "@/components/ui/file-upload";
 import { WoCustomerStep, type CustomerStepValue } from "./wizard/wo-customer-step";
 import {

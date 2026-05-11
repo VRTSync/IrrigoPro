@@ -7,7 +7,7 @@ import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-hea
 import { Plus, Users, Search, Edit, Trash2, Phone, Mail, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Switch } from "@/components/ui/switch";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 import { CustomerForm } from "@/components/customer-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";

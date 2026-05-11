@@ -9,8 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Filter } from "lucide-react";
-import type { Customer } from "@shared/schema";
-import type { LifecycleStatus } from "@shared/lifecycle";
+import type { Customer } from "@workspace/db/schema";
+import type { LifecycleStatus } from "@/lib/lifecycle";
 import { COLUMN_THEMES } from "./estimate-board-column";
 
 const STATUS_CHIP_THEMES: Record<

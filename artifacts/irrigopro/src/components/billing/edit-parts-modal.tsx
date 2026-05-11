@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Package, Plus, Trash2, BookOpen } from "lucide-react";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
-import type { Part } from "@shared/schema";
+import type { Part } from "@workspace/db/schema";
 
 export interface EditPartRow {
   partId?: number | null;

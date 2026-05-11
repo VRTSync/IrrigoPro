@@ -6,8 +6,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Estimate } from "@shared/schema";
-import type { LifecycleStatus } from "@shared/lifecycle";
+import type { Estimate } from "@workspace/db/schema";
+import type { LifecycleStatus } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 
 interface Props {

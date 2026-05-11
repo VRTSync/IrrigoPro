@@ -37,7 +37,7 @@ import {
 import {
   Cpu, ChevronDown, ChevronRight, Loader2, Search,
 } from "lucide-react";
-import type { Customer, PropertyController } from "@shared/schema";
+import type { Customer, PropertyController } from "@workspace/db/schema";
 
 const MAX_CONTROLLERS = 26;
 

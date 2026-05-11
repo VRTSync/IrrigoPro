@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Estimate, Customer } from "@shared/schema";
-import type { LifecycleStatus } from "@shared/lifecycle";
-import { computeLifecycleStatus } from "@shared/lifecycle";
+import type { Estimate, Customer } from "@workspace/db/schema";
+import type { LifecycleStatus } from "@/lib/lifecycle";
+import { computeLifecycleStatus } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import {
   Accordion,

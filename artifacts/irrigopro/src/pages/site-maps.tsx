@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MapPin, Search, Eye, Users, Building } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import type { Customer, SiteMap } from "@shared/schema";
+import type { Customer, SiteMap } from "@workspace/db/schema";
 
 interface SiteMapWithCustomer extends SiteMap {
   customer: Customer;

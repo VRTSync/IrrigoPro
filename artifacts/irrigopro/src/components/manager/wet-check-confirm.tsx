@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type {
   Customer, IssueTypeConfig, WetCheckFinding, WetCheckWithDetails, WetCheckZoneRecord,
-} from "@shared/schema";
+} from "@workspace/db/schema";
 
 type Resolution = WetCheckFinding["resolution"];
 interface FindingItem { f: WetCheckFinding; zr: WetCheckZoneRecord; }

@@ -63,7 +63,7 @@ import type {
   NavLeaf,
   NavBadgeMap,
 } from "./nav-config";
-import type { Part, ManualPartReview, Estimate } from "@shared/schema";
+import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
 const SIDEBAR_STORAGE_KEY = "irrigopro_desktop_sidebar_open";
 const SHELL_HINT_SEEN_KEY = "irrigopro_desktop_shell_seen";

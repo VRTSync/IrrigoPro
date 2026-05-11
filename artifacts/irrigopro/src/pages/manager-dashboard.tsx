@@ -14,7 +14,7 @@ import { WorkOrderWizard } from "@/components/work-orders/work-order-wizard";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-modal";
-import type { WorkOrder, BillingSheet } from "@shared/schema";
+import type { WorkOrder, BillingSheet } from "@workspace/db/schema";
 import { format } from "date-fns";
 
 const ATTENTION_STATUSES = ["work_completed", "pending_manager_review", "submitted"];

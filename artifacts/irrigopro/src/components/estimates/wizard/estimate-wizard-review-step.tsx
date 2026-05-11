@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronRight, Image as ImageIcon, Paperclip, User, Briefcase, Loader2, MapPin, Cpu } from "lucide-react";
 import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 import {
   computeTotals,
   DEFAULT_LABOR_RATE,

@@ -19,7 +19,7 @@ import {
   ArrowUp,
   ArrowDown
 } from "lucide-react";
-import type { Part } from "@shared/schema";
+import type { Part } from "@workspace/db/schema";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { PartFormDialog } from "@/components/parts/part-form-dialog";

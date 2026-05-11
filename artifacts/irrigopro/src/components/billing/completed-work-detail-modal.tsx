@@ -34,7 +34,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@shared/schema";
+import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { apiRequest, parseApiError } from "@/lib/queryClient";

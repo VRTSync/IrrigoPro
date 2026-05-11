@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { CustomerSelector } from "@/components/ui/customer-selector";
 import { User, Mail, Phone, MapPin, Pencil, Building2 } from "lucide-react";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 export interface CustomerStepValue {
   customer: Customer | null;

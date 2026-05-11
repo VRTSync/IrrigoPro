@@ -1,4 +1,4 @@
-import type { BillingSheet } from "@shared/schema";
+import type { BillingSheet } from "@workspace/db/schema";
 import { CompletedWorkDetailModal } from "./completed-work-detail-modal";
 
 interface BillingSheetViewModalProps {

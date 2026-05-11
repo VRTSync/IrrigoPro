@@ -1,4 +1,4 @@
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 /**
  * Build a Nominatim-friendly address query from a customer record.

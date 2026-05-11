@@ -10,7 +10,7 @@ import { ChevronLeft, Loader2, FileText, Wrench, FileCheck, ListChecks, X, Light
 import type {
   Customer, IssueTypeConfig, Part, WetCheckFinding, WetCheckPhoto,
   WetCheckWithDetails, WetCheckZoneRecord,
-} from "@shared/schema";
+} from "@workspace/db/schema";
 import { FindingCard, type FindingEdits } from "./finding-card";
 import { DecisionCard } from "./decision-card";
 import { AutoBilledBanner } from "./auto-billed-banner";

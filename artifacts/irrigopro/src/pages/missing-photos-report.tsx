@@ -23,7 +23,7 @@ import { Camera, Download, Search, User, Building2, Calendar, ChevronDown, Chevr
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { BillingSheet } from "@shared/schema";
+import type { BillingSheet } from "@workspace/db/schema";
 
 interface NotificationInfo {
   lastSentAt: string;

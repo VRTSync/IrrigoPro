@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import type { WetCheck } from "@shared/schema";
+import type { WetCheck } from "@workspace/db/schema";
 import { WetCheckWizard } from "@/components/manager/wet-check-wizard";
 
 // ─── Inbox ───────────────────────────────────────────────────────────────────

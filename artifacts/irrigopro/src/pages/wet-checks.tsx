@@ -44,7 +44,7 @@ import type {
   PropertyController,
   IssueTypeConfig,
   Part,
-} from "@shared/schema";
+} from "@workspace/db/schema";
 
 // UUIDv4 strict — server validators (z.string().uuid()) reject anything else,
 // so the fallback path also emits a v4-shaped string when crypto.randomUUID

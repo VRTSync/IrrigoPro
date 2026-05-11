@@ -15,8 +15,8 @@ import { CalendarIcon, DollarSign, Percent, FileText, Tag, Plus, X, Building2 } 
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { insertCustomerSchema } from "@shared/schema";
-import type { Customer, User } from "@shared/schema";
+import { insertCustomerSchema } from "@workspace/db/schema";
+import type { Customer, User } from "@workspace/db/schema";
 
 const customerFormSchema = insertCustomerSchema.extend({
   companyId: z.number().min(1, "Company ID is required"),

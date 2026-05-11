@@ -52,7 +52,7 @@ import {
   Navigation,
 } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
-import type { WorkOrder, Part, Customer } from "@shared/schema";
+import type { WorkOrder, Part, Customer } from "@workspace/db/schema";
 
 const workOrderCompletionSchema = z.object({
   workSummary: z.string().min(10, "Work summary must be at least 10 characters"),

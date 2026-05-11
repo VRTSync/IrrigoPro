@@ -13,7 +13,7 @@ import {
 import { Cpu, Droplets, Minus, Plus, Loader2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Customer, PropertyController } from "@shared/schema";
+import type { Customer, PropertyController } from "@workspace/db/schema";
 
 const DEFAULT_ZONE_COUNT = 12;
 const MAX_CONTROLLERS = 26;

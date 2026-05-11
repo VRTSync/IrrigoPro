@@ -12,8 +12,8 @@ import { zodResolver } from "@/lib/zod-resolver";
 import { z } from "zod/v4";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { insertPartSchema } from "@shared/schema";
-import type { Part, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@shared/schema";
+import { insertPartSchema } from "@workspace/db/schema";
+import type { Part, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@workspace/db/schema";
 
 interface QuickAddPopoverProps {
   label: string;

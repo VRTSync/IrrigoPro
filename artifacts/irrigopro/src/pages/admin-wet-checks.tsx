@@ -16,7 +16,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Loader2, Trash2, Eye, Search, Droplets } from "lucide-react";
-import type { WetCheck } from "@shared/schema";
+import type { WetCheck } from "@workspace/db/schema";
 
 type AdminWetCheckRow = WetCheck & {
   zoneRecordCount: number;

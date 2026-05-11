@@ -18,7 +18,7 @@ import { LocationPicker } from "@/components/ui/location-picker";
 import { composeCustomerAddress } from "@/lib/customer-address";
 import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import { MapPin, Cpu, Droplets, Briefcase } from "lucide-react";
-import type { Customer, PropertyController } from "@shared/schema";
+import type { Customer, PropertyController } from "@workspace/db/schema";
 
 export interface WorkLocation {
   lat: number;

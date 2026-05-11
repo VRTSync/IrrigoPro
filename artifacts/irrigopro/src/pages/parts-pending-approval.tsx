@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, Package, ClipboardList, DollarSign } from "lucide-react";
 import { useState } from "react";
-import type { Part, ManualPartReview } from "@shared/schema";
+import type { Part, ManualPartReview } from "@workspace/db/schema";
 
 interface PendingPartRowProps {
   part: Part;

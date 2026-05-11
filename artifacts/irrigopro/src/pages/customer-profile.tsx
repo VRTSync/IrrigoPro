@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, MapPin, Phone, Mail, Building, FileText, Receipt, DollarSign } from "lucide-react";
-import { Customer } from "@shared/schema";
+import { Customer } from "@workspace/db/schema";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 import { IrrigationSystemCard } from "@/components/customers/irrigation-system-card";

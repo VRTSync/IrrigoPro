@@ -7,7 +7,7 @@ import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
-import type { Estimate } from "@shared/schema";
+import type { Estimate } from "@workspace/db/schema";
 
 interface EstimatesManagerProps {
   onBack: () => void;

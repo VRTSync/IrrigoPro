@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { User, Users, ArrowRight } from "lucide-react";
-import type { WorkOrder, User as UserType } from "@shared/schema";
+import type { WorkOrder, User as UserType } from "@workspace/db/schema";
 
 interface AssignmentConfirmationModalProps {
   isOpen: boolean;

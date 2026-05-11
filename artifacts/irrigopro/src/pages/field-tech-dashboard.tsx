@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Package, ClipboardList, Plus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder } from "@shared/schema";
+import type { WorkOrder } from "@workspace/db/schema";
 import { Link } from "wouter";
 import { BilledBadge } from "@/components/ui/billed-indicator";
 import { BillingSheetWizard } from "@/components/billing/billing-sheet-wizard";

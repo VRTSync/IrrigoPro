@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Building, Mail, Phone, Globe, MapPin, Image, Upload } from "lucide-react";
-import type { Company, InsertCompany } from "@shared/schema";
+import type { Company, InsertCompany } from "@workspace/db/schema";
 import { apiRequest } from "@/lib/queryClient";
 import CompanySetup from "@/components/company/company-setup";
 import { ObjectUploader } from "@/components/ObjectUploader";

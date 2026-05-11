@@ -13,7 +13,7 @@ import {
   Minus,
   ChevronLeft,
 } from "lucide-react";
-import type { Part } from "@shared/schema";
+import type { Part } from "@workspace/db/schema";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import { LaborModeToggle, type LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 

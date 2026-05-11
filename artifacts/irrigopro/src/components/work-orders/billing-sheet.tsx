@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { WorkOrder, WorkOrderItem, Customer } from "@shared/schema";
+import type { WorkOrder, WorkOrderItem, Customer } from "@workspace/db/schema";
 import { buildMapsUrl } from "@/lib/maps-url";
 import logoPath from "@assets/IrrigoPro_2026-05_1778193170303.png";
 

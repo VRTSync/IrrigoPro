@@ -13,7 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 import type { WorkLocation } from "./wo-location-step";
 import { WizardSummaryStrip } from "./wo-summary-strip";
 

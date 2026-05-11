@@ -19,7 +19,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Loader2, Plus, ArrowUp, ArrowDown, Save, RotateCcw, Wrench } from "lucide-react";
-import type { IssueTypeConfig } from "@shared/schema";
+import type { IssueTypeConfig } from "@workspace/db/schema";
 
 type GroupValue = "quick_fix" | "advanced" | "zone_issue";
 const GROUP_OPTIONS: ReadonlyArray<{ value: GroupValue; label: string }> = [

@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, ClipboardList, Eye, Mail, ShieldCheck } from "lucide-react";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
-import type { Estimate } from "@shared/schema";
+import type { Estimate } from "@workspace/db/schema";
 
 function formatCurrency(amount: string | number) {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;

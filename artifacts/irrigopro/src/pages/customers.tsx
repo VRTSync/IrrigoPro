@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Users, Search, Trash2, Phone, Mail, Settings, Eye, MapPin, ChevronRight, ChevronDown, ChevronUp, Building2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 import { CustomerIntegration } from "@/components/integrations/customer-integration";
 import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";

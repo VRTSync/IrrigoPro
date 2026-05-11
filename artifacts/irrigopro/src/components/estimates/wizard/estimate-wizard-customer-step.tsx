@@ -29,7 +29,7 @@ import {
   Cpu,
   Droplets,
 } from "lucide-react";
-import type { Customer, PropertyController } from "@shared/schema";
+import type { Customer, PropertyController } from "@workspace/db/schema";
 
 export interface WorkLocation {
   lat: number;

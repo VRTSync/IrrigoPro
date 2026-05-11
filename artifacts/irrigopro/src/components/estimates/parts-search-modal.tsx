@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Package, Plus, X, Check } from "lucide-react";
-import type { Part } from "@shared/schema";
+import type { Part } from "@workspace/db/schema";
 
 export type PartsSearchPresentation = "dialog" | "sheet";
 export type PartsSearchSelectMode = "single" | "multi";

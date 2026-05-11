@@ -1,5 +1,5 @@
-import { LIFECYCLE_ORDER, type LifecycleStatus } from "@shared/lifecycle";
-import type { Estimate } from "@shared/schema";
+import { LIFECYCLE_ORDER, type LifecycleStatus } from "@/lib/lifecycle";
+import type { Estimate } from "@workspace/db/schema";
 
 export type SortField = "customer" | "amount" | "status" | "date";
 export type SortDir = "asc" | "desc";

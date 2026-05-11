@@ -16,7 +16,7 @@ import { ChevronLeft, FileText, Loader2 } from "lucide-react";
 import { WizardHeader } from "@/components/wizard-shared/wizard-header";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { Customer, EstimateWithItems, EstimateItem } from "@shared/schema";
+import type { Customer, EstimateWithItems, EstimateItem } from "@workspace/db/schema";
 import type { UploadedFile } from "@/components/ui/file-upload";
 import {
   EstimateWizardCustomerStep,

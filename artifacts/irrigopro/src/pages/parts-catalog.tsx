@@ -22,8 +22,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@/lib/zod-resolver";
 import { z } from "zod/v4";
-import type { Part, Assembly, AssemblyWithParts, InsertAssembly, InsertAssemblyPart, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@shared/schema";
-import { insertPartSchema, insertAssemblySchema } from "@shared/schema";
+import type { Part, Assembly, AssemblyWithParts, InsertAssembly, InsertAssemblyPart, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@workspace/db/schema";
+import { insertPartSchema, insertAssemblySchema } from "@workspace/db/schema";
 
 import { BulkImport } from "@/components/parts/bulk-import";
 

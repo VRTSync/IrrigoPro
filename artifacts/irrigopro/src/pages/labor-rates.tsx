@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, X, Edit, DollarSign } from "lucide-react";
-import type { Customer } from "@shared/schema";
+import type { Customer } from "@workspace/db/schema";
 
 interface EditState {
   laborRate: string;

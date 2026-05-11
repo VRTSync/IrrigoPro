@@ -45,7 +45,7 @@ import {
   Camera
 } from "lucide-react";
 import { Link } from "wouter";
-import type { WorkOrder } from "@shared/schema";
+import type { WorkOrder } from "@workspace/db/schema";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
 export default function WorkOrders() {

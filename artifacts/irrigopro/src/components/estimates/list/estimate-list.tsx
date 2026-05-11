@@ -9,8 +9,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { type LifecycleStatus } from "@shared/lifecycle";
-import type { Estimate } from "@shared/schema";
+import { type LifecycleStatus } from "@/lib/lifecycle";
+import type { Estimate } from "@workspace/db/schema";
 import { EstimateListRow } from "./estimate-list-row";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";

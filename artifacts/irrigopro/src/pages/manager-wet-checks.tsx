@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CheckCircle2, AlertTriangle, DollarSign } from "lucide-react";
 import { Loader2 } from "lucide-react";
 import { WetCheckCard, type WetCheckCardData } from "@/components/manager/wet-check-card";
-import type { WetCheck, BillingSheetWithItems } from "@shared/schema";
+import type { WetCheck, BillingSheetWithItems } from "@workspace/db/schema";
 
 interface User { id: number; companyId?: number; name: string; role: string; }
 

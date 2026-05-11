@@ -8,7 +8,7 @@ import { authedPhotoSrc } from "@/lib/queryClient";
 import { Wrench, MapPin, StickyNote, Pencil, Search, type LucideIcon } from "lucide-react";
 import type {
   Part, WetCheckFinding, WetCheckPhoto, WetCheckZoneRecord, IssueTypeConfig,
-} from "@shared/schema";
+} from "@workspace/db/schema";
 
 export interface FindingEdits {
   partId: number | null;

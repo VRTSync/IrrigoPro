@@ -12,7 +12,7 @@ import { Clock, MapPin, Plus, Trash2, Wrench, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
-import type { Part } from "@shared/schema";
+import type { Part } from "@workspace/db/schema";
 
 interface PropertyZone {
   id: string;

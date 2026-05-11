@@ -17,7 +17,7 @@ import {
   Users,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import type { Part, ManualPartReview } from "@shared/schema";
+import type { Part, ManualPartReview } from "@workspace/db/schema";
 
 interface CustomerPreview {
   id: number;
