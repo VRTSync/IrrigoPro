@@ -1175,6 +1175,12 @@ export const wetCheckFindings = pgTable("wet_check_findings", {
   notes: text("notes"),
   resolution: text("resolution").notNull().default("pending"),
   // pending | repaired_in_field | sent_to_estimate | deferred_to_work_order | documented_only
+  // Task #464 — labor-only Mark Complete. When true on a repaired_in_field
+  // finding with no partId, the auto-bill path writes a labor-only line
+  // (qty 0 / part price 0) instead of throwing the missing-part guard.
+  // Cleared automatically by the server whenever a partId is assigned, so
+  // the two states can never both be true.
+  noPartNeeded: boolean("no_part_needed").notNull().default(false),
   // Task #428 — tech intent, decoupled from `resolution` so manager rerouting
   // (e.g. → sent_to_estimate) does not erase what the field tech said about
   // the work. Values: needs_review | completed_in_field. Null on legacy rows

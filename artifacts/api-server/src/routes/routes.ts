@@ -11394,6 +11394,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     repairedInField: z.boolean().optional(),
     // Task #428 — tech intent, persisted independently of `resolution`.
     techDisposition: z.enum(["needs_review", "completed_in_field"]).optional(),
+    // Task #464 — labor-only Mark Complete confirmation. Server force-clears
+    // it whenever a partId is also present, so the two states cannot both
+    // be true on a finding.
+    noPartNeeded: z.boolean().optional(),
     clientId: z.string().uuid().nullish(),
   });
 
@@ -11424,6 +11428,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         techDisposition:
           body.techDisposition
           ?? (body.repairedInField ? "completed_in_field" : "needs_review"),
+        // Task #464 — labor-only Mark Complete confirmation. Force-cleared
+        // whenever a partId is also present so the two states cannot both
+        // be true on a finding.
+        noPartNeeded: body.partId != null ? false : (body.noPartNeeded ?? false),
         clientId: body.clientId ?? null,
       });
       res.status(201).json(created);
@@ -11442,6 +11450,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     repairedInField: z.boolean().optional(),
     // Task #428 — tech intent, persisted independently of `resolution`.
     techDisposition: z.enum(["needs_review", "completed_in_field"]).optional(),
+    // Task #464 — labor-only Mark Complete confirmation. Server clears it
+    // automatically whenever a partId is assigned (see updateWetCheckFinding).
+    noPartNeeded: z.boolean().optional(),
   }).partial();
 
   app.patch("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
@@ -11492,6 +11503,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
     if (body.techDisposition !== undefined) {
       patch.techDisposition = body.techDisposition;
+    }
+    // Task #464 — labor-only Mark Complete. Storage layer also force-clears
+    // this when a partId is assigned, so the two states cannot both be true.
+    if (body.noPartNeeded !== undefined) {
+      patch.noPartNeeded = body.noPartNeeded;
     }
     try {
       const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);

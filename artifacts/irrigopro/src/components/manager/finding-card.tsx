@@ -101,6 +101,18 @@ export function FindingCard({
                 Tech: {finding.techDisposition === "completed_in_field" ? "Completed in field" : "Needs manager review"}
               </Badge>
             )}
+            {/* Task #464 — labor-only Mark Complete. Shown so the manager
+                can see at a glance why the auto-billed sheet has a
+                no-parts line for this finding. */}
+            {finding.noPartNeeded && (
+              <Badge
+                variant="outline"
+                className="mt-1 ml-1 text-xs border-blue-300 text-blue-700 bg-blue-50"
+                data-testid={`wizard-finding-${finding.id}-no-part-needed`}
+              >
+                No part needed (labor only)
+              </Badge>
+            )}
           </div>
         </div>
 

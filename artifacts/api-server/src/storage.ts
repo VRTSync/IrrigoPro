@@ -5735,12 +5735,23 @@ export class DatabaseStorage implements IStorage {
       f.convertedAt == null &&
       f.billingSheetId == null,
     );
+    // Task #464 — preview must mirror the submit guard exactly so the
+    // tech-facing modal totals match what _writeRepairedInFieldBilling
+    // will actually persist:
+    //   - With a part assigned → bill parts (qty × partPrice) + labor.
+    //   - With no part but `noPartNeeded` true → labor-only line
+    //     (qty 0 / partPrice 0); only labor counts.
+    //   - With no part AND no `noPartNeeded` → submit will throw, so we
+    //     exclude these from the totals (they're surfaced inline on the
+    //     submit CTA and block the button instead).
+    const billable = repaired.filter(f => f.partId != null || f.noPartNeeded);
     let partsTotal = 0;
     let laborTotal = 0;
     if (autoBillEnabled) {
-      for (const f of repaired) {
-        const qty = Number(f.quantity ?? 0);
-        const partPrice = parseFloat(String(f.partPrice ?? "0"));
+      for (const f of billable) {
+        const isLaborOnly = f.partId == null && f.noPartNeeded;
+        const qty = isLaborOnly ? 0 : Number(f.quantity ?? 0);
+        const partPrice = isLaborOnly ? 0 : parseFloat(String(f.partPrice ?? "0"));
         const laborHours = parseFloat(String(f.laborHours ?? "0"));
         partsTotal += partPrice * qty;
         laborTotal += laborHours * laborRate;
@@ -5758,7 +5769,7 @@ export class DatabaseStorage implements IStorage {
     }
     return {
       autoBillEnabled,
-      autoBilledCount: autoBillEnabled ? repaired.length : 0,
+      autoBilledCount: autoBillEnabled ? billable.length : 0,
       autoBilledPartsTotal: partsTotal.toFixed(2),
       autoBilledLaborTotal: laborTotal.toFixed(2),
       autoBilledGrandTotal: (partsTotal + laborTotal).toFixed(2),
@@ -5788,15 +5799,23 @@ export class DatabaseStorage implements IStorage {
     // explicitly; we extend the same guard to non-positive quantity
     // (qty * price would zero the line) and negative labor hours.
     for (const f of repaired) {
-      if (f.partId == null) {
+      // Task #464 — labor-only Mark Complete. A finding marked complete
+      // with no part is valid when the tech ticked "No part needed"; the
+      // line is written below with qty 0 / unit price 0.
+      if (f.partId == null && !f.noPartNeeded) {
         throw new Error(
           `Cannot auto-bill finding ${f.id}: marked complete but has no part assigned. ` +
-          `Add a part before submitting, or leave Mark Complete unchecked to route to the manager.`,
+          `Add a part before submitting, tick "No part needed" for a labor-only fix, ` +
+          `or leave Mark Complete unchecked to route to the manager.`,
         );
       }
       const qty = Number(f.quantity);
-      if (!Number.isFinite(qty) || qty <= 0) {
-        throw new Error(`Cannot auto-bill finding ${f.id}: quantity must be > 0 (got ${f.quantity}).`);
+      // Labor-only lines legitimately have qty 0; only validate qty when a
+      // part is actually being billed.
+      if (f.partId != null) {
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error(`Cannot auto-bill finding ${f.id}: quantity must be > 0 (got ${f.quantity}).`);
+        }
       }
       const laborHours = parseFloat(String(f.laborHours ?? "0"));
       if (!Number.isFinite(laborHours) || laborHours < 0) {
@@ -5804,6 +5823,12 @@ export class DatabaseStorage implements IStorage {
       }
     }
     const lines = repaired.map(f => {
+      // Labor-only lines: qty 0, unit price 0, total parts 0. Labor still
+      // flows from the per-finding laborHours × customer rate as normal.
+      if (f.partId == null && f.noPartNeeded) {
+        const laborHours = parseFloat(String(f.laborHours ?? "0"));
+        return { qty: 0, partPrice: 0, laborHours, partsTotal: 0 };
+      }
       const qty = Number(f.quantity);
       const partPrice = parseFloat(String(f.partPrice ?? "0"));
       const laborHours = parseFloat(String(f.laborHours ?? "0"));
@@ -6053,6 +6078,9 @@ export class DatabaseStorage implements IStorage {
       if (!p) throw new Error(`Part ${patch.partId} not found in this company`);
       next.partName = p.name;
       next.partPrice = p.price;
+      // Task #464 — assigning a part always wins over the labor-only flag
+      // so the two states can never both be set on a finding.
+      next.noPartNeeded = false;
     }
     if (patch.issueType) next.issueGroup = deriveIssueGroup(patch.issueType);
     const [updated] = await db.update(wetCheckFindings).set(next).where(eq(wetCheckFindings.id, id)).returning();

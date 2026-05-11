@@ -830,6 +830,14 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
   const allFindings = wc.zoneRecords.flatMap(z => z.findings);
   const completeCount = allFindings.filter(f => f.resolution === "repaired_in_field").length;
   const pendingFindingCount = allFindings.filter(f => f.resolution === "pending").length;
+  // Task #464 — Complete findings that have neither a part nor the
+  // labor-only confirmation block submit. Surface them inline on the CTA
+  // so the tech knows exactly what to fix before tapping Submit.
+  const completeNeedingDecision = allFindings.filter(f =>
+    f.resolution === "repaired_in_field" &&
+    f.partId == null &&
+    !f.noPartNeeded,
+  );
   const naCount = wc.zoneRecords.filter(z => z.status === "not_applicable").length;
   // Task #428 — submit CTA copy + intent counts. Disposition is the tech's
   // self-reported intent and is decoupled from `resolution` (which carries
@@ -957,6 +965,17 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
         />
       )}
 
+      {!isReadOnly && completeNeedingDecision.length > 0 && (
+        <div
+          className="text-sm rounded border border-amber-300 bg-amber-50 p-3 text-amber-900"
+          data-testid="submit-needs-part-or-no-part-hint"
+        >
+          {completeNeedingDecision.length} finding{completeNeedingDecision.length === 1 ? " is" : "s are"} marked complete without a part.
+          Open {completeNeedingDecision.length === 1 ? "it" : "them"} and either pick a part or tick
+          {" "}<span className="font-medium">No part needed (labor only)</span> before submitting.
+        </div>
+      )}
+
       {!isReadOnly && (
         <Button
           className="w-full min-h-[48px]"
@@ -981,7 +1000,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
             }
             previewMut.mutate();
           }}
-          disabled={previewMut.isPending || submitMut.isPending}
+          disabled={previewMut.isPending || submitMut.isPending || completeNeedingDecision.length > 0}
           data-testid="btn-submit-wet-check"
         >
           {(previewMut.isPending || submitMut.isPending) ? <Loader2 className="animate-spin" /> : submitCtaLabel}
@@ -1922,6 +1941,9 @@ function FindingSheet({
   const [notes, setNotes] = useState<string>("");
   const [search, setSearch] = useState<string>("");
   const [repairedInField, setRepairedInField] = useState<boolean>(false);
+  // Task #464 — labor-only Mark Complete confirmation. Visible only while
+  // Mark Complete is on AND no part is selected. Picking a part clears it.
+  const [noPartNeeded, setNoPartNeeded] = useState<boolean>(false);
   // Photos picked while creating a finding (before save). Uploaded immediately
   // with findingId=null and linked to the new finding once saveMut succeeds.
   const [pendingPhotos, setPendingPhotos] = useState<WetCheckPhoto[]>([]);
@@ -1950,6 +1972,7 @@ function FindingSheet({
       setLaborHours(editing.laborHours ?? "0");
       setNotes(editing.notes ?? "");
       setRepairedInField(editing.resolution === "repaired_in_field");
+      setNoPartNeeded(Boolean(editing.noPartNeeded));
     } else {
       setSelectedPart(null);
       setPartFromEdit(null);
@@ -1957,6 +1980,7 @@ function FindingSheet({
       setLaborHours(cfg?.defaultLaborHours ?? "0");
       setNotes("");
       setRepairedInField(false);
+      setNoPartNeeded(false);
       setPendingPhotos([]);
     }
     setSearch("");
@@ -1986,6 +2010,14 @@ function FindingSheet({
     return { id: null, name: null, price: null };
   };
 
+  // Task #464 — picking a part always wins over the labor-only flag, so
+  // they can never both be true. Mirrors the server-side guard in
+  // updateWetCheckFinding.
+  const hasPartSelected = (selectedPart?.id ?? partFromEdit?.id ?? null) != null;
+  useEffect(() => {
+    if (hasPartSelected && noPartNeeded) setNoPartNeeded(false);
+  }, [hasPartSelected, noPartNeeded]);
+
   type SaveResult = { id: number; clientId: string };
   const saveMut = useMutation<SaveResult, Error, void>({
     mutationFn: async () => {
@@ -2002,6 +2034,10 @@ function FindingSheet({
         // toggle so an explicit completed-in-field repair is captured even
         // when WET_CHECK_AUTO_BILL is off. Anything else flags for review.
         techDisposition: repairedInField ? "completed_in_field" : "needs_review",
+        // Task #464 — labor-only Mark Complete confirmation. Server also
+        // force-clears this when partId is set, so the two states cannot
+        // both be true on a finding.
+        noPartNeeded: !p.id && repairedInField ? noPartNeeded : false,
       };
       if (mode === "edit" && editing) {
         // Edit path goes through the offline wrapper so the patch is
@@ -2282,6 +2318,31 @@ function FindingSheet({
               </span>
             </span>
           </label>
+
+          {/* Task #464 — labor-only confirmation. Only meaningful while
+              the finding is being marked complete with no part chosen
+              (e.g. clearing a clogged nozzle, tightening a fitting).
+              Picking a part automatically clears this. */}
+          {repairedInField && !hasPartSelected && (
+            <label
+              className="flex items-start gap-2 text-sm rounded border border-amber-200 bg-amber-50 p-2"
+              data-testid="finding-no-part-needed-toggle"
+            >
+              <input
+                type="checkbox"
+                checked={noPartNeeded}
+                onChange={(e) => setNoPartNeeded(e.target.checked)}
+                className="h-4 w-4 mt-0.5"
+                data-testid="finding-no-part-needed-checkbox"
+              />
+              <span>
+                <span className="font-medium">No part needed (labor only)</span>
+                <span className="block text-xs text-gray-700">
+                  Confirm this is a labor-only fix — the billing line will be labor only with no part charge.
+                </span>
+              </span>
+            </label>
+          )}
 
           <Button
             className="w-full min-h-[48px]"
