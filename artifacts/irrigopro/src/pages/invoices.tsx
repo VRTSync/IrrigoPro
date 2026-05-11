@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   DollarSign,
   ClipboardList,
+  Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -30,12 +31,16 @@ interface Invoice {
   customerName: string;
   customerEmail: string;
   totalAmount: string;
+  partsSubtotal?: string;
+  laborSubtotal?: string;
   periodStart: string;
   periodEnd: string;
   invoiceMonth: number;
   invoiceYear: number;
   status: string;
   createdAt: string;
+  sentAt?: string | null;
+  dueDate?: string | null;
   quickbooksInvoiceId?: string;
 }
 
@@ -63,6 +68,66 @@ function formatCurrency(amount: string | number) {
 
 function formatDate(date: string) {
   return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function toIsoDate(value: string | null | undefined) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function csvEscape(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
+  let s = String(value);
+  // Neutralize CSV/spreadsheet formula injection: prefix risky leading chars
+  // so Excel/Sheets/Numbers do not evaluate them as formulas.
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function buildInvoicesCsv(invoices: Invoice[]) {
+  const headers = [
+    "Billing Period",
+    "Invoice Number",
+    "Customer",
+    "Status",
+    "QuickBooks Sync Status",
+    "Subtotal",
+    "Tax",
+    "Total",
+    "Issued Date",
+    "Due Date",
+  ];
+  const rows = invoices.map((inv) => {
+    const period = `${inv.invoiceYear}-${String(inv.invoiceMonth).padStart(2, "0")}`;
+    const total = parseFloat(inv.totalAmount) || 0;
+    const parts = parseFloat(inv.partsSubtotal ?? "0") || 0;
+    const labor = parseFloat(inv.laborSubtotal ?? "0") || 0;
+    const subtotal = parts + labor;
+    const tax = Math.max(0, +(total - subtotal).toFixed(2));
+    const issued = toIsoDate(inv.sentAt ?? inv.createdAt);
+    const due = toIsoDate(inv.dueDate);
+    const qbStatus = inv.quickbooksInvoiceId ? "Synced" : "Not synced";
+    return [
+      period,
+      inv.invoiceNumber,
+      inv.customerName,
+      inv.status,
+      qbStatus,
+      subtotal.toFixed(2),
+      tax.toFixed(2),
+      total.toFixed(2),
+      issued,
+      due,
+    ].map(csvEscape).join(",");
+  });
+  return [headers.join(","), ...rows].join("\r\n") + "\r\n";
 }
 
 function getStatusBadge(status: string) {
@@ -153,6 +218,33 @@ export default function InvoicesPage() {
 
   const monthOptions = generateMonthOptions();
 
+  const handleExportCsv = () => {
+    if (filteredInvoices.length === 0) return;
+    try {
+      const csv = buildInvoicesCsv(filteredInvoices);
+      const today = new Date().toISOString().slice(0, 10);
+      const filename =
+        monthFilter !== "all"
+          ? `monthly-invoices-${monthFilter}.csv`
+          : `monthly-invoices-${today}.csv`;
+      const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      toast({
+        title: "Export failed",
+        description: err instanceof Error ? err.message : "Unable to generate CSV",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-64 p-8">
@@ -196,13 +288,25 @@ export default function InvoicesPage() {
               </h1>
               <p className="text-sm text-gray-500 mt-0.5">All invoices sent across all customers</p>
             </div>
-            {filteredInvoices.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-right">
-                <div className="text-xs text-blue-600 font-medium">Total Billed</div>
-                <div className="text-lg font-bold text-blue-800">{formatCurrency(totalBilled)}</div>
-                <div className="text-xs text-blue-500">{filteredInvoices.length} invoice{filteredInvoices.length !== 1 ? "s" : ""}</div>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportCsv}
+                disabled={filteredInvoices.length === 0}
+                data-testid="button-export-csv"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Export CSV
+              </Button>
+              {filteredInvoices.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-right">
+                  <div className="text-xs text-blue-600 font-medium">Total Billed</div>
+                  <div className="text-lg font-bold text-blue-800">{formatCurrency(totalBilled)}</div>
+                  <div className="text-xs text-blue-500">{filteredInvoices.length} invoice{filteredInvoices.length !== 1 ? "s" : ""}</div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
