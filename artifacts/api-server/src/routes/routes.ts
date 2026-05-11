@@ -11764,6 +11764,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     // set, `null` to clear. Server forces it to null when the zone is not in
     // `checked_with_issues` so the badge cannot leak onto OK / N/A tiles.
     markedCompleteAt: z.union([z.string().datetime(), z.number(), z.date(), z.boolean()]).nullish(),
+    // Task #490 (mobile M5) — accepted but not persisted on PATCH. The mobile
+    // helper attaches a UUID `clientId` to every wet-check mutation so an
+    // offline-queue retry (M8) can be deduped; for PATCH the (resource id +
+    // request payload) is already idempotent so we just allow the field
+    // through the strict schema and ignore it.
+    clientId: z.string().uuid().nullish(),
   }).strict();
 
   app.patch("/api/wet-checks/zone-records/:id", requireAuthentication, async (req, res) => {

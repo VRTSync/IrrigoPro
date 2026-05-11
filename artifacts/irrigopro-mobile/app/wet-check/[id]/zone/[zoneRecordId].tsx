@@ -1,22 +1,35 @@
 import { Feather } from "@expo/vector-icons";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
+import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
-import { apiRequest } from "@/lib/api";
-import { wetCheckDetailQueryKey } from "../../[id]";
+import { ApiError, apiRequest } from "@/lib/api";
+import {
+  WetCheckConflictError,
+  wetCheckDetailQueryKey,
+  wetCheckIssueTypesQueryKey,
+  wetCheckMutate,
+  wetCheckMutationKey,
+  wetCheckPartsByIssueQueryKey,
+} from "@/lib/wet-check";
 
 type WetCheckPhoto = {
   id: number;
@@ -33,18 +46,26 @@ type WetCheckFinding = {
   zoneRecordId: number;
   issueType: string;
   resolution: string;
+  partId: number | null;
   partName: string | null;
+  partPrice: string | null;
   quantity: number;
   laborHours: string | null;
   notes: string | null;
 };
+
+type ZoneStatus =
+  | "not_checked"
+  | "checked_ok"
+  | "checked_with_issues"
+  | "not_applicable";
 
 type WetCheckZoneRecord = {
   id: number;
   wetCheckId: number;
   controllerLetter: string;
   zoneNumber: number;
-  status: string;
+  status: ZoneStatus;
   markedCompleteAt: string | null;
   notes: string | null;
   observedPressure: string | null;
@@ -55,17 +76,50 @@ type WetCheckZoneRecord = {
 
 type WetCheckDetail = {
   id: number;
+  customerId: number;
   customerName: string;
+  status: string;
   zoneRecords: WetCheckZoneRecord[];
   photos: WetCheckPhoto[];
 };
 
-const ZONE_STATUS_LABELS: Record<string, string> = {
+type IssueTypeConfig = {
+  id: number;
+  issueType: string;
+  issueGroup: string;
+  displayLabel: string;
+  defaultLaborHours: string;
+  partCategoryFilter: string | null;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+type Part = {
+  id: number;
+  name: string;
+  description: string | null;
+  price: string;
+  category: string;
+};
+
+type PartsByIssueResponse = {
+  parts: Part[];
+  recentPartIds: number[];
+};
+
+const ZONE_STATUS_LABELS: Record<ZoneStatus, string> = {
   checked_ok: "Ran OK",
   checked_with_issues: "Needs work",
   not_applicable: "Skipped (N/A)",
   not_checked: "Not checked",
 };
+
+const ZONE_STATUS_OPTIONS: ReadonlyArray<{ value: ZoneStatus; tone: { bg: string; fg: string } }> = [
+  { value: "checked_ok", tone: { bg: "#16a34a", fg: "#ffffff" } },
+  { value: "checked_with_issues", tone: { bg: "#dc2626", fg: "#ffffff" } },
+  { value: "not_applicable", tone: { bg: "#9ca3af", fg: "#ffffff" } },
+  { value: "not_checked", tone: { bg: "#e5e7eb", fg: "#374151" } },
+];
 
 const FINDING_RESOLUTION_LABELS: Record<string, string> = {
   pending: "Pending decision",
@@ -99,6 +153,7 @@ function zoneStatusColor(status: string, colors: ReturnType<typeof useColors>) {
 export default function ZoneDetailScreen() {
   const colors = useColors();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const params = useLocalSearchParams<{ id: string; zoneRecordId: string }>();
   const wetCheckId = useMemo(() => {
     const n = Number(params.id);
@@ -109,31 +164,43 @@ export default function ZoneDetailScreen() {
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [params.zoneRecordId]);
 
-  // Refetch the parent wet check so pull-to-refresh on the zone screen
-  // reflects the latest server-side data — there's no per-zone-record
-  // endpoint today.
-  const {
-    data: wc,
-    isLoading,
-    isError,
-    error,
-    refetch,
-    isRefetching,
-  } = useQuery({
+  const [conflict, setConflict] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  // Inline error banners for the zone screen — we surface mutation failures
+  // here instead of via native Alerts so the error stays visible while the
+  // tech retries (and matches the task's "validation errors via inline UX"
+  // language).
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [findingError, setFindingError] = useState<string | null>(null);
+
+  const detailQuery = useQuery({
     queryKey:
       wetCheckId != null
         ? wetCheckDetailQueryKey(wetCheckId)
         : ["wet-check", "missing"],
     enabled: wetCheckId != null,
-    queryFn: () =>
-      apiRequest<WetCheckDetail>(`/api/wet-checks/${wetCheckId}`),
+    queryFn: () => apiRequest<WetCheckDetail>(`/api/wet-checks/${wetCheckId}`),
     staleTime: 30_000,
   });
+
+  const wc = detailQuery.data;
 
   const zone = useMemo<WetCheckZoneRecord | undefined>(() => {
     if (!wc || zoneRecordId == null) return undefined;
     return wc.zoneRecords.find((z) => z.id === zoneRecordId);
   }, [wc, zoneRecordId]);
+
+  // Prefetch and cache the company's issue types as soon as we land on a
+  // zone — the M5 finding editor needs them, and React Query keeps them
+  // around for the rest of the wet-check session.
+  useQuery({
+    queryKey: wetCheckIssueTypesQueryKey,
+    queryFn: () => apiRequest<IssueTypeConfig[]>("/api/wet-checks/issue-types"),
+    staleTime: 5 * 60_000,
+    enabled: wetCheckId != null,
+  });
+
+  const isLocked = wc != null && wc.status !== "in_progress";
 
   const zonePhotos = useMemo<WetCheckPhoto[]>(() => {
     if (!wc || zoneRecordId == null) return [];
@@ -150,6 +217,173 @@ export default function ZoneDetailScreen() {
   const headerTitle = zone
     ? `Controller ${zone.controllerLetter} · Zone ${zone.zoneNumber}`
     : "Zone";
+
+  // ─── Mutations ─────────────────────────────────────────────────────────
+
+  const handleConflict = useCallback(() => {
+    setConflict(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
+      () => undefined,
+    );
+  }, []);
+
+  // Returns an error message to surface inline. Returns null if the error was
+  // already handled (e.g. 409 conflict shows the banner instead).
+  const errorMessage = useCallback((err: unknown): string | null => {
+    if (err instanceof WetCheckConflictError) {
+      handleConflict();
+      return null;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
+      () => undefined,
+    );
+    if (err instanceof ApiError) return err.message;
+    if (err instanceof Error) return err.message;
+    return "Something went wrong";
+  }, [handleConflict]);
+
+  // ── Zone status PATCH (optimistic) ──
+  const statusMutation = useMutation({
+    mutationKey:
+      wetCheckId != null && zoneRecordId != null
+        ? wetCheckMutationKey(wetCheckId, "zone-status", zoneRecordId)
+        : ["wet-check", "mutation", -1, "zone-status"],
+    mutationFn: async (next: ZoneStatus) => {
+      if (zoneRecordId == null) throw new Error("Missing zone id");
+      return wetCheckMutate<WetCheckZoneRecord, { status: ZoneStatus }>({
+        path: `/api/wet-checks/zone-records/${zoneRecordId}`,
+        method: "PATCH",
+        body: { status: next },
+      });
+    },
+    onMutate: async (next) => {
+      if (wetCheckId == null || zoneRecordId == null) return { previous: undefined };
+      await queryClient.cancelQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+      const previous = queryClient.getQueryData<WetCheckDetail>(
+        wetCheckDetailQueryKey(wetCheckId),
+      );
+      if (previous) {
+        queryClient.setQueryData<WetCheckDetail>(
+          wetCheckDetailQueryKey(wetCheckId),
+          {
+            ...previous,
+            zoneRecords: previous.zoneRecords.map((z) =>
+              z.id === zoneRecordId
+                ? {
+                    ...z,
+                    status: next,
+                    // Mirror the server: leaving Needs Work clears the badge.
+                    markedCompleteAt:
+                      next === "checked_with_issues" ? z.markedCompleteAt : null,
+                  }
+                : z,
+            ),
+          },
+        );
+      }
+      return { previous };
+    },
+    onSuccess: () => {
+      setStatusError(null);
+      Haptics.selectionAsync().catch(() => undefined);
+    },
+    onError: (err, _next, ctx) => {
+      if (wetCheckId != null && ctx?.previous) {
+        queryClient.setQueryData(wetCheckDetailQueryKey(wetCheckId), ctx.previous);
+      }
+      const m = errorMessage(err);
+      if (m != null) setStatusError(m);
+    },
+    onSettled: () => {
+      if (wetCheckId != null) {
+        queryClient.invalidateQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+      }
+    },
+  });
+
+  // ── Add finding (POST) ──
+  const addFindingMutation = useMutation({
+    mutationKey:
+      wetCheckId != null && zoneRecordId != null
+        ? wetCheckMutationKey(wetCheckId, "finding-add", zoneRecordId)
+        : ["wet-check", "mutation", -1, "finding-add"],
+    mutationFn: async (input: {
+      issueType: string;
+      partId: number | null;
+      partName: string | null;
+      partPrice: string | null;
+      quantity: number;
+      laborHours: string;
+      notes: string | null;
+    }) => {
+      if (zoneRecordId == null) throw new Error("Missing zone id");
+      return wetCheckMutate<WetCheckFinding, typeof input>({
+        path: `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
+        method: "POST",
+        body: input,
+      });
+    },
+    onSuccess: () => {
+      setFindingError(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => undefined,
+      );
+      setEditorOpen(false);
+      if (wetCheckId != null) {
+        queryClient.invalidateQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+      }
+    },
+    onError: (err) => {
+      const m = errorMessage(err);
+      if (m != null) setFindingError(m);
+    },
+  });
+
+  // ── Delete finding ──
+  // All delete-finding mutations on this zone share one key (no per-finding
+  // subId): there's no useMutation-per-row, and any successful delete is a
+  // strong signal that the tech has recovered from the prior delete error.
+  const deleteFindingMutation = useMutation({
+    mutationKey:
+      wetCheckId != null
+        ? wetCheckMutationKey(wetCheckId, "finding-delete")
+        : ["wet-check", "mutation", -1, "finding-delete"],
+    mutationFn: async (findingId: number) => {
+      return wetCheckMutate<{ ok: boolean }>({
+        path: `/api/wet-checks/findings/${findingId}`,
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      setFindingError(null);
+      Haptics.selectionAsync().catch(() => undefined);
+      if (wetCheckId != null) {
+        queryClient.invalidateQueries({ queryKey: wetCheckDetailQueryKey(wetCheckId) });
+      }
+    },
+    onError: (err) => {
+      const m = errorMessage(err);
+      if (m != null) setFindingError(m);
+    },
+  });
+
+  const onRemoveFinding = useCallback(
+    (finding: WetCheckFinding) => {
+      Alert.alert(
+        "Remove finding?",
+        `Remove "${prettyIssueType(finding.issueType)}" from this zone?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: () => deleteFindingMutation.mutate(finding.id),
+          },
+        ],
+      );
+    },
+    [deleteFindingMutation],
+  );
 
   return (
     <>
@@ -170,54 +404,22 @@ export default function ZoneDetailScreen() {
             <Text style={[styles.errorTitle, { color: colors.foreground }]}>
               Invalid zone
             </Text>
-            <Pressable
-              onPress={() => router.back()}
-              style={({ pressed }) => [
-                styles.retryButton,
-                {
-                  backgroundColor: colors.primary,
-                  borderRadius: colors.radius - 4,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-            >
-              <Text
-                style={[styles.retryText, { color: colors.primaryForeground }]}
-              >
-                Go back
-              </Text>
-            </Pressable>
+            <PrimaryButton label="Go back" colors={colors} onPress={() => router.back()} />
           </View>
-        ) : isLoading ? (
+        ) : detailQuery.isLoading ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.primary} />
           </View>
-        ) : isError || !wc ? (
+        ) : detailQuery.isError || !wc ? (
           <View style={styles.center}>
             <Feather name="alert-circle" size={32} color={colors.destructive} />
             <Text style={[styles.errorTitle, { color: colors.foreground }]}>
               Couldn't load zone
             </Text>
             <Text style={[styles.errorBody, { color: colors.mutedForeground }]}>
-              {error instanceof Error ? error.message : "Something went wrong."}
+              {detailQuery.error instanceof Error ? detailQuery.error.message : "Something went wrong."}
             </Text>
-            <Pressable
-              onPress={() => refetch()}
-              style={({ pressed }) => [
-                styles.retryButton,
-                {
-                  backgroundColor: colors.primary,
-                  borderRadius: colors.radius - 4,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-            >
-              <Text
-                style={[styles.retryText, { color: colors.primaryForeground }]}
-              >
-                Try again
-              </Text>
-            </Pressable>
+            <PrimaryButton label="Try again" colors={colors} onPress={() => detailQuery.refetch()} />
           </View>
         ) : !zone ? (
           <View style={styles.center}>
@@ -233,13 +435,94 @@ export default function ZoneDetailScreen() {
             contentContainerStyle={styles.scroll}
             refreshControl={
               <RefreshControl
-                refreshing={isRefetching}
-                onRefresh={() => refetch()}
+                refreshing={detailQuery.isRefetching}
+                onRefresh={() => {
+                  setConflict(false);
+                  detailQuery.refetch();
+                }}
                 tintColor={colors.primary}
               />
             }
           >
+            {conflict ? (
+              <ConflictBanner
+                colors={colors}
+                onRefresh={() => {
+                  setConflict(false);
+                  detailQuery.refetch();
+                }}
+              />
+            ) : null}
+
             <ZoneStatusCard zone={zone} colors={colors} />
+
+            <Section title="Zone status" colors={colors}>
+              {statusError ? (
+                <InlineErrorBanner
+                  colors={colors}
+                  message={statusError}
+                  onDismiss={() => setStatusError(null)}
+                />
+              ) : null}
+              <View style={styles.statusGroup}>
+                {ZONE_STATUS_OPTIONS.map((opt) => {
+                  const selected = zone.status === opt.value;
+                  const disabled =
+                    isLocked ||
+                    (statusMutation.isPending && statusMutation.variables !== opt.value);
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => {
+                        if (isLocked || zone.status === opt.value) return;
+                        statusMutation.mutate(opt.value);
+                      }}
+                      disabled={disabled}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, disabled }}
+                      accessibilityLabel={ZONE_STATUS_LABELS[opt.value]}
+                      style={({ pressed }) => [
+                        styles.statusOption,
+                        {
+                          backgroundColor: selected ? opt.tone.bg : colors.background,
+                          borderColor: selected ? opt.tone.bg : colors.border,
+                          opacity: pressed && !disabled ? 0.85 : disabled && !selected ? 0.5 : 1,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.radioDot,
+                          {
+                            borderColor: selected ? opt.tone.fg : colors.mutedForeground,
+                            backgroundColor: selected ? opt.tone.fg : "transparent",
+                          },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.statusOptionText,
+                          { color: selected ? opt.tone.fg : colors.foreground },
+                        ]}
+                      >
+                        {ZONE_STATUS_LABELS[opt.value]}
+                      </Text>
+                      {statusMutation.isPending && statusMutation.variables === opt.value ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={selected ? opt.tone.fg : colors.primary}
+                        />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {isLocked ? (
+                <Text style={[styles.lockedHint, { color: colors.mutedForeground }]}>
+                  This wet check has been submitted — zones are read-only.
+                </Text>
+              ) : null}
+            </Section>
 
             {zone.notes ? (
               <Section title="Zone notes" colors={colors}>
@@ -249,14 +532,16 @@ export default function ZoneDetailScreen() {
               </Section>
             ) : null}
 
-            <Section
-              title={`Findings (${zone.findings.length})`}
-              colors={colors}
-            >
+            <Section title={`Findings (${zone.findings.length})`} colors={colors}>
+              {findingError ? (
+                <InlineErrorBanner
+                  colors={colors}
+                  message={findingError}
+                  onDismiss={() => setFindingError(null)}
+                />
+              ) : null}
               {zone.findings.length === 0 ? (
-                <Text
-                  style={[styles.emptyText, { color: colors.mutedForeground }]}
-                >
+                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                   No findings recorded for this zone.
                 </Text>
               ) : (
@@ -273,21 +558,13 @@ export default function ZoneDetailScreen() {
                     ]}
                   >
                     <View style={styles.findingTopRow}>
-                      <Text
-                        style={[
-                          styles.findingTitle,
-                          { color: colors.foreground },
-                        ]}
-                      >
+                      <Text style={[styles.findingTitle, { color: colors.foreground }]}>
                         {prettyIssueType(f.issueType)}
                       </Text>
                       <View
                         style={[
                           styles.resolutionPill,
-                          {
-                            backgroundColor: colors.secondary,
-                            borderRadius: 999,
-                          },
+                          { backgroundColor: colors.secondary, borderRadius: 999 },
                         ]}
                       >
                         <Text
@@ -317,28 +594,64 @@ export default function ZoneDetailScreen() {
                       />
                     ) : null}
                     {f.notes ? (
-                      <Text
-                        style={[
-                          styles.findingNotes,
-                          { color: colors.mutedForeground },
-                        ]}
-                      >
+                      <Text style={[styles.findingNotes, { color: colors.mutedForeground }]}>
                         {f.notes}
                       </Text>
+                    ) : null}
+                    {!isLocked ? (
+                      <Pressable
+                        onPress={() => onRemoveFinding(f)}
+                        disabled={
+                          deleteFindingMutation.isPending &&
+                          deleteFindingMutation.variables === f.id
+                        }
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove finding ${prettyIssueType(f.issueType)}`}
+                        style={({ pressed }) => [
+                          styles.removeButton,
+                          { opacity: pressed ? 0.7 : 1 },
+                        ]}
+                      >
+                        {deleteFindingMutation.isPending &&
+                        deleteFindingMutation.variables === f.id ? (
+                          <ActivityIndicator size="small" color={colors.destructive} />
+                        ) : (
+                          <Feather name="trash-2" size={14} color={colors.destructive} />
+                        )}
+                        <Text style={[styles.removeButtonText, { color: colors.destructive }]}>
+                          Remove
+                        </Text>
+                      </Pressable>
                     ) : null}
                   </View>
                 ))
               )}
+
+              {!isLocked ? (
+                <Pressable
+                  onPress={() => setEditorOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add finding"
+                  style={({ pressed }) => [
+                    styles.addFindingButton,
+                    {
+                      borderColor: colors.primary,
+                      borderRadius: colors.radius - 4,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="plus" size={16} color={colors.primary} />
+                  <Text style={[styles.addFindingText, { color: colors.primary }]}>
+                    Add finding
+                  </Text>
+                </Pressable>
+              ) : null}
             </Section>
 
-            <Section
-              title={`Photos (${zonePhotos.length})`}
-              colors={colors}
-            >
+            <Section title={`Photos (${zonePhotos.length})`} colors={colors}>
               {zonePhotos.length === 0 ? (
-                <Text
-                  style={[styles.emptyText, { color: colors.mutedForeground }]}
-                >
+                <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
                   No photos for this zone.
                 </Text>
               ) : (
@@ -376,10 +689,23 @@ export default function ZoneDetailScreen() {
             <View style={{ height: 24 }} />
           </ScrollView>
         )}
+
+        {wc && zone && wetCheckId != null ? (
+          <FindingEditorModal
+            visible={editorOpen}
+            onClose={() => setEditorOpen(false)}
+            colors={colors}
+            customerId={wc.customerId}
+            isSaving={addFindingMutation.isPending}
+            onSubmit={(payload) => addFindingMutation.mutate(payload)}
+          />
+        ) : null}
       </SafeAreaView>
     </>
   );
 }
+
+// ─── Sub-components ──────────────────────────────────────────────────────
 
 function ZoneStatusCard({
   zone,
@@ -422,9 +748,7 @@ function ZoneStatusCard({
       {zone.status === "checked_with_issues" && zone.markedCompleteAt ? (
         <View style={styles.markedCompleteRow}>
           <Feather name="check-circle" size={14} color="#16a34a" />
-          <Text
-            style={[styles.markedCompleteText, { color: colors.foreground }]}
-          >
+          <Text style={[styles.markedCompleteText, { color: colors.foreground }]}>
             Marked complete by tech
           </Text>
         </View>
@@ -448,6 +772,78 @@ function ZoneStatusCard({
           ) : null}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function InlineErrorBanner({
+  colors,
+  message,
+  onDismiss,
+}: {
+  colors: ReturnType<typeof useColors>;
+  message: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.inlineErrorBanner,
+        {
+          backgroundColor: "#fee2e2",
+          borderColor: "#fca5a5",
+          borderRadius: colors.radius - 4,
+        },
+      ]}
+      accessibilityRole="alert"
+    >
+      <Feather name="alert-octagon" size={16} color="#b91c1c" />
+      <Text style={[styles.inlineErrorText]} numberOfLines={3}>
+        {message}
+      </Text>
+      <Pressable onPress={onDismiss} hitSlop={10} accessibilityLabel="Dismiss error">
+        <Feather name="x" size={16} color="#7f1d1d" />
+      </Pressable>
+    </View>
+  );
+}
+
+function ConflictBanner({
+  colors,
+  onRefresh,
+}: {
+  colors: ReturnType<typeof useColors>;
+  onRefresh: () => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.conflictBanner,
+        {
+          backgroundColor: "#fef3c7",
+          borderColor: "#f59e0b",
+          borderRadius: colors.radius,
+        },
+      ]}
+    >
+      <Feather name="alert-triangle" size={18} color="#b45309" />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.conflictTitle}>
+          This wet check was edited in the office
+        </Text>
+        <Text style={styles.conflictBody}>
+          Refresh to see the latest version before continuing.
+        </Text>
+      </View>
+      <Pressable
+        onPress={onRefresh}
+        style={({ pressed }) => [
+          styles.conflictRefresh,
+          { borderRadius: 999, opacity: pressed ? 0.85 : 1 },
+        ]}
+      >
+        <Text style={styles.conflictRefreshText}>Refresh</Text>
+      </Pressable>
     </View>
   );
 }
@@ -501,6 +897,569 @@ function DetailLine({
   );
 }
 
+function PrimaryButton({
+  label,
+  colors,
+  onPress,
+}: {
+  label: string;
+  colors: ReturnType<typeof useColors>;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.retryButton,
+        {
+          backgroundColor: colors.primary,
+          borderRadius: colors.radius - 4,
+          opacity: pressed ? 0.85 : 1,
+        },
+      ]}
+    >
+      <Text style={[styles.retryText, { color: colors.primaryForeground }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+// ─── Finding Editor Modal ─────────────────────────────────────────────────
+
+type FindingEditorPayload = {
+  issueType: string;
+  partId: number | null;
+  partName: string | null;
+  partPrice: string | null;
+  quantity: number;
+  laborHours: string;
+  notes: string | null;
+};
+
+function FindingEditorModal({
+  visible,
+  onClose,
+  colors,
+  customerId,
+  isSaving,
+  onSubmit,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  colors: ReturnType<typeof useColors>;
+  customerId: number;
+  isSaving: boolean;
+  onSubmit: (payload: FindingEditorPayload) => void;
+}) {
+  const [issueType, setIssueType] = useState<IssueTypeConfig | null>(null);
+  const [selectedPart, setSelectedPart] = useState<Part | null>(null);
+  const [quantity, setQuantity] = useState("1");
+  const [laborHours, setLaborHours] = useState("");
+  const [notes, setNotes] = useState("");
+  const [issuePickerOpen, setIssuePickerOpen] = useState(false);
+  const [partPickerOpen, setPartPickerOpen] = useState(false);
+
+  const issueTypesQuery = useQuery({
+    queryKey: wetCheckIssueTypesQueryKey,
+    queryFn: () => apiRequest<IssueTypeConfig[]>("/api/wet-checks/issue-types"),
+    staleTime: 5 * 60_000,
+  });
+
+  // Reset state whenever the modal closes.
+  React.useEffect(() => {
+    if (!visible) {
+      setIssueType(null);
+      setSelectedPart(null);
+      setQuantity("1");
+      setLaborHours("");
+      setNotes("");
+      setIssuePickerOpen(false);
+      setPartPickerOpen(false);
+    }
+  }, [visible]);
+
+  // When the user picks an issue type, prefill labor hours from its default.
+  React.useEffect(() => {
+    if (issueType && !laborHours) {
+      setLaborHours(issueType.defaultLaborHours);
+    }
+    // Reset selected part when issue type changes — categories may differ.
+    setSelectedPart(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issueType?.id]);
+
+  const canSubmit =
+    issueType != null && Number(quantity) >= 1 && !isSaving;
+
+  const onSave = () => {
+    if (!issueType) return;
+    const qty = Math.max(1, parseInt(quantity, 10) || 1);
+    const labor = String(laborHours || "0");
+    onSubmit({
+      issueType: issueType.issueType,
+      partId: selectedPart?.id ?? null,
+      partName: selectedPart?.name ?? null,
+      partPrice: selectedPart?.price ?? null,
+      quantity: qty,
+      laborHours: labor,
+      notes: notes.trim() ? notes.trim() : null,
+    });
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView
+        style={[styles.modalSafe, { backgroundColor: colors.background }]}
+      >
+        <View
+          style={[
+            styles.modalHeader,
+            { borderBottomColor: colors.border },
+          ]}
+        >
+          <Pressable onPress={onClose} hitSlop={12} disabled={isSaving}>
+            <Text style={[styles.modalCancel, { color: colors.primary, opacity: isSaving ? 0.5 : 1 }]}>
+              Cancel
+            </Text>
+          </Pressable>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]}>
+            Add finding
+          </Text>
+          <Pressable onPress={onSave} disabled={!canSubmit} hitSlop={12}>
+            {isSaving ? (
+              <ActivityIndicator color={colors.primary} size="small" />
+            ) : (
+              <Text
+                style={[
+                  styles.modalSave,
+                  { color: canSubmit ? colors.primary : colors.mutedForeground },
+                ]}
+              >
+                Save
+              </Text>
+            )}
+          </Pressable>
+        </View>
+
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.modalScroll}
+            keyboardShouldPersistTaps="handled"
+          >
+            <FieldLabel colors={colors}>Issue type</FieldLabel>
+            <Pressable
+              onPress={() => setIssuePickerOpen(true)}
+              style={({ pressed }) => [
+                styles.fieldButton,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderRadius: colors.radius - 4,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Pick issue type"
+            >
+              <Text
+                style={[
+                  styles.fieldButtonText,
+                  { color: issueType ? colors.foreground : colors.mutedForeground },
+                ]}
+              >
+                {issueType ? issueType.displayLabel : "Select an issue…"}
+              </Text>
+              <Feather name="chevron-down" size={16} color={colors.mutedForeground} />
+            </Pressable>
+
+            <FieldLabel colors={colors}>Part (optional)</FieldLabel>
+            <Pressable
+              onPress={() => {
+                if (!issueType) return;
+                setPartPickerOpen(true);
+              }}
+              disabled={!issueType}
+              style={({ pressed }) => [
+                styles.fieldButton,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderRadius: colors.radius - 4,
+                  opacity: pressed ? 0.85 : !issueType ? 0.5 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Pick part"
+              accessibilityState={{ disabled: !issueType }}
+            >
+              <Text
+                style={[
+                  styles.fieldButtonText,
+                  { color: selectedPart ? colors.foreground : colors.mutedForeground },
+                ]}
+                numberOfLines={1}
+              >
+                {selectedPart
+                  ? selectedPart.name
+                  : issueType
+                    ? "Select a part…"
+                    : "Pick an issue first"}
+              </Text>
+              {selectedPart ? (
+                <Pressable
+                  onPress={() => setSelectedPart(null)}
+                  hitSlop={10}
+                  accessibilityLabel="Clear part"
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              ) : (
+                <Feather name="chevron-down" size={16} color={colors.mutedForeground} />
+              )}
+            </Pressable>
+
+            <View style={styles.row}>
+              <View style={{ flex: 1 }}>
+                <FieldLabel colors={colors}>Quantity</FieldLabel>
+                <TextInput
+                  value={quantity}
+                  onChangeText={setQuantity}
+                  keyboardType="number-pad"
+                  style={[
+                    styles.textInput,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      borderRadius: colors.radius - 4,
+                      color: colors.foreground,
+                    },
+                  ]}
+                  accessibilityLabel="Quantity"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <FieldLabel colors={colors}>Labor hours</FieldLabel>
+                <TextInput
+                  value={laborHours}
+                  onChangeText={setLaborHours}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor={colors.mutedForeground}
+                  style={[
+                    styles.textInput,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                      borderRadius: colors.radius - 4,
+                      color: colors.foreground,
+                    },
+                  ]}
+                  accessibilityLabel="Labor hours"
+                />
+              </View>
+            </View>
+
+            <FieldLabel colors={colors}>Notes (optional)</FieldLabel>
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              placeholder="Anything the office should know"
+              placeholderTextColor={colors.mutedForeground}
+              style={[
+                styles.textInput,
+                styles.textArea,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderRadius: colors.radius - 4,
+                  color: colors.foreground,
+                },
+              ]}
+              accessibilityLabel="Notes"
+            />
+          </ScrollView>
+        </KeyboardAvoidingView>
+
+        <IssueTypePickerModal
+          visible={issuePickerOpen}
+          onClose={() => setIssuePickerOpen(false)}
+          colors={colors}
+          options={issueTypesQuery.data ?? []}
+          loading={issueTypesQuery.isLoading}
+          selectedId={issueType?.id ?? null}
+          onSelect={(opt) => {
+            setIssueType(opt);
+            setIssuePickerOpen(false);
+          }}
+        />
+
+        {issueType ? (
+          <PartPickerModal
+            visible={partPickerOpen}
+            onClose={() => setPartPickerOpen(false)}
+            colors={colors}
+            issueType={issueType.issueType}
+            customerId={customerId}
+            onSelect={(part) => {
+              setSelectedPart(part);
+              setPartPickerOpen(false);
+            }}
+          />
+        ) : null}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function FieldLabel({
+  colors,
+  children,
+}: {
+  colors: ReturnType<typeof useColors>;
+  children: React.ReactNode;
+}) {
+  return (
+    <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>
+      {String(children).toUpperCase()}
+    </Text>
+  );
+}
+
+function IssueTypePickerModal({
+  visible,
+  onClose,
+  colors,
+  options,
+  loading,
+  selectedId,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  colors: ReturnType<typeof useColors>;
+  options: IssueTypeConfig[];
+  loading: boolean;
+  selectedId: number | null;
+  onSelect: (opt: IssueTypeConfig) => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={[styles.modalSafe, { backgroundColor: colors.background }]}>
+        <View
+          style={[
+            styles.modalHeader,
+            { borderBottomColor: colors.border },
+          ]}
+        >
+          <Pressable onPress={onClose} hitSlop={12}>
+            <Text style={[styles.modalCancel, { color: colors.primary }]}>Cancel</Text>
+          </Pressable>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]}>Issue type</Text>
+          <View style={{ width: 60 }} />
+        </View>
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.pickerList}>
+            {options.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.mutedForeground, padding: 24 }]}>
+                No issue types configured for this company yet.
+              </Text>
+            ) : (
+              options.map((opt) => {
+                const selected = opt.id === selectedId;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => onSelect(opt)}
+                    style={({ pressed }) => [
+                      styles.pickerRow,
+                      {
+                        backgroundColor: selected ? colors.secondary : "transparent",
+                        opacity: pressed ? 0.85 : 1,
+                        borderBottomColor: colors.border,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={opt.displayLabel}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.pickerRowTitle, { color: colors.foreground }]}>
+                        {opt.displayLabel}
+                      </Text>
+                      <Text style={[styles.pickerRowMeta, { color: colors.mutedForeground }]}>
+                        {prettyIssueType(opt.issueGroup)} · default {opt.defaultLaborHours} hr
+                      </Text>
+                    </View>
+                    {selected ? (
+                      <Feather name="check" size={18} color={colors.primary} />
+                    ) : null}
+                  </Pressable>
+                );
+              })
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function PartPickerModal({
+  visible,
+  onClose,
+  colors,
+  issueType,
+  customerId,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  colors: ReturnType<typeof useColors>;
+  issueType: string;
+  customerId: number;
+  onSelect: (part: Part) => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  const partsQuery = useQuery({
+    queryKey: wetCheckPartsByIssueQueryKey(issueType, customerId),
+    queryFn: () =>
+      apiRequest<PartsByIssueResponse>(
+        `/api/wet-checks/parts/by-issue?issueType=${encodeURIComponent(issueType)}&customerId=${customerId}`,
+      ),
+    staleTime: 5 * 60_000,
+    enabled: visible,
+  });
+
+  React.useEffect(() => {
+    if (!visible) setSearch("");
+  }, [visible]);
+
+  const filtered = useMemo(() => {
+    const all = partsQuery.data?.parts ?? [];
+    if (!search.trim()) return all;
+    const needle = search.trim().toLowerCase();
+    return all.filter(
+      (p) =>
+        p.name.toLowerCase().includes(needle) ||
+        (p.description ?? "").toLowerCase().includes(needle) ||
+        (p.category ?? "").toLowerCase().includes(needle),
+    );
+  }, [partsQuery.data, search]);
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={[styles.modalSafe, { backgroundColor: colors.background }]}>
+        <View
+          style={[
+            styles.modalHeader,
+            { borderBottomColor: colors.border },
+          ]}
+        >
+          <Pressable onPress={onClose} hitSlop={12}>
+            <Text style={[styles.modalCancel, { color: colors.primary }]}>Cancel</Text>
+          </Pressable>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]}>Pick part</Text>
+          <View style={{ width: 60 }} />
+        </View>
+
+        <View style={{ padding: 12 }}>
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search parts"
+            placeholderTextColor={colors.mutedForeground}
+            style={[
+              styles.textInput,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius - 4,
+                color: colors.foreground,
+              },
+            ]}
+            accessibilityLabel="Search parts"
+          />
+        </View>
+
+        {partsQuery.isLoading ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : partsQuery.isError ? (
+          <View style={styles.center}>
+            <Feather name="alert-circle" size={28} color={colors.destructive} />
+            <Text style={[styles.errorTitle, { color: colors.foreground }]}>
+              Couldn't load parts
+            </Text>
+            <PrimaryButton
+              label="Try again"
+              colors={colors}
+              onPress={() => partsQuery.refetch()}
+            />
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.pickerList} keyboardShouldPersistTaps="handled">
+            {filtered.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.mutedForeground, padding: 24 }]}>
+                No parts match your search.
+              </Text>
+            ) : (
+              filtered.map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => onSelect(p)}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    {
+                      opacity: pressed ? 0.85 : 1,
+                      borderBottomColor: colors.border,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={p.name}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.pickerRowTitle, { color: colors.foreground }]}>
+                      {p.name}
+                    </Text>
+                    <Text style={[styles.pickerRowMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
+                      {p.category}{p.description ? ` · ${p.description}` : ""}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
 const PHOTO_SIZE = 120;
 
 const styles = StyleSheet.create({
@@ -532,18 +1491,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
-  headerNumber: {
-    fontSize: 13,
-    fontWeight: "600",
-    flexShrink: 1,
-  },
+  headerNumber: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
   statusPill: { paddingHorizontal: 10, paddingVertical: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
-  markedCompleteRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
+  markedCompleteRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   markedCompleteText: { fontSize: 13, fontWeight: "600" },
   metricsRow: { gap: 4 },
   section: { gap: 6 },
@@ -571,12 +1522,45 @@ const styles = StyleSheet.create({
   resolutionPill: { paddingHorizontal: 8, paddingVertical: 3 },
   resolutionText: { fontSize: 11, fontWeight: "600" },
   findingNotes: { fontSize: 13, lineHeight: 18, marginTop: 2 },
-  detailLine: {
+  detailLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  detailLineText: { fontSize: 13 },
+  removeButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
+    alignSelf: "flex-start",
+    paddingTop: 4,
   },
-  detailLineText: { fontSize: 13 },
+  removeButtonText: { fontSize: 12, fontWeight: "600" },
+  addFindingButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderStyle: "dashed",
+  },
+  addFindingText: { fontSize: 14, fontWeight: "600" },
+  statusGroup: { gap: 6 },
+  statusOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  statusOptionText: { fontSize: 14, fontWeight: "600", flex: 1 },
+  radioDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    borderWidth: 2,
+  },
+  lockedHint: { fontSize: 12, paddingTop: 4 },
   photoStrip: { gap: 8, paddingVertical: 4 },
   photoFrame: {
     width: PHOTO_SIZE,
@@ -585,4 +1569,77 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   photoImage: { width: "100%", height: "100%" },
+  conflictBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  conflictTitle: { fontSize: 13, fontWeight: "700", color: "#92400e" },
+  conflictBody: { fontSize: 12, marginTop: 2, color: "#78350f" },
+  conflictRefresh: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#b45309",
+  },
+  conflictRefreshText: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
+  inlineErrorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  inlineErrorText: { flex: 1, fontSize: 13, color: "#7f1d1d" },
+  modalSafe: { flex: 1 },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  modalTitle: { fontSize: 16, fontWeight: "700" },
+  modalCancel: { fontSize: 15, fontWeight: "500", minWidth: 60 },
+  modalSave: { fontSize: 15, fontWeight: "700", minWidth: 60, textAlign: "right" },
+  modalScroll: { padding: 16, gap: 6 },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  fieldButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  fieldButtonText: { fontSize: 15, flex: 1 },
+  textInput: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontSize: 15,
+  },
+  textArea: { minHeight: 80, textAlignVertical: "top" },
+  row: { flexDirection: "row", gap: 12 },
+  pickerList: { paddingBottom: 24 },
+  pickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  pickerRowTitle: { fontSize: 15, fontWeight: "600" },
+  pickerRowMeta: { fontSize: 12, marginTop: 2 },
 });
