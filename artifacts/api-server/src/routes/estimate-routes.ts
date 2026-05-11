@@ -154,7 +154,8 @@ export function registerEstimateRoutes(
       if (customerId != null) {
         const customer = await storage.getCustomer(customerId);
         if (!customer) {
-          return res.status(400).json({ message: `Customer ${customerId} not found` });
+          res.status(400).json({ message: `Customer ${customerId} not found` });
+          return;
         }
         const masterRate = resolveCreateLaborRate(customer.laborRate);
         (parsed.estimate as { laborRate: string }).laborRate = masterRate;
@@ -168,10 +169,11 @@ export function registerEstimateRoutes(
     } catch (error) {
       console.error("Estimate creation error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
+        res.status(400).json({
           message: "Invalid estimate data",
-          errors: error.errors,
+          errors: error.issues,
         });
+        return;
       }
       res.status(500).json({ message: "Failed to create estimate" });
     }
@@ -179,9 +181,10 @@ export function registerEstimateRoutes(
 
   app.put("/api/estimates/:id", requireAuthentication, async (req, res) => {
     try {
-      const estimateId = parseInt(req.params.id);
+      const estimateId = parseInt(String(req.params.id));
       if (isNaN(estimateId)) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const parsed = createEstimateWithItemsSchema.parse(req.body);
       // Strip ownership/audit fields from the update payload — these are
@@ -205,7 +208,8 @@ export function registerEstimateRoutes(
       // historical totals do not silently shift.
       const existing = await storage.getEstimate(estimateId);
       if (!existing) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       const newCustomerId = (parsed.estimate as { customerId?: number | null }).customerId ?? null;
       const customerChanged = newCustomerId != null && newCustomerId !== existing.customerId;
@@ -213,7 +217,8 @@ export function registerEstimateRoutes(
       if (customerChanged) {
         const customer = await storage.getCustomer(newCustomerId!);
         if (!customer) {
-          return res.status(400).json({ message: `Customer ${newCustomerId} not found` });
+          res.status(400).json({ message: `Customer ${newCustomerId} not found` });
+          return;
         }
         resolvedRate = resolvePutLaborRate({
           customerChanged: true,
@@ -256,10 +261,11 @@ export function registerEstimateRoutes(
     } catch (error) {
       console.error("Estimate update error:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
+        res.status(400).json({
           message: "Invalid estimate data",
-          errors: error.errors,
+          errors: error.issues,
         });
+        return;
       }
       res.status(500).json({ message: "Failed to update estimate" });
     }

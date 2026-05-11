@@ -15,8 +15,8 @@ import { Plus, User, Edit, UserX, Mail, Shield, Wrench, Crown, Trash2, AlertTria
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { zodResolver } from "@/lib/zod-resolver";
+import { z } from "zod/v4";
 import { apiRequest, queryClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 

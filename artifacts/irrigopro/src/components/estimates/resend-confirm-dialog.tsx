@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -10,6 +11,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { Estimate } from "@shared/schema";
+
+// AlertDialogContent's public type omits onPointerDownOutside / onInteractOutside,
+// but the underlying primitive still forwards them — re-expose them via a single
+// typed alias so we keep the existing close-on-outside-interaction behavior.
+type AlertDialogContentExtraProps = {
+  onPointerDownOutside?: (event: Event) => void;
+  onInteractOutside?: (event: Event) => void;
+};
+const AlertDialogContentTyped = AlertDialogContent as React.ComponentType<
+  React.ComponentProps<typeof AlertDialogContent> & AlertDialogContentExtraProps
+>;
 
 interface ResendConfirmDialogProps {
   estimate: Estimate | null;
@@ -32,7 +44,7 @@ export function ResendConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent
+      <AlertDialogContentTyped
         onPointerDownOutside={() => onOpenChange(false)}
         onInteractOutside={() => onOpenChange(false)}
       >
@@ -85,7 +97,7 @@ export function ResendConfirmDialog({
             </AlertDialogFooter>
           </>
         )}
-      </AlertDialogContent>
+      </AlertDialogContentTyped>
     </AlertDialog>
   );
 }

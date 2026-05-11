@@ -451,22 +451,29 @@ function AddIssueTypeDialog({
     },
   });
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     const key = issueType.trim().toLowerCase().replace(/\s+/g, "_");
-    if (!key) return toast({ title: "Issue type key is required", variant: "destructive" });
+    if (!key) {
+      toast({ title: "Issue type key is required", variant: "destructive" });
+      return;
+    }
     if (!/^[a-z0-9_]+$/.test(key)) {
-      return toast({ title: "Key may only contain letters, numbers, and underscores", variant: "destructive" });
+      toast({ title: "Key may only contain letters, numbers, and underscores", variant: "destructive" });
+      return;
     }
     if (existingKeys.has(key)) {
-      return toast({ title: "That key already exists", variant: "destructive" });
+      toast({ title: "That key already exists", variant: "destructive" });
+      return;
     }
     if (!displayLabel.trim()) {
-      return toast({ title: "Label is required", variant: "destructive" });
+      toast({ title: "Label is required", variant: "destructive" });
+      return;
     }
     const hrs = parseFloat(defaultLaborHours);
     if (Number.isNaN(hrs) || hrs < 0) {
-      return toast({ title: "Labor hours must be a non-negative number", variant: "destructive" });
+      toast({ title: "Labor hours must be a non-negative number", variant: "destructive" });
+      return;
     }
     createMut.mutate({
       issueType: key,

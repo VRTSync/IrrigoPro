@@ -1,7 +1,7 @@
 import { pgTable, text, serial, integer, boolean, decimal, timestamp, uniqueIndex, jsonb, index, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 // Companies table for multi-company support
 export const companies = pgTable("companies", {

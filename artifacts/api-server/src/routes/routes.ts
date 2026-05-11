@@ -22,6 +22,7 @@ import {
   startQbTokenHealthJob,
   type QbRefreshFailureCategory,
   type QbStorageAdapter,
+  type QbRefreshFn,
 } from "../qb-token-utils";
 
 /// <reference path="./types/express.d.ts" />
@@ -277,23 +278,26 @@ const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
     }
     
     if (!userId || !userRole) {
-      return res.status(401).json({ 
+      res.status(401).json({ 
         message: "Authentication required" 
       });
+      return;
     }
     
     if (userRole !== 'company_admin') {
-      return res.status(403).json({ 
+      res.status(403).json({ 
         message: "Access denied. Site map operations are restricted to company administrators only." 
       });
+      return;
     }
     
     next();
   } catch (error) {
     console.error('Site map authentication error:', error);
-    return res.status(500).json({ 
+    res.status(500).json({ 
       message: "Authentication error" 
     });
+    return;
   }
 };
 
@@ -313,17 +317,20 @@ const requireCustomerEditAccess = async (req: any, res: any, next: any) => {
     }
 
     if (!userId || !userRole) {
-      return res.status(401).json({ message: "Authentication required" });
+      res.status(401).json({ message: "Authentication required" });
+      return;
     }
 
     if (userRole !== 'company_admin' && userRole !== 'super_admin' && userRole !== 'billing_manager') {
-      return res.status(403).json({ message: "Access denied. Customer editing is restricted to administrators and billing managers." });
+      res.status(403).json({ message: "Access denied. Customer editing is restricted to administrators and billing managers." });
+      return;
     }
 
     next();
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Authentication error" });
+    res.status(500).json({ message: "Authentication error" });
+    return;
   }
 };
 
@@ -352,7 +359,8 @@ const requireBoundaryEditAccess = async (req: any, res: any, next: any) => {
     }
 
     if (!userId || !userRole) {
-      return res.status(401).json({ message: "Authentication required" });
+      res.status(401).json({ message: "Authentication required" });
+      return;
     }
 
     const allowed = new Set([
@@ -361,15 +369,17 @@ const requireBoundaryEditAccess = async (req: any, res: any, next: any) => {
       'irrigation_manager',
     ]);
     if (!allowed.has(userRole)) {
-      return res.status(403).json({
+      res.status(403).json({
         message: "Access denied. Property boundary editing is restricted to administrators and irrigation managers.",
       });
+      return;
     }
 
     next();
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Authentication error" });
+    res.status(500).json({ message: "Authentication error" });
+    return;
   }
 };
 
@@ -378,9 +388,10 @@ const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
   const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
   
   if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
-    return res.status(403).json({ 
+    res.status(403).json({ 
       message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit or delete work orders and billing sheets." 
     });
+    return;
   }
   
   next();
@@ -392,9 +403,10 @@ const requireWorkOrderBillingAccess = (req: any, res: any, next: any) => {
 const requireEstimateApprovalAccess = (req: any, res: any, next: any) => {
   const userRole = req.authenticatedUserRole;
   if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'super_admin') {
-    return res.status(403).json({
+    res.status(403).json({
       message: "Access denied. Estimate approval and customer delivery are restricted to billing managers and administrators.",
     });
+    return;
   }
   next();
 };
@@ -416,9 +428,10 @@ const requireBillingAccess = (req: any, res: any, next: any) => {
   const userRole = req.authenticatedUserRole;
   
   if (userRole !== 'company_admin' && userRole !== 'billing_manager') {
-    return res.status(403).json({ 
+    res.status(403).json({ 
       message: "Access denied. Only company administrators and billing managers can access invoice PDFs." 
     });
+    return;
   }
   
   next();
@@ -440,9 +453,10 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
   if (userRole === 'field_tech') {
     // Validate that we have user ID
     if (!userId) {
-      return res.status(401).json({ 
+      res.status(401).json({ 
         message: "Authentication required - user ID not found." 
       });
+      return;
     }
     
     // Check if this is just starting a work order (changing status to in_progress)
@@ -480,9 +494,10 @@ const requireWorkOrderUpdateAccess = async (req: any, res: any, next: any) => {
     }
   }
   
-  return res.status(403).json({ 
+  res.status(403).json({ 
     message: "Access denied. Field technicians can only start work orders assigned to them." 
   });
+  return;
 };
 
 // More granular middleware for billing sheet updates that allows field techs to submit for approval
@@ -504,13 +519,15 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
     const isPhotosOnlyEdit = keys.length === 1 && keys[0] === 'photos' && Array.isArray(updateData.photos);
 
     if (!isSubmit && !isPhotosOnlyEdit) {
-      return res.status(403).json({
+      res.status(403).json({
         message: "Access denied. Field technicians can only submit billing sheets for approval or update photos on their own sheets."
       });
+      return;
     }
 
     if (!userId) {
-      return res.status(401).json({ message: "Authentication required - user ID not found." });
+      res.status(401).json({ message: "Authentication required - user ID not found." });
+      return;
     }
 
     try {
@@ -529,14 +546,16 @@ const requireBillingSheetUpdateAccess = async (req: any, res: any, next: any) =>
       console.error('Error checking billing sheet ownership:', error);
     }
 
-    return res.status(403).json({
+    res.status(403).json({
       message: "Access denied. Field technicians can only act on their own billing sheets."
     });
+    return;
   }
 
-  return res.status(403).json({
+  res.status(403).json({
     message: "Access denied. Only company administrators, billing managers, and irrigation managers can edit billing sheets."
   });
+  return;
 };
 
 // Authentication middleware for notifications - ensures users can only access their own notifications
@@ -556,9 +575,10 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
     // Validate that we have authentication data
     if (!authenticatedUserId) {
       console.log(`Authentication failed for notification access - no user ID found for request to user ${requestedUserId}`);
-      return res.status(401).json({ 
+      res.status(401).json({ 
         message: "Authentication required" 
       });
+      return;
     }
     
     // Parse user IDs safely
@@ -568,17 +588,19 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
     // Validate that both IDs are valid numbers
     if (isNaN(authUserId) || isNaN(reqUserId)) {
       console.log(`Invalid user ID format - auth: ${authenticatedUserId}, requested: ${requestedUserId}`);
-      return res.status(400).json({ 
+      res.status(400).json({ 
         message: "Invalid user ID format" 
       });
+      return;
     }
     
     // Validate that the authenticated user matches the requested user
     if (authUserId !== reqUserId) {
       console.log(`Access denied - user ${authUserId} tried to access notifications for user ${reqUserId}`);
-      return res.status(403).json({ 
+      res.status(403).json({ 
         message: "Access denied. You can only access your own notifications." 
       });
+      return;
     }
     
     // Store authenticated user ID for use in route handler
@@ -596,9 +618,10 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
         'x-user-role': req.headers['x-user-role']
       }
     });
-    return res.status(500).json({ 
+    res.status(500).json({ 
       message: "Authentication error" 
     });
+    return;
   }
 };
 
@@ -633,9 +656,10 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     
     // Authentication required
     if (!userId) {
-      return res.status(401).json({ 
+      res.status(401).json({ 
         message: "Authentication required" 
       });
+      return;
     }
     
     if (!userId || !userRole) {
@@ -645,18 +669,20 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
         hasSession: !!req.session,
         sessionUserId: req.session?.userId
       });
-      return res.status(401).json({ 
+      res.status(401).json({ 
         message: "Authentication required" 
       });
+      return;
     }
     
     // Validate user ID is a number
     const parsedUserId = parseInt(userId);
     if (isNaN(parsedUserId)) {
       console.log(`Invalid user ID format: ${userId}`);
-      return res.status(400).json({ 
+      res.status(400).json({ 
         message: "Invalid user ID format" 
       });
+      return;
     }
     
     // Store authenticated user data for use in route handlers
@@ -676,9 +702,10 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
         'x-user-role': req.headers['x-user-role']
       }
     });
-    return res.status(500).json({ 
+    res.status(500).json({ 
       message: "Authentication error" 
     });
+    return;
   }
 };
 
@@ -713,25 +740,28 @@ const requireSiteMapViewAccess = async (req: any, res: any, next: any) => {
     
     if (!userId || !userRole) {
       console.log('Authentication failed - missing user data');
-      return res.status(401).json({ 
+      res.status(401).json({ 
         message: "Authentication required" 
       });
+      return;
     }
     
     if (userRole !== 'company_admin' && userRole !== 'irrigation_manager' && userRole !== 'field_tech') {
       console.log('Access denied for role:', userRole);
-      return res.status(403).json({ 
+      res.status(403).json({ 
         message: "Access denied. Site map viewing is restricted to company administrators, irrigation managers, and field technicians only." 
       });
+      return;
     }
     
     console.log('Site map access granted:', { userId, userRole });
     next();
   } catch (error) {
     console.error('Site map view authentication error:', error);
-    return res.status(500).json({ 
+    res.status(500).json({ 
       message: "Authentication error" 
     });
+    return;
   }
 };
 
@@ -740,9 +770,10 @@ const requireQuickBooksAccess = (req: any, res: any, next: any) => {
   const userRole = req.authenticatedUserRole || req.headers['x-user-role'];
   
   if (userRole === 'irrigation_manager' || userRole === 'field_tech') {
-    return res.status(403).json({ 
+    res.status(403).json({ 
       message: "Access denied. QuickBooks integration is not available for your role." 
     });
+    return;
   }
   
   next();
@@ -802,7 +833,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!file) {
         console.log(`[LOGO-SERVE] Logo file not found: ${logoId}`);
-        return res.status(404).json({ error: "Logo not found" });
+        res.status(404).json({ error: "Logo not found" });
+        return;
       }
       
       console.log(`[LOGO-SERVE] Logo file found, downloading...`);
@@ -812,7 +844,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
     } catch (error) {
       console.error(`[LOGO-SERVE] Error serving logo ${logoId}:`, error);
-      return res.status(500).json({ error: "Failed to serve logo" });
+      res.status(500).json({ error: "Failed to serve logo" });
+      return;
     }
   });
 
@@ -831,7 +864,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Access denied. Super admin only." });
+        res.status(403).json({ message: "Access denied. Super admin only." });
+        return;
       }
       const company = await storage.createCompany(req.body);
       res.status(201).json(company);
@@ -846,12 +880,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'super_admin' && userRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
       const companyId = parseInt(req.params.id);
       const updatedCompany = await storage.updateCompany(companyId, req.body);
       if (!updatedCompany) {
-        return res.status(404).json({ message: "Company not found" });
+        res.status(404).json({ message: "Company not found" });
+        return;
       }
       res.json(updatedCompany);
     } catch (error) {
@@ -864,12 +900,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Access denied. Super admin only." });
+        res.status(403).json({ message: "Access denied. Super admin only." });
+        return;
       }
       const companyId = parseInt(req.params.id);
       const success = await storage.deleteCompany(companyId);
       if (!success) {
-        return res.status(404).json({ message: "Company not found" });
+        res.status(404).json({ message: "Company not found" });
+        return;
       }
       res.json({ message: "Company deleted successfully" });
     } catch (error) {
@@ -888,12 +926,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Allow company admins and irrigation managers to view their own company profile
       const allowedRoles = ['company_admin', 'irrigation_manager'];
       if (!allowedRoles.includes(userRole as string) || userCompanyId !== companyId) {
-        return res.status(403).json({ message: "Access denied. You can only view your own company profile." });
+        res.status(403).json({ message: "Access denied. You can only view your own company profile." });
+        return;
       }
 
       const company = await storage.getCompanyProfile(companyId);
       if (!company) {
-        return res.status(404).json({ message: "Company profile not found", requiresSetup: true });
+        res.status(404).json({ message: "Company profile not found", requiresSetup: true });
+        return;
       }
       res.json(company);
     } catch (error) {
@@ -911,13 +951,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Only company admins can create their own company profile
       if (userRole !== 'company_admin' || userCompanyId !== companyId) {
-        return res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+        res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+        return;
       }
 
       // Check if company profile already exists
       const existingCompany = await storage.getCompanyProfile(companyId);
       if (existingCompany) {
-        return res.status(409).json({ message: "Company profile already exists" });
+        res.status(409).json({ message: "Company profile already exists" });
+        return;
       }
 
       const companyData = insertCompanySchema.parse({ ...req.body, id: companyId });
@@ -926,7 +968,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid company data", errors: error.errors });
+        res.status(400).json({ message: "Invalid company data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create company profile" });
     }
@@ -941,7 +984,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Only company admins can check their own company setup status
       if (userRole !== 'company_admin' || userCompanyId !== companyId) {
-        return res.status(403).json({ message: "Access denied" });
+        res.status(403).json({ message: "Access denied" });
+        return;
       }
 
       const exists = await storage.checkCompanyProfileExists(companyId);
@@ -960,7 +1004,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Only company admins can update their own company profile
       if (userRole !== 'company_admin' || userCompanyId !== companyId) {
-        return res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+        res.status(403).json({ message: "Access denied. Company admins can only manage their own company profile." });
+        return;
       }
 
       const updates = insertCompanySchema.partial().parse(req.body);
@@ -976,7 +1021,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid company data", errors: error.errors });
+        res.status(400).json({ message: "Invalid company data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update company profile" });
     }
@@ -989,7 +1035,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Only company admins can upload logos
       if (userRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied. Only company admins can upload logos." });
+        res.status(403).json({ message: "Access denied. Only company admins can upload logos." });
+        return;
       }
 
       const objectStorageService = new ObjectStorageService();
@@ -1013,7 +1060,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const companyId = parseInt(req.params.companyId);
       
       if (userRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
+        res.status(403).json({ message: "Access denied. Only company admins can reset logos." });
+        return;
       }
 
       // Direct database update to ensure logo is cleared
@@ -1024,7 +1072,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .returning();
 
       if (!result || result.length === 0) {
-        return res.status(404).json({ message: "Company not found" });
+        res.status(404).json({ message: "Company not found" });
+        return;
       }
 
       res.json({ 
@@ -1048,11 +1097,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Only company admins can update logos
       if (userRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied. Only company admins can update logos." });
+        res.status(403).json({ message: "Access denied. Only company admins can update logos." });
+        return;
       }
 
       if (!logoUrl) {
-        return res.status(400).json({ message: "Logo URL is required" });
+        res.status(400).json({ message: "Logo URL is required" });
+        return;
       }
 
       // Normalize the logo path and get public URL
@@ -1068,7 +1119,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (!updatedCompany) {
-        return res.status(404).json({ message: "Company not found" });
+        res.status(404).json({ message: "Company not found" });
+        return;
       }
 
       // Logo successfully updated in database
@@ -1108,11 +1160,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (userRole === 'company_admin' && userCompanyId) {
         const companyExists = await storage.checkCompanyProfileExists(userCompanyId);
         if (!companyExists) {
-          return res.status(423).json({ 
+          res.status(423).json({ 
             message: "Company profile setup required", 
             requiresSetup: true,
             companyId: userCompanyId 
           });
+          return;
         }
       }
       next();
@@ -1128,7 +1181,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = req.authenticatedUserRole;
       
       if (userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Access denied. Super admin only." });
+        res.status(403).json({ message: "Access denied. Super admin only." });
+        return;
       }
 
       const { adminEmail, adminPassword } = req.body;
@@ -1136,7 +1190,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check if user already exists
       const existingUser = await storage.getUserByUsername(adminEmail);
       if (existingUser) {
-        return res.status(400).json({ message: "A user with this email already exists" });
+        res.status(400).json({ message: "A user with this email already exists" });
+        return;
       }
 
       // Create placeholder company first (admin will complete setup)
@@ -1223,7 +1278,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+        res.status(400).json({ message: "Invalid user data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create user" });
     }
@@ -1236,7 +1292,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userData = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(userId, userData);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
@@ -1244,7 +1301,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+        res.status(400).json({ message: "Invalid user data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update user" });
     }
@@ -1268,12 +1326,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       
       const success = await storage.softDeleteUser(userId);
       if (!success) {
-        return res.status(500).json({ message: "Failed to delete user" });
+        res.status(500).json({ message: "Failed to delete user" });
+        return;
       }
       
       res.json({ 
@@ -1292,12 +1352,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       
       const success = await storage.hardDeleteUserWithCascade(userId);
       if (!success) {
-        return res.status(500).json({ message: "Failed to delete user" });
+        res.status(500).json({ message: "Failed to delete user" });
+        return;
       }
       
       res.json({ 
@@ -1316,7 +1378,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
 
       // Check if user has dependencies
@@ -1327,7 +1390,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Use soft delete for users with data
         const success = await storage.softDeleteUser(userId);
         if (!success) {
-          return res.status(500).json({ message: "Failed to delete user" });
+          res.status(500).json({ message: "Failed to delete user" });
+          return;
         }
         res.json({ 
           message: "User deleted successfully (soft delete - data preserved)",
@@ -1341,7 +1405,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Use hard delete for users without dependencies
         const success = await storage.deleteUser(userId);
         if (!success) {
-          return res.status(500).json({ message: "Failed to delete user" });
+          res.status(500).json({ message: "Failed to delete user" });
+          return;
         }
         res.json({ 
           message: "User deleted successfully (permanent deletion)",
@@ -1360,7 +1425,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userData = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(id, userData);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
@@ -1368,7 +1434,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+        res.status(400).json({ message: "Invalid user data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update user" });
     }
@@ -1380,7 +1447,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userData = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(id, userData);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
@@ -1388,7 +1456,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+        res.status(400).json({ message: "Invalid user data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update user" });
     }
@@ -1399,7 +1468,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const success = await storage.deleteUser(id);
       if (!success) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       res.json({ message: "User deleted successfully" });
     } catch (error) {
@@ -1486,7 +1556,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Phone is required for new users — it becomes the username
       const { phone, email, name, password, role } = req.body;
       if (!phone || !phone.trim()) {
-        return res.status(400).json({ message: "Phone number is required" });
+        res.status(400).json({ message: "Phone number is required" });
+        return;
       }
 
       const userData = insertUserSchema.parse({
@@ -1528,7 +1599,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+        res.status(400).json({ message: "Invalid user data", errors: error.issues });
+        return;
       }
       console.error('Full error details for user creation:', error);
       res.status(500).json({ message: "Failed to create user", error: error instanceof Error ? error.message : String(error) });
@@ -1543,7 +1615,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Verify user belongs to company
       const existingUser = await storage.getUser(userId);
       if (!existingUser || existingUser.companyId !== companyId) {
-        return res.status(403).json({ message: "Not authorized to modify this user" });
+        res.status(403).json({ message: "Not authorized to modify this user" });
+        return;
       }
 
       const userData = insertUserSchema.partial().parse(req.body);
@@ -1562,7 +1635,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.updateUser(userId, updatePayload);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
@@ -1570,7 +1644,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+        res.status(400).json({ message: "Invalid user data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update user" });
     }
@@ -1584,12 +1659,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Verify user belongs to company
       const existingUser = await storage.getUser(userId);
       if (!existingUser || existingUser.companyId !== companyId) {
-        return res.status(403).json({ message: "Not authorized to modify this user" });
+        res.status(403).json({ message: "Not authorized to modify this user" });
+        return;
       }
 
       const user = await storage.updateUser(userId, { isActive: false });
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       res.json({ message: "User deactivated successfully" });
     } catch (error) {
@@ -1606,13 +1683,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { newPassword } = req.body;
       
       if (!newPassword || newPassword.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters long" });
+        res.status(400).json({ message: "Password must be at least 6 characters long" });
+        return;
       }
       
       // Verify user belongs to company
       const existingUser = await storage.getUser(userId);
       if (!existingUser || existingUser.companyId !== companyId) {
-        return res.status(403).json({ message: "Not authorized to modify this user" });
+        res.status(403).json({ message: "Not authorized to modify this user" });
+        return;
       }
 
       // Hash the new password
@@ -1624,7 +1703,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       
       res.json({ message: "Password changed successfully" });
@@ -1691,7 +1771,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update Randy's password
       const user = await storage.updateUserPassword('randy@highplainsprop.com', hashedPassword);
       if (!user) {
-        return res.status(404).json({ message: "Randy not found" });
+        res.status(404).json({ message: "Randy not found" });
+        return;
       }
       
       res.json({ 
@@ -1712,22 +1793,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUserByUsername(username);
       
       if (!user || !user.isActive) {
-        return res.status(401).json({ message: "Invalid credentials" });
+        res.status(401).json({ message: "Invalid credentials" });
+        return;
       }
       
       // Use bcrypt to compare password with hash
       const passwordValid = await bcrypt.compare(password, user.password);
       if (!passwordValid) {
-        return res.status(401).json({ message: "Invalid credentials" });
+        res.status(401).json({ message: "Invalid credentials" });
+        return;
       }
       
       // Check if email is verified (optional enforcement)
       if (user.email && !user.emailVerified) {
-        return res.status(403).json({ 
+        res.status(403).json({ 
           message: "Email verification required", 
           requiresVerification: true,
           email: user.email 
         });
+        return;
       }
       
       // Return user without password
@@ -1747,7 +1831,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!user) {
         // Don't reveal if email exists or not for security
-        return res.json({ message: "If this email exists, you will receive a password reset link." });
+        res.json({ message: "If this email exists, you will receive a password reset link." });
+        return;
       }
       
       // Generate reset token
@@ -1777,17 +1862,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { token, newPassword } = req.body;
       
       if (!token || !newPassword) {
-        return res.status(400).json({ message: "Token and new password are required" });
+        res.status(400).json({ message: "Token and new password are required" });
+        return;
       }
       
       if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters long" });
+        res.status(400).json({ message: "Password must be at least 6 characters long" });
+        return;
       }
       
       const user = await storage.getUserByPasswordResetToken(token);
       
       if (!user || !user.passwordResetExpires || user.passwordResetExpires < new Date()) {
-        return res.status(400).json({ message: "Invalid or expired reset token" });
+        res.status(400).json({ message: "Invalid or expired reset token" });
+        return;
       }
       
       // Hash the new password before storing
@@ -1814,11 +1902,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUserByEmail(email);
       
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       
       if (user.emailVerified) {
-        return res.status(400).json({ message: "Email already verified" });
+        res.status(400).json({ message: "Email already verified" });
+        return;
       }
       
       // Generate new verification token
@@ -1853,15 +1943,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(parseInt(userId));
       
       if (!user || user.companyId !== parseInt(companyId)) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
       
       if (user.emailVerified) {
-        return res.status(400).json({ message: "Email already verified" });
+        res.status(400).json({ message: "Email already verified" });
+        return;
       }
       
       if (!user.email) {
-        return res.status(400).json({ message: "User has no email address" });
+        res.status(400).json({ message: "User has no email address" });
+        return;
       }
       
       // Generate new verification token
@@ -1894,17 +1987,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Check session for user ID
       if (!req.session || !req.session.userId) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           message: "No active session" 
         });
+        return;
       }
       
       // Get user from database
       const user = await storage.getUser(parseInt(String(req.session.userId)));
       if (!user) {
-        return res.status(404).json({ 
+        res.status(404).json({ 
           message: "User not found" 
         });
+        return;
       }
       
       // Return user data (excluding sensitive fields)
@@ -1933,13 +2028,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUserByEmailVerificationToken(token);
       
       if (!user || !user.emailVerificationExpires || user.emailVerificationExpires < new Date()) {
-        return res.status(400).send(`
+        res.status(400).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h1 style="color: #ef4444;">Verification Failed</h1>
             <p>This verification link is invalid or has expired.</p>
             <p>Please request a new verification email.</p>
           </body></html>
         `);
+        return;
       }
       
       // Mark email as verified and clear verification token
@@ -2270,13 +2366,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate customer ID is a valid number
       if (isNaN(customerId) || customerId <= 0) {
-        return res.status(400).json({ message: "Invalid customer ID" });
+        res.status(400).json({ message: "Invalid customer ID" });
+        return;
       }
       
       const customer = await storage.getCustomerById(customerId);
       
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
       
       res.json(applyBillingNotesVisibility(req, customer));
@@ -2293,13 +2391,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate customer ID is a valid number
       if (isNaN(customerId) || customerId <= 0) {
-        return res.status(400).json({ message: "Invalid customer ID" });
+        res.status(400).json({ message: "Invalid customer ID" });
+        return;
       }
       
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
 
       // Get all work orders for the customer
@@ -2457,9 +2557,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!companyId) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "User company information not available" 
         });
+        return;
       }
       
       // Validate the request body
@@ -2474,10 +2575,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error creating site map:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "Invalid site map data", 
-          errors: error.errors 
+          errors: error.issues 
         });
+        return;
       }
       res.status(500).json({ message: "Failed to create site map" });
     }
@@ -2492,17 +2594,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const siteMap = await storage.updateSiteMap(siteMapId, validatedData);
       if (!siteMap) {
-        return res.status(404).json({ message: "Site map not found" });
+        res.status(404).json({ message: "Site map not found" });
+        return;
       }
       
       res.json(siteMap);
     } catch (error) {
       console.error("Error updating site map:", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "Invalid site map data", 
-          errors: error.errors 
+          errors: error.issues 
         });
+        return;
       }
       res.status(500).json({ message: "Failed to update site map" });
     }
@@ -2514,7 +2618,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const success = await storage.deleteSiteMap(siteMapId);
       
       if (!success) {
-        return res.status(404).json({ message: "Site map not found" });
+        res.status(404).json({ message: "Site map not found" });
+        return;
       }
       
       res.json({ message: "Site map deleted successfully" });
@@ -2530,7 +2635,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const controllers = req.body.controllers;
       
       if (!Array.isArray(controllers)) {
-        return res.status(400).json({ message: "Controllers must be an array" });
+        res.status(400).json({ message: "Controllers must be an array" });
+        return;
       }
       
       // Get user's company ID - production-ready approach
@@ -2543,9 +2649,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!companyId) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "User company information not available" 
         });
+        return;
       }
       
       const savedControllers = await storage.saveControllers(siteMapId, controllers, companyId);
@@ -2562,7 +2669,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const zones = req.body.zones;
       
       if (!Array.isArray(zones)) {
-        return res.status(400).json({ message: "Zones must be an array" });
+        res.status(400).json({ message: "Zones must be an array" });
+        return;
       }
       
       // Get user's company ID - production-ready approach
@@ -2575,9 +2683,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!companyId) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "User company information not available" 
         });
+        return;
       }
       
       const savedZones = await storage.saveZones(siteMapId, zones, companyId);
@@ -2596,7 +2705,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
 
       // Get all work orders for the customer
@@ -2638,7 +2748,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0) {
-        return res.status(400).json({ message: "No valid items selected for invoicing" });
+        res.status(400).json({ message: "No valid items selected for invoicing" });
+        return;
       }
 
       // Create preview invoice data using stored financial snapshots
@@ -2735,19 +2846,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
-        return res.status(400).json({
+        res.status(400).json({
           message: "QuickBooks is not connected. Please connect QuickBooks before creating invoices.",
           quickbooksError: "QuickBooks integration is not configured or the access token is missing. Go to the QuickBooks section to connect your account."
         });
+        return;
       }
 
       // Abort early if connection is already marked as reconnect_required — do not attempt any refresh
       if (integration.connectionStatus === 'reconnect_required') {
-        return res.status(400).json({
+        res.status(400).json({
           message: "QuickBooks reauthorization is required. Please reconnect QuickBooks.",
           quickbooksError: integration.reconnectRequiredReason || "QuickBooks connection requires reauthorization.",
           reconnectRequired: true
         });
+        return;
       }
 
       // Proactively refresh if token is expired or within 5-minute buffer
@@ -2756,10 +2869,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`QuickBooks access token ${tokenActuallyExpired ? 'expired' : 'expiring soon'}, attempting proactive refresh...`);
         if (!integration.refreshToken) {
           if (tokenActuallyExpired) {
-            return res.status(400).json({
+            res.status(400).json({
               message: "QuickBooks session has expired and cannot be refreshed. Please reconnect QuickBooks.",
               quickbooksError: "Your QuickBooks session has expired. Go to the QuickBooks section to reconnect your account."
             });
+            return;
           }
           console.warn('QuickBooks refresh token missing during buffer window; proceeding with existing token');
         } else {
@@ -2822,18 +2936,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   console.error('Failed to persist reconnect_required state:', e);
                 });
                 console.warn(`[QB] Marked realmId=${proactiveRealmId} as reconnect_required (${refreshErr.category})`);
-                return res.status(400).json({
+                res.status(400).json({
                   message: "QuickBooks authorization has expired. Please reconnect QuickBooks to continue.",
                   quickbooksError: reason,
                   reconnectRequired: true
                 });
+                return;
               }
             }
             if (tokenActuallyExpired) {
-              return res.status(400).json({
+              res.status(400).json({
                 message: "QuickBooks session has expired and could not be refreshed. Please reconnect QuickBooks.",
                 quickbooksError: "Your QuickBooks session has expired. Go to the QuickBooks section to reconnect your account."
               });
+              return;
             }
             console.warn('Proactive refresh failed within buffer window; proceeding with existing token — makeQuickBooksRequest will retry on 401');
           }
@@ -2843,7 +2959,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get customer details
       const customer = await storage.getCustomerById(customerId);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
 
       // Get all work orders for the customer
@@ -2885,7 +3002,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (selectedWorkOrders.length === 0 && selectedBillingSheets.length === 0) {
-        return res.status(400).json({ message: "No valid items selected for invoicing" });
+        res.status(400).json({ message: "No valid items selected for invoicing" });
+        return;
       }
 
       // Create the consolidated monthly invoice
@@ -2907,10 +3025,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const parsedStart = parseLocalDate(periodStartInput);
         const parsedEnd = parseLocalDate(periodEndInput);
         if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
-          return res.status(400).json({ message: "Invalid periodStart or periodEnd date value." });
+          res.status(400).json({ message: "Invalid periodStart or periodEnd date value." });
+          return;
         }
         if (parsedStart > parsedEnd) {
-          return res.status(400).json({ message: "periodStart must not be after periodEnd." });
+          res.status(400).json({ message: "periodStart must not be after periodEnd." });
+          return;
         }
         periodStart = parsedStart;
         periodEnd = new Date(parsedEnd.getFullYear(), parsedEnd.getMonth(), parsedEnd.getDate(), 23, 59, 59);
@@ -3093,7 +3213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }, 'Monthly Invoice Creation', integration.realmId);
 
         if (invoiceResponse.ok) {
-          const invoiceResult = await invoiceResponse.json();
+          const invoiceResult = (await invoiceResponse.json()) as { QueryResponse?: { Invoice?: Array<{ Id?: string }> }; Invoice?: { Id?: string; DocNumber?: string } };
           quickbooksId = invoiceResult?.QueryResponse?.Invoice?.[0]?.Id || invoiceResult?.Invoice?.Id;
           console.log("Successfully created invoice in QuickBooks with ID:", quickbooksId);
 
@@ -3137,10 +3257,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (rollbackError) {
           console.error('Error during invoice rollback:', rollbackError);
         }
-        return res.status(502).json({
+        res.status(502).json({
           message: "Failed to create invoice in QuickBooks. No items were billed. Please try again.",
           quickbooksError
         });
+        return;
       }
 
       // QuickBooks succeeded — now mark items as billed
@@ -3215,7 +3336,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const customer = await storage.getCustomer(id);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
@@ -3237,7 +3359,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Customer creation error:', error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
+        res.status(400).json({ message: "Invalid customer data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create customer" });
     }
@@ -3254,13 +3377,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const customer = await storage.updateCustomer(id, customerData);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
+        res.status(400).json({ message: "Invalid customer data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update customer" });
     }
@@ -3277,13 +3402,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const customer = await storage.updateCustomer(id, customerData);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
       res.json(applyBillingNotesVisibility(req, customer));
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid customer data", errors: error.errors });
+        res.status(400).json({ message: "Invalid customer data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update customer" });
     }
@@ -3292,7 +3419,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/customers/:id/labor-rates", requireAuthentication, async (req, res) => {
     try {
       if (req.authenticatedUserRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied. Labor rate changes are restricted to company administrators." });
+        res.status(403).json({ message: "Access denied. Labor rate changes are restricted to company administrators." });
+        return;
       }
       const id = parseInt(req.params.id);
       const laborRateSchema = z.object({
@@ -3305,13 +3433,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (parsed.emergencyLaborRate !== undefined) updateData.emergencyLaborRate = String(parsed.emergencyLaborRate);
       const customer = await storage.updateCustomer(id, updateData);
       if (!customer) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
       res.json(customer);
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid labor rate data", errors: error.errors });
+        res.status(400).json({ message: "Invalid labor rate data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update labor rates" });
     }
@@ -3322,7 +3452,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const success = await storage.deleteCustomer(id);
       if (!success) {
-        return res.status(404).json({ message: "Customer not found" });
+        res.status(404).json({ message: "Customer not found" });
+        return;
       }
       res.json({ message: "Customer deleted successfully" });
     } catch (error) {
@@ -3421,10 +3552,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/customers/:id/property-boundary", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid customer id" });
+      if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid customer id" }); return; }
       const customer = await loadCustomerWithTenantCheck(req, res, id);
       if (!customer) return;
-      return res.json({
+      res.json({
         propertyBoundary: customer.propertyBoundary ?? null,
         propertyBoundaryKml: customer.propertyBoundaryKml ?? null,
         propertyBoundaryFileName: customer.propertyBoundaryFileName ?? null,
@@ -3434,9 +3565,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         propertyBoundaryAreaAcres: customer.propertyBoundaryAreaAcres ?? null,
         propertyBoundaryUpdatedAt: customer.propertyBoundaryUpdatedAt ?? null,
       });
+      return;
     } catch (error) {
       console.error(error);
-      return res.status(500).json({ message: "Failed to fetch property boundary" });
+      res.status(500).json({ message: "Failed to fetch property boundary" });
+      return;
     }
   });
 
@@ -3447,7 +3580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req, res) => {
       try {
         const id = parseInt(req.params.id);
-        if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid customer id" });
+        if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid customer id" }); return; }
         const guard = await loadCustomerWithTenantCheck(req, res, id);
         if (!guard) return;
         const parsed = propertyBoundarySchema.parse(req.body);
@@ -3470,14 +3603,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           propertyBoundaryUpdatedAt: new Date(),
         };
         const customer = await storage.updateCustomer(id, updateData);
-        if (!customer) return res.status(404).json({ message: "Customer not found" });
-        return res.json(applyBillingNotesVisibility(req, customer));
+        if (!customer) { res.status(404).json({ message: "Customer not found" }); return; }
+        res.json(applyBillingNotesVisibility(req, customer));
+        return;
       } catch (error) {
         if (error instanceof z.ZodError) {
-          return res.status(400).json({ message: "Invalid boundary data", errors: error.issues });
+          res.status(400).json({ message: "Invalid boundary data", errors: error.issues });
+          return;
         }
         console.error(error);
-        return res.status(500).json({ message: "Failed to save property boundary" });
+        res.status(500).json({ message: "Failed to save property boundary" });
+        return;
       }
     },
   );
@@ -3489,7 +3625,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req, res) => {
       try {
         const id = parseInt(req.params.id);
-        if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid customer id" });
+        if (!Number.isFinite(id)) { res.status(400).json({ message: "Invalid customer id" }); return; }
         const guard = await loadCustomerWithTenantCheck(req, res, id);
         if (!guard) return;
         const clearData: Partial<InsertCustomer> = {
@@ -3503,11 +3639,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           propertyBoundaryUpdatedAt: null,
         };
         const customer = await storage.updateCustomer(id, clearData);
-        if (!customer) return res.status(404).json({ message: "Customer not found" });
-        return res.json(applyBillingNotesVisibility(req, customer));
+        if (!customer) { res.status(404).json({ message: "Customer not found" }); return; }
+        res.json(applyBillingNotesVisibility(req, customer));
+        return;
       } catch (error) {
         console.error(error);
-        return res.status(500).json({ message: "Failed to remove property boundary" });
+        res.status(500).json({ message: "Failed to remove property boundary" });
+        return;
       }
     },
   );
@@ -3550,14 +3688,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const file = req.files?.file;
       if (!file) {
-        return res.status(400).json({ message: "No file uploaded" });
+        res.status(400).json({ message: "No file uploaded" });
+        return;
       }
 
-      const csvData = file.data.toString();
+      const csvData = (Array.isArray(file) ? file[0] : file).data.toString();
       const lines = csvData.split('\n').filter((line: string) => line.trim());
       
       if (lines.length < 2) {
-        return res.status(400).json({ message: "CSV file must contain at least a header and one data row" });
+        res.status(400).json({ message: "CSV file must contain at least a header and one data row" });
+        return;
       }
 
       const headers = lines[0].split(',').map((h: string) => h.trim().replace(/"/g, ''));
@@ -3663,7 +3803,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const query = req.query.q as string;
       if (!query) {
-        return res.status(400).json({ message: "Search query is required" });
+        res.status(400).json({ message: "Search query is required" });
+        return;
       }
       const parts = await storage.searchParts(query);
       res.json(parts);
@@ -3678,10 +3819,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'billing_manager' && userRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
       const companyId = req.authenticatedUserCompanyId;
-      if (!companyId) return res.status(400).json({ message: "Company ID required" });
+      if (!companyId) { res.status(400).json({ message: "Company ID required" }); return; }
       const pendingParts = await storage.getPendingParts(companyId);
       res.json(pendingParts);
     } catch (error) {
@@ -3696,12 +3838,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate part ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid part ID" });
+        res.status(400).json({ message: "Invalid part ID" });
+        return;
       }
       
       const part = await storage.getPart(id);
       if (!part) {
-        return res.status(404).json({ message: "Part not found" });
+        res.status(404).json({ message: "Part not found" });
+        return;
       }
       res.json(part);
     } catch (error) {
@@ -3715,7 +3859,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = req.authenticatedUserRole;
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
       if (!allowedRoles.includes(userRole as string)) {
-        return res.status(403).json({ message: "Access denied. You don't have permission to create parts." });
+        res.status(403).json({ message: "Access denied. You don't have permission to create parts." });
+        return;
       }
 
       const rawData = req.body;
@@ -3724,13 +3869,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (rawData.price !== undefined) {
         const priceNum = Number(rawData.price);
         if (!Number.isFinite(priceNum) || priceNum < 0 || priceNum > MAX_DECIMAL) {
-          return res.status(400).json({ message: "Price must be between 0 and 99,999,999.99" });
+          res.status(400).json({ message: "Price must be between 0 and 99,999,999.99" });
+          return;
         }
       }
       if (rawData.cost !== undefined && rawData.cost !== "" && rawData.cost !== null) {
         const costNum = Number(rawData.cost);
         if (!Number.isFinite(costNum) || costNum < 0 || costNum > MAX_DECIMAL) {
-          return res.status(400).json({ message: "Cost must be between 0 and 99,999,999.99" });
+          res.status(400).json({ message: "Cost must be between 0 and 99,999,999.99" });
+          return;
         }
       }
 
@@ -3771,7 +3918,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(part);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid part data", errors: error.errors });
+        res.status(400).json({ message: "Invalid part data", errors: error.issues });
+        return;
       }
       console.error("Error creating part:", error instanceof Error ? error.message : error, { price: req.body?.price, cost: req.body?.cost });
       res.status(500).json({ message: "Failed to create part" });
@@ -3784,7 +3932,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate part ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid part ID" });
+        res.status(400).json({ message: "Invalid part ID" });
+        return;
       }
       
       // Check role-based access for parts editing
@@ -3792,30 +3941,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
       if (!allowedRoles.includes(userRole as string)) {
         console.error(`PUT /api/parts/:id - Access denied. Role ${userRole} cannot edit parts`);
-        return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
+        res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
+        return;
       }
       
       // Check if part exists and belongs to user's company
       const existingPart = await storage.getPart(id);
       if (!existingPart) {
-        return res.status(404).json({ message: "Part not found" });
+        res.status(404).json({ message: "Part not found" });
+        return;
       }
       
       const authenticatedCompanyId = req.authenticatedUserCompanyId;
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
-        return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+        res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+        return;
       }
       
       const partData = insertPartSchema.partial().parse(req.body);
       const part = await storage.updatePart(id, partData);
       if (!part) {
-        return res.status(404).json({ message: "Part not found" });
+        res.status(404).json({ message: "Part not found" });
+        return;
       }
       res.json(part);
     } catch (error) {
       console.error("Error updating part (PUT):", error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid part data", errors: error.errors });
+        res.status(400).json({ message: "Invalid part data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update part" });
     }
@@ -3836,7 +3990,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate part ID is a valid number
       if (isNaN(id) || id <= 0) {
         console.error(`PATCH /api/parts/${partId} - Invalid part ID`);
-        return res.status(400).json({ message: "Invalid part ID" });
+        res.status(400).json({ message: "Invalid part ID" });
+        return;
       }
       
       // Check role-based access for parts editing
@@ -3844,7 +3999,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
       if (!allowedRoles.includes(userRole as string)) {
         console.error(`PATCH /api/parts/:id - Access denied. Role ${userRole} cannot edit parts`);
-        return res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
+        res.status(403).json({ message: "Access denied. You don't have permission to edit parts." });
+        return;
       }
       
       // Check if part exists before updating - with explicit error handling
@@ -3853,12 +4009,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         existingPart = await storage.getPart(id);
       } catch (partLookupError) {
         console.error(`PATCH /api/parts/:id - Database error during part lookup:`, partLookupError);
-        return res.status(500).json({ message: "Database error while checking part" });
+        res.status(500).json({ message: "Database error while checking part" });
+        return;
       }
       
       if (!existingPart) {
         console.error(`PATCH /api/parts/:id - Part not found: ${id}`);
-        return res.status(404).json({ message: "Part not found" });
+        res.status(404).json({ message: "Part not found" });
+        return;
       }
       
       // Ensure the part belongs to the user's company
@@ -3867,7 +4025,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Only check company ownership if the user has a company (not null)
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
         console.error(`PATCH /api/parts/:id - Access denied. User company ${authenticatedCompanyId} cannot update part from company ${existingPart.companyId}`);
-        return res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+        res.status(403).json({ message: "Access denied. You can only update parts from your company." });
+        return;
       }
       
       // Parse and validate request data with proper type conversion for database
@@ -3890,8 +4049,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         partData = insertPartSchema.partial().parse(processedData);
       } catch (validationError) {
         if (validationError instanceof z.ZodError) {
-          console.error("PATCH /api/parts/:id - Zod validation errors:", validationError.errors);
-          return res.status(400).json({ message: "Invalid part data", errors: validationError.errors });
+          console.error("PATCH /api/parts/:id - Zod validation errors:", validationError.issues);
+          res.status(400).json({ message: "Invalid part data", errors: validationError.issues });
+          return;
         }
         throw validationError; // Re-throw if not a Zod error
       }
@@ -3911,18 +4071,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Check if it's a constraint violation or data type error
         const errorMessage = updateError instanceof Error ? updateError.message : String(updateError);
         if (errorMessage.includes('constraint') || errorMessage.includes('violates') || errorMessage.includes('invalid input')) {
-          return res.status(400).json({ 
+          res.status(400).json({ 
             message: "Invalid data provided. Please check all fields and try again.",
             details: errorMessage 
           });
+          return;
         }
         
-        return res.status(500).json({ message: "Database error while updating part" });
+        res.status(500).json({ message: "Database error while updating part" });
+        return;
       }
       
       if (!part) {
         console.error(`PATCH /api/parts/:id - Update failed for part: ${id}`);
-        return res.status(404).json({ message: "Part not found after update" });
+        res.status(404).json({ message: "Part not found after update" });
+        return;
       }
       
       res.json(part);
@@ -3950,7 +4113,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Bulk import request:', { hasCSV: !!csvData, mappingsLength: columnMappings?.length, mappings: columnMappings });
       
       if (!csvData || typeof csvData !== 'string') {
-        return res.status(400).json({ message: "CSV data is required" });
+        res.status(400).json({ message: "CSV data is required" });
+        return;
       }
 
       // Proper CSV parsing function
@@ -3988,7 +4152,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Parse CSV data
       const lines = csvData.trim().split('\n');
       if (lines.length < 2) {
-        return res.status(400).json({ message: "CSV must have header and at least one data row" });
+        res.status(400).json({ message: "CSV must have header and at least one data row" });
+        return;
       }
 
       const csvHeaders = parseCSVLine(lines[0]);
@@ -4053,9 +4218,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const missingFields = requiredFields.filter(field => !mappedFields.includes(field));
         
         if (missingFields.length > 0) {
-          return res.status(400).json({ 
+          res.status(400).json({ 
             message: `Missing required field mappings: ${missingFields.join(', ')}` 
           });
+          return;
         }
       } else {
         // Old behavior - map by header names
@@ -4064,9 +4230,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const missingFields = requiredFields.filter(field => !headers.includes(field));
         
         if (missingFields.length > 0) {
-          return res.status(400).json({ 
+          res.status(400).json({ 
             message: `Missing required fields: ${missingFields.join(', ')}` 
           });
+          return;
         }
         
         // Create legacy mapping
@@ -4189,13 +4356,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (error instanceof z.ZodError) {
             // Provide detailed validation errors
-            const errorMessages = error.errors.map(e => {
+            const errorMessages = error.issues.map(e => {
               const field = e.path.join('.');
               return `${field}: ${e.message}`;
             });
             results.errors.push({
               row: i + 1,
-              field: String(error.errors[0]?.path[0] || 'general'),
+              field: String(error.issues[0]?.path[0] || 'general'),
               message: errorMessages.join(', ')
             });
           } else {
@@ -4226,7 +4393,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const requirePartsSettingsAccess = (req: any, res: any, next: any) => {
     const userRole = req.authenticatedUserRole;
     if (userRole !== 'company_admin' && userRole !== 'billing_manager' && userRole !== 'irrigation_manager') {
-      return res.status(403).json({ message: "Access denied. Only company administrators, billing managers, and irrigation managers can manage parts settings." });
+      res.status(403).json({ message: "Access denied. Only company administrators, billing managers, and irrigation managers can manage parts settings." });
+      return;
     }
     next();
   };
@@ -4234,7 +4402,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Part Categories
   app.get("/api/part-settings/categories", requireAuthentication, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     try {
       const categories = await storage.getPartCategories(companyId);
       res.json(categories);
@@ -4246,13 +4414,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/part-settings/categories", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    if (!name) return res.status(400).json({ message: "Name is required" });
+    if (!name) { res.status(400).json({ message: "Name is required" }); return; }
     let markupPercent = "0.00";
     if (req.body.markupPercent !== undefined) {
       const parsed = parseFloat(req.body.markupPercent);
-      if (isNaN(parsed) || parsed < 0) return res.status(400).json({ message: "markupPercent must be a non-negative number" });
+      if (isNaN(parsed) || parsed < 0) { res.status(400).json({ message: "markupPercent must be a non-negative number" }); return; }
       markupPercent = parsed.toFixed(2);
     }
     try {
@@ -4266,23 +4434,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/part-settings/categories/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const update: { name?: string; markupPercent?: string } = {};
     if (typeof req.body.name === "string") {
       update.name = req.body.name.trim();
-      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+      if (!update.name) { res.status(400).json({ message: "Name cannot be empty" }); return; }
     }
     if (req.body.markupPercent !== undefined) {
       const parsed = parseFloat(req.body.markupPercent);
-      if (isNaN(parsed) || parsed < 0) return res.status(400).json({ message: "markupPercent must be a non-negative number" });
+      if (isNaN(parsed) || parsed < 0) { res.status(400).json({ message: "markupPercent must be a non-negative number" }); return; }
       update.markupPercent = parsed.toFixed(2);
     }
-    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    if (Object.keys(update).length === 0) { res.status(400).json({ message: "No valid fields to update" }); return; }
     try {
       const category = await storage.updatePartCategory(id, companyId, update);
-      if (!category) return res.status(404).json({ message: "Category not found" });
+      if (!category) { res.status(404).json({ message: "Category not found" }); return; }
       res.json(category);
     } catch (error) {
       console.error(error);
@@ -4292,12 +4460,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/part-settings/categories/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const deleted = await storage.deletePartCategory(id, companyId);
-      if (!deleted) return res.status(404).json({ message: "Category not found" });
+      if (!deleted) { res.status(404).json({ message: "Category not found" }); return; }
       res.json({ message: "Category deleted" });
     } catch (error) {
       console.error(error);
@@ -4308,7 +4476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Part Brands
   app.get("/api/part-settings/brands", requireAuthentication, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     try {
       const brands = await storage.getPartBrands(companyId);
       res.json(brands);
@@ -4320,9 +4488,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/part-settings/brands", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    if (!name) return res.status(400).json({ message: "Name is required" });
+    if (!name) { res.status(400).json({ message: "Name is required" }); return; }
     try {
       const brand = await storage.createPartBrand({ companyId, name });
       res.json(brand);
@@ -4334,18 +4502,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/part-settings/brands/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const update: { name?: string } = {};
     if (typeof req.body.name === "string") {
       update.name = req.body.name.trim();
-      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+      if (!update.name) { res.status(400).json({ message: "Name cannot be empty" }); return; }
     }
-    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    if (Object.keys(update).length === 0) { res.status(400).json({ message: "No valid fields to update" }); return; }
     try {
       const brand = await storage.updatePartBrand(id, companyId, update);
-      if (!brand) return res.status(404).json({ message: "Brand not found" });
+      if (!brand) { res.status(404).json({ message: "Brand not found" }); return; }
       res.json(brand);
     } catch (error) {
       console.error(error);
@@ -4355,12 +4523,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/part-settings/brands/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const deleted = await storage.deletePartBrand(id, companyId);
-      if (!deleted) return res.status(404).json({ message: "Brand not found" });
+      if (!deleted) { res.status(404).json({ message: "Brand not found" }); return; }
       res.json({ message: "Brand deleted" });
     } catch (error) {
       console.error(error);
@@ -4371,7 +4539,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Part Sizes
   app.get("/api/part-settings/sizes", requireAuthentication, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     try {
       const sizes = await storage.getPartSizes(companyId);
       res.json(sizes);
@@ -4383,9 +4551,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/part-settings/sizes", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    if (!name) return res.status(400).json({ message: "Name is required" });
+    if (!name) { res.status(400).json({ message: "Name is required" }); return; }
     try {
       const size = await storage.createPartSize({ companyId, name });
       res.json(size);
@@ -4397,18 +4565,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/part-settings/sizes/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const update: { name?: string } = {};
     if (typeof req.body.name === "string") {
       update.name = req.body.name.trim();
-      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+      if (!update.name) { res.status(400).json({ message: "Name cannot be empty" }); return; }
     }
-    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    if (Object.keys(update).length === 0) { res.status(400).json({ message: "No valid fields to update" }); return; }
     try {
       const size = await storage.updatePartSize(id, companyId, update);
-      if (!size) return res.status(404).json({ message: "Size not found" });
+      if (!size) { res.status(404).json({ message: "Size not found" }); return; }
       res.json(size);
     } catch (error) {
       console.error(error);
@@ -4418,12 +4586,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/part-settings/sizes/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const deleted = await storage.deletePartSize(id, companyId);
-      if (!deleted) return res.status(404).json({ message: "Size not found" });
+      if (!deleted) { res.status(404).json({ message: "Size not found" }); return; }
       res.json({ message: "Size deleted" });
     } catch (error) {
       console.error(error);
@@ -4434,7 +4602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Part Materials
   app.get("/api/part-settings/materials", requireAuthentication, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     try {
       const materials = await storage.getPartMaterials(companyId);
       res.json(materials);
@@ -4446,9 +4614,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/part-settings/materials", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    if (!name) return res.status(400).json({ message: "Name is required" });
+    if (!name) { res.status(400).json({ message: "Name is required" }); return; }
     try {
       const material = await storage.createPartMaterial({ companyId, name });
       res.json(material);
@@ -4460,18 +4628,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/part-settings/materials/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const update: { name?: string } = {};
     if (typeof req.body.name === "string") {
       update.name = req.body.name.trim();
-      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+      if (!update.name) { res.status(400).json({ message: "Name cannot be empty" }); return; }
     }
-    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    if (Object.keys(update).length === 0) { res.status(400).json({ message: "No valid fields to update" }); return; }
     try {
       const material = await storage.updatePartMaterial(id, companyId, update);
-      if (!material) return res.status(404).json({ message: "Material not found" });
+      if (!material) { res.status(404).json({ message: "Material not found" }); return; }
       res.json(material);
     } catch (error) {
       console.error(error);
@@ -4481,12 +4649,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/part-settings/materials/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const deleted = await storage.deletePartMaterial(id, companyId);
-      if (!deleted) return res.status(404).json({ message: "Material not found" });
+      if (!deleted) { res.status(404).json({ message: "Material not found" }); return; }
       res.json({ message: "Material deleted" });
     } catch (error) {
       console.error(error);
@@ -4497,7 +4665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Part Fitting Types
   app.get("/api/part-settings/fitting-types", requireAuthentication, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     try {
       const fittingTypes = await storage.getPartFittingTypes(companyId);
       res.json(fittingTypes);
@@ -4509,9 +4677,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/part-settings/fitting-types", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    if (!name) return res.status(400).json({ message: "Name is required" });
+    if (!name) { res.status(400).json({ message: "Name is required" }); return; }
     try {
       const fittingType = await storage.createPartFittingType({ companyId, name });
       res.json(fittingType);
@@ -4523,18 +4691,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/part-settings/fitting-types/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     const update: { name?: string } = {};
     if (typeof req.body.name === "string") {
       update.name = req.body.name.trim();
-      if (!update.name) return res.status(400).json({ message: "Name cannot be empty" });
+      if (!update.name) { res.status(400).json({ message: "Name cannot be empty" }); return; }
     }
-    if (Object.keys(update).length === 0) return res.status(400).json({ message: "No valid fields to update" });
+    if (Object.keys(update).length === 0) { res.status(400).json({ message: "No valid fields to update" }); return; }
     try {
       const fittingType = await storage.updatePartFittingType(id, companyId, update);
-      if (!fittingType) return res.status(404).json({ message: "Fitting type not found" });
+      if (!fittingType) { res.status(404).json({ message: "Fitting type not found" }); return; }
       res.json(fittingType);
     } catch (error) {
       console.error(error);
@@ -4544,12 +4712,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/part-settings/fitting-types/:id", requireAuthentication, requirePartsSettingsAccess, async (req, res) => {
     const companyId = req.authenticatedUserCompanyId;
-    if (!companyId) return res.status(401).json({ message: "Unauthorized" });
+    if (!companyId) { res.status(401).json({ message: "Unauthorized" }); return; }
     const id = parseInt(req.params.id);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const deleted = await storage.deletePartFittingType(id, companyId);
-      if (!deleted) return res.status(404).json({ message: "Fitting type not found" });
+      if (!deleted) { res.status(404).json({ message: "Fitting type not found" }); return; }
       res.json({ message: "Fitting type deleted" });
     } catch (error) {
       console.error(error);
@@ -4573,7 +4741,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const partId = parseInt(req.params.id);
       if (isNaN(partId) || partId <= 0) {
-        return res.status(400).json({ message: "Invalid part ID" });
+        res.status(400).json({ message: "Invalid part ID" });
+        return;
       }
       const companyId = req.authenticatedUserCompanyId || 1;
       await storage.trackPartUsage(companyId, partId);
@@ -4589,24 +4758,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'billing_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
       const id = parseInt(req.params.id);
-      if (isNaN(id) || id <= 0) return res.status(400).json({ message: "Invalid part ID" });
+      if (isNaN(id) || id <= 0) { res.status(400).json({ message: "Invalid part ID" }); return; }
 
       // Verify company ownership (except super_admin who can approve any)
       const existingPart = await storage.getPart(id);
-      if (!existingPart) return res.status(404).json({ message: "Part not found" });
+      if (!existingPart) { res.status(404).json({ message: "Part not found" }); return; }
       const companyId = req.authenticatedUserCompanyId;
       if (userRole !== 'super_admin' && companyId !== null && existingPart.companyId !== companyId) {
-        return res.status(403).json({ message: "Access denied. You can only approve parts from your company." });
+        res.status(403).json({ message: "Access denied. You can only approve parts from your company." });
+        return;
       }
 
       const { price, cost } = req.body;
-      if (!price) return res.status(400).json({ message: "price is required" });
+      if (!price) { res.status(400).json({ message: "price is required" }); return; }
 
       const updatedPart = await storage.approvePart(id, String(price), cost ? String(cost) : undefined, existingPart.companyId);
-      if (!updatedPart) return res.status(404).json({ message: "Part not found" });
+      if (!updatedPart) { res.status(404).json({ message: "Part not found" }); return; }
 
       res.json(updatedPart);
     } catch (error) {
@@ -4620,10 +4791,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'billing_manager' && userRole !== 'company_admin') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
       const companyId = req.authenticatedUserCompanyId;
-      if (!companyId) return res.status(400).json({ message: "Company ID required" });
+      if (!companyId) { res.status(400).json({ message: "Company ID required" }); return; }
       const reviews = await storage.getManualPartReviews(companyId);
       res.json(reviews);
     } catch (error) {
@@ -4637,24 +4809,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userRole = req.authenticatedUserRole;
       if (userRole !== 'billing_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
       const id = parseInt(req.params.id);
-      if (isNaN(id) || id <= 0) return res.status(400).json({ message: "Invalid review ID" });
+      if (isNaN(id) || id <= 0) { res.status(400).json({ message: "Invalid review ID" }); return; }
 
       // Verify company ownership (except super_admin who can approve any)
       const existingReview = await storage.getManualPartReview(id);
-      if (!existingReview) return res.status(404).json({ message: "Review not found" });
+      if (!existingReview) { res.status(404).json({ message: "Review not found" }); return; }
       const companyId = req.authenticatedUserCompanyId;
       if (userRole !== 'super_admin' && companyId !== null && existingReview.companyId !== companyId) {
-        return res.status(403).json({ message: "Access denied. You can only approve reviews from your company." });
+        res.status(403).json({ message: "Access denied. You can only approve reviews from your company." });
+        return;
       }
 
       const { reviewedPrice } = req.body;
-      if (!reviewedPrice) return res.status(400).json({ message: "reviewedPrice is required" });
+      if (!reviewedPrice) { res.status(400).json({ message: "reviewedPrice is required" }); return; }
 
       const updated = await storage.approveManualPartReview(id, String(reviewedPrice));
-      if (!updated) return res.status(404).json({ message: "Review not found" });
+      if (!updated) { res.status(404).json({ message: "Review not found" }); return; }
 
       res.json(updated);
     } catch (error) {
@@ -4668,27 +4842,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = req.authenticatedUserRole;
       const allowedRoles = ['company_admin', 'super_admin', 'billing_manager', 'irrigation_manager'];
       if (!allowedRoles.includes(userRole as string)) {
-        return res.status(403).json({ message: "Access denied. You don't have permission to delete parts." });
+        res.status(403).json({ message: "Access denied. You don't have permission to delete parts." });
+        return;
       }
 
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid part ID" });
+        res.status(400).json({ message: "Invalid part ID" });
+        return;
       }
 
       const existingPart = await storage.getPart(id);
       if (!existingPart) {
-        return res.status(404).json({ message: "Part not found" });
+        res.status(404).json({ message: "Part not found" });
+        return;
       }
 
       const authenticatedCompanyId = req.authenticatedUserCompanyId;
       if (authenticatedCompanyId !== null && existingPart.companyId !== authenticatedCompanyId) {
-        return res.status(403).json({ message: "Access denied. You can only delete parts from your company." });
+        res.status(403).json({ message: "Access denied. You can only delete parts from your company." });
+        return;
       }
 
       const success = await storage.deletePart(id);
       if (!success) {
-        return res.status(404).json({ message: "Part not found" });
+        res.status(404).json({ message: "Part not found" });
+        return;
       }
       res.json({ message: "Part deleted successfully" });
     } catch (error) {
@@ -4713,11 +4892,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assembly ID" });
+        res.status(400).json({ message: "Invalid assembly ID" });
+        return;
       }
       const assembly = await storage.getAssembly(id);
       if (!assembly) {
-        return res.status(404).json({ message: "Assembly not found" });
+        res.status(404).json({ message: "Assembly not found" });
+        return;
       }
       res.json(assembly);
     } catch (error) {
@@ -4740,7 +4921,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error creating assembly:", error instanceof Error ? error.message : error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
+        res.status(400).json({ message: "Invalid assembly data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create assembly" });
     }
@@ -4750,20 +4932,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assembly ID" });
+        res.status(400).json({ message: "Invalid assembly ID" });
+        return;
       }
       const { assembly, parts } = req.body;
       const assemblyData = insertAssemblySchema.partial().parse(assembly);
       const partsData = parts ? parts.map((p: any) => insertAssemblyPartSchema.parse(p)) : undefined;
       const updatedAssembly = await storage.updateAssembly(id, assemblyData, partsData);
       if (!updatedAssembly) {
-        return res.status(404).json({ message: "Assembly not found" });
+        res.status(404).json({ message: "Assembly not found" });
+        return;
       }
       res.json(updatedAssembly);
     } catch (error) {
       console.error("Error updating assembly:", error instanceof Error ? error.message : error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid assembly data", errors: error.errors });
+        res.status(400).json({ message: "Invalid assembly data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update assembly" });
     }
@@ -4773,11 +4958,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assembly ID" });
+        res.status(400).json({ message: "Invalid assembly ID" });
+        return;
       }
       const success = await storage.deleteAssembly(id);
       if (!success) {
-        return res.status(404).json({ message: "Assembly not found" });
+        res.status(404).json({ message: "Assembly not found" });
+        return;
       }
       res.json({ message: "Assembly deleted successfully" });
     } catch (error) {
@@ -4802,13 +4989,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sheetsUrl } = req.body;
       if (!sheetsUrl) {
-        return res.status(400).json({ message: "Google Sheets URL is required" });
+        res.status(400).json({ message: "Google Sheets URL is required" });
+        return;
       }
 
       // Convert Google Sheets URL to CSV export URL
       const sheetId = sheetsUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1];
       if (!sheetId) {
-        return res.status(400).json({ message: "Invalid Google Sheets URL format" });
+        res.status(400).json({ message: "Invalid Google Sheets URL format" });
+        return;
       }
 
       const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
@@ -4816,16 +5005,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch CSV data
       const response = await fetch(csvUrl);
       if (!response.ok) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "Failed to access Google Sheets. Make sure the sheet is publicly viewable (Anyone with the link can view)" 
         });
+        return;
       }
 
       const csvData = await response.text();
       const lines = csvData.split('\n').filter(line => line.trim());
       
       if (lines.length < 2) {
-        return res.status(400).json({ message: "Sheet appears to be empty or missing data" });
+        res.status(400).json({ message: "Sheet appears to be empty or missing data" });
+        return;
       }
 
       // Parse CSV headers
@@ -4849,9 +5040,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Mapped fields:', { nameField, priceField, skuField, laborField });
 
       if (!nameField || !priceField) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: `Could not find required columns in sheet. Available headers: ${headers.join(', ')}. Need at least: name/product and price/cost` 
         });
+        return;
       }
 
       // Parse and import parts
@@ -4914,7 +5106,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { docUrl } = req.body;
       if (!docUrl) {
-        return res.status(400).json({ message: "Google Docs URL is required" });
+        res.status(400).json({ message: "Google Docs URL is required" });
+        return;
       }
       await storage.syncPartsFromGoogleDocs(docUrl);
       res.json({ message: "Parts synced from Google Docs successfully" });
@@ -4950,7 +5143,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         scopeCompanyId = null;
       } else {
         if (!userCompanyId) {
-          return res.status(400).json({ message: "Missing company context" });
+          res.status(400).json({ message: "Missing company context" });
+          return;
         }
         scopeCompanyId = Number(userCompanyId);
       }
@@ -4967,7 +5161,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       res.json(estimate);
     } catch (error) {
@@ -4988,7 +5183,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const success = await storage.deleteEstimate(id);
       if (!success) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       res.json({ message: "Estimate deleted successfully" });
     } catch (error) {
@@ -5003,7 +5199,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       
       // For now, just simulate sending email
@@ -5031,7 +5228,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const propertyZone = await storage.getPropertyZone(id);
       if (!propertyZone) {
-        return res.status(404).json({ message: "Property zone not found" });
+        res.status(404).json({ message: "Property zone not found" });
+        return;
       }
       res.json(propertyZone);
     } catch (error) {
@@ -5048,7 +5246,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid property zone data", errors: error.errors });
+        res.status(400).json({ message: "Invalid property zone data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create property zone" });
     }
@@ -5058,7 +5257,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sheetsUrl } = req.body;
       if (!sheetsUrl) {
-        return res.status(400).json({ message: "Google Sheets URL is required" });
+        res.status(400).json({ message: "Google Sheets URL is required" });
+        return;
       }
       await storage.syncPropertyZonesFromGoogleSheets(sheetsUrl);
       res.json({ message: "Property zones synced from Google Sheets successfully" });
@@ -5084,7 +5284,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const session = await storage.getFieldWorkSession(id);
       if (!session) {
-        return res.status(404).json({ message: "Field work session not found" });
+        res.status(404).json({ message: "Field work session not found" });
+        return;
       }
       res.json(session);
     } catch (error) {
@@ -5101,7 +5302,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid field work session data", errors: error.errors });
+        res.status(400).json({ message: "Invalid field work session data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create field work session" });
     }
@@ -5112,7 +5314,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       const session = await storage.completeFieldWorkSession(id);
       if (!session) {
-        return res.status(404).json({ message: "Field work session not found" });
+        res.status(404).json({ message: "Field work session not found" });
+        return;
       }
       res.json(session);
     } catch (error) {
@@ -5130,7 +5333,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid field work item data", errors: error.errors });
+        res.status(400).json({ message: "Invalid field work item data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to add field work item" });
     }
@@ -5188,7 +5392,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
 
   // Function to refresh QuickBooks token
-  async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal, context?: { realmId?: string; calledFrom?: string }) {
+  async function refreshQuickBooksToken(refreshToken: string, signal?: AbortSignal, context?: { realmId?: string; calledFrom?: string }): Promise<{ access_token: string; refresh_token: string; expires_in?: number; [key: string]: unknown }> {
     const tokenEndpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
     const authHeader = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID}:${process.env.QUICKBOOKS_CLIENT_SECRET}`).toString('base64');
     const startedAt = Date.now();
@@ -5228,7 +5432,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       throw new QbRefreshError(`Token refresh failed: ${response.status} ${errorText}`, category);
     }
 
-    const tokenData = await response.json();
+    const tokenData = (await response.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; [key: string]: unknown };
     if (!tokenData.access_token) {
       const durationMs = Date.now() - startedAt;
       console.error(`[QB token-refresh] FAILURE realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} failureCode=MISSING_ACCESS_TOKEN failureMessage=Token refresh response missing access_token`);
@@ -5244,7 +5448,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const tokenRotated = true;
     const expiresInSeconds = tokenData.expires_in && tokenData.expires_in > 0 ? tokenData.expires_in : 3600;
     console.log(`[QB token-refresh] SUCCESS realmId=${realmId} calledFrom=${calledFrom} durationMs=${durationMs} tokenRotated=${tokenRotated} newExpiresInSeconds=${expiresInSeconds}`);
-    return tokenData;
+    return tokenData as { access_token: string; refresh_token: string; expires_in?: number; [key: string]: unknown };
   }
 
   // Shared helper: persist reconnect_required for unrecoverable QbRefreshError
@@ -5469,7 +5673,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         realmId
       );
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as { QueryResponse?: { Item?: Array<{ Id?: string; Name?: string }> } };
         const items = data?.QueryResponse?.Item;
         if (items && items.length > 0) {
           return { id: String(items[0].Id), name: items[0].Name || QB_SERVICE_ITEM_NAME };
@@ -5485,7 +5689,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   }
 
   // Function to exchange authorization code for access tokens
-  async function exchangeCodeForTokens(code: string, realmId: string, req: any) {
+  async function exchangeCodeForTokens(code: string, realmId: string, req: any): Promise<{ access_token: string; refresh_token: string; expires_in: number; companyName?: string; [key: string]: unknown }> {
     const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI;
     if (!redirectUri) {
       throw new Error('QUICKBOOKS_REDIRECT_URI environment variable is not set');
@@ -5519,7 +5723,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       throw new Error(`Token exchange failed: ${response.status} ${errorText}${intuitTid ? ` [TID: ${intuitTid}]` : ''}`);
     }
 
-    const tokenData = await response.json();
+    const tokenData = (await response.json()) as { access_token: string; refresh_token: string; expires_in: number; companyName?: string; [key: string]: unknown };
     console.log('Successfully exchanged code for tokens');
     
     // Get company info from QuickBooks API
@@ -5536,7 +5740,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }, 'Company Info', realmId);
       
       if (companyInfoResponse.ok) {
-        const companyData = await companyInfoResponse.json();
+        const companyData = (await companyInfoResponse.json()) as { QueryResponse?: { CompanyInfo?: Array<{ CompanyName?: string }> } };
         tokenData.companyName = companyData?.QueryResponse?.CompanyInfo?.[0]?.CompanyName || `Company ${realmId}`;
         console.log('Company info fetched successfully');
       } else {
@@ -5555,17 +5759,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       // Check if QuickBooks credentials are available
       if (!process.env.QUICKBOOKS_CLIENT_ID || !process.env.QUICKBOOKS_CLIENT_SECRET) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           message: "QuickBooks integration is not configured. Please contact your administrator to set up the QuickBooks credentials." 
         });
+        return;
       }
 
       const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI;
       if (!redirectUri) {
         console.warn('WARNING: QUICKBOOKS_REDIRECT_URI environment variable is not set');
-        return res.status(400).json({
+        res.status(400).json({
           message: "QuickBooks redirect URI is not configured. Please set the QUICKBOOKS_REDIRECT_URI environment variable."
         });
+        return;
       }
 
       const state = crypto.randomBytes(16).toString('hex');
@@ -5594,7 +5800,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const { code, state, realmId } = req.query;
       
       if (!code || !realmId) {
-        return res.status(400).send(`
+        res.status(400).send(`
           <html>
             <body>
               <h2>QuickBooks Connection Failed</h2>
@@ -5603,13 +5809,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             </body>
           </html>
         `);
+        return;
       }
 
       // Verify CSRF state parameter against in-memory store
       const stateEntry = state ? oauthStateStore.get(state as string) : undefined;
       if (!state || !stateEntry || Date.now() > stateEntry.expiry) {
         console.error('QuickBooks OAuth state mismatch or expired. Possible CSRF attack.', { received: state });
-        return res.status(400).send(`
+        res.status(400).send(`
           <html>
             <head><title>Connection Failed</title></head>
             <body>
@@ -5619,6 +5826,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             </body>
           </html>
         `);
+        return;
       }
       // Retrieve company ID that was stored when the OAuth flow was initiated
       const oauthCompanyId = stateEntry.companyId;
@@ -5759,7 +5967,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const userCompanyId = (req.headers['x-user-company-id'] as string) || null;
       if (!userCompanyId) {
-        return res.status(400).json({ success: false, message: "Company context is required to disconnect QuickBooks." });
+        res.status(400).json({ success: false, message: "Company context is required to disconnect QuickBooks." });
+        return;
       }
       
       // Remove QuickBooks integration for this company only
@@ -5809,7 +6018,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const qbStatus = await storage.getQuickBooksCustomerStatus(userCompanyId);
       
       if (!qbStatus.isConnected) {
-        return res.json([]);
+        res.json([]);
+        return;
       }
 
       // Get actual QuickBooks integration data - resolve realmId from companyId then fetch canonically
@@ -5817,7 +6027,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       
       if (!integration || !integration.accessToken) {
-        return res.json([]);
+        res.json([]);
+        return;
       }
 
       // Use production QuickBooks API for deployment, sandbox for development
@@ -5842,10 +6053,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           console.error('QuickBooks authorization failed - connection needs to be re-established');
         }
         
-        return res.json([]);
+        res.json([]);
+        return;
       }
 
-      const qbData = await customersResponse.json();
+      const qbData = (await customersResponse.json()) as { QueryResponse?: { Customer?: unknown[] } };
       const qbCustomers = qbData?.QueryResponse?.Customer || [];
       
       res.json(qbCustomers);
@@ -5862,7 +6074,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const hasCredentials = process.env.QUICKBOOKS_CLIENT_ID && process.env.QUICKBOOKS_CLIENT_SECRET;
       
       if (!hasCredentials) {
-        return res.json({ 
+        res.json({ 
           companyId: null,
           companyName: null,
           isConnected: false,
@@ -5871,6 +6083,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           reconnectRequiredReason: null,
           error: "QuickBooks credentials not configured"
         });
+        return;
       }
       
       // Get user's company ID from header (app uses localStorage/header auth, not server sessions)
@@ -5943,10 +6156,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       if (!integration || !integration.accessToken) {
         console.log("Missing integration or access token");
-        return res.status(400).json({ 
+        res.status(400).json({ 
           success: false, 
           message: "QuickBooks not connected. Please connect to QuickBooks first." 
         });
+        return;
       }
 
       // Use production QuickBooks API for deployment, sandbox for development
@@ -5974,21 +6188,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           console.error('Failed to fetch customers from QuickBooks:', customersResponse.status, errorText);
           
           if (customersResponse.status === 403) {
-            return res.status(403).json({ 
+            res.status(403).json({ 
               success: false, 
               message: "QuickBooks authorization expired or invalid. Please reconnect to QuickBooks.",
               errorCode: "AUTHORIZATION_FAILED",
               needsReconnection: true
             });
+            return;
           }
           
-          return res.status(500).json({ 
+          res.status(500).json({ 
             success: false, 
             message: `Failed to fetch customers from QuickBooks: ${customersResponse.status}${customersTid ? ` [TID: ${customersTid}]` : ''}` 
           });
+          return;
         }
 
-        const qbData = await customersResponse.json();
+        const qbData = (await customersResponse.json()) as { QueryResponse?: { Customer?: Record<string, unknown>[] } };
         const page: Record<string, unknown>[] = qbData?.QueryResponse?.Customer || [];
         qbCustomers.push(...page);
 
@@ -6077,10 +6293,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           success: false, 
           message: "QuickBooks not connected. Please connect QuickBooks first." 
         });
+        return;
       }
 
       // Use production QuickBooks API for deployment, sandbox for development
@@ -6099,13 +6316,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const errorText = await itemsResponse.text();
         const itemsTid = itemsResponse.headers.get('intuit_tid');
         console.error('Failed to fetch items from QuickBooks:', itemsResponse.status, errorText);
-        return res.status(500).json({ 
+        res.status(500).json({ 
           success: false, 
           message: `Failed to fetch items from QuickBooks: ${itemsResponse.status}${itemsTid ? ` [TID: ${itemsTid}]` : ''}` 
         });
+        return;
       }
 
-      const qbData = await itemsResponse.json();
+      const qbData = (await itemsResponse.json()) as { QueryResponse?: { Item?: Array<Record<string, unknown>> } };
       const qbItems = qbData?.QueryResponse?.Item || [];
       
       console.log(`Found ${qbItems.length} inventory items in QuickBooks`);
@@ -6126,20 +6344,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       let syncedCount = 0;
       const results = [];
 
-      for (const item of irrigationParts) {
+      for (const item of irrigationParts as Array<Record<string, unknown>>) {
         try {
+          const itemId = String(item.Id ?? '');
+          const itemName = String(item.Name ?? `Item ${itemId}`);
           const partData = {
-            name: item.Name || `Item ${item.Id}`,
-            sku: item.Sku || item.Name || `QB-${item.Id}`,
-            description: item.Description || '',
-            price: (item.UnitPrice || 0).toString(),
+            name: itemName,
+            sku: String(item.Sku ?? item.Name ?? `QB-${itemId}`),
+            description: String(item.Description ?? ''),
+            price: Number(item.UnitPrice ?? 0),
             companyId: req.authenticatedUserCompanyId || 1,
-            quickbooksId: item.Id,
+            quickbooksId: itemId,
             category: 'General'
           };
 
           // Check if part already exists by QuickBooks ID
-          const existingPart = await storage.getPartByQuickBooksId(item.Id);
+          const existingPart = await storage.getPartByQuickBooksId(itemId);
           
           if (!existingPart) {
             // Actually create the part in the database
@@ -6179,11 +6399,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       
       // Get QuickBooks integration data - resolve realmId from companyId then fetch canonically
@@ -6191,10 +6413,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const qbLookup = userCompanyId ? await storage.getQuickBooksIntegrationByCompanyId(userCompanyId) : null;
       const integration = qbLookup?.realmId ? await storage.getQuickBooksIntegration(qbLookup.realmId) : null;
       if (!integration || !integration.accessToken) {
-        return res.status(400).json({ 
+        res.status(400).json({ 
           success: false, 
           message: "QuickBooks not connected. Please connect to QuickBooks first." 
         });
+        return;
       }
 
       // Create invoice in QuickBooks using actual API
@@ -6207,28 +6430,31 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (estimate.customerId) {
         const customer = await storage.getCustomer(estimate.customerId);
         if (!customer || !customer.quickbooksId) {
-          return res.status(400).json({
+          res.status(400).json({
             success: false,
             message: "Sync this customer to QuickBooks first before creating an invoice."
           });
+          return;
         }
         qbCustomerId = customer.quickbooksId;
       }
 
       if (!qbCustomerId) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: "This estimate has no linked customer. Please assign a customer and sync them to QuickBooks first."
         });
+        return;
       }
 
       // Look up service item dynamically (shared helper — no hardcoded IDs)
       const qbServiceItem = await lookupQBServiceItem(apiBase, integration.realmId, integration.accessToken);
       if (!qbServiceItem) {
-        return res.status(502).json({
+        res.status(502).json({
           success: false,
           message: `Could not find the QuickBooks item "${QB_SERVICE_ITEM_NAME}". Please create an active Service-type item with that exact name in QuickBooks and try again.`
         });
+        return;
       }
 
       const lineAmount = parseFloat(estimate.totalAmount);
@@ -6246,7 +6472,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             UnitPrice: lineAmount,
             Qty: 1
           },
-          Description: estimate.title || 'Estimate'
+          Description: (estimate as { title?: string }).title || 'Estimate'
         }],
         CustomerRef: {
           value: qbCustomerId
@@ -6266,7 +6492,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }, 'Estimate Invoice Creation', integration.realmId);
 
       if (invoiceResponse.ok) {
-        const invoiceResult = await invoiceResponse.json();
+        const invoiceResult = (await invoiceResponse.json()) as { Invoice?: { Id?: string } };
         const qbInvoiceId = invoiceResult?.Invoice?.Id;
         if (!qbInvoiceId) {
           console.error('[QB] Invoice created but no ID returned:', invoiceResult);
@@ -6300,21 +6526,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const existing = await storage.getEstimate(id);
       if (!existing) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, existing.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       const estimate = await storage.updateEstimate(id, { 
         status: "approved", 
         approvedAt: new Date() 
       });
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       res.json({ message: "Estimate approved successfully", estimate });
     } catch (error) {
@@ -6329,21 +6559,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const existing = await storage.getEstimate(id);
       if (!existing) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, existing.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       const estimate = await storage.updateEstimate(id, { 
         status: "rejected", 
         rejectedAt: new Date() 
       });
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       res.json({ message: "Estimate rejected successfully", estimate });
     } catch (error) {
@@ -6359,17 +6593,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (estimate.internalStatus !== "pending_approval") {
-        return res.status(400).json({ message: "Only estimates pending internal review can be internally approved" });
+        res.status(400).json({ message: "Only estimates pending internal review can be internally approved" });
+        return;
       }
       const updated = await storage.updateEstimate(id, { internalStatus: "approved_internal" });
       res.json({ message: "Estimate internally approved", estimate: updated });
@@ -6386,17 +6624,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (estimate.status !== "pending") {
-        return res.status(400).json({ message: "Only pending estimates can be approved" });
+        res.status(400).json({ message: "Only pending estimates can be approved" });
+        return;
       }
       
       const updatedEstimate = await storage.updateEstimate(id, { 
@@ -6448,17 +6690,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate estimate ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (estimate.status !== "pending") {
-        return res.status(400).json({ message: "Only pending estimates can be rejected" });
+        res.status(400).json({ message: "Only pending estimates can be rejected" });
+        return;
       }
       
       const updatedEstimate = await storage.updateEstimate(id, { status: "rejected" });
@@ -6541,25 +6787,30 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (estimate.status !== "pending") {
-        return res.status(400).json({ message: "Only pending estimates can have approval emails sent" });
+        res.status(400).json({ message: "Only pending estimates can have approval emails sent" });
+        return;
       }
       // Allow sending from either the queue's pre-approval state
       // (one-click "Approve & Send") or after internal approval
       // (two-step). Reject if it has already been sent.
       if (estimate.internalStatus === "sent_to_customer") {
-        return res.status(400).json({ message: "Estimate has already been sent to the customer" });
+        res.status(400).json({ message: "Estimate has already been sent to the customer" });
+        return;
       }
       if (
         estimate.internalStatus !== "pending_approval" &&
         estimate.internalStatus !== "approved_internal"
       ) {
-        return res.status(400).json({ message: "Estimate is not in a sendable internal state" });
+        res.status(400).json({ message: "Estimate is not in a sendable internal state" });
+        return;
       }
 
       await _sendEstimateApprovalEmailFlow(id);
@@ -6583,20 +6834,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid estimate ID" });
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
       }
       const action = (req.body?.action ?? "") as string;
       const allowedActions = ["submit_for_review", "send_to_customer", "resend"];
       if (!allowedActions.includes(action)) {
-        return res.status(400).json({ message: `Unknown transition action: ${action}` });
+        res.status(400).json({ message: `Unknown transition action: ${action}` });
+        return;
       }
 
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
 
       const role = req.authenticatedUserRole;
@@ -6608,46 +6863,56 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       if (action === "submit_for_review") {
         if (!canSubmitForReview) {
-          return res.status(403).json({ message: "Access denied. Submitting for review requires irrigation manager or admin role." });
+          res.status(403).json({ message: "Access denied. Submitting for review requires irrigation manager or admin role." });
+          return;
         }
         if (estimate.internalStatus !== "draft") {
-          return res.status(400).json({ message: "Only draft estimates can be submitted for review" });
+          res.status(400).json({ message: "Only draft estimates can be submitted for review" });
+          return;
         }
-        const updates: Partial<InsertEstimate> = {
+        const updates: Partial<InsertEstimate> & { updatedAt?: Date } = {
           internalStatus: "pending_approval",
           updatedAt: new Date(),
         };
         await storage.updateEstimate(id, updates);
         const fresh = await storage.getEstimate(id);
-        return res.json({ message: "Estimate submitted for review", estimate: fresh });
+        res.json({ message: "Estimate submitted for review", estimate: fresh });
+        return;
       }
 
       if (action === "send_to_customer") {
         if (!canSendToCustomer) {
-          return res.status(403).json({ message: "Access denied. Sending to a customer requires billing manager or admin role." });
+          res.status(403).json({ message: "Access denied. Sending to a customer requires billing manager or admin role." });
+          return;
         }
         if (estimate.internalStatus !== "pending_approval") {
-          return res.status(400).json({ message: "Only estimates pending review can be sent to the customer" });
+          res.status(400).json({ message: "Only estimates pending review can be sent to the customer" });
+          return;
         }
         await _sendEstimateApprovalEmailFlow(id);
         const fresh = await storage.getEstimate(id);
-        return res.json({ message: "Estimate sent to customer", estimate: fresh });
+        res.json({ message: "Estimate sent to customer", estimate: fresh });
+        return;
       }
 
       if (action === "resend") {
         if (!canResend) {
-          return res.status(403).json({ message: "Access denied. Resending requires irrigation manager or admin role." });
+          res.status(403).json({ message: "Access denied. Resending requires irrigation manager or admin role." });
+          return;
         }
         if (estimate.lifecycleStatus !== "expired") {
-          return res.status(400).json({ message: "Only expired estimates can be resent" });
+          res.status(400).json({ message: "Only expired estimates can be resent" });
+          return;
         }
         await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true });
         const fresh = await storage.getEstimate(id);
-        return res.json({ message: "Estimate resent to customer", estimate: fresh });
+        res.json({ message: "Estimate resent to customer", estimate: fresh });
+        return;
       }
 
       // Unreachable due to allowedActions check.
-      return res.status(400).json({ message: "Unknown transition action" });
+      res.status(400).json({ message: "Unknown transition action" });
+      return;
     } catch (error) {
       console.error('Estimate transition error:', error);
       res.status(500).json({ message: "Failed to transition estimate" });
@@ -6662,33 +6927,36 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const estimate = estimates.find(e => e.approvalToken === token);
       
       if (!estimate) {
-        return res.status(404).send(`
+        res.status(404).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #ef4444;">Invalid or Expired Link</h2>
             <p>This approval link is no longer valid. Please contact us directly.</p>
           </body></html>
         `);
+        return;
       }
 
       // Check if token has expired
       if (estimate.tokenExpiresAt && new Date() > new Date(estimate.tokenExpiresAt)) {
         // Mark estimate as expired
         await storage.updateEstimate(estimate.id, { status: 'expired' });
-        return res.status(400).send(`
+        res.status(400).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #ef4444;">Link Expired</h2>
             <p>This approval link has expired. Please contact us to request a new estimate.</p>
           </body></html>
         `);
+        return;
       }
 
       if (estimate.status !== "pending") {
-        return res.status(400).send(`
+        res.status(400).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #f59e0b;">Already Responded</h2>
             <p>You have already responded to this estimate. Thank you!</p>
           </body></html>
         `);
+        return;
       }
 
       // Approve the estimate with approval source tracking
@@ -6781,21 +7049,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const estimate = estimates.find(e => e.approvalToken === token);
       
       if (!estimate) {
-        return res.status(404).send(`
+        res.status(404).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #ef4444;">Invalid or Expired Link</h2>
             <p>This approval link is no longer valid. Please contact us directly.</p>
           </body></html>
         `);
+        return;
       }
 
       if (estimate.status !== "pending") {
-        return res.status(400).send(`
+        res.status(400).send(`
           <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h2 style="color: #f59e0b;">Already Responded</h2>
             <p>You have already responded to this estimate. Thank you!</p>
           </body></html>
         `);
+        return;
       }
 
       // Reject the estimate with approval source tracking
@@ -6902,10 +7172,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       console.error("Error converting estimate to work order:", error);
       if (error instanceof Error) {
         if (error.message.includes('not found')) {
-          return res.status(404).json({ message: error.message });
+          res.status(404).json({ message: error.message });
+          return;
         }
         if (error.message.includes('must be approved') || error.message.includes('already exists')) {
-          return res.status(400).json({ message: error.message });
+          res.status(400).json({ message: error.message });
+          return;
         }
       }
       res.status(500).json({ message: "Failed to create work order" });
@@ -6929,7 +7201,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const { sheetUrl } = req.body;
       if (!sheetUrl) {
-        return res.status(400).json({ message: "Sheet URL is required" });
+        res.status(400).json({ message: "Sheet URL is required" });
+        return;
       }
       await storage.connectGoogleSheetsCustomers(sheetUrl);
       res.json({ message: "Connected to Google Sheets successfully" });
@@ -7007,7 +7280,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // req.authenticatedUserCompanyId is set by requireAuthentication from x-user-company-id header
       const userCompanyId = req.authenticatedUserCompanyId ? req.authenticatedUserCompanyId.toString() : null;
       if (!userCompanyId) {
-        return res.status(400).json({ message: "Company context is required to disconnect QuickBooks." });
+        res.status(400).json({ message: "Company context is required to disconnect QuickBooks." });
+        return;
       }
       await storage.disconnectQuickBooks(userCompanyId);
       res.json({ message: "Disconnected from QuickBooks successfully" });
@@ -7042,7 +7316,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Billing lock: prevent completing an already-billed work order
       const existingWoForComplete = await storage.getWorkOrder(workOrderId);
       if (existingWoForComplete && (existingWoForComplete.invoiceId || existingWoForComplete.status === 'billed')) {
-        return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        return;
       }
 
       const completedByUserId = req.authenticatedUserId;
@@ -7058,7 +7333,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
           const effectiveBranch = incomingBranchName || existingWorkOrder.branchName;
           if (!effectiveBranch || String(effectiveBranch).trim() === '') {
-            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before completing the work order." });
+            res.status(400).json({ message: "Branch is required for this customer. Please select a branch before completing the work order." });
+            return;
           }
         }
       }
@@ -7153,7 +7429,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       });
 
       if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
 
       // Save used parts information
@@ -7222,7 +7499,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Read existing work order to snapshot rates from customer
       const existingWorkOrder = await storage.getWorkOrder(id);
       if (!existingWorkOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
 
       // Snapshot the customer's configured labor rate at the time of completion.
@@ -7251,7 +7529,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         appliedLaborRate: appliedLaborRate.toFixed(2),
       });
       if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
 
       // Notify managers about work order completion / pending review
@@ -7285,15 +7564,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userId = req.authenticatedUserId;
 
       if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Only irrigation managers and company admins can approve work orders." });
+        res.status(403).json({ message: "Only irrigation managers and company admins can approve work orders." });
+        return;
       }
 
       const workOrder = await storage.getWorkOrder(id);
       if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
       if (workOrder.status !== 'pending_manager_review') {
-        return res.status(400).json({ message: "Work order must be in Pending Manager Review to approve." });
+        res.status(400).json({ message: "Work order must be in Pending Manager Review to approve." });
+        return;
       }
 
       const approverUser = userId ? await storage.getUser(userId) : undefined;
@@ -7332,15 +7614,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userRole = req.authenticatedUserRole;
 
       if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Only irrigation managers and company admins can return work orders for correction." });
+        res.status(403).json({ message: "Only irrigation managers and company admins can return work orders for correction." });
+        return;
       }
 
       const workOrder = await storage.getWorkOrder(id);
       if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
       if (workOrder.status !== 'pending_manager_review') {
-        return res.status(400).json({ message: "Work order must be in Pending Manager Review to return for correction." });
+        res.status(400).json({ message: "Work order must be in Pending Manager Review to return for correction." });
+        return;
       }
 
       const { notes } = req.body;
@@ -7365,15 +7650,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userId = req.authenticatedUserId;
 
       if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Only irrigation managers and company admins can approve billing sheets." });
+        res.status(403).json({ message: "Only irrigation managers and company admins can approve billing sheets." });
+        return;
       }
 
       const billingSheet = await storage.getBillingSheetById(id);
       if (!billingSheet) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
       if (billingSheet.status !== 'pending_manager_review') {
-        return res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to approve." });
+        res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to approve." });
+        return;
       }
 
       const approverUser = userId ? await storage.getUser(userId) : undefined;
@@ -7412,15 +7700,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userRole = req.authenticatedUserRole;
 
       if (userRole !== 'irrigation_manager' && userRole !== 'company_admin' && userRole !== 'super_admin') {
-        return res.status(403).json({ message: "Only irrigation managers and company admins can return billing sheets for correction." });
+        res.status(403).json({ message: "Only irrigation managers and company admins can return billing sheets for correction." });
+        return;
       }
 
       const billingSheet = await storage.getBillingSheetById(id);
       if (!billingSheet) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
       if (billingSheet.status !== 'pending_manager_review') {
-        return res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to return for correction." });
+        res.status(400).json({ message: "Billing sheet must be in Pending Manager Review to return for correction." });
+        return;
       }
 
       const { notes } = req.body;
@@ -7515,7 +7806,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
 
       // Tenant scoping: non-super_admin requesters only see techs/sheets within
@@ -7585,7 +7877,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const csv = [header.join(','), ...rows].join('\n');
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="missing-photos-${new Date().toISOString().slice(0,10)}.csv"`);
-        return res.send(csv);
+        res.send(csv);
+        return;
       }
 
       // Tenant-scoped notifications: only expose rows for technicians visible
@@ -7645,7 +7938,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
 
       const force = req.body?.force === true;
@@ -7662,7 +7956,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
       const isSuperAdmin = role === 'super_admin';
       if (!isSuperAdmin && requesterCompanyId == null) {
-        return res.status(403).json({ message: "Access denied: no company context." });
+        res.status(403).json({ message: "Access denied: no company context." });
+        return;
       }
 
       const all = await storage.getAllBillingSheets();
@@ -7864,17 +8159,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
 
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid billing sheet ID" });
+        res.status(400).json({ message: "Invalid billing sheet ID" });
+        return;
       }
 
       const existing = await storage.getBillingSheetById(id);
       if (!existing) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
 
       // Tenant scoping: non-super_admin users can only mark sheets whose
@@ -7884,22 +8182,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!isSuperAdmin) {
         const requesterCompanyId: number | null = req.authenticatedUserCompanyId ?? null;
         if (requesterCompanyId == null) {
-          return res.status(403).json({ message: "Access denied: no company context." });
+          res.status(403).json({ message: "Access denied: no company context." });
+          return;
         }
         const tech = existing.technicianId ? await storage.getUser(existing.technicianId) : null;
         if (!tech || tech.companyId !== requesterCompanyId) {
-          return res.status(403).json({ message: "Access denied." });
+          res.status(403).json({ message: "Access denied." });
+          return;
         }
       }
 
       const userId = parseInt(String(req.authenticatedUserId ?? req.headers['x-user-id']));
       if (!userId || isNaN(userId)) {
-        return res.status(401).json({ message: "Authentication required - user ID not found." });
+        res.status(401).json({ message: "Authentication required - user ID not found." });
+        return;
       }
 
       const updated = await storage.markBillingSheetNoPhotosNeeded(id, userId);
       if (!updated) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
       res.json(updated);
     } catch (error) {
@@ -7925,7 +8227,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const errorCode = params.ErrorCode || null;
 
       if (!messageSid || !status) {
-        return res.status(400).send('Missing MessageSid or MessageStatus');
+        res.status(400).send('Missing MessageSid or MessageStatus');
+        return;
       }
 
       // Signature validation:
@@ -7937,7 +8240,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const isProd = process.env.NODE_ENV === 'production';
       if (isProd && !token) {
         console.warn('Twilio status callback rejected: no TWILIO_AUTH_TOKEN configured in production');
-        return res.status(403).send('Webhook not configured');
+        res.status(403).send('Webhook not configured');
+        return;
       }
       if (token) {
         const signature = req.header('X-Twilio-Signature') || '';
@@ -7948,7 +8252,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const valid = twilio.validateRequest(token, signature, url, params);
         if (!valid) {
           console.warn('Twilio status callback: invalid signature', { messageSid, url });
-          return res.status(403).send('Invalid signature');
+          res.status(403).send('Invalid signature');
+          return;
         }
       }
 
@@ -7959,11 +8264,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         console.log(`Twilio status callback: no matching SMS row for sid=${messageSid} status=${status}`);
       }
       // Twilio expects a 2xx with empty body (or TwiML). Empty 204 works.
-      return res.status(204).end();
+      res.status(204).end();
+      return;
     } catch (error) {
       console.error('Twilio status callback error:', error);
       // Return 200 anyway so Twilio doesn't retry indefinitely on our bug.
-      return res.status(200).send('OK');
+      res.status(200).send('OK');
+      return;
     }
   });
 
@@ -7972,7 +8279,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const id = parseInt(req.params.id);
       const billingSheet = await storage.getBillingSheetById(id);
       if (!billingSheet) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, billingSheet));
@@ -7992,7 +8300,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const customer = await storage.getCustomer(Number(billingSheetData.customerId));
         if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
           if (!billingSheetData.branchName || String(billingSheetData.branchName).trim() === '') {
-            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+            res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+            return;
           }
         }
       }
@@ -8025,14 +8334,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Always look up the customer's authoritative labor rate — ignore any client-supplied value.
       // Fail fast if the customer does not exist or has no labor rate configured.
       if (!billingSheetData.customerId) {
-        return res.status(400).json({ message: "Customer ID is required to determine the correct labor rate." });
+        res.status(400).json({ message: "Customer ID is required to determine the correct labor rate." });
+        return;
       }
       const customerForRate = await storage.getCustomer(Number(billingSheetData.customerId));
       if (!customerForRate) {
-        return res.status(400).json({ message: "Customer not found. Cannot determine labor rate." });
+        res.status(400).json({ message: "Customer not found. Cannot determine labor rate." });
+        return;
       }
       if (!customerForRate.laborRate || parseFloat(customerForRate.laborRate) <= 0) {
-        return res.status(400).json({ message: `Customer "${customerForRate.name}" does not have a labor rate configured. Please set a labor rate on the customer record before creating a billing sheet.` });
+        res.status(400).json({ message: `Customer "${customerForRate.name}" does not have a labor rate configured. Please set a labor rate on the customer record before creating a billing sheet.` });
+        return;
       }
       const bsAuthorizedLaborRate = parseFloat(customerForRate.laborRate);
 
@@ -8074,7 +8386,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           : (customerForRate.companyId ?? null));
       const pricingResult = await resolveAuthoritativePartPricing(rawClientItems, postCompanyId);
       if (pricingResult.error) {
-        return res.status(pricingResult.error.status).json({ message: pricingResult.error.message });
+        res.status(pricingResult.error.status).json({ message: pricingResult.error.message });
+        return;
       }
       const resolvedClientItems = (pricingResult.items as RawBillingItem[]) ?? [];
       if (pricingResult.auditedZeros.length > 0) {
@@ -8296,13 +8609,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Billing lock: reject updates to billing sheets that have been invoiced or approved for billing
       const existingBsForLockCheck = await storage.getBillingSheetById(id);
       if (!isBsPhotosOnlyPatch && existingBsForLockCheck && (existingBsForLockCheck.invoiceId || existingBsForLockCheck.status === 'billed')) {
-        return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        return;
       }
       // Lock after manager approval — only admins and billing managers can proceed
       const patchUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
       if (!isBsPhotosOnlyPatch && existingBsForLockCheck?.status === 'approved_passed_to_billing' &&
           patchUserRole !== 'company_admin' && patchUserRole !== 'super_admin' && patchUserRole !== 'billing_manager') {
-        return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
+        res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
+        return;
       }
 
       const { items, companyId, ...billingSheetData } = req.body;
@@ -8341,9 +8656,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (billingSheetData.status !== undefined) {
         const patchStatusParse = z.enum(billingSheetStatusValues).safeParse(billingSheetData.status);
         if (!patchStatusParse.success) {
-          return res.status(400).json({
+          res.status(400).json({
             message: `Invalid billing sheet status '${billingSheetData.status}'. Allowed values: ${billingSheetStatusValues.join(', ')}.`,
           });
+          return;
         }
         billingSheetData.status = patchStatusParse.data;
       }
@@ -8414,7 +8730,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Update the billing sheet
       const billingSheet = await storage.updateBillingSheet(id, billingSheetData);
       if (!billingSheet) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
 
       // Task #224 — when photos change on a billing sheet that's already linked
@@ -8500,7 +8817,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             : null);
         const patchPricingResult = await resolveAuthoritativePartPricing(items as RawBillingItem[], patchCompanyIdForPricing);
         if (patchPricingResult.error) {
-          return res.status(patchPricingResult.error.status).json({ message: patchPricingResult.error.message });
+          res.status(patchPricingResult.error.status).json({ message: patchPricingResult.error.message });
+          return;
         }
         const resolvedPatchItems = (patchPricingResult.items as RawBillingItem[]) ?? [];
         if (patchPricingResult.auditedZeros.length > 0) {
@@ -8545,7 +8863,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const currentSheet = await storage.getBillingSheetById(id);
         const currentItems = currentSheet?.items ?? [];
         if (partsSubtotal > 0 && currentItems.length === 0) {
-          return res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+          res.status(400).json({ message: "Parts were recorded but no line items were saved — submission blocked to prevent billing data loss" });
+          return;
         }
         // Inverse check: items have prices summing to > 0 but partsSubtotal is 0 (or diverged by >1%)
         const itemsTotal = currentItems.reduce(
@@ -8553,12 +8872,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           0
         );
         if (itemsTotal > 0 && partsSubtotal === 0) {
-          return res.status(400).json({ message: "Parts line item total does not match partsSubtotal — resubmit after saving to sync" });
+          res.status(400).json({ message: "Parts line item total does not match partsSubtotal — resubmit after saving to sync" });
+          return;
         }
         if (itemsTotal > 0 && partsSubtotal > 0) {
           const divergencePct = Math.abs(itemsTotal - partsSubtotal) / itemsTotal;
           if (divergencePct > 0.01) {
-            return res.status(400).json({ message: "Parts line item total does not match partsSubtotal — resubmit after saving to sync" });
+            res.status(400).json({ message: "Parts line item total does not match partsSubtotal — resubmit after saving to sync" });
+            return;
           }
         }
         console.log(`[AUDIT] billing_sheet_status_change billingSheetId=${id} status=${billingSheetData.status} itemCount=${currentItems.length}`);
@@ -8616,11 +8937,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const { ids } = req.body;
       if (!Array.isArray(ids) || ids.length === 0) {
-        return res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+        res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+        return;
       }
       const validIds = ids.filter((id: any) => typeof id === 'number' && id > 0);
       if (validIds.length === 0) {
-        return res.status(400).json({ message: "No valid IDs provided" });
+        res.status(400).json({ message: "No valid IDs provided" });
+        return;
       }
       // Mirror the wet-checks bulk-delete shape so the UI can summarize
       // "X deleted, Y blocked by an existing invoice".
@@ -8671,17 +8994,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const id = parseInt(req.params.id);
       const ok = await storage.deleteBillingSheet(id);
-      if (!ok) return res.status(404).json({ message: "Billing sheet not found" });
+      if (!ok) { res.status(404).json({ message: "Billing sheet not found" }); return; }
       res.json({ message: "Billing sheet deleted successfully" });
     } catch (error: any) {
       if (error instanceof BillingSheetInvoicedError) {
-        return res.status(409).json({
+        res.status(409).json({
           message: error.invoiceNumber
             ? `Can't delete: this billing sheet is already on invoice #${error.invoiceNumber}.`
             : `Can't delete: this billing sheet is already on an invoice.`,
           invoiceNumber: error.invoiceNumber,
           invoiceId: error.invoiceId,
         });
+        return;
       }
       console.error(error);
       res.status(500).json({ message: "Failed to delete billing sheet" });
@@ -8693,7 +9017,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const invoiceId = parseInt(req.params.invoiceId);
       const invoice = await storage.getInvoiceById(invoiceId);
       if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
+        res.status(404).json({ message: "Invoice not found" });
+        return;
       }
 
       // Enforce tenant scoping: verify the invoice belongs to the authenticated user's company.
@@ -8702,7 +9027,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (userCompanyId !== null && userCompanyId !== undefined) {
         const invoiceCustomer = await storage.getCustomerById(invoice.customerId);
         if (!invoiceCustomer || invoiceCustomer.companyId !== userCompanyId) {
-          return res.status(403).json({ message: "Access denied. You do not have permission to audit this invoice." });
+          res.status(403).json({ message: "Access denied. You do not have permission to audit this invoice." });
+          return;
         }
       }
 
@@ -8855,7 +9181,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const invoiceId = parseInt(req.params.invoiceId);
       const invoice = await storage.getInvoiceById(invoiceId);
       if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
+        res.status(404).json({ message: "Invoice not found" });
+        return;
       }
 
       const customer = await storage.getCustomerById(invoice.customerId);
@@ -8873,7 +9200,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const result = await pdfService.generatePdfBuffer(invoiceId);
 
         if (!result.success) {
-          return res.status(500).json({ message: "PDF generation failed", error: result.error });
+          res.status(500).json({ message: "PDF generation failed", error: result.error });
+          return;
         }
 
         pdf = await storage.createInvoicePdf({
@@ -8902,12 +9230,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       if (!result.success || !result.pdfBuffer) {
         if (result.validationFailure) {
-          return res.status(422).json({
+          res.status(422).json({
             message: result.error || "Invoice totals validation failed",
             validationFailure: result.validationFailure,
           });
+          return;
         }
-        return res.status(500).json({ message: result.error || "Failed to generate PDF" });
+        res.status(500).json({ message: result.error || "Failed to generate PDF" });
+        return;
       }
 
       const invoice = await storage.getInvoiceById(invoiceId);
@@ -8939,24 +9269,28 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const invoice = await storage.getInvoiceById(invoiceId);
       
       if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
+        res.status(404).json({ message: "Invoice not found" });
+        return;
       }
 
       const pdfService = new InvoicePdfService(storage);
       const validationResult = await pdfService.generatePdfBuffer(invoiceId);
       if (!validationResult.success) {
         if (validationResult.validationFailure) {
-          return res.status(422).json({
+          res.status(422).json({
             message: validationResult.error || "Invoice totals validation failed",
             validationFailure: validationResult.validationFailure,
           });
+          return;
         }
-        return res.status(500).json({ message: validationResult.error || "Failed to validate invoice PDF" });
+        res.status(500).json({ message: validationResult.error || "Failed to validate invoice PDF" });
+        return;
       }
 
       const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
       if (!pdf) {
-        return res.status(404).json({ message: "PDF not found for this invoice" });
+        res.status(404).json({ message: "PDF not found for this invoice" });
+        return;
       }
 
       // Send email to customer with PDF attachment
@@ -8996,7 +9330,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const invoice = await storage.getInvoiceById(invoiceId);
       
       if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
+        res.status(404).json({ message: "Invoice not found" });
+        return;
       }
 
       const existingPdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
@@ -9030,10 +9365,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const id = parseInt(req.params.id);
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
       if (!estimateOwnershipMatches(req, estimate.companyId)) {
-        return res.status(404).json({ message: "Estimate not found" });
+        res.status(404).json({ message: "Estimate not found" });
+        return;
       }
 
       const { renderEstimatePdf } = await import('../estimate-pdf');
@@ -9083,7 +9420,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
 
       const all = await storage.getWorkOrders();
@@ -9125,7 +9463,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const csv = [header.join(','), ...rows].join('\n');
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="work-orders-missing-photos-${new Date().toISOString().slice(0,10)}.csv"`);
-        return res.send(csv);
+        res.send(csv);
+        return;
       }
 
       res.json({
@@ -9146,27 +9485,32 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
 
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
 
       const existing = await storage.getWorkOrder(id);
       if (!existing) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
 
       const userId = parseInt(String(req.authenticatedUserId ?? req.headers['x-user-id']));
       if (!userId || isNaN(userId)) {
-        return res.status(401).json({ message: "Authentication required - user ID not found." });
+        res.status(401).json({ message: "Authentication required - user ID not found." });
+        return;
       }
 
       const updated = await storage.markWorkOrderNoPhotosNeeded(id, userId);
       if (!updated) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
       res.json(updated);
     } catch (error) {
@@ -9182,22 +9526,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role = req.authenticatedUserRole;
       if (role !== 'company_admin' && role !== 'super_admin' && role !== 'irrigation_manager' && role !== 'billing_manager') {
-        return res.status(403).json({ message: "Access denied." });
+        res.status(403).json({ message: "Access denied." });
+        return;
       }
 
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
 
       const existing = await storage.getWorkOrder(id);
       if (!existing) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
 
       const updated = await storage.clearWorkOrderNoPhotosNeeded(id);
       if (!updated) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
       res.json(updated);
     } catch (error) {
@@ -9211,7 +9559,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const id = parseInt(req.params.id);
       const workOrder = await storage.getWorkOrder(id);
       if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
       // Strip pricing fields for field technicians
       res.json(applyPricingVisibility(req, workOrder));
@@ -9242,7 +9591,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const customer = await storage.getCustomer(workOrderData.customerId);
         if (customer && Array.isArray(customer.branches) && customer.branches.length > 0) {
           if (!workOrderData.branchName || workOrderData.branchName.trim() === '') {
-            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+            res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+            return;
           }
         }
       }
@@ -9259,7 +9609,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             : null);
         const woCreatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woCreateCompanyId);
         if (woCreatePricing.error) {
-          return res.status(woCreatePricing.error.status).json({ message: woCreatePricing.error.message });
+          res.status(woCreatePricing.error.status).json({ message: woCreatePricing.error.message });
+          return;
         }
         resolvedWoCreateItems = (woCreatePricing.items as RawBillingItem[]) ?? [];
         auditedZerosForLog = woCreatePricing.auditedZeros.map((d) => ({
@@ -9329,7 +9680,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
+        res.status(400).json({ message: "Invalid work order data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to create work order" });
     }
@@ -9341,7 +9693,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
 
       // Task #191: photos-only patches (single key 'photos' with an array value)
@@ -9355,13 +9708,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // Billing lock: reject updates to work orders that have been invoiced
       const existingForLockCheck = await storage.getWorkOrder(id);
       if (!isWoPhotosOnlyPatch && existingForLockCheck && (existingForLockCheck.invoiceId || existingForLockCheck.status === 'billed')) {
-        return res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        res.status(409).json({ message: "This record has been billed and cannot be edited." });
+        return;
       }
       // Lock after manager approval — only admins and billing managers can proceed
       const woUpdateUserRole = req.authenticatedUserRole || req.headers['x-user-role'];
       if (!isWoPhotosOnlyPatch && existingForLockCheck?.status === 'approved_passed_to_billing' &&
           woUpdateUserRole !== 'company_admin' && woUpdateUserRole !== 'super_admin' && woUpdateUserRole !== 'billing_manager') {
-        return res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
+        res.status(409).json({ message: "This record has been approved and passed to billing — it cannot be edited." });
+        return;
       }
 
       const { items, ...workOrderBody } = req.body;
@@ -9375,23 +9730,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
         // 'work_completed' is a legacy terminal state — use /complete endpoint.
         if (requestedStatus === 'work_completed') {
-          return res.status(400).json({
+          res.status(400).json({
             message: "Cannot set status to 'work_completed' directly. Use POST /api/work-orders/complete or POST /api/work-orders/:id/complete."
           });
+          return;
         }
 
         // Only the /approve endpoint may transition to approved_passed_to_billing.
         if (requestedStatus === 'approved_passed_to_billing') {
-          return res.status(400).json({
+          res.status(400).json({
             message: "Cannot approve a work order via PATCH. Use the POST /api/work-orders/:id/approve endpoint."
           });
+          return;
         }
 
         // Only the invoicing flow may mark a work order as billed.
         if (requestedStatus === 'billed') {
-          return res.status(400).json({
+          res.status(400).json({
             message: "Cannot set status to 'billed' directly. Billing status is set automatically when an invoice is created."
           });
+          return;
         }
 
         // Allowed next-state map for all lifecycle-transition writes via PATCH
@@ -9409,9 +9767,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
         const validNextStates = allowedTransitions[currentStatus] ?? [];
         if (!validNextStates.includes(requestedStatus)) {
-          return res.status(400).json({
+          res.status(400).json({
             message: `Invalid status transition from '${currentStatus}' to '${requestedStatus}'. Valid transitions: [${validNextStates.join(', ') || 'none'}].`
           });
+          return;
         }
       }
 
@@ -9441,12 +9800,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (Object.keys(workOrderData).length > 0) {
         workOrder = await storage.updateWorkOrder(id, workOrderData);
         if (!workOrder) {
-          return res.status(404).json({ message: "Work order not found" });
+          res.status(404).json({ message: "Work order not found" });
+          return;
         }
       } else {
         workOrder = await storage.getWorkOrder(id);
         if (!workOrder) {
-          return res.status(404).json({ message: "Work order not found" });
+          res.status(404).json({ message: "Work order not found" });
+          return;
         }
       }
 
@@ -9531,7 +9892,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
             : null);
         const woUpdatePricing = await resolveAuthoritativePartPricing(items as RawBillingItem[], woUpdateCompanyId);
         if (woUpdatePricing.error) {
-          return res.status(woUpdatePricing.error.status).json({ message: woUpdatePricing.error.message });
+          res.status(woUpdatePricing.error.status).json({ message: woUpdatePricing.error.message });
+          return;
         }
         const resolvedWoUpdateItems = (woUpdatePricing.items as RawBillingItem[]) ?? [];
         if (woUpdatePricing.auditedZeros.length > 0) {
@@ -9595,7 +9957,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid work order data", errors: error.errors });
+        res.status(400).json({ message: "Invalid work order data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to update work order" });
     }
@@ -9605,11 +9968,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const { ids } = req.body;
       if (!Array.isArray(ids) || ids.length === 0) {
-        return res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+        res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+        return;
       }
       const validIds = ids.filter((id: any) => typeof id === 'number' && id > 0);
       if (validIds.length === 0) {
-        return res.status(400).json({ message: "No valid IDs provided" });
+        res.status(400).json({ message: "No valid IDs provided" });
+        return;
       }
       let deleted = 0;
       const skipped: number[] = [];
@@ -9624,7 +9989,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         if (success) deleted++;
       }
       if (skipped.length > 0 && deleted === 0) {
-        return res.status(409).json({ message: "These work orders are linked to invoices and cannot be deleted. Remove them from their invoices first." });
+        res.status(409).json({ message: "These work orders are linked to invoices and cannot be deleted. Remove them from their invoices first." });
+        return;
       }
       const skipMessage = skipped.length > 0
         ? `${skipped.length} work order(s) could not be deleted because they are linked to invoices. Remove them from their invoices first.`
@@ -9642,16 +10008,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
       const invoiced = await storage.hasInvoiceItems(id);
       if (invoiced) {
-        return res.status(409).json({ message: "This work order is linked to an invoice and cannot be deleted. Remove it from the invoice first." });
+        res.status(409).json({ message: "This work order is linked to an invoice and cannot be deleted. Remove it from the invoice first." });
+        return;
       }
       await storage.deleteWorkOrderItems(id);
       const success = await storage.deleteWorkOrder(id);
       if (!success) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
       res.json({ message: "Work order deleted successfully" });
     } catch (error) {
@@ -9668,7 +10037,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(workOrderId) || workOrderId <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
       const items = await storage.getWorkOrderItems(workOrderId);
       // Strip pricing fields for field technicians
@@ -9685,7 +10055,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(workOrderId) || workOrderId <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
 
       // Server-side authoritative pricing (Task #160): if the body references a
@@ -9703,7 +10074,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       };
       const itemPricing = await resolveAuthoritativePartPricing([probeItem], woItemCompanyId);
       if (itemPricing.error) {
-        return res.status(itemPricing.error.status).json({ message: itemPricing.error.message });
+        res.status(itemPricing.error.status).json({ message: itemPricing.error.message });
+        return;
       }
       const resolvedSingle = (itemPricing.items as RawBillingItem[] | undefined)?.[0] ?? probeItem;
       if (itemPricing.auditedZeros.length > 0) {
@@ -9756,7 +10128,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid work order item data", errors: error.errors });
+        res.status(400).json({ message: "Invalid work order item data", errors: error.issues });
+        return;
       }
       res.status(500).json({ message: "Failed to add work order item" });
     }
@@ -9769,13 +10142,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(workOrderId) || workOrderId <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
       const { technicianId, technicianName } = req.body;
       
       const success = await storage.assignWorkOrder(workOrderId, technicianId, technicianName);
       if (!success) {
-        return res.status(404).json({ message: "Work order not found or assignment failed" });
+        res.status(404).json({ message: "Work order not found or assignment failed" });
+        return;
       }
       
       // Get work order details for notification
@@ -9806,7 +10181,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate billing sheet ID is a valid number
       if (isNaN(billingSheetId) || billingSheetId <= 0) {
-        return res.status(400).json({ message: "Invalid billing sheet ID" });
+        res.status(400).json({ message: "Invalid billing sheet ID" });
+        return;
       }
       const items = await storage.getBillingSheetItems(billingSheetId);
       res.json(items);
@@ -9883,7 +10259,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const actor = await getAuditActor(req);
       if (!isAuditAdmin(actor.role)) {
-        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        return;
       }
       // super_admin can scope to a specific company via ?companyId=, or pass companyId=all to see everything
       let scopeCompanyId: number | null = actor.companyId;
@@ -9907,7 +10284,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const actor = await getAuditActor(req);
       if (!isAuditAdmin(actor.role)) {
-        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        return;
       }
       const body = req.body || {};
       // Accept either:
@@ -9969,7 +10347,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const actor = await getAuditActor(req);
       if (!isAuditAdmin(actor.role)) {
-        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        return;
       }
       let scopeCompanyId: number | null = actor.companyId;
       if (actor.role === 'super_admin') {
@@ -9992,7 +10371,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const actor = await getAuditActor(req);
       if (!isAuditAdmin(actor.role)) {
-        return res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        res.status(403).json({ message: "Access denied. Admin or billing manager role required." });
+        return;
       }
       const body = req.body || {};
       let selection: Array<{ source: 'work_order' | 'billing_sheet'; parentId: number; classification: 'standard' | 'emergency' }> = [];
@@ -10057,13 +10437,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role: string | null = (req.authenticatedUserRole as string) ?? null;
       if (!isPricingHistoryViewer(role)) {
-        return res.status(403).json({
+        res.status(403).json({
           message: "Access denied. Manager or admin role required to view pricing history.",
         });
+        return;
       }
       const parentId = parseInt(req.params.id);
       if (!Number.isFinite(parentId)) {
-        return res.status(400).json({ message: "Invalid id" });
+        res.status(400).json({ message: "Invalid id" });
+        return;
       }
 
       // Scope the lookup to the user's company so a manager from company A
@@ -10074,29 +10456,34 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (role !== 'super_admin') {
         // Non-super-admin callers MUST have a company on their session.
         if (scopeCompanyId == null) {
-          return res.status(403).json({ message: "Access denied" });
+          res.status(403).json({ message: "Access denied" });
+          return;
         }
         if (source === 'billing_sheet') {
           const sheet = await storage.getBillingSheetById(parentId);
-          if (!sheet) return res.status(404).json({ message: "Billing sheet not found" });
+          if (!sheet) { res.status(404).json({ message: "Billing sheet not found" }); return; }
           // If the sheet has no customer linkage, ownership cannot be proven —
           // deny rather than fall through to an unscoped read.
           if (!sheet.customerId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
           const cust = await storage.getCustomer(sheet.customerId);
           if (!cust || cust.companyId !== scopeCompanyId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
         } else {
           const wo = await storage.getWorkOrder(parentId);
-          if (!wo) return res.status(404).json({ message: "Work order not found" });
+          if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
           if (!wo.customerId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
           const cust = await storage.getCustomer(wo.customerId);
           if (!cust || cust.companyId !== scopeCompanyId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
         }
       }
@@ -10145,13 +10532,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const role: string | null = (req.authenticatedUserRole as string) ?? null;
       if (!isPhotoLateAdditionViewer(role)) {
-        return res.status(403).json({
+        res.status(403).json({
           message: "Access denied. Manager or admin role required to view the photo audit trail.",
         });
+        return;
       }
       const ticketId = parseInt(req.params.id);
       if (!Number.isFinite(ticketId)) {
-        return res.status(400).json({ message: "Invalid id" });
+        res.status(400).json({ message: "Invalid id" });
+        return;
       }
 
       // Cross-company guard mirroring the pricing-audit history endpoint.
@@ -10160,27 +10549,32 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         : null;
       if (role !== 'super_admin') {
         if (scopeCompanyId == null) {
-          return res.status(403).json({ message: "Access denied" });
+          res.status(403).json({ message: "Access denied" });
+          return;
         }
         if (ticketType === 'billing_sheet') {
           const sheet = await storage.getBillingSheetById(ticketId);
-          if (!sheet) return res.status(404).json({ message: "Billing sheet not found" });
+          if (!sheet) { res.status(404).json({ message: "Billing sheet not found" }); return; }
           if (!sheet.customerId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
           const cust = await storage.getCustomer(sheet.customerId);
           if (!cust || cust.companyId !== scopeCompanyId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
         } else {
           const wo = await storage.getWorkOrder(ticketId);
-          if (!wo) return res.status(404).json({ message: "Work order not found" });
+          if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
           if (!wo.customerId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
           const cust = await storage.getCustomer(wo.customerId);
           if (!cust || cust.companyId !== scopeCompanyId) {
-            return res.status(403).json({ message: "Access denied" });
+            res.status(403).json({ message: "Access denied" });
+            return;
           }
         }
       }
@@ -10216,13 +10610,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(workOrderId) || workOrderId <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
 
       // Fetch the work order to enrich billing sheet with required fields
       const workOrder = await storage.getWorkOrder(workOrderId);
       if (!workOrder) {
-        return res.status(404).json({ message: "Work order not found" });
+        res.status(404).json({ message: "Work order not found" });
+        return;
       }
 
       // Branch enforcement: the work order must have a branchName if its customer has branches
@@ -10232,7 +10628,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           // Accept branchName from the request body (tech may be selecting it now) or already set on the work order
           const effectiveBranch = req.body.branchName || workOrder.branchName;
           if (!effectiveBranch || String(effectiveBranch).trim() === '') {
-            return res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+            res.status(400).json({ message: "Branch is required for this customer. Please select a branch before submitting." });
+            return;
           }
         }
       }
@@ -10261,14 +10658,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const totalHoursVal = workOrder.totalHours ?? "0";
       // Always look up the customer's authoritative labor rate — fail fast if unavailable.
       if (!workOrder.customerId) {
-        return res.status(400).json({ message: "Work order has no associated customer. Cannot determine labor rate." });
+        res.status(400).json({ message: "Work order has no associated customer. Cannot determine labor rate." });
+        return;
       }
       const woCustomerForRate = await storage.getCustomer(workOrder.customerId);
       if (!woCustomerForRate) {
-        return res.status(400).json({ message: "Customer not found. Cannot determine labor rate." });
+        res.status(400).json({ message: "Customer not found. Cannot determine labor rate." });
+        return;
       }
       if (!woCustomerForRate.laborRate || parseFloat(woCustomerForRate.laborRate) <= 0) {
-        return res.status(400).json({ message: `Customer "${woCustomerForRate.name}" does not have a labor rate configured. Please set a labor rate on the customer record before converting to a billing sheet.` });
+        res.status(400).json({ message: `Customer "${woCustomerForRate.name}" does not have a labor rate configured. Please set a labor rate on the customer record before converting to a billing sheet.` });
+        return;
       }
       const laborRateVal = parseFloat(woCustomerForRate.laborRate).toFixed(2);
       const laborSubtotalVal = (parseFloat(String(totalHoursVal)) * parseFloat(String(laborRateVal))).toFixed(2);
@@ -10330,7 +10730,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           : (woCustomerForRate.companyId ?? null));
       const woPricingResult = await resolveAuthoritativePartPricing(rawRequestItems as RawBillingItem[], woCompanyIdForPricing);
       if (woPricingResult.error) {
-        return res.status(woPricingResult.error.status).json({ message: woPricingResult.error.message });
+        res.status(woPricingResult.error.status).json({ message: woPricingResult.error.message });
+        return;
       }
       const resolvedRequestItems = (woPricingResult.items as RawLineItem[] | undefined) ?? rawRequestItems;
       if (woPricingResult.auditedZeros.length > 0) {
@@ -10448,11 +10849,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       
       // Validate work order ID is a valid number
       if (isNaN(workOrderId) || workOrderId <= 0) {
-        return res.status(400).json({ message: "Invalid work order ID" });
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
       }
       const billingSheet = await storage.getBillingSheetById(workOrderId);
       if (!billingSheet) {
-        return res.status(404).json({ message: "Billing sheet not found" });
+        res.status(404).json({ message: "Billing sheet not found" });
+        return;
       }
       res.json(billingSheet);
     } catch (error) {
@@ -10472,7 +10875,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const ext = originalName.split('.').pop()?.toLowerCase() || '';
       const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'tiff', 'tif', 'avif'];
       if (ext && !allowedExtensions.includes(ext)) {
-        return res.status(400).json({ message: "Only image files are allowed for photo uploads" });
+        res.status(400).json({ message: "Only image files are allowed for photo uploads" });
+        return;
       }
 
       const photoService = new ObjectStorageService();
@@ -10500,7 +10904,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const photoId = (req.body?.photoId as string)?.trim();
       if (!photoId || !photoId.startsWith("photos/")) {
-        return res.status(400).json({ message: "Invalid photoId" });
+        res.status(400).json({ message: "Invalid photoId" });
+        return;
       }
       const photoService = new ObjectStorageService();
       // Await variant generation so the client learns about failures
@@ -10510,12 +10915,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         const result = await photoService.ensurePhotoVariants(photoId);
         if (result.error) {
           console.warn(`[PHOTO-FINALIZE] ${photoId} partial:`, result);
-          return res.status(502).json({ ok: false, message: result.error, result });
+          res.status(502).json({ ok: false, message: result.error, result });
+          return;
         }
-        return res.json({ ok: true, result });
+        res.json({ ok: true, result });
+        return;
       } catch (e) {
         console.error(`[PHOTO-FINALIZE] ${photoId} failed:`, e);
-        return res.status(500).json({ ok: false, message: "Variant generation failed" });
+        res.status(500).json({ ok: false, message: "Variant generation failed" });
+        return;
       }
     } catch (error) {
       console.error("Photo finalize error:", error);
@@ -10530,10 +10938,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const { photoIds, variant } = req.body || {};
       if (!Array.isArray(photoIds)) {
-        return res.status(400).json({ message: "photoIds must be an array" });
+        res.status(400).json({ message: "photoIds must be an array" });
+        return;
       }
       if (photoIds.length > 200) {
-        return res.status(400).json({ message: "Too many photoIds (max 200)" });
+        res.status(400).json({ message: "Too many photoIds (max 200)" });
+        return;
       }
       const requested = (variant === "thumb" || variant === "medium" || variant === "original")
         ? variant : "medium";
@@ -10613,10 +11023,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     //    scoped to this company.
     const overlaps = (col: any) => sql`${col} && ${candidates}::text[]`;
     const woRows = await db.select({ id: workOrders.id }).from(workOrders)
-      .where(and(eq(workOrders.companyId, user.companyId), overlaps(workOrders.photos))).limit(1);
+      .innerJoin(customers, eq(customers.id, workOrders.customerId))
+      .where(and(eq(customers.companyId, user.companyId), overlaps(workOrders.photos))).limit(1);
     if (woRows.length > 0) return true;
     const bsRows = await db.select({ id: billingSheets.id }).from(billingSheets)
-      .where(and(eq(billingSheets.companyId, user.companyId), overlaps(billingSheets.photos))).limit(1);
+      .innerJoin(customers, eq(customers.id, billingSheets.customerId))
+      .where(and(eq(customers.companyId, user.companyId), overlaps(billingSheets.photos))).limit(1);
     if (bsRows.length > 0) return true;
     const esRows = await db.select({ id: estimates.id }).from(estimates)
       .where(and(eq(estimates.companyId, user.companyId), overlaps(estimates.photos))).limit(1);
@@ -10627,7 +11039,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   }
 
   app.get("/api/photos/{*photoId}/signed-url", requireAuthentication, async (req, res) => {
-    const photoId = req.params.photoId;
+    const photoIdParam = req.params.photoId;
+    const photoId = Array.isArray(photoIdParam) ? photoIdParam.join("/") : (photoIdParam ?? "");
     const variantQ = String(req.query.variant || "medium");
     const variant = (variantQ === "thumb" || variantQ === "medium" || variantQ === "original")
       ? variantQ : "medium";
@@ -10636,12 +11049,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const photoService = new ObjectStorageService();
       const normalized = photoId.startsWith("/") ? photoId.slice(1) : photoId;
       const signedUrl = await photoService.getPhotoDownloadURL(normalized, 900, variant);
-      if (signedUrl) return res.json({ url: signedUrl });
+      if (signedUrl) { res.json({ url: signedUrl }); return; }
 
-      return res.json({ url: `/api/photos/${normalized}?variant=${variant}` });
+      res.json({ url: `/api/photos/${normalized}?variant=${variant}` });
+      return;
     } catch (error) {
       console.error(`[PHOTO-SIGNED-URL] Error generating signed URL for ${photoId}:`, error);
-      return res.status(500).json({ error: "Failed to generate signed URL" });
+      res.status(500).json({ error: "Failed to generate signed URL" });
+      return;
     }
   });
 
@@ -10649,7 +11064,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // variants. Display variants get long-lived public cache headers
   // (content-addressed by an unguessable UUID, so safe to cache).
   app.get("/api/photos/{*photoId}", requireAuthentication, async (req, res) => {
-    const photoId = req.params.photoId;
+    const photoIdParam = req.params.photoId;
+    const photoId = Array.isArray(photoIdParam) ? photoIdParam.join("/") : (photoIdParam ?? "");
     const variantQ = String(req.query.variant || "");
     const variant = (variantQ === "thumb" || variantQ === "medium" || variantQ === "original")
       ? variantQ : null;
@@ -10672,14 +11088,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const safeName = path.basename(photoId.replace(/^\/uploads\//, ""));
       const localPath = path.join("./uploads", safeName);
       if (fs.existsSync(localPath)) {
-        return res.sendFile(path.resolve(localPath));
+        res.sendFile(path.resolve(localPath));
+        return;
       }
 
-      return res.status(404).json({ error: "Photo not found" });
+      res.status(404).json({ error: "Photo not found" });
+      return;
     } catch (error) {
       console.error(`[PHOTO-SERVE] Error serving photo ${photoId}:`, error);
       if (!res.headersSent) {
-        return res.status(500).json({ error: "Failed to serve photo" });
+        res.status(500).json({ error: "Failed to serve photo" });
+        return;
       }
     }
   });
@@ -10687,7 +11106,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/upload/attachment", requireAuthentication, async (req, res) => {
     try {
       if (!req.files || !req.files.attachment) {
-        return res.status(400).json({ message: "No attachment file provided" });
+        res.status(400).json({ message: "No attachment file provided" });
+        return;
       }
 
       const attachment = Array.isArray(req.files.attachment) ? req.files.attachment[0] : req.files.attachment;
@@ -10708,16 +11128,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const pathMod = await import("path");
       const fs = await import("fs");
-      const safeName = pathMod.basename(req.params.photoId);
+      const fileNameParam = (req.params as { fileName?: string | string[] }).fileName;
+      const fileNameStr = Array.isArray(fileNameParam) ? fileNameParam.join("/") : (fileNameParam ?? "");
+      const safeName = pathMod.basename(fileNameStr);
       const localPath = pathMod.join("./uploads", safeName);
       if (fs.existsSync(localPath)) {
-        return res.sendFile(pathMod.resolve(localPath));
+        res.sendFile(pathMod.resolve(localPath));
+        return;
       }
-      return res.status(404).json({ error: "Attachment not found" });
+      res.status(404).json({ error: "Attachment not found" });
+      return;
     } catch (error) {
       console.error(`[ATTACHMENT-SERVE] Error serving attachment ${req.params.fileName}:`, error);
       if (!res.headersSent) {
-        return res.status(500).json({ error: "Failed to serve attachment" });
+        res.status(500).json({ error: "Failed to serve attachment" });
+        return;
       }
     }
   });
@@ -10823,7 +11248,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userEmail = req.user?.email;
       
       if (!userId || !userEmail) {
-        return res.status(401).json({ message: "Authentication required" });
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
 
       const { mfaManager } = await import('../mfa');
@@ -10848,7 +11274,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const { secret, code, backupCodes } = req.body;
       
       if (!userId) {
-        return res.status(401).json({ message: "Authentication required" });
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
 
       const { mfaManager } = await import('../mfa');
@@ -10885,12 +11312,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const { code } = req.body;
       
       if (!userId) {
-        return res.status(401).json({ message: "Authentication required" });
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
 
       const user = await storage.getUser(userId);
       if (!user || !user.mfaEnabled || !user.mfaSecret) {
-        return res.status(400).json({ message: "MFA not enabled for this user" });
+        res.status(400).json({ message: "MFA not enabled for this user" });
+        return;
       }
 
       const { mfaManager } = await import('../mfa');
@@ -10932,19 +11361,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const { password } = req.body;
       
       if (!userId) {
-        return res.status(401).json({ message: "Authentication required" });
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
 
       // Verify password before disabling MFA
       const user = await storage.getUser(userId);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
 
       const bcrypt = await import('bcrypt');
       const passwordValid = await bcrypt.compare(password, user.password);
       if (!passwordValid) {
-        return res.status(400).json({ message: "Invalid password" });
+        res.status(400).json({ message: "Invalid password" });
+        return;
       }
 
       const { mfaManager } = await import('../mfa');
@@ -10973,12 +11405,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userId = req.user?.id;
       
       if (!userId) {
-        return res.status(401).json({ message: "Authentication required" });
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
 
       const user = await storage.getUser(userId);
       if (!user || !user.mfaEnabled) {
-        return res.status(400).json({ message: "MFA not enabled for this user" });
+        res.status(400).json({ message: "MFA not enabled for this user" });
+        return;
       }
 
       const { mfaManager } = await import('../mfa');
@@ -11005,12 +11439,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const userId = req.user?.id;
       
       if (!userId) {
-        return res.status(401).json({ message: "Authentication required" });
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
 
       const user = await storage.getUser(userId);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
+        return;
       }
 
       const backupCodes = user.mfaBackupCodes ? JSON.parse(user.mfaBackupCodes) : [];
@@ -11205,7 +11641,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const { name, expiresAt } = req.body;
 
       if (!name || name.trim().length === 0) {
-        return res.status(400).json({ message: "API key name is required" });
+        res.status(400).json({ message: "API key name is required" });
+        return;
       }
 
       // Generate a secure API key
@@ -11267,10 +11704,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const authHeader = req.headers.authorization;
       
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: "UNAUTHORIZED",
           message: "API key required. Use Authorization: Bearer <your-api-key>" 
         });
+        return;
       }
 
       const apiKeyValue = authHeader.substring(7); // Remove 'Bearer ' prefix
@@ -11279,18 +11717,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const apiKey = await storage.getApiKeyByKey(apiKeyValue);
       
       if (!apiKey) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: "INVALID_API_KEY",
           message: "Invalid or inactive API key" 
         });
+        return;
       }
 
       // Check if key has expired
       if (apiKey.expiresAt && new Date(apiKey.expiresAt) < new Date()) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: "API_KEY_EXPIRED",
           message: "API key has expired" 
         });
+        return;
       }
 
       // Update last used timestamp
@@ -11322,11 +11762,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const validationResult = externalWorkOrderSchema.safeParse(req.body);
       
       if (!validationResult.success) {
-        return res.status(400).json({
+        res.status(400).json({
           error: "VALIDATION_ERROR",
           message: "Invalid request data",
           details: validationResult.error.flatten()
         });
+        return;
       }
 
       const { customer, workOrder } = validationResult.data;
@@ -11438,20 +11879,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const authHeader = req.headers.authorization;
       
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: "UNAUTHORIZED",
           message: "API key required" 
         });
+        return;
       }
 
       const apiKeyValue = authHeader.substring(7);
       const apiKey = await storage.getApiKeyByKey(apiKeyValue);
       
       if (!apiKey) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: "INVALID_API_KEY",
           message: "Invalid or inactive API key" 
         });
+        return;
       }
 
       // Update last used timestamp
@@ -11461,19 +11904,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const workOrder = await storage.getWorkOrder(workOrderId);
 
       if (!workOrder) {
-        return res.status(404).json({ 
+        res.status(404).json({ 
           error: "NOT_FOUND",
           message: "Work order not found" 
         });
+        return;
       }
 
       // Verify the work order belongs to the API key's company through customer
       const customer = await storage.getCustomer(workOrder.customerId);
       if (!customer || customer.companyId !== apiKey.companyId) {
-        return res.status(403).json({ 
+        res.status(403).json({ 
           error: "FORBIDDEN",
           message: "Access denied to this work order" 
         });
+        return;
       }
 
       res.json({
@@ -11578,19 +12023,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         } catch (logErr) {
           console.error("[AI] Failed to write audit log for blocked request:", logErr);
         }
-        return res.json({
+        res.json({
           short_work_completed_description: "",
           detailed_work_completed_description: "",
           missing_info_warnings: missingCritical,
         });
+        return;
       }
 
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
         console.error("[AI] OPENAI_API_KEY environment secret not configured");
-        return res.status(503).json({ 
+        res.status(503).json({ 
           message: "AI generation is not configured. Please set the OPENAI_API_KEY environment secret." 
         });
+        return;
       }
 
       const prompt = buildWorkDescriptionPrompt(inputs);
@@ -11618,7 +12065,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!openaiResponse.ok) {
         const errText = await openaiResponse.text();
         console.error("[AI] OpenAI API error:", openaiResponse.status, errText);
-        return res.status(502).json({ message: "AI service returned an error. Please try again." });
+        res.status(502).json({ message: "AI service returned an error. Please try again." });
+        return;
       }
 
       const openaiData: any = await openaiResponse.json();
@@ -11632,7 +12080,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         parsed = JSON.parse(cleaned);
       } catch (parseError) {
         console.error("[AI] Failed to parse GPT JSON response:", rawOutput);
-        return res.status(502).json({ message: "AI returned an unexpected response format. Please try again." });
+        res.status(502).json({ message: "AI returned an unexpected response format. Please try again." });
+        return;
       }
 
       // Log the generation for audit
@@ -11657,15 +12106,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
       console.log(`[AUDIT] ai_description_generated entityType=${entityType || "unknown"} entityId=${entityId || "none"} userId=${req.authenticatedUserId} templateVersion=${TEMPLATE_VERSION}`);
 
-      return res.json({
+      res.json({
         short_work_completed_description: parsed.short_work_completed_description || "",
         detailed_work_completed_description: parsed.detailed_work_completed_description || "",
         missing_info_warnings: warnings,
       });
+      return;
 
     } catch (error) {
       console.error("[AI] Unexpected error in generate-work-description:", error);
-      return res.status(500).json({ message: "Failed to generate description. Please try again." });
+      res.status(500).json({ message: "Failed to generate description. Please try again." });
+      return;
     }
   });
 
@@ -11674,12 +12125,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       const { rawDescription } = req.body;
       const raw = typeof rawDescription === "string" ? rawDescription.trim() : "";
       if (!raw) {
-        return res.status(400).json({ message: "rawDescription is required" });
+        res.status(400).json({ message: "rawDescription is required" });
+        return;
       }
 
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
-        return res.status(503).json({ message: "AI generation is not configured. Please set the OPENAI_API_KEY environment secret." });
+        res.status(503).json({ message: "AI generation is not configured. Please set the OPENAI_API_KEY environment secret." });
+        return;
       }
 
       const prompt = buildExpandDescriptionPrompt(raw);
@@ -11701,7 +12154,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!openaiResponse.ok) {
         const errText = await openaiResponse.text();
         console.error("[AI expand] OpenAI API error:", openaiResponse.status, errText);
-        return res.status(502).json({ message: "AI service returned an error. Please try again." });
+        res.status(502).json({ message: "AI service returned an error. Please try again." });
+        return;
       }
 
       const openaiData: any = await openaiResponse.json();
@@ -11713,19 +12167,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         parsed = JSON.parse(cleaned);
       } catch {
         console.error("[AI expand] Failed to parse GPT JSON response:", rawOutput);
-        return res.status(502).json({ message: "AI returned an unexpected response format. Please try again." });
+        res.status(502).json({ message: "AI returned an unexpected response format. Please try again." });
+        return;
       }
 
       const expanded = typeof parsed.expanded === "string" ? parsed.expanded.trim() : "";
       if (!expanded) {
-        return res.status(502).json({ message: "AI returned an empty result. Please try again." });
+        res.status(502).json({ message: "AI returned an empty result. Please try again." });
+        return;
       }
 
-      return res.json({ expanded });
+      res.json({ expanded });
+      return;
 
     } catch (error) {
       console.error("[AI expand] Unexpected error:", error);
-      return res.status(500).json({ message: "Failed to expand description. Please try again." });
+      res.status(500).json({ message: "Failed to expand description. Please try again." });
+      return;
     }
   });
 
@@ -11746,7 +12204,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   };
 
   // Injected Intuit refresh function (uses real token endpoint)
-  const realRefreshFn = (refreshToken: string, signal: AbortSignal) =>
+  const realRefreshFn: QbRefreshFn = (refreshToken: string, signal: AbortSignal) =>
     refreshQuickBooksToken(refreshToken, signal, { calledFrom: 'health-job' });
 
   startQbTokenHealthJob(
@@ -11853,9 +12311,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     ) {
       return next();
     }
-    return res.status(403).json({
+    res.status(403).json({
       message: "Access denied. Only company administrators, super administrators, irrigation managers, and billing managers can manage wet check issue types.",
     });
+    return;
   };
 
   const issueTypeAdminBodySchema = insertIssueTypeConfigSchema
@@ -11888,7 +12347,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const cid = requireCompanyId(req, res); if (!cid) return;
     const parsed = issueTypeAdminBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+      res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+      return;
     }
     try {
       const row = await storage.createIssueTypeConfig(cid, parsed.data);
@@ -11896,7 +12356,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) {
       const msg = String(e?.message ?? "");
       if (e?.code === "23505" || /unique/i.test(msg)) {
-        return res.status(409).json({ message: "An issue type with that key already exists for this company." });
+        res.status(409).json({ message: "An issue type with that key already exists for this company." });
+        return;
       }
       res.status(500).json({ message: msg || "Failed" });
     }
@@ -11906,19 +12367,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.patch("/api/admin/issue-types/:id", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const id = parseInt(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid id" });
+    if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ message: "Invalid id" }); return; }
     const parsed = issueTypePatchSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+      res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+      return;
     }
     try {
       const row = await storage.updateIssueTypeConfig(cid, id, parsed.data);
-      if (!row) return res.status(404).json({ message: "Not found" });
+      if (!row) { res.status(404).json({ message: "Not found" }); return; }
       res.json(row);
     } catch (e: any) {
       const msg = String(e?.message ?? "");
       if (e?.code === "23505" || /unique/i.test(msg)) {
-        return res.status(409).json({ message: "An issue type with that key already exists for this company." });
+        res.status(409).json({ message: "An issue type with that key already exists for this company." });
+        return;
       }
       res.status(500).json({ message: msg || "Failed" });
     }
@@ -11928,10 +12391,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.delete("/api/admin/issue-types/:id", requireAuthentication, requireIssueTypeAdminAccess, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const id = parseInt(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid id" });
+    if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const row = await storage.updateIssueTypeConfig(cid, id, { isActive: false });
-      if (!row) return res.status(404).json({ message: "Not found" });
+      if (!row) { res.status(404).json({ message: "Not found" }); return; }
       res.json(row);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
@@ -11943,7 +12406,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const cid = requireCompanyId(req, res); if (!cid) return;
     const parsed = issueTypeReorderSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+      res.status(400).json({ message: "Invalid input", issues: parsed.error.issues });
+      return;
     }
     try {
       const rows = await storage.reorderIssueTypeConfigs(cid, parsed.data.orderedIds);
@@ -11954,7 +12418,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.get("/api/wet-checks/parts/by-issue", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     const issueType = String(req.query.issueType ?? "");
-    if (!issueType) return res.status(400).json({ message: "issueType required" });
+    if (!issueType) { res.status(400).json({ message: "issueType required" }); return; }
     const customerId = req.query.customerId ? parseInt(String(req.query.customerId)) : null;
     try {
       const result = await storage.getPartsByIssueType(cid, issueType, customerId);
@@ -11997,10 +12461,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   });
   app.patch("/api/properties/:customerId/controllers", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const customerId = parseInt(req.params.customerId);
     const parsed = propertyControllerPatchBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const { controllerLetter, zoneCount, notes } = parsed.data;
     try {
       // Verify the customer belongs to the caller's company before any write.
@@ -12008,7 +12472,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // would otherwise allow cross-tenant writes via a foreign customerId.
       const owner = await storage.getCustomer(customerId);
       if (!owner || owner.companyId !== cid) {
-        return res.status(404).json({ message: "Not found" });
+        res.status(404).json({ message: "Not found" });
+        return;
       }
       // Try a normal update first so the wet-check shrink side-effect in
       // updatePropertyController still fires for existing rows.
@@ -12020,7 +12485,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         // No row yet for this letter (typical for legacy customers or a
         // freshly-bumped controller count). Upsert just this controller —
         // do NOT bulk-seed A..N which would invent unrelated controllers.
-        if (zoneCount === undefined) return res.status(404).json({ message: "Not found" });
+        if (zoneCount === undefined) { res.status(404).json({ message: "Not found" }); return; }
         updated = await storage.upsertPropertyController(cid, customerId, controllerLetter, {
           zoneCount,
           notes: notes ?? undefined,
@@ -12037,7 +12502,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // chips in /wet-checks/pending-review.
   app.get("/api/wet-checks/pending-review", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     try {
       const rows = await storage.listWetChecksPendingReview(cid);
       res.json(rows);
@@ -12065,7 +12530,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       req.authenticatedUserRole !== "super_admin" &&
       req.authenticatedUserRole !== "irrigation_manager"
     ) {
-      return res.status(403).json({ message: "Forbidden" });
+      res.status(403).json({ message: "Forbidden" });
+      return;
     }
     try {
       const opts: { status?: string } = {};
@@ -12087,11 +12553,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       req.authenticatedUserRole !== "super_admin" &&
       req.authenticatedUserRole !== "irrigation_manager"
     ) {
-      return res.status(403).json({ message: "Forbidden" });
+      res.status(403).json({ message: "Forbidden" });
+      return;
     }
     const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : null;
     if (!rawIds || rawIds.length === 0) {
-      return res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+      res.status(400).json({ message: "ids must be a non-empty array of numbers" });
+      return;
     }
     const validIds = Array.from(new Set(
       rawIds
@@ -12099,7 +12567,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         .filter((n: number) => Number.isInteger(n) && n > 0)
     )) as number[];
     if (validIds.length === 0) {
-      return res.status(400).json({ message: "No valid IDs provided" });
+      res.status(400).json({ message: "No valid IDs provided" });
+      return;
     }
     type Outcome = {
       id: number;
@@ -12146,20 +12615,22 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       req.authenticatedUserRole !== "super_admin" &&
       req.authenticatedUserRole !== "irrigation_manager"
     ) {
-      return res.status(403).json({ message: "Forbidden" });
+      res.status(403).json({ message: "Forbidden" });
+      return;
     }
     const id = parseInt(req.params.id);
-    if (Number.isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+    if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
       const ok = await storage.deleteWetCheck(id, cid);
-      if (!ok) return res.status(404).json({ message: "Not found" });
+      if (!ok) { res.status(404).json({ message: "Not found" }); return; }
       res.json({ ok });
     } catch (e: any) {
       if (e instanceof WetCheckHasInvoicedRecordsError) {
-        return res.status(409).json({
+        res.status(409).json({
           message: e.message,
           blockers: e.blockers,
         });
+        return;
       }
       const msg = e?.message ?? "Failed";
       const status = /not found for company/.test(msg) ? 404 : 500;
@@ -12171,7 +12642,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const cid = requireCompanyId(req, res); if (!cid) return;
     try {
       const wc = await storage.getWetCheck(parseInt(req.params.id), cid);
-      if (!wc) return res.status(404).json({ message: "Not found" });
+      if (!wc) { res.status(404).json({ message: "Not found" }); return; }
       res.json(wc);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
@@ -12189,23 +12660,24 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/wet-checks", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = wetCheckCreateBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     try {
       const customer = await storage.getCustomer(body.customerId);
-      if (!customer || customer.companyId !== cid) return res.status(404).json({ message: "Customer not found" });
+      if (!customer || customer.companyId !== cid) { res.status(404).json({ message: "Customer not found" }); return; }
       const techId = req.authenticatedUserId;
-      if (!techId) return res.status(401).json({ message: "Authentication required" });
+      if (!techId) { res.status(401).json({ message: "Authentication required" }); return; }
       const tech = await storage.getUser(techId);
-      if (!tech) return res.status(401).json({ message: "User not found" });
+      if (!tech) { res.status(401).json({ message: "User not found" }); return; }
 
       // Resume an existing in-progress wet check at this property for this tech
       // before creating a new one. Idempotent for the common "tap New again" case.
       const existing = await storage.findActiveWetCheck(cid, body.customerId, tech.id);
       if (existing) {
-        return res.status(200).json(existing);
+        res.status(200).json(existing);
+        return;
       }
 
       const numControllers = Math.max(1, Math.min(26, Number(customer.totalControllers ?? 1)));
@@ -12236,12 +12708,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.patch("/api/wet-checks/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = wetCheckPatchBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     try {
       const updated = await storage.updateWetCheck(parseInt(req.params.id), cid, parsed.data);
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
@@ -12249,15 +12721,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   const submitBody = z.object({ clientId: z.string().uuid().nullish() }).partial();
   app.post("/api/wet-checks/:id/submit", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     // Body is optional; if provided, validate clientId shape only.
     if (req.body && Object.keys(req.body).length > 0) {
       const parsed = submitBody.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ message: "Invalid body", errors: parsed.error.flatten() });
+      if (!parsed.success) { res.status(400).json({ message: "Invalid body", errors: parsed.error.flatten() }); return; }
     }
     try {
       const result = await storage.submitWetCheck(parseInt(req.params.id), cid);
-      if (!result) return res.status(404).json({ message: "Not found" });
+      if (!result) { res.status(404).json({ message: "Not found" }); return; }
       // Spread wetCheck so legacy clients that read fields directly off the
       // response (status, submittedAt, etc.) keep working; the new
       // billingSheetId / autoBilledCount / pendingCount surface alongside.
@@ -12290,10 +12762,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // WET_CHECK_AUTO_BILL feature flag is off.
   app.post("/api/wet-checks/:id/submit-preview", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     try {
       const preview = await storage.previewWetCheckSubmit(parseInt(req.params.id), cid);
-      if (!preview) return res.status(404).json({ message: "Not found" });
+      if (!preview) { res.status(404).json({ message: "Not found" }); return; }
       res.json(preview);
     } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }
   });
@@ -12314,9 +12786,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/wet-checks/:id/zone-records", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = zoneRecordBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     try {
       const wetCheckId = parseInt(req.params.id);
@@ -12354,9 +12826,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.patch("/api/wet-checks/zone-records/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = zoneRecordPatchBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     const patch: Partial<InsertWetCheckZoneRecord> = {};
     if (body.status !== undefined) patch.status = body.status;
@@ -12371,7 +12843,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
     try {
       const updated = await storage.updateWetCheckZoneRecord(parseInt(req.params.id), cid, patch);
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
@@ -12393,9 +12865,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/wet-checks/zone-records/:id/findings", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = findingCreateBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     try {
       const userId = req.authenticatedUserId ?? null;
@@ -12444,24 +12916,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     // manager-only. Per-finding convertedAt/FK lock in storage prevents
     // mutating an already-converted row even during partial-conversion.
     const findingId = parseInt(req.params.id);
-    if (Number.isNaN(findingId)) return res.status(400).json({ message: "Invalid id" });
+    if (Number.isNaN(findingId)) { res.status(400).json({ message: "Invalid id" }); return; }
     const role = req.authenticatedUserRole;
     let wcStatus: string | null = null;
     try {
       wcStatus = await storage.getWetCheckStatusForFinding(findingId, cid);
     } catch (e: any) {
-      return res.status(500).json({ message: e?.message ?? "Failed" });
+      res.status(500).json({ message: e?.message ?? "Failed" });
+      return;
     }
-    if (wcStatus == null) return res.status(404).json({ message: "Not found" });
+    if (wcStatus == null) { res.status(404).json({ message: "Not found" }); return; }
     if (wcStatus === "in_progress") {
-      if (!isFieldRole(role)) return res.status(403).json({ message: "Forbidden" });
+      if (!isFieldRole(role)) { res.status(403).json({ message: "Forbidden" }); return; }
     } else if (wcStatus === "submitted" || wcStatus === "partially_converted") {
-      if (!isWetCheckManagerRole(role)) return res.status(403).json({ message: "Forbidden" });
+      if (!isWetCheckManagerRole(role)) { res.status(403).json({ message: "Forbidden" }); return; }
     } else {
-      return res.status(409).json({ message: `Wet check is ${wcStatus}; finding pricing is locked` });
+      res.status(409).json({ message: `Wet check is ${wcStatus}; finding pricing is locked` });
+      return;
     }
     const parsed = findingPatchBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     const userId = req.authenticatedUserId ?? null;
     const patch: Partial<InsertWetCheckFinding> = {};
@@ -12487,14 +12961,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
     try {
       const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
 
   app.delete("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     try {
       const ok = await storage.deleteWetCheckFinding(parseInt(req.params.id), cid);
       res.json({ ok });
@@ -12517,12 +12991,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/wet-checks/:id/photos", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = photoBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     const takenBy = req.authenticatedUserId;
-    if (!takenBy) return res.status(401).json({ message: "Authentication required" });
+    if (!takenBy) { res.status(401).json({ message: "Authentication required" }); return; }
     try {
       const wetCheckId = parseInt(req.params.id);
       const takenAt = body.takenAt != null ? new Date(body.takenAt as string | number | Date) : new Date();
@@ -12545,23 +13019,23 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.patch("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const parsed = photoLinkBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     try {
       const updated = await storage.linkWetCheckPhotoToFinding(
         parseInt(req.params.id),
         parsed.data.findingId,
         cid,
       );
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
 
   app.delete("/api/wet-checks/photos/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isFieldRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     try {
       const ok = await storage.deleteWetCheckPhoto(parseInt(req.params.id), cid);
       res.json({ ok });
@@ -12571,14 +13045,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // ─── Manager review / routing / approve / convert ────────────────────────
   app.post("/api/wet-checks/:id/approve", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const userId = req.authenticatedUserId;
-    if (!userId) return res.status(401).json({ message: "Authentication required" });
+    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
     try {
       const me = await storage.getUser(userId);
-      if (!me) return res.status(401).json({ message: "User not found" });
+      if (!me) { res.status(401).json({ message: "User not found" }); return; }
       const updated = await storage.approveWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name });
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
@@ -12589,16 +13063,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.patch("/api/wet-checks/findings/:id/route", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const userId = req.authenticatedUserId;
-    if (!userId) return res.status(401).json({ message: "Authentication required" });
+    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
     const parsed = findingRouteBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     try {
       const me = await storage.getUser(userId);
-      if (!me) return res.status(401).json({ message: "User not found" });
+      if (!me) { res.status(401).json({ message: "User not found" }); return; }
       const updated = await storage.routeWetCheckFinding(parseInt(req.params.id), cid, parsed.data.resolution, { id: me.id, name: me.name });
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
@@ -12610,11 +13084,11 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
 
   app.post("/api/wet-checks/:id/convert", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) return res.status(403).json({ message: "Forbidden" });
+    if (!isWetCheckManagerRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
     const userId = req.authenticatedUserId;
-    if (!userId) return res.status(401).json({ message: "Authentication required" });
+    if (!userId) { res.status(401).json({ message: "Authentication required" }); return; }
     const parsed = convertBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const scheduledDates: Record<number, string | null> = {};
     for (const [k, v] of Object.entries(parsed.data.scheduledDates ?? {})) {
       const fid = parseInt(k);
@@ -12622,7 +13096,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
     try {
       const me = await storage.getUser(userId);
-      if (!me) return res.status(401).json({ message: "User not found" });
+      if (!me) { res.status(401).json({ message: "User not found" }); return; }
       const result = await storage.convertWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name }, scheduledDates);
       res.json(result);
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
@@ -12662,9 +13136,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const cid = requireCompanyId(req, res); if (!cid) return;
     if (!requireAdminRole(req, res)) return;
     const customerId = parseInt(req.params.customerId);
-    if (Number.isNaN(customerId)) return res.status(400).json({ message: "Invalid customerId" });
+    if (Number.isNaN(customerId)) { res.status(400).json({ message: "Invalid customerId" }); return; }
     const parsed = setControllerCountBody.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     try {
       const result = await storage.setCustomerControllerCount(cid, customerId, parsed.data.count, {
         confirmDeleteWithZones: parsed.data.confirmDeleteWithZones,
@@ -12680,12 +13154,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       res.json({ ...result, controllers: wireControllers, branchName: wireBranch });
     } catch (e: any) {
       if (e instanceof ControllerHasZonesError) {
-        return res.status(409).json({
+        res.status(409).json({
           message: `Removing controllers ${e.letters.join(", ")} would discard their zones. Confirm to proceed.`,
           letters: e.letters,
           branchName: parsed.data.branchName ?? null,
           requiresConfirmation: true,
         });
+        return;
       }
       const msg = e?.message ?? "Failed";
       const status = /not found/i.test(msg) ? 404 : /must be between/i.test(msg) ? 400 : 500;
@@ -12706,10 +13181,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!requireAdminRole(req, res)) return;
       const customerId = parseInt(req.params.customerId);
       const letter = String(req.params.letter || "").toUpperCase();
-      if (Number.isNaN(customerId)) return res.status(400).json({ message: "Invalid customerId" });
-      if (!/^[A-Z]$/.test(letter)) return res.status(400).json({ message: "Invalid controller letter" });
+      if (Number.isNaN(customerId)) { res.status(400).json({ message: "Invalid customerId" }); return; }
+      if (!/^[A-Z]$/.test(letter)) { res.status(400).json({ message: "Invalid controller letter" }); return; }
       const parsed = setZoneCountBody.safeParse(req.body ?? {});
-      if (!parsed.success) return res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+      if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
       try {
         const updated = await storage.updatePropertyController(
           cid,
@@ -12718,7 +13193,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           { zoneCount: parsed.data.zoneCount },
           parsed.data.branchName ?? null,
         );
-        if (!updated) return res.status(404).json({ message: "Controller not found" });
+        if (!updated) { res.status(404).json({ message: "Controller not found" }); return; }
         // Preserve pre-Task-#320 wire shape: customer-level → null.
         res.json({ ...updated, branchName: updated.branchName ? updated.branchName : null });
       } catch (e: any) { res.status(500).json({ message: e?.message ?? "Failed" }); }

@@ -20,8 +20,8 @@ import { Plus, Package, Search, Edit, Trash2, FileSpreadsheet, Upload, Settings,
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { zodResolver } from "@/lib/zod-resolver";
+import { z } from "zod/v4";
 import type { Part, Assembly, AssemblyWithParts, InsertAssembly, InsertAssemblyPart, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@shared/schema";
 import { insertPartSchema, insertAssemblySchema } from "@shared/schema";
 

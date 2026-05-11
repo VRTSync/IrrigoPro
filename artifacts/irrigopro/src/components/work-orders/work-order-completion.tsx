@@ -3,8 +3,8 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { AiExpandButton, AiSuggestionCard } from "@/components/ui/ai-expand-button";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { zodResolver } from "@/lib/zod-resolver";
+import { z } from "zod/v4";
 import {
   Dialog,
   DialogContent,
@@ -603,9 +603,9 @@ export function WorkOrderCompletion({
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 min-w-0">
                     {photos.map((photo, index) => (
                       <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                        {photo.previewUrl ? (
+                        {(photo as { previewUrl?: string }).previewUrl ? (
                           <img
-                            src={photo.previewUrl}
+                            src={(photo as { previewUrl?: string }).previewUrl}
                             alt={`Completion photo ${index + 1}`}
                             className="w-full h-full object-cover"
                           />

@@ -116,11 +116,15 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
   );
 });
 
-self.addEventListener("sync", (event: SyncEvent) => {
+interface SyncEventLike extends Event {
+  readonly tag: string;
+  waitUntil(promise: Promise<unknown>): void;
+}
+self.addEventListener("sync", ((event: SyncEventLike) => {
   if (event.tag === "notification-sync") {
     event.waitUntil(syncNotifications());
   }
-});
+}) as EventListener);
 
 async function syncNotifications(): Promise<void> {
   try {

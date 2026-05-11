@@ -1,4 +1,4 @@
-import type { LaborMode } from "@shared/schema";
+export type LaborMode = "flat" | "per_part";
 
 export interface SwitchableLaborItem {
   laborHours: number;

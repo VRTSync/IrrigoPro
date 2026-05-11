@@ -50,12 +50,14 @@ import type {
 // so the fallback path also emits a v4-shaped string when crypto.randomUUID
 // is unavailable (older Safari, insecure contexts).
 const newClientId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+  const cryptoObj: Crypto | undefined =
+    typeof crypto !== "undefined" ? (crypto as Crypto) : undefined;
+  if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+    return cryptoObj.randomUUID();
   }
   const bytes = new Uint8Array(16);
-  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
-    crypto.getRandomValues(bytes);
+  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+    cryptoObj.getRandomValues(bytes);
   } else {
     for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
   }

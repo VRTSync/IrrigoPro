@@ -88,6 +88,7 @@ export function PartsSearchModal({
         return () => clearTimeout(t);
       }
     }
+    return undefined;
   }, [open, presentation]);
 
   // Debounce search by 200ms.

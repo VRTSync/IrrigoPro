@@ -4,7 +4,7 @@
  * — 2026 rebrand: navy primary + fresh green accent.
  */
 
-const colors = {
+const palettes = {
   light: {
     text: "#0f172a",
     tint: "#1E5A99",
@@ -62,7 +62,10 @@ const colors = {
     border: "#1e2a3d",
     input: "#1e2a3d",
   },
+};
 
+const colors = {
+  ...palettes,
   radius: 14,
 };
 
