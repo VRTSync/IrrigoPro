@@ -64,7 +64,24 @@ export interface EngineOptions {
   maxConcurrent?: number;
   pruneOlderThanMs?: number;
   authHeaders?: () => Record<string, string>;
+  // Task #501 — passive retry caps. Once a mutation has accumulated
+  // `maxAttempts` failed attempts OR has been sitting in the queue
+  // (createdAt → now) longer than `maxRetryAgeMs`, the engine flips it to
+  // `status: "failed"` instead of scheduling another retry. The existing
+  // Retry / Cancel affordances in the queue view then become visible so
+  // the tech can decide what to do, rather than having a doomed upload
+  // loop forever in the background.
+  maxAttempts?: number;
+  maxRetryAgeMs?: number;
 }
+
+// Task #501 — default caps. ~8 attempts maps to a worst-case of roughly
+// 1s+2s+4s+8s+16s+30s+30s+30s ≈ 2 minutes of backoff before giving up,
+// and the 1h elapsed cap is a hard backstop for slow-trickle failures
+// (e.g. a mutation that keeps hitting the cap-restart cycle as the user
+// flips back online intermittently).
+const DEFAULT_MAX_ATTEMPTS = 8;
+const DEFAULT_MAX_RETRY_AGE_MS = 60 * 60 * 1000;
 
 export class SyncEngine {
   private db: OfflineDB | null = null;
@@ -75,6 +92,8 @@ export class SyncEngine {
   private maxConcurrent: number;
   private pruneOlderThanMs: number;
   private authHeaders: () => Record<string, string>;
+  private maxAttempts: number;
+  private maxRetryAgeMs: number;
   private inFlight = new Set<string>();
   private aborts = new Map<string, AbortController>();
   private online = true;
@@ -89,6 +108,26 @@ export class SyncEngine {
     this.maxConcurrent = opts.maxConcurrent ?? 2;
     this.pruneOlderThanMs = opts.pruneOlderThanMs ?? 24 * 60 * 60 * 1000;
     this.authHeaders = opts.authHeaders ?? (() => ({}));
+    this.maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.maxRetryAgeMs = opts.maxRetryAgeMs ?? DEFAULT_MAX_RETRY_AGE_MS;
+  }
+
+  // Task #501 — decide whether the next attempt for this mutation would
+  // exceed either configured cap. `nextAttemptCount` is the value we'd
+  // write if we kept it pending. Returns a reason string if the mutation
+  // should be flipped to `failed` instead, or `null` to keep retrying.
+  private capExceededReason(
+    m: QueuedMutation,
+    nextAttemptCount: number,
+  ): string | null {
+    if (nextAttemptCount >= this.maxAttempts) {
+      return `gave_up_after_${nextAttemptCount}_attempts`;
+    }
+    if (this.now() - m.createdAt >= this.maxRetryAgeMs) {
+      const mins = Math.round(this.maxRetryAgeMs / 60_000);
+      return `gave_up_after_${mins}_minutes`;
+    }
+    return null;
   }
 
   on(l: EngineListener): () => void {
@@ -388,14 +427,32 @@ export class SyncEngine {
         const message = body || `${res.status}`;
         if (looksLikeEdge) {
           this.setOnline(false);
-          await updateMutation(db, m.id, {
-            status: "pending",
-            attemptCount: m.attemptCount + 1,
-            lastError: `edge_${res.status}`,
-          });
-          await this.broadcastState();
-          const wait = backoffMs(m.attemptCount + 1);
-          setTimeout(() => this.scheduleTick(), wait);
+          const nextAttempt = m.attemptCount + 1;
+          const giveUp = this.capExceededReason(m, nextAttempt);
+          if (giveUp) {
+            await updateMutation(db, m.id, {
+              status: "failed",
+              attemptCount: nextAttempt,
+              lastError: giveUp,
+            });
+            this.emit({
+              type: "error",
+              mutationId: m.id,
+              kind: m.kind,
+              status: res.status,
+              message: giveUp,
+            });
+            await this.broadcastState();
+          } else {
+            await updateMutation(db, m.id, {
+              status: "pending",
+              attemptCount: nextAttempt,
+              lastError: `edge_${res.status}`,
+            });
+            await this.broadcastState();
+            const wait = backoffMs(nextAttempt);
+            setTimeout(() => this.scheduleTick(), wait);
+          }
         } else {
           await updateMutation(db, m.id, {
             status: "failed",
@@ -412,31 +469,68 @@ export class SyncEngine {
           await this.broadcastState();
         }
       } else {
-        // 5xx → retry with backoff.
+        // 5xx → retry with backoff, unless we've blown the cap (Task #501).
         let message = `${res.status}`;
         try { message = (await res.text()) || message; } catch {}
         // 5xx might mean server-side outage — flip offline-ish to throttle
         // future tries. Heartbeat will recover us.
         if (res.status >= 500) this.setOnline(false);
-        await updateMutation(db, m.id, {
-          status: "pending",
-          attemptCount: m.attemptCount + 1,
-          lastError: message,
-        });
-        await this.broadcastState();
-        const wait = backoffMs(m.attemptCount + 1);
-        setTimeout(() => this.scheduleTick(), wait);
+        const nextAttempt = m.attemptCount + 1;
+        const giveUp = this.capExceededReason(m, nextAttempt);
+        if (giveUp) {
+          await updateMutation(db, m.id, {
+            status: "failed",
+            attemptCount: nextAttempt,
+            lastError: `${giveUp}: ${message}`,
+          });
+          this.emit({
+            type: "error",
+            mutationId: m.id,
+            kind: m.kind,
+            status: res.status,
+            message,
+          });
+          await this.broadcastState();
+        } else {
+          await updateMutation(db, m.id, {
+            status: "pending",
+            attemptCount: nextAttempt,
+            lastError: message,
+          });
+          await this.broadcastState();
+          const wait = backoffMs(nextAttempt);
+          setTimeout(() => this.scheduleTick(), wait);
+        }
       }
     } catch (err: any) {
-      // Network error — treat as offline + backoff.
+      // Network error — treat as offline + backoff (Task #501 cap applies).
       this.setOnline(false);
-      await updateMutation(db, m.id, {
-        status: "pending",
-        attemptCount: m.attemptCount + 1,
-        lastError: err?.message ?? String(err),
-      });
-      const wait = backoffMs(m.attemptCount + 1);
-      setTimeout(() => this.scheduleTick(), wait);
+      const errMessage = err?.message ?? String(err);
+      const nextAttempt = m.attemptCount + 1;
+      const giveUp = this.capExceededReason(m, nextAttempt);
+      if (giveUp) {
+        await updateMutation(db, m.id, {
+          status: "failed",
+          attemptCount: nextAttempt,
+          lastError: `${giveUp}: ${errMessage}`,
+        });
+        this.emit({
+          type: "error",
+          mutationId: m.id,
+          kind: m.kind,
+          status: null,
+          message: errMessage,
+        });
+        await this.broadcastState();
+      } else {
+        await updateMutation(db, m.id, {
+          status: "pending",
+          attemptCount: nextAttempt,
+          lastError: errMessage,
+        });
+        const wait = backoffMs(nextAttempt);
+        setTimeout(() => this.scheduleTick(), wait);
+      }
     } finally {
       this.inFlight.delete(m.id);
       this.aborts.delete(m.id);

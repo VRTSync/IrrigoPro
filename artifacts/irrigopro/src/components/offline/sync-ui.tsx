@@ -258,6 +258,19 @@ function kindLabel(kind: QueuedMutationKind): string {
 // errors instead of the raw `<!doctype html>…` payload.
 function friendlyErrorMessage(raw: string): string {
   const head = raw.trimStart().slice(0, 64).toLowerCase();
+  // Task #501 — passive retry cap reached. The raw message is shaped like
+  // `gave_up_after_8_attempts` or `gave_up_after_60_minutes: <body>`.
+  if (head.startsWith("gave_up_after_")) {
+    const m = /^gave_up_after_(\d+)_(attempts|minutes)/.exec(head);
+    if (m) {
+      const n = m[1];
+      const unit = m[2];
+      return unit === "attempts"
+        ? `Gave up after ${n} attempts — tap Retry to try again`
+        : `Gave up after ${n} minutes — tap Retry to try again`;
+    }
+    return "Gave up after repeated failures — tap Retry to try again";
+  }
   if (
     head.startsWith("<!doctype") ||
     head.startsWith("<html") ||
