@@ -269,6 +269,7 @@ import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
+import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
 const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
@@ -11438,23 +11439,6 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (e: any) { res.status(400).json({ message: e?.message ?? "Failed" }); }
   });
 
-  const findingPatchBody = z.object({
-    issueType: z.string().min(1).optional(),
-    severity: z.string().nullish(),
-    partId: z.coerce.number().int().nullish(),
-    partName: z.string().nullish(),
-    partPrice: z.union([z.string(), z.number()]).nullish(),
-    quantity: z.coerce.number().int().min(1).optional(),
-    laborHours: z.union([z.string(), z.number()]).optional(),
-    notes: z.string().nullish(),
-    repairedInField: z.boolean().optional(),
-    // Task #428 — tech intent, persisted independently of `resolution`.
-    techDisposition: z.enum(["needs_review", "completed_in_field"]).optional(),
-    // Task #464 — labor-only Mark Complete confirmation. Server clears it
-    // automatically whenever a partId is assigned (see updateWetCheckFinding).
-    noPartNeeded: z.boolean().optional(),
-  }).partial();
-
   app.patch("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     // in_progress → field tech owns it; submitted/partially_converted →
@@ -11483,32 +11467,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (!parsed.success) { res.status(400).json({ message: "Invalid body", issues: parsed.error.issues }); return; }
     const body = parsed.data;
     const userId = req.authenticatedUserId ?? null;
-    const patch: Partial<InsertWetCheckFinding> = {};
-    if (body.issueType !== undefined) patch.issueType = body.issueType;
-    if (body.severity !== undefined) patch.severity = body.severity ?? null;
-    if (body.partId !== undefined) patch.partId = body.partId ?? null;
-    if (body.partName !== undefined) patch.partName = body.partName ?? null;
-    if (body.partPrice !== undefined) patch.partPrice = body.partPrice != null ? String(body.partPrice) : null;
-    if (body.quantity !== undefined) patch.quantity = body.quantity;
-    if (body.laborHours !== undefined) patch.laborHours = String(body.laborHours);
-    if (body.notes !== undefined) patch.notes = body.notes ?? null;
-    if (body.repairedInField !== undefined) {
-      patch.resolution = body.repairedInField ? "repaired_in_field" : "pending";
-      patch.resolutionDecidedAt = body.repairedInField ? new Date() : null;
-      patch.resolutionDecidedBy = body.repairedInField ? userId : null;
-      // Mirror tech intent unless caller is explicitly setting it below.
-      if (body.techDisposition === undefined) {
-        patch.techDisposition = body.repairedInField ? "completed_in_field" : "needs_review";
-      }
-    }
-    if (body.techDisposition !== undefined) {
-      patch.techDisposition = body.techDisposition;
-    }
-    // Task #464 — labor-only Mark Complete. Storage layer also force-clears
-    // this when a partId is assigned, so the two states cannot both be true.
-    if (body.noPartNeeded !== undefined) {
-      patch.noPartNeeded = body.noPartNeeded;
-    }
+    const patch = buildFindingPatchFromBody(body, userId);
     try {
       const updated = await storage.updateWetCheckFinding(parseInt(req.params.id), cid, patch);
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }

@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { preparePhotoForUpload } from "@/lib/photo-prep";
+import { buildFindingSavePayload } from "@/lib/finding-save-payload";
 import {
   PHOTO_OFFLINE_MESSAGE,
   isProbablyOffline,
@@ -2004,12 +2005,6 @@ function FindingSheet({
   const recentParts = filtered.filter(p => recentSet.has(p.id)).slice(0, 12);
   const otherParts = filtered.filter(p => !recentSet.has(p.id)).slice(0, 60);
 
-  const effectivePart = (): { id: number | null; name: string | null; price: string | null } => {
-    if (selectedPart) return { id: selectedPart.id, name: selectedPart.name, price: selectedPart.price };
-    if (partFromEdit) return partFromEdit;
-    return { id: null, name: null, price: null };
-  };
-
   // Task #464 — picking a part always wins over the labor-only flag, so
   // they can never both be true. Mirrors the server-side guard in
   // updateWetCheckFinding.
@@ -2021,24 +2016,15 @@ function FindingSheet({
   type SaveResult = { id: number; clientId: string };
   const saveMut = useMutation<SaveResult, Error, void>({
     mutationFn: async () => {
-      const p = effectivePart();
-      const payload = {
-        partId: p.id,
-        partName: p.name,
-        partPrice: p.price,
-        quantity: Math.max(1, parseInt(quantity) || 1),
-        laborHours: laborHours || "0",
-        notes: notes || null,
+      const payload = buildFindingSavePayload({
+        selectedPart,
+        partFromEdit,
+        quantity,
+        laborHours,
+        notes,
         repairedInField,
-        // Task #428 — default tech disposition mirrors the Mark Complete
-        // toggle so an explicit completed-in-field repair is captured even
-        // when WET_CHECK_AUTO_BILL is off. Anything else flags for review.
-        techDisposition: repairedInField ? "completed_in_field" : "needs_review",
-        // Task #464 — labor-only Mark Complete confirmation. Server also
-        // force-clears this when partId is set, so the two states cannot
-        // both be true on a finding.
-        noPartNeeded: !p.id && repairedInField ? noPartNeeded : false,
-      };
+        noPartNeeded,
+      });
       if (mode === "edit" && editing) {
         // Edit path goes through the offline wrapper so the patch is
         // queued + mirror-updated when the tech is offline.
