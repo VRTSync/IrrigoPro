@@ -223,6 +223,11 @@ export const billingSheets = pgTable("billing_sheets", {
   photos: text("photos").array().default([]),
   notes: text("notes"),
   branchName: text("branch_name"), // Selected branch for multi-location customers
+  // Task #488 (M3) — canonical link from a billing sheet back to the parent
+  // work order it was converted from (when applicable). Populated by the
+  // POST /api/work-orders/:id/billing-sheet conversion endpoint. Nullable
+  // because billing sheets can also be created standalone with no WO.
+  workOrderId: integer("work_order_id").references(() => workOrders.id),
   // AI-generated description fields
   aiInputs: text("ai_inputs"), // JSON blob of structured inputs used for AI generation
   aiShortDescription: text("ai_short_description"), // Final accepted short description (user-editable)

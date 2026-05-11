@@ -43,11 +43,10 @@ function AuthGate() {
 
   useEffect(() => {
     if (isLoading) return;
-    const inTabs = segments[0] === "(tabs)";
     const onSignIn = segments[0] === "sign-in";
     if (!user && !onSignIn) {
       router.replace("/sign-in");
-    } else if (user && !inTabs) {
+    } else if (user && onSignIn) {
       router.replace("/");
     }
   }, [user, isLoading, segments, router]);
@@ -71,6 +70,7 @@ function AuthGate() {
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+      <Stack.Screen name="work-order/[id]" options={{ title: "Work order" }} />
     </Stack>
   );
 }

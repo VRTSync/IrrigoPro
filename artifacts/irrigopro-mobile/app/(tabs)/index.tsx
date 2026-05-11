@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import React, { useMemo } from "react";
 import {
   ActivityIndicator,
@@ -69,6 +70,7 @@ function formatTodayHeader(): string {
 
 export default function TodayScreen() {
   const colors = useColors();
+  const router = useRouter();
   const { user } = useAuth();
 
   const techId = user?.id;
@@ -175,7 +177,17 @@ export default function TodayScreen() {
           data={todayOrders}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => <WorkOrderCard wo={item} />}
+          renderItem={({ item }) => (
+            <WorkOrderCard
+              wo={item}
+              onPress={() =>
+                router.push({
+                  pathname: "/work-order/[id]",
+                  params: { id: String(item.id) },
+                })
+              }
+            />
+          )}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -189,16 +201,18 @@ export default function TodayScreen() {
   );
 }
 
-function WorkOrderCard({ wo }: { wo: WorkOrder }) {
+function WorkOrderCard({ wo, onPress }: { wo: WorkOrder; onPress: () => void }) {
   const colors = useColors();
   return (
-    <View
-      style={[
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
         styles.card,
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
           borderRadius: colors.radius,
+          opacity: pressed ? 0.85 : 1,
         },
       ]}
     >
@@ -253,7 +267,7 @@ function WorkOrderCard({ wo }: { wo: WorkOrder }) {
           {formatTime(wo.scheduledDate)}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

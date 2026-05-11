@@ -881,7 +881,7 @@ import {
   customers, estimates, workOrders, estimateItems, parts, billingSheets, billingSheetItems, 
   users, invoices, invoiceItems, zones, fieldWorkSessions, fieldWorkItems, notifications,
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs,
-  wetCheckPhotos, wetChecks,
+  wetCheckPhotos, wetChecks, wetCheckFindings,
 } from "@workspace/db";
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
 
@@ -9478,6 +9478,9 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         customerName: workOrder.customerName,
         propertyAddress: workOrder.projectAddress || "",
         customerId: workOrder.customerId,
+        // Task #488 (M3) — canonical link back to the parent WO so the
+        // mobile detail screen can list attached billing sheets.
+        workOrderId,
         totalHours: totalHoursVal,
         laborRate: laborRateVal,
         laborSubtotal: laborSubtotalVal,
@@ -9556,6 +9559,92 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch billing sheet" });
+    }
+  });
+
+  // Mobile detail screens (Task #488 / M3): list billing sheets created
+  // from a work order via the canonical billing_sheets.work_order_id
+  // link populated by the conversion endpoint above. Scoped to the
+  // caller's company via the parent work order's customer.
+  app.get("/api/work-orders/:id/billing-sheets", requireAuthentication, async (req, res) => {
+    try {
+      const cid = requireCompanyId(req, res); if (!cid) return;
+      const workOrderId = parseInt(req.params.id);
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
+      }
+      const wo = await storage.getWorkOrder(workOrderId);
+      if (!wo) {
+        res.status(404).json({ message: "Work order not found" });
+        return;
+      }
+      if (wo.customerId) {
+        const owner = await storage.getCustomer(wo.customerId);
+        if (!owner || owner.companyId !== cid) {
+          res.status(404).json({ message: "Work order not found" });
+          return;
+        }
+      }
+      const rows = await db
+        .select({
+          id: billingSheets.id,
+          billingNumber: billingSheets.billingNumber,
+          status: billingSheets.status,
+          workDate: billingSheets.workDate,
+        })
+        .from(billingSheets)
+        .where(eq(billingSheets.workOrderId, workOrderId))
+        .orderBy(desc(billingSheets.workDate));
+      res.json(rows);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to fetch billing sheets" });
+    }
+  });
+
+  // Mobile detail screens (Task #488 / M3): list wet checks attached to
+  // a work order via wet_check_findings.work_order_id (the canonical
+  // schema link between wet checks and work orders). Scoped to the
+  // caller's company by joining the parent work order's customer.
+  app.get("/api/work-orders/:id/wet-checks", requireAuthentication, async (req, res) => {
+    try {
+      const cid = requireCompanyId(req, res); if (!cid) return;
+      const workOrderId = parseInt(req.params.id);
+      if (isNaN(workOrderId) || workOrderId <= 0) {
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
+      }
+      // Verify the work order belongs to the caller's company via its customer.
+      const wo = await storage.getWorkOrder(workOrderId);
+      if (!wo) {
+        res.status(404).json({ message: "Work order not found" });
+        return;
+      }
+      if (wo.customerId) {
+        const owner = await storage.getCustomer(wo.customerId);
+        if (!owner || owner.companyId !== cid) {
+          res.status(404).json({ message: "Work order not found" });
+          return;
+        }
+      }
+      const rows = await db
+        .selectDistinct({
+          id: wetChecks.id,
+          customerId: wetChecks.customerId,
+          customerName: wetChecks.customerName,
+          status: wetChecks.status,
+          startedAt: wetChecks.startedAt,
+          submittedAt: wetChecks.submittedAt,
+        })
+        .from(wetChecks)
+        .innerJoin(wetCheckFindings, eq(wetCheckFindings.wetCheckId, wetChecks.id))
+        .where(eq(wetCheckFindings.workOrderId, workOrderId))
+        .orderBy(desc(wetChecks.startedAt));
+      res.json(rows);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to fetch wet checks" });
     }
   });
 
