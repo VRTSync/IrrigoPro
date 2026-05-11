@@ -96,11 +96,39 @@ export function formatCurrency(amount: number): string {
 export function coverPage(
   vm: PdfViewModel
 ): string {
-  const { company, invoice } = vm;
+  const { company, invoice, customerHasBranches, branchSubtotals } = vm;
 
   const logoHtml = company.logoDataUri
     ? `<img src="${company.logoDataUri}" class="cover-logo" alt="${company.name}">`
     : `<div class="cover-company-name-fallback">${company.name}</div>`;
+
+  const branchSummaryHtml = (customerHasBranches && branchSubtotals.length > 0)
+    ? (() => {
+        const rows = branchSubtotals.map(group => {
+          const ticketCount = group.workOrders.length + group.billingSheets.length;
+          return `
+            <tr>
+              <td class="cover-breakdown-type">${group.branchName}</td>
+              <td class="cover-breakdown-count">${ticketCount}</td>
+              <td class="cover-breakdown-total">${formatCurrency(group.subtotal)}</td>
+            </tr>`;
+        }).join('');
+        return `
+        <div class="cover-breakdown">
+          <div class="cover-breakdown-heading">Per-Branch Summary</div>
+          <table class="cover-breakdown-table">
+            <thead>
+              <tr>
+                <th>Branch</th>
+                <th class="cover-breakdown-count">Tickets</th>
+                <th class="cover-breakdown-total">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+      })()
+    : '';
 
   return `
   <div class="cover-page">
@@ -127,6 +155,8 @@ export function coverPage(
       ${invoice.customerEmail ? `<div class="cover-bill-to-detail">${invoice.customerEmail}</div>` : ''}
       ${invoice.customerPhone ? `<div class="cover-bill-to-detail">${invoice.customerPhone}</div>` : ''}
     </div>
+
+    ${branchSummaryHtml}
   </div>`;
 }
 
