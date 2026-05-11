@@ -295,11 +295,23 @@ export interface UpsertZoneRecordInput {
   // Capture-time timestamp set on the device. Preserved through queueing
   // so replay records the real field-time, not the replay-time clock.
   checkedAt?: string;
+  // Task #458 — Mark Zone Complete badge state. Send an ISO timestamp to
+  // set, `null` to clear. Server force-clears it whenever status !=
+  // checked_with_issues, so callers don't need to bother clearing it
+  // explicitly when transitioning out of Needs Work.
+  markedCompleteAt?: string | null;
 }
 
 export async function upsertZoneRecord(input: UpsertZoneRecordInput): Promise<{ id?: number; clientId: string }> {
   const clientId = input.clientId ?? uuid();
   const checkedAt = input.checkedAt ?? new Date().toISOString();
+  // Task #458 — server force-clears `markedCompleteAt` whenever status is
+  // not `checked_with_issues`, so we mirror that rule here too: anything
+  // explicitly set by the caller is honored only on Needs Work upserts.
+  const markedCompleteAt =
+    input.status === "checked_with_issues"
+      ? (input.markedCompleteAt ?? null)
+      : null;
   if (!isOfflineQueueEnabled() && input.wetCheckId != null) {
     return await apiRequest(`/api/wet-checks/${input.wetCheckId}/zone-records`, "POST", {
       controllerLetter: input.controllerLetter,
@@ -308,6 +320,7 @@ export async function upsertZoneRecord(input: UpsertZoneRecordInput): Promise<{ 
       ranSuccessfully: input.ranSuccessfully ?? null,
       notes: input.notes ?? null,
       checkedAt,
+      markedCompleteAt,
       clientId,
     });
   }
@@ -324,6 +337,7 @@ export async function upsertZoneRecord(input: UpsertZoneRecordInput): Promise<{ 
       ranSuccessfully: input.ranSuccessfully ?? null,
       notes: input.notes ?? null,
       checkedAt,
+      markedCompleteAt,
     },
     updatedAt: Date.now(),
   });
@@ -334,6 +348,7 @@ export async function upsertZoneRecord(input: UpsertZoneRecordInput): Promise<{ 
     ranSuccessfully: input.ranSuccessfully ?? null,
     notes: input.notes ?? null,
     checkedAt,
+    markedCompleteAt,
     clientId,
   };
   await getSyncEngine().enqueue(newMutation({

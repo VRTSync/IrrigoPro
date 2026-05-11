@@ -789,14 +789,30 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
               : r?.status === "not_applicable"
               ? "bg-gray-400 text-white"
               : "bg-white border border-gray-300";
+            // Task #458 — overlay a check-mark on Needs Work tiles the tech
+            // has explicitly marked complete, so the controller grid reads
+            // as a true progress map (red = still mid-edit, red-with-check
+            // = reviewed-and-confirmed).
+            const isMarkedComplete =
+              r?.status === "checked_with_issues" && r?.markedCompleteAt != null;
             return (
               <button
                 key={n}
                 onClick={() => setActiveZone(n)}
-                className={`aspect-square min-h-[44px] text-sm sm:text-xs font-medium rounded active:scale-95 transition-transform ${cls}`}
+                className={`relative aspect-square min-h-[44px] text-sm sm:text-xs font-medium rounded active:scale-95 transition-transform ${cls}`}
                 data-testid={`zone-${activeLetter}-${n}`}
+                data-marked-complete={isMarkedComplete ? "true" : undefined}
+                aria-label={isMarkedComplete ? `Zone ${n} — Needs Work, marked complete` : `Zone ${n}`}
               >
                 {n}
+                {isMarkedComplete && (
+                  <span
+                    className="absolute -top-1 -right-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-white text-green-600 shadow ring-1 ring-green-600"
+                    data-testid={`zone-${activeLetter}-${n}-marked-complete`}
+                  >
+                    <CheckCircle2 className="w-3 h-3" strokeWidth={3} />
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1354,14 +1370,83 @@ function ZoneScreen({
   // as Ran OK / Skip without touching the zone status. If the tech hasn't
   // logged any findings yet, we surface a tiny inline confirm so a stray
   // tap doesn't lose context.
+  // Task #458 — also persist a `markedCompleteAt` timestamp on the zone so
+  // the controller grid can render a check-mark overlay on Needs Work tiles
+  // the tech has already reviewed-and-confirmed (vs. ones still mid-edit).
+  // The state survives refresh because it lives on the zone record row.
   const [confirmMarkComplete, setConfirmMarkComplete] = useState(false);
   const findingsCount = zoneRecord?.findings.length ?? 0;
+  const markCompleteMut = useMutation({
+    mutationFn: async () => {
+      const markedAt = new Date().toISOString();
+      // Online + offline both share the upsert path, which dedupes by
+      // (wetCheckId, controllerLetter, zoneNumber) so this re-stamps the
+      // existing row without creating a duplicate.
+      if (isOfflineQueueEnabled() && wetCheckClientId) {
+        await offlineUpsertZoneRecord({
+          wetCheckClientId,
+          wetCheckId,
+          controllerLetter: letter,
+          zoneNumber,
+          status: "checked_with_issues",
+          ranSuccessfully: false,
+          notes: zoneRecord?.notes ?? null,
+          checkedAt: zoneRecord?.checkedAt
+            ? new Date(zoneRecord.checkedAt).toISOString()
+            : markedAt,
+          markedCompleteAt: markedAt,
+          clientId: zoneRecord?.clientId ?? undefined,
+        });
+        return;
+      }
+      if (zoneRecord?.id) {
+        await apiRequest(`/api/wet-checks/zone-records/${zoneRecord.id}`, "PATCH", {
+          markedCompleteAt: markedAt,
+        });
+      }
+    },
+    onMutate: async () => {
+      // Optimistic flip so the badge appears immediately on advance.
+      const key = ["/api/wet-checks", wetCheckId];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<WetCheckWithDetails>(key);
+      const stamp = new Date();
+      if (previous && zoneRecord) {
+        // Match by server id when present, otherwise by clientId — avoids
+        // false-positive flips on unsynced offline rows whose id is still
+        // undefined.
+        const matches = (zr: WetCheckZoneRecord) =>
+          zoneRecord.id != null
+            ? zr.id === zoneRecord.id
+            : zr.clientId != null && zr.clientId === zoneRecord.clientId;
+        queryClient.setQueryData<WetCheckWithDetails>(key, {
+          ...previous,
+          zoneRecords: previous.zoneRecords.map((zr) =>
+            matches(zr) ? { ...zr, markedCompleteAt: stamp } : zr,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (e: any, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(["/api/wet-checks", wetCheckId], ctx.previous);
+      }
+      toast({
+        title: "Couldn't mark zone complete",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
+  });
   const handleMarkZoneComplete = () => {
     if (findingsCount === 0 && !confirmMarkComplete) {
       setConfirmMarkComplete(true);
       return;
     }
     setConfirmMarkComplete(false);
+    markCompleteMut.mutate();
     onAdvance();
   };
   // Reset the inline confirm when the tech navigates to a different zone

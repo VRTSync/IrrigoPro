@@ -11280,6 +11280,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     // Client-supplied capture timestamp (ms or ISO). Server falls back to now()
     // when status moves out of not_checked and the client didn't send one.
     checkedAt: z.union([z.string().datetime(), z.number(), z.date()]).nullish(),
+    // Task #458 — Mark Zone Complete badge state. Only meaningful when the
+    // zone is in `checked_with_issues`; the server clears it automatically
+    // when the status moves to anything else (see below).
+    markedCompleteAt: z.union([z.string().datetime(), z.number(), z.date()]).nullish(),
     clientId: z.string().uuid().nullish(),
   });
 
@@ -11295,6 +11299,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         body.checkedAt != null
           ? new Date(body.checkedAt as string | number | Date)
           : (body.status !== "not_checked" ? new Date() : null);
+      // Task #458 — clear `markedCompleteAt` whenever the zone moves out of
+      // the Needs Work state, so the badge can never linger on an OK / N/A
+      // / Not Checked tile.
+      const markedCompleteAt =
+        body.status === "checked_with_issues"
+          ? (body.markedCompleteAt != null ? new Date(body.markedCompleteAt as string | number | Date) : null)
+          : null;
       const created = await storage.upsertWetCheckZoneRecord(wetCheckId, cid, {
         wetCheckId,
         controllerLetter: body.controllerLetter,
@@ -11306,6 +11317,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         notes: body.notes ?? null,
         checkedAt,
         checkedBy: req.authenticatedUserId ?? null,
+        markedCompleteAt,
         clientId: body.clientId ?? null,
       });
       res.status(201).json(created);
@@ -11321,6 +11333,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     observedPressure: z.union([z.string(), z.number()]).nullish(),
     observedFlow: z.union([z.string(), z.number()]).nullish(),
     notes: z.string().nullish(),
+    // Task #458 — Mark Zone Complete badge state. Send a timestamp / true to
+    // set, `null` to clear. Server forces it to null when the zone is not in
+    // `checked_with_issues` so the badge cannot leak onto OK / N/A tiles.
+    markedCompleteAt: z.union([z.string().datetime(), z.number(), z.date(), z.boolean()]).nullish(),
   }).strict();
 
   app.patch("/api/wet-checks/zone-records/:id", requireAuthentication, async (req, res) => {
@@ -11339,6 +11355,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     if (body.status === "checked_ok" || body.status === "checked_with_issues" || body.status === "not_applicable") {
       patch.checkedAt = new Date();
       patch.checkedBy = req.authenticatedUserId ?? null;
+    }
+    // Task #458 — Mark Zone Complete badge state.
+    // - Setting it explicitly is allowed only while the zone is (or is moving
+    //   to) `checked_with_issues`; otherwise we force-clear it so the badge
+    //   never lingers on an OK / N/A / Not Checked tile.
+    // - Any status change away from `checked_with_issues` always clears it,
+    //   even when the client didn't send `markedCompleteAt`.
+    if (body.markedCompleteAt !== undefined) {
+      const want = body.markedCompleteAt;
+      if (want == null || want === false) {
+        patch.markedCompleteAt = null;
+      } else if (want === true) {
+        patch.markedCompleteAt = new Date();
+      } else {
+        patch.markedCompleteAt = new Date(want as string | number | Date);
+      }
+    }
+    if (body.status !== undefined && body.status !== "checked_with_issues") {
+      patch.markedCompleteAt = null;
     }
     try {
       const updated = await storage.updateWetCheckZoneRecord(parseInt(req.params.id), cid, patch);

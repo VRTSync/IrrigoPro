@@ -1145,6 +1145,11 @@ export const wetCheckZoneRecords = pgTable("wet_check_zone_records", {
   notes: text("notes"),
   checkedAt: timestamp("checked_at"),
   checkedBy: integer("checked_by").references(() => users.id),
+  // Task #458 — set when the tech taps "Mark Zone Complete" on a Needs Work
+  // zone, so the controller grid can distinguish reviewed-and-confirmed
+  // Needs Work zones from ones still mid-edit. Cleared automatically when
+  // the zone status moves away from `checked_with_issues`.
+  markedCompleteAt: timestamp("marked_complete_at"),
   clientId: text("client_id"),
 }, (table) => ({
   uniqZone: uniqueIndex("uniq_wet_check_zone").on(table.wetCheckId, table.controllerLetter, table.zoneNumber),
