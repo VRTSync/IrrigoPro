@@ -428,13 +428,13 @@ export default function Navigation() {
       <div className="lg:hidden m-0 p-0">
         {/* Top Bar with Logo and Notifications */}
         <div className="bg-white shadow-sm border-b border-gray-200 m-0 p-0">
-          <div className="flex justify-between items-center h-28 px-4">
+          <div className="flex justify-between items-center h-14 px-4">
             {/* Logo */}
             <div className="flex items-center min-w-0 flex-1 mr-2">
               <img
                 src={irrigoProLogo}
                 alt="IrrigoPro"
-                className="h-24 w-auto max-w-full object-contain"
+                className="h-8 w-auto max-w-full object-contain"
               />
             </div>
 
