@@ -2461,6 +2461,13 @@ export class DatabaseStorage implements IStorage {
       projectAddress: estimate.projectAddress,
       locationNotes: estimate.locationNotes,
       accessInstructions: estimate.accessInstructions,
+      // Task #445 — carry the estimate's free-form work description into
+      // the work order's scope field so the field tech sees the same
+      // scope context the estimator wrote, without manual re-entry.
+      // No-op when the source estimate has no work description.
+      ...(estimate.workDescription
+        ? { description: estimate.workDescription }
+        : {}),
       // Carry the pinned map location and irrigation context forward so
       // the field tech sees the same pin / controller / zone the estimate
       // was scoped to.
