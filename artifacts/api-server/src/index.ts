@@ -1,5 +1,16 @@
 import { createApp } from "./app";
+import { resolveChromiumExecutable } from "./chromium-resolver";
 import { logger } from "./lib/logger";
+
+try {
+  const chromiumPath = resolveChromiumExecutable();
+  logger.info({ chromiumPath }, "Chromium resolved for PDF generation");
+} catch (err) {
+  logger.warn(
+    { err: err instanceof Error ? err.message : String(err) },
+    "Chromium not resolved at startup — PDF generation will fail until a Chromium binary is available",
+  );
+}
 
 const rawPort = process.env["PORT"];
 
