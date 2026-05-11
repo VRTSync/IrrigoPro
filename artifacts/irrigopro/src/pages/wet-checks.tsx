@@ -1799,7 +1799,7 @@ function ZoneScreen({
                       </Badge>
                     )}
                   </div>
-                  {!readOnly && f.resolution === "pending" && (
+                  {!readOnly && (
                     <div className="flex items-center gap-1 shrink-0">
                       <Button
                         variant="ghost"
@@ -2188,7 +2188,7 @@ function FindingSheet({
             <div data-testid="finding-sheet-photos">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-sm font-medium">Photos</div>
-                {!readOnly && editing.resolution === "pending" && (
+                {!readOnly && (
                   <PhotoCaptureButton
                     wetCheckId={wetCheckId}
                     wetCheckClientId={wetCheckClientId}
@@ -2210,7 +2210,7 @@ function FindingSheet({
                       <PhotoThumb
                         key={p.id}
                         photo={p}
-                        canDelete={!readOnly && editing.resolution === "pending"}
+                        canDelete={!readOnly}
                       />
                     ))}
                   </div>
