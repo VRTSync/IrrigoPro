@@ -677,7 +677,7 @@ export interface IStorage {
     opts?: { confirmDeleteWithZones?: boolean; branchName?: string | null },
   ): Promise<{ customer: Customer; controllers: PropertyController[]; removedLetters: string[] }>;
 
-  listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]>;
+  listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<Array<WetCheck & { zoneCount: number; workOrderIds: number[] }>>;
   // Admin-only company-wide list with per-row aggregate counts (zone
   // records, findings, photos). Used by the company-admin Wet Checks
   // management page.
@@ -5161,11 +5161,49 @@ export class DatabaseStorage implements IStorage {
     return { customer: updatedCustomer ?? customer, controllers, removedLetters };
   }
 
-  async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<WetCheck[]> {
+  async listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number }): Promise<Array<WetCheck & { zoneCount: number; workOrderIds: number[] }>> {
     const conds = [eq(wetChecks.companyId, companyId)];
     if (opts?.status) conds.push(eq(wetChecks.status, opts.status));
     if (opts?.technicianId) conds.push(eq(wetChecks.technicianId, opts.technicianId));
-    return await db.select().from(wetChecks).where(and(...conds)).orderBy(desc(wetChecks.startedAt)).limit(200);
+    const wcs = await db.select().from(wetChecks).where(and(...conds)).orderBy(desc(wetChecks.startedAt)).limit(200);
+    if (wcs.length === 0) return [];
+    const ids = wcs.map(w => w.id);
+
+    // Per-row zone count + linked work order ids so the mobile/list UIs
+    // can show "N zones" and "WO #..." chips without N+1 fetches. Work
+    // orders are linked indirectly via `wet_check_findings.work_order_id`
+    // (the canonical schema link); in_progress wet checks usually have
+    // none yet, so the array is commonly empty.
+    const zoneRows = await db.select({
+      wetCheckId: wetCheckZoneRecords.wetCheckId,
+      n: sql<number>`count(*)::int`,
+    }).from(wetCheckZoneRecords)
+      .where(inArray(wetCheckZoneRecords.wetCheckId, ids))
+      .groupBy(wetCheckZoneRecords.wetCheckId);
+    const woRows = await db.selectDistinct({
+      wetCheckId: wetCheckFindings.wetCheckId,
+      workOrderId: wetCheckFindings.workOrderId,
+    }).from(wetCheckFindings)
+      .where(and(
+        inArray(wetCheckFindings.wetCheckId, ids),
+        sql`${wetCheckFindings.workOrderId} IS NOT NULL`,
+      ));
+
+    const zoneMap = new Map(zoneRows.map(r => [r.wetCheckId, Number(r.n)]));
+    const woMap = new Map<number, number[]>();
+    for (const r of woRows) {
+      if (r.workOrderId == null) continue;
+      const list = woMap.get(r.wetCheckId) ?? [];
+      list.push(r.workOrderId);
+      woMap.set(r.wetCheckId, list);
+    }
+    for (const list of woMap.values()) list.sort((a, b) => a - b);
+
+    return wcs.map(wc => ({
+      ...wc,
+      zoneCount: zoneMap.get(wc.id) ?? 0,
+      workOrderIds: woMap.get(wc.id) ?? [],
+    }));
   }
 
   async listWetChecksForAdmin(

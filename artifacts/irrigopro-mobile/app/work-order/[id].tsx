@@ -428,7 +428,7 @@ export default function WorkOrderDetailScreen() {
             onStart={onStart}
             onComplete={onComplete}
             onAddWetCheck={() =>
-              showToast("Wet checks arrive in the next update")
+              showToast("Adding wet checks arrives in a later update")
             }
             onAddBillingSheet={() =>
               showToast("Billing sheets arrive in a later update")
@@ -602,6 +602,7 @@ function AttachedRecords({
   billingSheetsLoading: boolean;
   colors: ReturnType<typeof useColors>;
 }) {
+  const router = useRouter();
   return (
     <>
       <Section title="Wet checks" colors={colors}>
@@ -618,7 +619,10 @@ function AttachedRecords({
             <Pressable
               key={wc.id}
               onPress={() => {
-                showToast("Wet check detail arrives in a later update");
+                router.push({
+                  pathname: "/wet-check/[id]",
+                  params: { id: String(wc.id) },
+                });
               }}
               style={({ pressed }) => [
                 styles.subRow,
