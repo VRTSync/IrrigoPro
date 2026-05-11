@@ -31,6 +31,7 @@ import {
   createFinding as offlineCreateFinding,
   updateFinding as offlineUpdateFinding,
   deleteFinding as offlineDeleteFinding,
+  enqueueZoneRevertCascade as offlineEnqueueZoneRevertCascade,
   linkPhotoToFinding as offlineLinkPhotoToFinding,
   warmWetCheckMirror,
   readWetCheckFromMirror,
@@ -1252,6 +1253,14 @@ function ZoneScreen({
 }) {
   const { toast } = useToast();
   const [findingSheet, setFindingSheet] = useState<FindingSheetState>({ open: false });
+  // Task #455 — revert from "Needs Work" back to "Ran OK" / "Skip" requires
+  // an explicit confirm + cascade of finding + finding-photo deletes when
+  // the zone has work attached. Tracks the pending target status until the
+  // tech confirms.
+  const [pendingRevert, setPendingRevert] = useState<
+    null | { targetStatus: "checked_ok" | "not_applicable" }
+  >(null);
+  const [reverting, setReverting] = useState(false);
   // Slice 3 — flag-gated copy. With auto-bill OFF, we drop the
   // "auto-bills on submit" badge so the field UX matches Slice 2.
   const { data: autoBillCfg } = useQuery<{ enabled: boolean }>({
@@ -1313,6 +1322,95 @@ function ZoneScreen({
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
   });
+
+  // Task #455 — counts of findings + finding-level photos used by both the
+  // "is revert destructive?" gate on the status buttons and the body copy
+  // of the confirmation dialog.
+  const findings = zoneRecord?.findings ?? [];
+  const findingIds = new Set(findings.map((f) => f.id));
+  const findingPhotos = photos.filter(
+    (p) => p.findingId != null && findingIds.has(p.findingId),
+  );
+  const hasAttachedWork = findings.length > 0 || findingPhotos.length > 0;
+
+  // Cascade: delete each finding's photos, reset any non-pending findings
+  // back to pending so the server's deleteWetCheckFinding allows the row
+  // through, delete every finding, then flip the zone status. Order matters
+  // — flipping status first would leave the zone briefly readable as
+  // "Ran OK with findings" (the inconsistent state the spec calls out).
+  //
+  // Online path: sequential awaits enforce order naturally.
+  // Offline path: a single `enqueueZoneRevertCascade` queues every step
+  // with explicit `parentClientIds` chaining so the sync engine (which
+  // dispatches up to 2 mutations concurrently) cannot reorder photo
+  // deletes / finding patches / finding deletes / status flip during
+  // replay.
+  async function performRevert(target: "checked_ok" | "not_applicable") {
+    setReverting(true);
+    try {
+      if (isOfflineQueueEnabled() && wetCheckClientId && zoneRecord?.clientId) {
+        // Bucket photos by finding server id (works for both
+        // clientId-having and legacy clientId-less findings).
+        const photosByFindingId = new Map<number, number[]>();
+        for (const p of findingPhotos) {
+          if (!p.findingId) continue;
+          const arr = photosByFindingId.get(p.findingId) ?? [];
+          arr.push(p.id);
+          photosByFindingId.set(p.findingId, arr);
+        }
+        await offlineEnqueueZoneRevertCascade({
+          wetCheckClientId,
+          wetCheckId,
+          zoneRecordClientId: zoneRecord.clientId,
+          zoneRecordId: zoneRecord.id,
+          controllerLetter: letter,
+          zoneNumber,
+          targetStatus: target,
+          findings: findings.map((f) => ({
+            id: f.id,
+            clientId: f.clientId ?? null,
+            needsResetToPending: f.resolution !== "pending",
+            photoIds: photosByFindingId.get(f.id) ?? [],
+          })),
+        });
+      } else {
+        // Online cascade — sequential awaits.
+        for (const p of findingPhotos) {
+          await apiRequest(`/api/wet-checks/photos/${p.id}`, "DELETE");
+        }
+        for (const f of findings) {
+          if (f.resolution === "pending") continue;
+          await apiRequest(`/api/wet-checks/findings/${f.id}`, "PATCH", { repairedInField: false });
+        }
+        for (const f of findings) {
+          await apiRequest(`/api/wet-checks/findings/${f.id}`, "DELETE");
+        }
+        await new Promise<void>((resolve, reject) => {
+          setStatus.mutate(target, {
+            onSuccess: () => resolve(),
+            onError: (e) => reject(e),
+          });
+        });
+      }
+      setPendingRevert(null);
+    } catch (e: any) {
+      toast({ title: "Couldn't reset zone", description: e?.message, variant: "destructive" });
+    } finally {
+      setReverting(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+    }
+  }
+
+  // Decide whether to show the confirm dialog before flipping status.
+  function handleStatusClick(next: "checked_ok" | "checked_with_issues" | "not_applicable") {
+    const current = zoneRecord?.status;
+    const isLeavingNeedsWork = current === "checked_with_issues" && next !== "checked_with_issues";
+    if (isLeavingNeedsWork && hasAttachedWork) {
+      setPendingRevert({ targetStatus: next as "checked_ok" | "not_applicable" });
+      return;
+    }
+    setStatus.mutate(next);
+  }
 
   // Task #428 — per-finding tech disposition (always visible regardless of
   // WET_CHECK_AUTO_BILL). Patches `techDisposition` on the finding so the
@@ -1494,8 +1592,8 @@ function ZoneScreen({
                 <Button
                   variant={zoneRecord?.status === "checked_ok" ? "default" : "outline"}
                   className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "checked_ok" ? "bg-green-600" : ""}`}
-                  onClick={() => setStatus.mutate("checked_ok")}
-                  disabled={setStatus.isPending}
+                  onClick={() => handleStatusClick("checked_ok")}
+                  disabled={setStatus.isPending || reverting}
                   data-testid="btn-zone-yes"
                 >
                   <CheckCircle2 className="w-4 h-4 mr-1 shrink-0" />
@@ -1505,8 +1603,8 @@ function ZoneScreen({
                 <Button
                   variant={zoneRecord?.status === "checked_with_issues" ? "default" : "outline"}
                   className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "checked_with_issues" ? "bg-red-600" : ""}`}
-                  onClick={() => setStatus.mutate("checked_with_issues")}
-                  disabled={setStatus.isPending}
+                  onClick={() => handleStatusClick("checked_with_issues")}
+                  disabled={setStatus.isPending || reverting}
                   data-testid="btn-zone-no"
                 >
                   <Wrench className="w-4 h-4 mr-1 shrink-0" />
@@ -1516,8 +1614,8 @@ function ZoneScreen({
                 <Button
                   variant={zoneRecord?.status === "not_applicable" ? "default" : "outline"}
                   className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "not_applicable" ? "bg-gray-500" : ""}`}
-                  onClick={() => setStatus.mutate("not_applicable")}
-                  disabled={setStatus.isPending}
+                  onClick={() => handleStatusClick("not_applicable")}
+                  disabled={setStatus.isPending || reverting}
                   data-testid="btn-zone-na"
                 >
                   <MinusCircle className="w-4 h-4 mr-1 shrink-0" />
@@ -1739,6 +1837,49 @@ function ZoneScreen({
         photos={photos}
         readOnly={readOnly}
       />
+
+      {/* Task #455 — confirm before reverting Needs Work → Ran OK / Skip
+          when the zone has work attached. Cancel = no changes. */}
+      <Dialog
+        open={pendingRevert !== null}
+        onOpenChange={(open) => { if (!open && !reverting) setPendingRevert(null); }}
+      >
+        <DialogContent data-testid="revert-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>Clear work for this zone?</DialogTitle>
+            <DialogDescription>
+              Switching this zone to{" "}
+              <span className="font-semibold">
+                {pendingRevert?.targetStatus === "checked_ok" ? "Ran OK" : "Skip / Not Applicable"}
+              </span>{" "}
+              will remove {findings.length} work item{findings.length === 1 ? "" : "s"}
+              {findingPhotos.length > 0
+                ? ` and ${findingPhotos.length} photo${findingPhotos.length === 1 ? "" : "s"}`
+                : ""}{" "}
+              attached to this zone. This can't be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPendingRevert(null)}
+              disabled={reverting}
+              data-testid="revert-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => { if (pendingRevert) performRevert(pendingRevert.targetStatus); }}
+              disabled={reverting}
+              data-testid="revert-confirm"
+            >
+              {reverting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+              Remove work and switch
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

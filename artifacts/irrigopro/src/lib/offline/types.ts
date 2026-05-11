@@ -18,7 +18,8 @@ export type QueuedMutationKind =
   | "finding.update"
   | "finding.delete"
   | "photo.link"
-  | "photo.upload";
+  | "photo.upload"
+  | "photo.delete";
 
 export interface QueuedMutation {
   id: string; // local UUID

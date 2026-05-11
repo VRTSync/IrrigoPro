@@ -248,6 +248,8 @@ function kindLabel(kind: QueuedMutationKind): string {
     case "finding.update":     return "Edit finding";
     case "finding.delete":     return "Remove finding";
     case "photo.link":         return "Attach photo";
+    case "photo.upload":       return "Upload photo";
+    case "photo.delete":       return "Remove photo";
     default:                   return kind;
   }
 }

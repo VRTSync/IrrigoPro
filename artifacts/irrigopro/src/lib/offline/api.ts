@@ -575,6 +575,258 @@ export async function deleteFinding(findingClientId: string, findingId: number |
   }));
 }
 
+// Queue (or directly perform) a wet-check photo delete. Used by the
+// "revert zone from Needs Work" flow (Task #455) to remove finding-level
+// photos as part of cascading the cleanup. Online: hits the DELETE
+// endpoint immediately. Offline: queues a `photo.delete` mutation that
+// the engine will replay against the same endpoint with the photo's
+// numeric server id baked into the URL (no placeholders needed).
+//
+// When `wetCheckClientId` is provided we also optimistically strip the
+// photo from the wet check mirror's `root.photos` array so the offline
+// reader (`assembleFromMirror`) reflects the cleanup immediately, before
+// the queued mutation has a chance to replay.
+export async function deletePhoto(photoId: number, wetCheckClientId?: string): Promise<void> {
+  if (!isOfflineQueueEnabled()) {
+    await apiRequest(`/api/wet-checks/photos/${photoId}`, "DELETE");
+    return;
+  }
+  const db = await openOfflineDB();
+  if (wetCheckClientId) {
+    const row = await getWetCheckMirrorByClientId(db, wetCheckClientId);
+    if (row) {
+      const data = (row as any).data ?? {};
+      const before: any[] = Array.isArray(data.photos) ? data.photos : [];
+      const after = before.filter((p) => p?.id !== photoId);
+      if (after.length !== before.length) {
+        await putWetCheckMirror(db, {
+          ...row,
+          data: { ...data, photos: after },
+          updatedAt: Date.now(),
+        });
+      }
+    }
+  }
+  await getSyncEngine().enqueue(newMutation({
+    kind: "photo.delete",
+    method: "DELETE",
+    urlTemplate: `/api/wet-checks/photos/${photoId}`,
+    body: undefined,
+    clientId: uuid(),
+    parentClientId: null,
+    placeholders: {},
+  }));
+}
+
+// Cancel any queued photo mutations (uploads or finding-link patches)
+// tied to the supplied finding clientIds. Used by the revert-zone flow
+// (Task #455) so an offline-captured photo for a finding being deleted
+// can't replay later and re-attach itself — either directly to the
+// finding (which has been deleted) or, worse, surface as a zone-level
+// photo on the now-OK zone.
+//
+// A photo.upload counts as tied to a finding when ANY of these is true:
+//   1. parentClientId === findingClientId (the typical capture-while-
+//      finding-exists path).
+//   2. placeholders.f === findingClientId (the upload's body still
+//      references the finding via {{f}} even though the queue parent is
+//      the zone record).
+// A photo.link is tied via parentClientId (or placeholders.f) — always
+// the finding cid in the create-finding-from-existing-photos flow.
+export async function cancelQueuedPhotoMutationsForFindings(
+  findingClientIds: ReadonlyArray<string>,
+): Promise<number> {
+  if (!isOfflineQueueEnabled() || findingClientIds.length === 0) return 0;
+  const engine = getSyncEngine();
+  const set = new Set(findingClientIds);
+  const all = await engine.listMutations();
+  let cancelled = 0;
+  for (const m of all) {
+    if (m.status === "completed") continue;
+    if (m.kind !== "photo.upload" && m.kind !== "photo.link") continue;
+    const parentMatch = m.parentClientId != null && set.has(m.parentClientId);
+    const placeholderF = m.placeholders?.f;
+    const placeholderMatch = !!placeholderF && set.has(placeholderF);
+    if (parentMatch || placeholderMatch) {
+      await engine.cancelMutation(m.id);
+      cancelled++;
+    }
+  }
+  return cancelled;
+}
+
+// Task #455 — single offline cascade for the "revert zone from Needs
+// Work" flow. We enqueue all of:
+//   1) photo.delete (one per finding photo)
+//   2) finding.update (set repairedInField=false on each non-pending
+//      finding so the server-side delete is allowed)
+//   3) finding.delete (one per finding)
+//   4) zone_record.upsert (the actual status flip)
+// with explicit `parentClientIds` chaining so the engine — which
+// dispatches up to 2 mutations concurrently — cannot reorder them. The
+// status flip will not run until every photo + finding mutation for this
+// zone has completed. Every step also writes through to the IndexedDB
+// mirror immediately so the local view reflects the cleaned-up zone
+// before any of these mutations replay.
+export interface ZoneRevertCascadeInput {
+  wetCheckClientId: string;
+  wetCheckId?: number;
+  zoneRecordClientId: string;
+  zoneRecordId?: number;
+  controllerLetter: string;
+  zoneNumber: number;
+  targetStatus: "checked_ok" | "not_applicable";
+  findings: ReadonlyArray<{
+    id: number;
+    // Legacy findings created before clientId was wired through may be
+    // null. Cascade falls back to addressing such findings by server id
+    // directly (no placeholder), so they still get cleaned up.
+    clientId: string | null;
+    needsResetToPending: boolean;
+    photoIds: ReadonlyArray<number>;
+  }>;
+  checkedAt?: string;
+}
+export async function enqueueZoneRevertCascade(input: ZoneRevertCascadeInput): Promise<void> {
+  const db = await openOfflineDB();
+  const engine = getSyncEngine();
+  const checkedAt = input.checkedAt ?? new Date().toISOString();
+
+  // Cancel any not-yet-replayed photo uploads/links tied to these
+  // findings so they can't sneak through after revert. (Legacy findings
+  // without a clientId have nothing queued against them, so skip.)
+  await cancelQueuedPhotoMutationsForFindings(
+    input.findings.map((f) => f.clientId).filter((c): c is string => !!c),
+  );
+
+  // Step 1 — photo deletes. Independent of each other; their cids feed
+  // every later step's parentClientIds.
+  const photoDeleteCids: string[] = [];
+  for (const f of input.findings) {
+    for (const photoId of f.photoIds) {
+      const row = await getWetCheckMirrorByClientId(db, input.wetCheckClientId);
+      if (row) {
+        const data = (row as any).data ?? {};
+        const before: any[] = Array.isArray(data.photos) ? data.photos : [];
+        const after = before.filter((p) => p?.id !== photoId);
+        if (after.length !== before.length) {
+          await putWetCheckMirror(db, {
+            ...row,
+            data: { ...data, photos: after },
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      const cid = uuid();
+      photoDeleteCids.push(cid);
+      await engine.enqueue(newMutation({
+        kind: "photo.delete",
+        method: "DELETE",
+        urlTemplate: `/api/wet-checks/photos/${photoId}`,
+        body: undefined,
+        clientId: cid,
+        parentClientId: null,
+        placeholders: {},
+      }));
+    }
+  }
+
+  // Step 2 — repairedInField=false on every non-pending finding so the
+  // server's delete is allowed through. Each patch waits on every photo
+  // delete completing first. Legacy findings without a clientId are
+  // addressed by server id directly (no placeholder, no parent gating).
+  const findingPatchCids = new Map<string, string>();
+  for (const f of input.findings) {
+    if (!f.needsResetToPending) continue;
+    if (f.clientId) {
+      const existing = await db.get("wetCheckFindings", f.clientId);
+      if (existing) {
+        await putFindingMirror(db, {
+          ...existing,
+          data: { ...(existing as any).data, resolution: "pending" },
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    const cid = uuid();
+    if (f.clientId) findingPatchCids.set(f.clientId, cid);
+    await engine.enqueue(newMutation({
+      kind: "finding.update",
+      method: "PATCH",
+      urlTemplate: f.clientId
+        ? "/api/wet-checks/findings/{{f}}"
+        : `/api/wet-checks/findings/${f.id}`,
+      body: { repairedInField: false },
+      clientId: cid,
+      parentClientId: f.clientId ?? null,
+      parentClientIds: photoDeleteCids.length > 0 ? [...photoDeleteCids] : undefined,
+      placeholders: f.clientId ? { f: f.clientId } : {},
+    }));
+  }
+
+  // Step 3 — finding.delete. Each finding's delete waits on its own
+  // patch (if any) AND every photo delete.
+  const findingDeleteCids: string[] = [];
+  for (const f of input.findings) {
+    if (f.clientId) await deleteFindingMirror(db, f.clientId);
+    const cid = uuid();
+    findingDeleteCids.push(cid);
+    const deps: string[] = [...photoDeleteCids];
+    const patchCid = f.clientId ? findingPatchCids.get(f.clientId) : undefined;
+    if (patchCid) deps.push(patchCid);
+    await engine.enqueue(newMutation({
+      kind: "finding.delete",
+      method: "DELETE",
+      urlTemplate: f.clientId
+        ? "/api/wet-checks/findings/{{f}}"
+        : `/api/wet-checks/findings/${f.id}`,
+      body: undefined,
+      clientId: cid,
+      parentClientId: f.clientId ?? null,
+      parentClientIds: deps.length > 0 ? deps : undefined,
+      placeholders: f.clientId ? { f: f.clientId } : {},
+    }));
+  }
+
+  // Step 4 — zone status flip. Waits on every finding delete (which in
+  // turn wait on every patch + every photo delete), so this cannot
+  // dispatch until the whole cascade is durably completed server-side.
+  await putZoneRecordMirror(db, {
+    clientId: input.zoneRecordClientId,
+    wetCheckClientId: input.wetCheckClientId,
+    wetCheckId: input.wetCheckId,
+    data: {
+      clientId: input.zoneRecordClientId,
+      controllerLetter: input.controllerLetter,
+      zoneNumber: input.zoneNumber,
+      status: input.targetStatus,
+      ranSuccessfully: input.targetStatus === "checked_ok" ? true : null,
+      notes: null,
+      checkedAt,
+    },
+    updatedAt: Date.now(),
+  });
+  const allDeps = [...photoDeleteCids, ...Array.from(findingPatchCids.values()), ...findingDeleteCids];
+  await engine.enqueue(newMutation({
+    kind: "zone_record.upsert",
+    method: "POST",
+    urlTemplate: "/api/wet-checks/{{wc}}/zone-records",
+    body: {
+      controllerLetter: input.controllerLetter,
+      zoneNumber: input.zoneNumber,
+      status: input.targetStatus,
+      ranSuccessfully: input.targetStatus === "checked_ok" ? true : null,
+      notes: null,
+      checkedAt,
+      clientId: input.zoneRecordClientId,
+    },
+    clientId: input.zoneRecordClientId,
+    parentClientId: input.wetCheckClientId,
+    parentClientIds: allDeps.length > 0 ? allDeps : undefined,
+    placeholders: { wc: input.wetCheckClientId },
+  }));
+}
+
 // --- Read helpers used to warm the mirror ------------------------------
 
 export async function warmWetCheckMirror(db: OfflineDB | null, wetCheckId: number, data: any): Promise<void> {
