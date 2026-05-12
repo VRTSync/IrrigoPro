@@ -20,3 +20,4 @@
 export * from "./schema";
 export * from "./marketing-leads";
 export * from "./client-errors";
+export * from "./audit-log";

@@ -216,6 +216,21 @@ tab; the other six tabs render a "coming in Phase N" placeholder.
   (`pages/admin-client-errors.tsx` + `GET /api/admin/client-errors`)
   is untouched and keeps working.
 
+## App Health Phase 2 (Task #551) deploy notes
+
+- **DB migration**: this phase introduces the `audit_log` table
+  (`lib/db/src/schema/audit-log.ts`). Production releases must run
+  `pnpm --filter @workspace/db run push` against the deploy DB
+  before traffic is shifted, otherwise
+  `GET /api/admin/app-health/audit` will fail. The dev DB has
+  already had this push applied.
+- **Approximate metrics**: uptime, request rate, and API p95 in the
+  Status Hero / Overview chart are computed from a process-local
+  access-log ring buffer that resets on server restart. Sync queue
+  depth is also a heuristic (in-progress field_work_sessions).
+  These are explicitly approximations until persistent telemetry
+  lands in Phase 3.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

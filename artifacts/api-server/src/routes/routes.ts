@@ -350,6 +350,7 @@ import {
   insertIssueTypeConfigSchema,
   clientErrors,
   appEventGroups,
+  auditLog,
 } from "@workspace/db";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
@@ -947,6 +948,54 @@ import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL 
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
+  // ── Task #550 (Phase 2) — App Health access-log ring buffer ───────────
+  // Lightweight in-memory ring of API request samples used to compute
+  // p95 latency, request counts, and error rates for the App Health
+  // hero / Overview tab. We don't have a separate access-log table yet,
+  // and we don't want to add row-per-request DB writes just for the
+  // health page, so a process-local ring is the right granularity here.
+  // Server restarts reset the buffer — that's acceptable; the page
+  // backfills the long-window error counts from `client_errors`.
+  type AccessLogEntry = { ts: number; durMs: number; status: number; path: string };
+  const ACCESS_LOG_SIZE = 5000;
+  const accessLog: AccessLogEntry[] = new Array(ACCESS_LOG_SIZE);
+  let accessLogHead = 0;
+  let accessLogCount = 0;
+  function recordAccessLogEntry(e: AccessLogEntry): void {
+    accessLog[accessLogHead] = e;
+    accessLogHead = (accessLogHead + 1) % ACCESS_LOG_SIZE;
+    if (accessLogCount < ACCESS_LOG_SIZE) accessLogCount++;
+  }
+  function snapshotAccessLog(): AccessLogEntry[] {
+    const out: AccessLogEntry[] = [];
+    for (let i = 0; i < accessLogCount; i++) {
+      const idx = (accessLogHead - 1 - i + ACCESS_LOG_SIZE) % ACCESS_LOG_SIZE;
+      const e = accessLog[idx];
+      if (e) out.push(e);
+    }
+    return out;
+  }
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api")) return next();
+    // Don't record the App Health endpoints themselves — they'd skew the
+    // numbers because they run on the same 15s polling cadence and would
+    // dominate the request volume for low-traffic tenants.
+    if (req.path.startsWith("/api/admin/app-health")) return next();
+    if (req.path === "/api/health") return next();
+    const start = Date.now();
+    res.on("finish", () => {
+      try {
+        recordAccessLogEntry({
+          ts: start,
+          durMs: Date.now() - start,
+          status: res.statusCode,
+          path: req.path,
+        });
+      } catch { /* never block */ }
+    });
+    next();
+  });
+
   // Tiny heartbeat used by the offline service worker / sync engine to
   // distinguish "no signal" from "online but slow". Intentionally
   // unauthenticated and dependency-free so a service worker fetch from
@@ -955,6 +1004,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
+
+  // ── Task #550 (Phase 2) — Audit log ingestion helper ──────────────────
+  // Best-effort: never throw out of the helper; an audit-log write
+  // failure must not fail the originating request.
+  type AuditEventInput = {
+    occurredAt?: Date;
+    actorUserId?: number | null;
+    actorLabel?: string | null;
+    actorRole?: string | null;
+    actorCompanyId?: number | null;
+    actionType?: string;
+    action: string;
+    severity?: "info" | "warning" | "error" | "critical";
+    targetType?: string | null;
+    targetId?: string | null;
+    summary?: string | null;
+    details?: Record<string, unknown> | null;
+    ip?: string | null;
+    userAgent?: string | null;
+    sessionId?: string | null;
+  };
+  async function recordAuditEvent(req: Request | null, evt: AuditEventInput): Promise<void> {
+    try {
+      const ip = evt.ip ?? (req ? (req.ip || (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() || null) : null);
+      const userAgent = evt.userAgent ?? (req ? ((req.headers["user-agent"] as string | undefined) ?? null) : null);
+      await db.insert(auditLog).values({
+        occurredAt: evt.occurredAt ?? new Date(),
+        actorUserId: evt.actorUserId ?? null,
+        actorLabel: evt.actorLabel ?? null,
+        actorRole: evt.actorRole ?? null,
+        actorCompanyId: evt.actorCompanyId ?? null,
+        actionType: evt.actionType ?? "other",
+        action: evt.action,
+        severity: evt.severity ?? "info",
+        targetType: evt.targetType ?? null,
+        targetId: evt.targetId ?? null,
+        summary: evt.summary ?? null,
+        details: evt.details ?? null,
+        ip: ip ? String(ip).slice(0, 64) : null,
+        userAgent: userAgent ? String(userAgent).slice(0, 512) : null,
+        sessionId: evt.sessionId ?? null,
+      });
+    } catch (err) {
+      try { req?.log?.warn({ err }, "audit log write failed"); } catch { /* ignore */ }
+    }
+  }
 
   // Slice 4A feature flag exposure. The offline service worker is gated
   // by the build-time VITE_OFFLINE_SERVICE_WORKER env var on the client,
@@ -1097,6 +1192,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (groupErr) {
         try { req.log.warn({ err: groupErr }, "client error group rollup failed"); } catch { /* ignore */ }
       }
+
+      // Emit a regression event into the audit log so the App Health
+      // "recent critical events" feed surfaces flips back from
+      // resolved → open as a first-class incident signal.
+      try {
+        const reg = await db.execute<{ isRegression: boolean; severity: string; name: string }>(sql`
+          SELECT is_regression AS "isRegression", severity, name
+          FROM app_event_groups WHERE fingerprint = ${fingerprint}
+        `);
+        const row = reg.rows?.[0];
+        if (row?.isRegression) {
+          await recordAuditEvent(req, {
+            actionType: "system",
+            action: "crash.regression",
+            severity: row.severity === "fatal" ? "critical" : "error",
+            targetType: "crash_group",
+            targetId: fingerprint,
+            summary: `Regression detected: ${row.name}`,
+          });
+        }
+      } catch { /* best-effort */ }
 
       // Best-effort retention sweep: keep ~30 days. Sampled to avoid
       // hammering the table on every report.
@@ -1452,6 +1568,641 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "appHealthBulkSetCrashStatus",
         ctx: {},
         fallbackMessage: "Couldn't update crashes — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #550 (Phase 2) — App Health summary / hero / overview ────────
+  // Window helpers — re-used by every Phase 2 endpoint.
+  const APP_HEALTH_WINDOW_MS: Record<string, number> = {
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+    "90d": 90 * 24 * 60 * 60 * 1000,
+  };
+  function resolveWindow(req: Request, fallback: keyof typeof APP_HEALTH_WINDOW_MS = "24h") {
+    const raw = typeof req.query.window === "string" ? req.query.window : "";
+    const key = APP_HEALTH_WINDOW_MS[raw] ? raw : fallback;
+    return { key, ms: APP_HEALTH_WINDOW_MS[key], interval: APP_HEALTH_WINDOWS[key] ?? "24 hours" };
+  }
+  function percentile(sortedAsc: number[], p: number): number {
+    if (sortedAsc.length === 0) return 0;
+    const idx = Math.min(sortedAsc.length - 1, Math.max(0, Math.ceil(sortedAsc.length * p) - 1));
+    return sortedAsc[idx];
+  }
+  function pctChange(current: number, previous: number): number | null {
+    if (previous === 0) return current === 0 ? 0 : null;
+    return Math.round(((current - previous) / previous) * 1000) / 10;
+  }
+
+  // Active sessions — counted from non-revoked, non-expired mobile tokens
+  // touched in the last 30 minutes. Web sessions are header-auth so we
+  // don't have a clean "last seen" surface for them yet; this still gives
+  // an honest pulse number for field techs (the bulk of active users).
+  async function getActiveUsersNow(): Promise<{ web: number; mobile: number; total: number }> {
+    try {
+      const r = await db.execute<{ mobile: number }>(sql`
+        SELECT COUNT(DISTINCT user_id)::int AS mobile
+        FROM mobile_tokens
+        WHERE revoked_at IS NULL
+          AND expires_at > now()
+          AND COALESCE(last_used_at, created_at) >= now() - interval '30 minutes'
+      `);
+      const mobile = r.rows?.[0]?.mobile ?? 0;
+      return { web: 0, mobile, total: mobile };
+    } catch {
+      return { web: 0, mobile: 0, total: 0 };
+    }
+  }
+
+  function summarizeAccessLog(
+    sinceMs: number,
+    untilMs: number = Number.POSITIVE_INFINITY,
+  ): { requests: number; errors: number; p95: number } {
+    const snap = snapshotAccessLog();
+    const durs: number[] = [];
+    let requests = 0;
+    let errors = 0;
+    for (const e of snap) {
+      if (e.ts < sinceMs || e.ts >= untilMs) continue;
+      requests++;
+      if (e.status >= 500) errors++;
+      durs.push(e.durMs);
+    }
+    durs.sort((a, b) => a - b);
+    return { requests, errors, p95: percentile(durs, 0.95) };
+  }
+
+  async function getEventCount(sinceMs: number, severity?: "warning" | "error" | "fatal"): Promise<number> {
+    return getEventCountBetween(sinceMs, Date.now(), severity);
+  }
+
+  async function getEventCountBetween(
+    sinceMs: number,
+    untilMs: number,
+    severity?: "warning" | "error" | "fatal" | Array<"warning" | "error" | "fatal">,
+  ): Promise<number> {
+    try {
+      const sinceDate = new Date(sinceMs);
+      const untilDate = new Date(untilMs);
+      let row;
+      if (severity) {
+        const sevs = Array.isArray(severity) ? severity : [severity];
+        const r = await db.execute<{ c: number }>(sql`
+          SELECT COUNT(*)::int AS c FROM client_errors
+          WHERE occurred_at >= ${sinceDate} AND occurred_at < ${untilDate}
+            AND severity = ANY(${sevs})
+        `);
+        row = r.rows?.[0];
+      } else {
+        const r = await db.execute<{ c: number }>(sql`
+          SELECT COUNT(*)::int AS c FROM client_errors
+          WHERE occurred_at >= ${sinceDate} AND occurred_at < ${untilDate}
+        `);
+        row = r.rows?.[0];
+      }
+      return row?.c ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  async function getActiveUsersAt(atMs: number): Promise<number> {
+    // Active users in the 30-minute window ending at `atMs`. Used to
+    // compute a true previous-window comparison for the hero tile.
+    try {
+      const start = new Date(atMs - 30 * 60 * 1000);
+      const end = new Date(atMs);
+      const r = await db.execute<{ c: number }>(sql`
+        SELECT COUNT(DISTINCT mt.user_id)::int AS c
+        FROM mobile_tokens mt
+        WHERE mt.revoked_at IS NULL
+          AND COALESCE(mt.last_used_at, mt.created_at) >= ${start}
+          AND COALESCE(mt.last_used_at, mt.created_at) < ${end}
+      `);
+      return r.rows?.[0]?.c ?? 0;
+    } catch { return 0; }
+  }
+
+  // Sync queue depth proxy: we don't yet have a server-side persisted
+  // queue, so use field_work_sessions stuck in "in_progress" as a
+  // best-effort signal — these are the records most likely to be in the
+  // tech's local offline queue waiting on a sync. > 1h old counts as
+  // "stuck".
+  async function getSyncQueueDepth(): Promise<{ depth: number; stuck: number }> {
+    try {
+      const r = await db.execute<{ depth: number; stuck: number }>(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'in-progress')::int AS depth,
+          COUNT(*) FILTER (WHERE status = 'in-progress' AND start_time < now() - interval '1 hour')::int AS stuck
+        FROM field_work_sessions
+      `);
+      const row = r.rows?.[0];
+      return { depth: row?.depth ?? 0, stuck: row?.stuck ?? 0 };
+    } catch {
+      return { depth: 0, stuck: 0 };
+    }
+  }
+
+  // Rolling snapshots for delta computation on metrics that don't have
+  // a natural "previous window" query (active users right now, current
+  // sync queue depth). Keyed by window so 24h ≠ 7d.
+  const summarySnapshots = new Map<string, { ts: number; activeUsers: number; syncQueue: number }>();
+
+  app.get("/api/admin/app-health/summary", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const { key: windowKey, ms: windowMs } = resolveWindow(req, "24h");
+      const now = Date.now();
+      const sinceCurrent = now - windowMs;
+      const sincePrev = now - 2 * windowMs;
+
+      const [active, current, previousOnly, errorsCurrent, errorsPrev, activeUsersPrev, sync, openIncidents] = await Promise.all([
+        getActiveUsersNow(),
+        Promise.resolve(summarizeAccessLog(sinceCurrent, now)),
+        Promise.resolve(summarizeAccessLog(sincePrev, sinceCurrent)),
+        // Spec: "Errors" KPI counts both error and fatal severities
+        // (warnings remain on the chart but are not part of the hero KPI).
+        getEventCountBetween(sinceCurrent, now, ["error", "fatal"]),
+        getEventCountBetween(sincePrev, sinceCurrent, ["error", "fatal"]),
+        getActiveUsersAt(sinceCurrent),
+        getSyncQueueDepth(),
+        (async () => {
+          try {
+            const r = await db.execute<{ c: number }>(sql`
+              SELECT COUNT(*)::int AS c FROM app_event_groups
+              WHERE status = 'open' AND severity IN ('error', 'fatal')
+                AND last_seen_at >= now() - interval '24 hours'
+            `);
+            return r.rows?.[0]?.c ?? 0;
+          } catch { return 0; }
+        })(),
+      ]);
+
+      // True prior-window slices: `summarizeAccessLog` is now bracket-
+      // queried [since,until) so we don't double-count the current
+      // window in `previousOnly` anymore. Same for `getEventCountBetween`.
+      const errRate = current.requests > 0 ? current.errors / current.requests : 0;
+      const uptime = current.requests > 0 ? Math.max(0, 1 - errRate) : 1;
+      const errRatePrev = previousOnly.requests > 0 ? previousOnly.errors / previousOnly.requests : 0;
+      const uptimePrev = previousOnly.requests > 0 ? Math.max(0, 1 - errRatePrev) : 1;
+      const uptimePctNum = uptime * 100;
+      const uptimePctPrev = uptimePrev * 100;
+      // Active users delta: compare the live "now" count to the live
+      // count as of the previous window boundary. If neither query has
+      // any data we still keep the snapshot fallback for parity.
+      const snap = summarySnapshots.get(windowKey);
+      const activeUsersDelta = activeUsersPrev > 0
+        ? pctChange(active.total, activeUsersPrev)
+        : (snap ? pctChange(active.total, snap.activeUsers) : null);
+      // Sync queue depth is a "right now" gauge — we only have a true
+      // previous-window comparison via the rolling snapshot map.
+      const syncQueueDelta = snap ? pctChange(sync.depth, snap.syncQueue) : null;
+      summarySnapshots.set(windowKey, {
+        ts: now,
+        activeUsers: active.total,
+        syncQueue: sync.depth,
+      });
+      // Status pulse:
+      //   ok    — error rate < 0.5% and < 5 fatal+error events in window
+      //   warn  — error rate < 2% or any open incident
+      //   crit  — > 2% errors, any sync_queue.stuck > 0, or > 1 open critical
+      let status: "ok" | "warn" | "crit" = "ok";
+      if (errRate >= 0.02 || sync.stuck > 0 || openIncidents > 1) status = "crit";
+      else if (errRate >= 0.005 || openIncidents > 0 || errorsCurrent > 5) status = "warn";
+
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        window: windowKey,
+        status,
+        uptimePct: Math.round(uptime * 10000) / 100,
+        uptimeSloPct: 99.9,
+        activeUsers: active.total,
+        activeUsersBreakdown: active,
+        errors: errorsCurrent,
+        errorsPrev,
+        apiP95Ms: current.p95,
+        apiP95Prev: previousOnly.p95,
+        syncQueueDepth: sync.depth,
+        syncQueueStuck: sync.stuck,
+        incidentsOpen: openIncidents,
+        kpisDelta: {
+          activeUsers: activeUsersDelta,
+          errors: pctChange(errorsCurrent, errorsPrev),
+          apiP95: pctChange(current.p95, previousOnly.p95),
+          syncQueue: syncQueueDelta,
+          uptime: pctChange(uptimePctNum, uptimePctPrev),
+        },
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthSummary",
+        ctx: {},
+        fallbackMessage: "Couldn't load App Health summary — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Hourly time-series for the Overview chart.
+  app.get("/api/admin/app-health/timeseries", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const { key: windowKey, ms: windowMs, interval } = resolveWindow(req, "24h");
+      // Reject unknown metric values so the contract stays explicit.
+      // The endpoint always returns the full bundle (requests + per-severity
+      // event counts); `metric` is reserved for forward-compat with Phase 3
+      // when we slice to a single series server-side.
+      const ALLOWED_METRICS = new Set(["all", "requests", "errors", "warnings", "fatal"]);
+      const metricParam = typeof req.query.metric === "string" ? req.query.metric : "all";
+      if (!ALLOWED_METRICS.has(metricParam)) {
+        res.status(400).json({ message: `Unknown metric: ${metricParam}` });
+        return;
+      }
+      const ALLOWED_BUCKETS = new Set(["1h", "1d"]);
+      const bucketParam = typeof req.query.bucket === "string" ? req.query.bucket : "";
+      if (bucketParam && !ALLOWED_BUCKETS.has(bucketParam)) {
+        res.status(400).json({ message: `Unknown bucket: ${bucketParam}` });
+        return;
+      }
+      // Default bucket: 1h for 24h/7d windows, 1d for 30d/90d. An
+      // explicit `bucket=1h` is honored even on 30d/90d.
+      const defaultBucket = windowKey === "30d" || windowKey === "90d" ? "1d" : "1h";
+      const effectiveBucket = bucketParam || defaultBucket;
+      let bucketMs: number;
+      let pgInterval: string;
+      let bucketTrunc: string;
+      if (effectiveBucket === "1d") {
+        bucketMs = 24 * 60 * 60 * 1000;
+        pgInterval = "1 day";
+        bucketTrunc = "day";
+      } else {
+        bucketMs = 60 * 60 * 1000;
+        pgInterval = "1 hour";
+        bucketTrunc = "hour";
+      }
+      const sinceMs = Date.now() - windowMs;
+      const sinceDate = new Date(sinceMs);
+
+      // Errors / warnings from app_events.
+      const eventsResult = await db.execute<{ ts: string; severity: string; c: number }>(sql`
+        SELECT date_trunc(${bucketTrunc}, occurred_at) AS ts, severity, COUNT(*)::int AS c
+        FROM client_errors
+        WHERE occurred_at >= ${sinceDate}
+        GROUP BY ts, severity
+        ORDER BY ts
+      `);
+
+      // Requests from access-log buffer (process-local).
+      const reqByBucket: Record<number, number> = {};
+      for (const e of snapshotAccessLog()) {
+        if (e.ts < sinceMs) continue;
+        const b = Math.floor(e.ts / bucketMs) * bucketMs;
+        reqByBucket[b] = (reqByBucket[b] ?? 0) + 1;
+      }
+
+      const eventsByBucket: Record<number, { errors: number; warnings: number; fatal: number }> = {};
+      for (const row of eventsResult.rows ?? []) {
+        const b = Math.floor(new Date(row.ts).getTime() / bucketMs) * bucketMs;
+        const cell = eventsByBucket[b] ?? { errors: 0, warnings: 0, fatal: 0 };
+        if (row.severity === "warning") cell.warnings += row.c;
+        else if (row.severity === "fatal") cell.fatal += row.c;
+        else if (row.severity === "error") cell.errors += row.c;
+        eventsByBucket[b] = cell;
+      }
+
+      const buckets: Array<{ ts: string; requests: number; errors: number; warnings: number; fatal: number }> = [];
+      const startBucket = Math.floor(sinceMs / bucketMs) * bucketMs;
+      const endBucket = Math.floor(Date.now() / bucketMs) * bucketMs;
+      for (let b = startBucket; b <= endBucket; b += bucketMs) {
+        const ev = eventsByBucket[b] ?? { errors: 0, warnings: 0, fatal: 0 };
+        buckets.push({
+          ts: new Date(b).toISOString(),
+          requests: reqByBucket[b] ?? 0,
+          errors: ev.errors,
+          warnings: ev.warnings,
+          fatal: ev.fatal,
+        });
+      }
+
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ window: windowKey, bucket: pgInterval, buckets });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthTimeseries",
+        ctx: {},
+        fallbackMessage: "Couldn't load App Health time-series — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Companies tab: list + drawer detail with derived health score ─────
+  type CompanyHealthRow = {
+    id: number;
+    name: string;
+    plan: string | null;
+    activeNow: number;
+    totalUsers: number;
+    errors24h: number;
+    syncQueue: number | null;
+    photoUploadPct: number | null;
+    storageBytes: number | null;
+    appVersion: string | null;
+    lastActivityAt: string | null;
+    healthScore: number;
+    healthBucket: "ok" | "warn" | "bad" | "crit";
+  };
+  let companiesCache: { ts: number; rows: CompanyHealthRow[] } | null = null;
+
+  function bucketFromScore(score: number): "ok" | "warn" | "bad" | "crit" {
+    if (score >= 90) return "ok";
+    if (score >= 75) return "warn";
+    if (score >= 50) return "bad";
+    return "crit";
+  }
+
+  function computeHealthScore(opts: {
+    errors24h: number;
+    activeNow: number;
+    totalUsers: number;
+    syncQueue: number | null;
+    photoUploadPct: number | null;
+  }): number {
+    // Heuristic per spec section 4: start at 100 and subtract for each
+    // signal of trouble. Capped at 0..100.
+    let score = 100;
+    // Errors per active user — heavy penalty above 1, lighter below.
+    const denom = Math.max(1, opts.activeNow || 1);
+    const errPerUser = opts.errors24h / denom;
+    score -= Math.min(40, errPerUser * 8);
+    // Sync queue: 1pt per stuck request, capped at 30. Skip when null
+    // (per-company breakout not yet available — don't penalize).
+    if (opts.syncQueue != null) score -= Math.min(30, opts.syncQueue * 1);
+    // Photo upload success: linear penalty below 95%.
+    if (opts.photoUploadPct != null && opts.photoUploadPct < 95) {
+      score -= Math.min(20, (95 - opts.photoUploadPct) * 0.8);
+    }
+    // Tiny tenant inactivity penalty if zero active users and any errors.
+    if (opts.activeNow === 0 && opts.errors24h > 0) score -= 5;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  async function loadCompaniesHealth(force = false): Promise<CompanyHealthRow[]> {
+    const now = Date.now();
+    if (!force && companiesCache && now - companiesCache.ts < 60_000) return companiesCache.rows;
+
+    const companiesResult = await db.execute<{
+      id: number;
+      name: string;
+      plan: string | null;
+      totalUsers: number;
+      activeNow: number;
+      errors24h: number;
+      syncQueue: number | null;
+      photoTotal: number;
+      photoStuck: number;
+      lastActivityAt: string | null;
+      latestVersion: string | null;
+    }>(sql`
+      WITH base AS (
+        SELECT c.id, c.name, c.subscription AS plan,
+               (SELECT COUNT(*)::int FROM users u WHERE u.company_id = c.id AND u.is_active = true AND u.is_deleted = false) AS "totalUsers",
+               (SELECT COUNT(DISTINCT mt.user_id)::int FROM mobile_tokens mt
+                  JOIN users u ON u.id = mt.user_id
+                  WHERE u.company_id = c.id
+                    AND mt.revoked_at IS NULL AND mt.expires_at > now()
+                    AND COALESCE(mt.last_used_at, mt.created_at) >= now() - interval '30 minutes'
+               ) AS "activeNow",
+               (SELECT COUNT(*)::int FROM client_errors ce
+                  WHERE ce.company_id = c.id
+                    AND ce.severity IN ('error','fatal')
+                    AND ce.occurred_at >= now() - interval '24 hours'
+               ) AS "errors24h",
+               -- field_work_sessions has no company_id (and no clean
+               -- join through users.clock_number either), so we can't
+               -- break the global sync queue depth out per-company yet.
+               -- Reported as NULL until a per-company queue source
+               -- lands in Phase 3, so the UI shows an honest "—".
+               NULL::int AS "syncQueue",
+               (SELECT COUNT(*)::int FROM wet_check_photos wp
+                  JOIN wet_checks wc ON wc.id = wp.wet_check_id
+                  WHERE wc.company_id = c.id AND wp.taken_at >= now() - interval '24 hours'
+               ) AS "photoTotal",
+               (SELECT COUNT(*)::int FROM wet_check_photos wp
+                  JOIN wet_checks wc ON wc.id = wp.wet_check_id
+                  WHERE wc.company_id = c.id AND wp.taken_at >= now() - interval '24 hours' AND wp.url = ''
+               ) AS "photoStuck",
+               (SELECT MAX(occurred_at)::text FROM client_errors WHERE company_id = c.id) AS "lastActivityAt",
+               (SELECT app_version FROM client_errors
+                  WHERE company_id = c.id AND app_version IS NOT NULL
+                    AND occurred_at >= now() - interval '7 days'
+                  GROUP BY app_version
+                  ORDER BY COUNT(*) DESC, MAX(occurred_at) DESC
+                  LIMIT 1) AS "latestVersion"
+        FROM companies c
+        WHERE c.is_active = true
+        ORDER BY c.name
+      )
+      SELECT * FROM base
+    `);
+
+    const rows: CompanyHealthRow[] = (companiesResult.rows ?? []).map((r) => {
+      const photoUploadPct = r.photoTotal > 0
+        ? Math.round(((r.photoTotal - r.photoStuck) / r.photoTotal) * 1000) / 10
+        : null;
+      const score = computeHealthScore({
+        errors24h: r.errors24h,
+        activeNow: r.activeNow,
+        totalUsers: r.totalUsers,
+        syncQueue: r.syncQueue,
+        photoUploadPct,
+      });
+      return {
+        id: r.id,
+        name: r.name,
+        plan: r.plan,
+        activeNow: r.activeNow,
+        totalUsers: r.totalUsers,
+        errors24h: r.errors24h,
+        syncQueue: r.syncQueue,
+        photoUploadPct,
+        storageBytes: null,
+        appVersion: r.latestVersion,
+        lastActivityAt: r.lastActivityAt,
+        healthScore: score,
+        healthBucket: bucketFromScore(score),
+      };
+    });
+    companiesCache = { ts: now, rows };
+    return rows;
+  }
+
+  app.get("/api/admin/app-health/companies", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const rows = await loadCompaniesHealth(req.query.refresh === "1");
+      const sorted = [...rows].sort((a, b) => a.healthScore - b.healthScore);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ companies: sorted });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthCompanies",
+        ctx: {},
+        fallbackMessage: "Couldn't load companies — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.get("/api/admin/app-health/companies/:id", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid company id" });
+        return;
+      }
+      const rows = await loadCompaniesHealth(req.query.refresh === "1");
+      const company = rows.find((c) => c.id === id);
+      if (!company) {
+        res.status(404).json({ message: "Company not found" });
+        return;
+      }
+
+      const [usersRes, topIssuesRes] = await Promise.all([
+        db.execute<{
+          id: number; name: string; username: string; role: string; lastSeenAt: string | null; isActive: boolean;
+        }>(sql`
+          SELECT u.id, u.name, u.username, u.role,
+            (SELECT MAX(COALESCE(mt.last_used_at, mt.created_at))::text FROM mobile_tokens mt WHERE mt.user_id = u.id) AS "lastSeenAt",
+            u.is_active AS "isActive"
+          FROM users u
+          WHERE u.company_id = ${id} AND u.is_deleted = false
+          ORDER BY u.is_active DESC, u.name
+          LIMIT 100
+        `),
+        db.execute<{ fingerprint: string; name: string; sampleMessage: string | null; severity: string; eventCount: number; lastSeenAt: string }>(sql`
+          SELECT g.fingerprint, g.name, g.sample_message AS "sampleMessage", g.severity,
+                 COUNT(ce.id)::int AS "eventCount",
+                 MAX(ce.occurred_at)::text AS "lastSeenAt"
+          FROM app_event_groups g
+          JOIN client_errors ce ON ce.fingerprint = g.fingerprint
+          WHERE ce.company_id = ${id}
+            AND ce.occurred_at >= now() - interval '7 days'
+          GROUP BY g.fingerprint, g.name, g.sample_message, g.severity
+          ORDER BY "eventCount" DESC
+          LIMIT 8
+        `),
+      ]);
+
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        company,
+        users: usersRes.rows ?? [],
+        topIssues: topIssuesRes.rows ?? [],
+        resources: {
+          storageBytes: null,
+          monthlyApiCalls: null,
+          syncQueueDepth: company.syncQueue,
+          photoUploadPct: company.photoUploadPct,
+        },
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthCompanyDetail",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't load company detail — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Audit Log tab ────────────────────────────────────────────────────
+  app.get("/api/admin/app-health/audit", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const q = typeof req.query.q === "string" ? req.query.q.slice(0, 200) : "";
+      const actor = typeof req.query.actor === "string" ? req.query.actor.slice(0, 200) : "";
+      const action = typeof req.query.action === "string" ? req.query.action.slice(0, 100) : "";
+      // Allow-list action_type and severity so the contract stays explicit
+      // and a stray ?severity=foo doesn't silently match nothing.
+      const ALLOWED_ACTION_TYPES = new Set([
+        "auth", "user", "company", "data", "config", "billing", "export", "system",
+        "admin", "deploy", "integration", "impersonation", "role_change", "other", "",
+      ]);
+      const ALLOWED_SEVERITIES = new Set(["info", "warning", "error", "critical"]);
+      const actionTypeRaw = typeof req.query.action_type === "string" ? req.query.action_type.slice(0, 50) : "";
+      if (actionTypeRaw && !ALLOWED_ACTION_TYPES.has(actionTypeRaw)) {
+        res.status(400).json({ message: `Unknown action_type: ${actionTypeRaw}` });
+        return;
+      }
+      const actionType = actionTypeRaw;
+      const severityRaw = typeof req.query.severity === "string" ? req.query.severity.slice(0, 64) : "";
+      if (severityRaw) {
+        const tokens = severityRaw.split(",").map((s) => s.trim()).filter(Boolean);
+        for (const t of tokens) {
+          if (!ALLOWED_SEVERITIES.has(t)) {
+            res.status(400).json({ message: `Unknown severity: ${t}` });
+            return;
+          }
+        }
+      }
+      const severity = severityRaw;
+      const fromRaw = typeof req.query.from === "string" ? Date.parse(req.query.from) : NaN;
+      const toRaw = typeof req.query.to === "string" ? Date.parse(req.query.to) : NaN;
+      const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 100));
+      const offset = Math.max(0, Number(req.query.offset) || 0);
+
+      const filters: SQL[] = [];
+      if (q) {
+        const like = `%${q}%`;
+        filters.push(sql`(action ILIKE ${like} OR summary ILIKE ${like} OR actor_label ILIKE ${like})`);
+      }
+      if (actor) filters.push(sql`actor_label ILIKE ${`%${actor}%`}`);
+      if (action) filters.push(sql`action = ${action}`);
+      if (actionType) filters.push(sql`action_type = ${actionType}`);
+      if (severity) {
+        // Accept comma-separated severities (e.g. ?severity=warning,error,critical).
+        const sevs = severity.split(",").map((s) => s.trim()).filter(Boolean);
+        if (sevs.length === 1) filters.push(sql`severity = ${sevs[0]}`);
+        else if (sevs.length > 1) filters.push(sql`severity = ANY(${sevs})`);
+      }
+      if (Number.isFinite(fromRaw)) filters.push(sql`occurred_at >= ${new Date(fromRaw)}`);
+      if (Number.isFinite(toRaw)) filters.push(sql`occurred_at <= ${new Date(toRaw)}`);
+      const where = filters.length === 0
+        ? sql`TRUE`
+        : filters.reduce<SQL>((acc, frag, i) => (i === 0 ? frag : sql`${acc} AND ${frag}`), sql``);
+
+      const rowsResult = await db.execute<{
+        id: number; occurredAt: string; actorUserId: number | null; actorLabel: string | null;
+        actorRole: string | null; actorCompanyId: number | null; actionType: string; action: string;
+        severity: string; targetType: string | null; targetId: string | null; summary: string | null;
+        details: unknown; ip: string | null;
+      }>(sql`
+        SELECT id, occurred_at AS "occurredAt", actor_user_id AS "actorUserId",
+               actor_label AS "actorLabel", actor_role AS "actorRole",
+               actor_company_id AS "actorCompanyId", action_type AS "actionType", action,
+               severity, target_type AS "targetType", target_id AS "targetId",
+               summary, details, ip
+        FROM audit_log
+        WHERE ${where}
+        ORDER BY occurred_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+      const totalResult = await db.execute<{ total: number }>(sql`
+        SELECT COUNT(*)::int AS total FROM audit_log WHERE ${where}
+      `);
+      const total = totalResult.rows?.[0]?.total ?? 0;
+      res.setHeader("X-Total-Count", String(total));
+      res.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+      res.json({ events: rowsResult.rows ?? [], total });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthAudit",
+        ctx: {},
+        fallbackMessage: "Couldn't load audit log — please retry",
       });
       res.status(status).json({ message });
     }
@@ -1927,10 +2678,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = parseInt(req.params.id);
       const userData = insertUserSchema.partial().parse(req.body);
+      const before = await storage.getUser(userId);
       const user = await storage.updateUser(userId, userData);
       if (!user) {
         res.status(404).json({ message: "User not found" });
         return;
+      }
+      // Task #551 (Phase 2) — surface role/active flips to the audit log.
+      if (before) {
+        const actor = headerUserId(req);
+        const actorRole = headerUserRole(req) ?? null;
+        if (userData.role && userData.role !== before.role) {
+          void recordAuditEvent(req, {
+            actorUserId: actor ? Number(actor) || null : null,
+            actorRole,
+            actionType: "role_change",
+            action: "user.role_changed",
+            severity: "warning",
+            targetType: "user",
+            targetId: String(user.id),
+            summary: `${before.username}: ${before.role} → ${userData.role}`,
+            details: { from: before.role, to: userData.role },
+          });
+        }
+        if (userData.isActive != null && userData.isActive !== before.isActive) {
+          void recordAuditEvent(req, {
+            actorUserId: actor ? Number(actor) || null : null,
+            actorRole,
+            actionType: "admin",
+            action: userData.isActive ? "user.reactivated" : "user.deactivated",
+            severity: "warning",
+            targetType: "user",
+            targetId: String(user.id),
+            summary: `${before.username} ${userData.isActive ? "reactivated" : "deactivated"}`,
+          });
+        }
       }
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
@@ -2389,6 +3171,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      void recordAuditEvent(req, {
+        actorUserId: null,
+        actorLabel: 'system',
+        actorRole: 'super_admin',
+        actorCompanyId: null,
+        actionType: 'admin',
+        action: 'admin_reset_users',
+        severity: 'critical',
+        targetType: 'user',
+        targetId: null,
+        summary: `Mass password reset across ${users.length} accounts`,
+        details: { usersUpdated: users.length },
+      });
+
       res.json({ 
         message: "All user passwords reset to 'password123'", 
         usersUpdated: users.length 
@@ -2428,29 +3224,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { username, password } = req.body;
       const user = await storage.getUserByUsername(username);
-      
+
       if (!user || !user.isActive) {
+        // Task #550 (Phase 2) — surface failed logins to the Audit Log tab.
+        void recordAuditEvent(req, {
+          actorUserId: user?.id ?? null,
+          actorLabel: typeof username === "string" ? String(username).slice(0, 200) : null,
+          actorRole: user?.role ?? null,
+          actorCompanyId: user?.companyId ?? null,
+          actionType: "auth",
+          action: "auth.login_failed",
+          severity: "warning",
+          summary: user ? "Login refused — account inactive" : "Login refused — unknown user",
+        });
         res.status(401).json({ message: "Invalid credentials" });
         return;
       }
-      
+
       // Use bcrypt to compare password with hash
       const passwordValid = await bcrypt.compare(password, user.password);
       if (!passwordValid) {
+        void recordAuditEvent(req, {
+          actorUserId: user.id,
+          actorLabel: user.username,
+          actorRole: user.role,
+          actorCompanyId: user.companyId ?? null,
+          actionType: "auth",
+          action: "auth.login_failed",
+          severity: "warning",
+          summary: "Login refused — bad password",
+        });
         res.status(401).json({ message: "Invalid credentials" });
         return;
       }
-      
+
       // Check if email is verified (optional enforcement)
       if (user.email && !user.emailVerified) {
-        res.status(403).json({ 
-          message: "Email verification required", 
+        res.status(403).json({
+          message: "Email verification required",
           requiresVerification: true,
-          email: user.email 
+          email: user.email
         });
         return;
       }
-      
+
+      void recordAuditEvent(req, {
+        actorUserId: user.id,
+        actorLabel: user.username,
+        actorRole: user.role,
+        actorCompanyId: user.companyId ?? null,
+        actionType: "auth",
+        action: "auth.login",
+        severity: "info",
+        summary: `${user.role} signed in`,
+        details: { surface: "web" },
+      });
+
       // Return user without password
       const { password: _, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
@@ -2504,12 +3333,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.getUserByUsername(String(username));
       if (!user || !user.isActive) {
+        void recordAuditEvent(req, {
+          actorUserId: user?.id ?? null,
+          actorLabel: typeof username === "string" ? String(username).slice(0, 200) : null,
+          actorRole: user?.role ?? null,
+          actorCompanyId: user?.companyId ?? null,
+          actionType: "auth",
+          action: "auth.login_failed",
+          severity: "warning",
+          summary: user ? "Mobile login refused — inactive" : "Mobile login refused — unknown user",
+          details: { surface: "mobile" },
+        });
         res.status(401).json({ message: "Invalid credentials" });
         return;
       }
 
       const passwordValid = await bcrypt.compare(String(password), user.password);
       if (!passwordValid) {
+        void recordAuditEvent(req, {
+          actorUserId: user.id,
+          actorLabel: user.username,
+          actorRole: user.role,
+          actorCompanyId: user.companyId ?? null,
+          actionType: "auth",
+          action: "auth.login_failed",
+          severity: "warning",
+          summary: "Mobile login refused — bad password",
+          details: { surface: "mobile" },
+        });
         res.status(401).json({ message: "Invalid credentials" });
         return;
       }
@@ -2529,6 +3380,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         return;
       }
+      void recordAuditEvent(req, {
+        actorUserId: user.id,
+        actorLabel: user.username,
+        actorRole: user.role,
+        actorCompanyId: user.companyId ?? null,
+        actionType: "auth",
+        action: "auth.login",
+        severity: "info",
+        summary: `${user.role} signed in (mobile)`,
+        details: { surface: "mobile" },
+      });
 
       const deviceLabel =
         typeof deviceName === 'string' && deviceName.length > 0 ? deviceName : null;
@@ -2650,6 +3512,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const refreshHash = crypto.createHash('sha256').update(bodyRefresh).digest('hex');
         await storage.revokeMobileRefreshToken(refreshHash);
       }
+      void recordAuditEvent(req, {
+        actionType: "auth",
+        action: "auth.logout",
+        severity: "info",
+        summary: "Mobile signed out",
+        details: { surface: "mobile" },
+      });
       res.json({ ok: true });
     } catch (error) {
       console.error('Mobile logout error:', error);
@@ -2721,7 +3590,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         passwordResetToken: null,
         passwordResetExpires: null,
       });
-      
+
+      void recordAuditEvent(req, {
+        actorUserId: user.id,
+        actorLabel: user.username,
+        actorRole: user.role,
+        actorCompanyId: user.companyId ?? null,
+        actionType: "auth",
+        action: "auth.password_reset",
+        severity: "warning",
+        summary: "Password reset via email link",
+      });
+
       res.json({ message: "Password reset successfully" });
     } catch (error) {
       console.error('Password reset error:', error);
@@ -9696,6 +10576,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         `itemCount=${result.itemCount} totalDifference=${result.totalDifference}`
       );
 
+      if (!dryRun) {
+        void recordAuditEvent(req, {
+          actorUserId: actor.userId,
+          actorLabel: actor.name,
+          actorRole: actor.role,
+          actorCompanyId: scopeCompanyId,
+          actionType: 'data',
+          action: 'zero_price_audit_repair',
+          severity: 'warning',
+          targetType: 'billing_sheet',
+          targetId: null,
+          summary: `Repaired ${result.itemCount} zero-price items across ${result.parentCount} records`,
+          details: {
+            companyId: scopeCompanyId,
+            parentCount: result.parentCount,
+            itemCount: result.itemCount,
+            totalDifference: result.totalDifference,
+          },
+        });
+      }
+
       res.json(result);
     } catch (error) {
       console.error("[zero-price-audit/repair] failed:", error);
@@ -10992,6 +11893,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Content-Disposition', `attachment; filename="irrigopro-logs-${new Date().toISOString().split('T')[0]}.json"`);
       res.send(JSON.stringify(exportData, null, 2));
+
+      void recordAuditEvent(req, {
+        actorUserId: null,
+        actorLabel: null,
+        actorRole: null,
+        actorCompanyId: null,
+        actionType: 'data',
+        action: 'logs_exported',
+        severity: 'info',
+        targetType: 'logs',
+        targetId: null,
+        summary: 'Exported application logs',
+      });
     } catch (error) {
       console.error("Error exporting logs:", error);
       res.status(500).json({ message: "Failed to export logs" });

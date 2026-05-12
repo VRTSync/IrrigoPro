@@ -34,6 +34,10 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { StatusHero } from "@/components/app-health/status-hero";
+import { OverviewTab } from "@/components/app-health/overview-tab";
+import { CompaniesTab } from "@/components/app-health/companies-tab";
+import { AuditTab } from "@/components/app-health/audit-tab";
 
 // Task #550 — Super Admin App Health page (Phase 1).
 // Phase 1 ships the page chrome and the working Crashes tab. The other
@@ -181,6 +185,7 @@ export default function SuperAdminAppHealthPage() {
   const allowed = role === "super_admin";
   const [activeTab, setActiveTab] = useState<TabKey>("crashes");
   const [windowKey, setWindowKey] = useState<WindowKey>("7d");
+  const [drawerFingerprint, setDrawerFingerprint] = useState<string | null>(null);
 
   if (!allowed) {
     return (
@@ -223,19 +228,8 @@ export default function SuperAdminAppHealthPage() {
         </div>
       </div>
 
-      {/* Status hero placeholder strip — Phase 2 fills this with real KPIs. */}
-      <Card className="border-dashed bg-gradient-to-r from-slate-50 to-blue-50">
-        <CardContent className="py-6">
-          <div className="flex items-center gap-3 text-gray-600">
-            <Sparkles className="h-5 w-5 text-blue-500" />
-            <div className="text-sm">
-              <span className="font-medium text-gray-800">Status hero coming in Phase 2.</span>{" "}
-              Headline KPIs (overall health, error rate, p95 latency, queue depth) will live
-              here.
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Status hero — Task #550 Phase 2. */}
+      <StatusHero windowKey={windowKey} />
 
       {/* Tab nav */}
       <div className="border-b">
@@ -270,7 +264,29 @@ export default function SuperAdminAppHealthPage() {
 
       {/* Tab body */}
       {activeTab === "crashes" ? (
-        <CrashesTab windowKey={windowKey} />
+        <CrashesTab
+          windowKey={windowKey}
+          drawerFingerprint={drawerFingerprint}
+          setDrawerFingerprint={setDrawerFingerprint}
+        />
+      ) : activeTab === "system" ? (
+        <OverviewTab
+          windowKey={windowKey}
+          onOpenCrash={(fp) => {
+            setActiveTab("crashes");
+            setDrawerFingerprint(fp);
+          }}
+        />
+      ) : activeTab === "companies" ? (
+        <CompaniesTab
+          windowKey={windowKey}
+          onOpenCrash={(fp) => {
+            setActiveTab("crashes");
+            setDrawerFingerprint(fp);
+          }}
+        />
+      ) : activeTab === "audit" ? (
+        <AuditTab windowKey={windowKey} />
       ) : (
         <ComingSoonTab tabKey={activeTab} />
       )}
@@ -298,7 +314,15 @@ function ComingSoonTab({ tabKey }: { tabKey: TabKey }) {
   );
 }
 
-function CrashesTab({ windowKey }: { windowKey: WindowKey }) {
+function CrashesTab({
+  windowKey,
+  drawerFingerprint,
+  setDrawerFingerprint,
+}: {
+  windowKey: WindowKey;
+  drawerFingerprint: string | null;
+  setDrawerFingerprint: (v: string | null) => void;
+}) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [status, setStatus] = useState<StatusKey>("open");
@@ -307,7 +331,6 @@ function CrashesTab({ windowKey }: { windowKey: WindowKey }) {
   const [q, setQ] = useState<string>("");
   const [companyId, setCompanyId] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [drawerFingerprint, setDrawerFingerprint] = useState<string | null>(null);
 
   const params = useMemo(() => {
     const usp = new URLSearchParams();
@@ -619,7 +642,7 @@ function CrashDetailDrawer({
       return res.json();
     },
     enabled: open,
-    staleTime: 5_000,
+    staleTime: 10_000,
   });
 
   const statusMutation = useMutation({
