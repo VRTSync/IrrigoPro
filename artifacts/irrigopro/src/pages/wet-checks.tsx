@@ -861,6 +861,71 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     onError: (e: any) => toast({ title: "Failed to submit", description: e?.message, variant: "destructive" }),
   });
 
+  // Task #561 — Hoist the "jump to next needs-decision" hooks (Task
+  // #517) above the loading guard. Otherwise WetCheckDetail trips
+  // React error #310 ("Rendered more hooks than during the previous
+  // render") when `wc` resolves on the second render — often
+  // synchronously from the IDB mirror in `isOfflineQueueEnabled()`
+  // mode — and React suddenly sees five extra hooks below the early
+  // return that didn't run on the first render. Derive the inputs
+  // from `wc?.zoneRecords` with `asArray` + optional chaining so
+  // they collapse to an empty list while `wc` is still loading.
+  const needsDecisionIds = asArray(wc?.zoneRecords)
+    .flatMap(z => asArray(z.findings))
+    .filter(
+      f =>
+        f.resolution === "repaired_in_field" &&
+        f.partId == null &&
+        !f.noPartNeeded,
+    )
+    .map(f => f.id);
+  const needsDecisionKey = needsDecisionIds.join(",");
+  const [jumpIndex, setJumpIndex] = useState(0);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTargetRef = useRef<HTMLElement | null>(null);
+  // Reset cycle whenever the underlying list of offenders changes so a
+  // fixed finding doesn't leave a stale pointer past the end. Also
+  // clear any in-flight highlight + timer so a card that just left the
+  // offender set isn't stuck wearing the amber ring.
+  useEffect(() => {
+    setJumpIndex(0);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = null;
+    }
+    if (highlightTargetRef.current) {
+      highlightTargetRef.current.classList.remove(
+        "ring-2",
+        "ring-amber-400",
+        "ring-offset-2",
+        "bg-amber-50",
+        "transition",
+      );
+      highlightTargetRef.current = null;
+    }
+  }, [needsDecisionKey]);
+  // Cancel any pending highlight cleanup on unmount, and clear the
+  // class from any element it was applied to so we don't leave a
+  // stuck ring on a card that's no longer in the offender list.
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+      if (highlightTargetRef.current) {
+        highlightTargetRef.current.classList.remove(
+          "ring-2",
+          "ring-amber-400",
+          "ring-offset-2",
+          "bg-amber-50",
+          "transition",
+        );
+        highlightTargetRef.current = null;
+      }
+    };
+  }, []);
+
   if (isLoading || !wc) {
     return <div className="flex justify-center py-10"><Loader2 className="animate-spin" /></div>;
   }
@@ -990,55 +1055,10 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     !f.noPartNeeded,
   );
   // Task #517 — Tap the amber banner to jump to the next finding that
-  // still needs a part / labor-only decision. Cycle through them in
-  // order so the tech can fix one, tap again, fix the next, etc.
-  const needsDecisionIds = completeNeedingDecision.map(f => f.id);
-  const needsDecisionKey = needsDecisionIds.join(",");
-  const [jumpIndex, setJumpIndex] = useState(0);
-  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const highlightTargetRef = useRef<HTMLElement | null>(null);
-  // Reset cycle whenever the underlying list of offenders changes so a
-  // fixed finding doesn't leave a stale pointer past the end. Also
-  // clear any in-flight highlight + timer so a card that just left the
-  // offender set isn't stuck wearing the amber ring.
-  useEffect(() => {
-    setJumpIndex(0);
-    if (highlightTimerRef.current) {
-      clearTimeout(highlightTimerRef.current);
-      highlightTimerRef.current = null;
-    }
-    if (highlightTargetRef.current) {
-      highlightTargetRef.current.classList.remove(
-        "ring-2",
-        "ring-amber-400",
-        "ring-offset-2",
-        "bg-amber-50",
-        "transition",
-      );
-      highlightTargetRef.current = null;
-    }
-  }, [needsDecisionKey]);
-  // Cancel any pending highlight cleanup on unmount, and clear the
-  // class from any element it was applied to so we don't leave a
-  // stuck ring on a card that's no longer in the offender list.
-  useEffect(() => {
-    return () => {
-      if (highlightTimerRef.current) {
-        clearTimeout(highlightTimerRef.current);
-        highlightTimerRef.current = null;
-      }
-      if (highlightTargetRef.current) {
-        highlightTargetRef.current.classList.remove(
-          "ring-2",
-          "ring-amber-400",
-          "ring-offset-2",
-          "bg-amber-50",
-          "transition",
-        );
-        highlightTargetRef.current = null;
-      }
-    };
-  }, []);
+  // still needs a part / labor-only decision. The cycle index, refs,
+  // and effects are hoisted above the loading guard (see Task #561)
+  // so the hook order stays stable across the wc undefined → defined
+  // transition; only the click handler stays here.
   const jumpToNextNeedsDecision = () => {
     if (needsDecisionIds.length === 0) return;
     const idx = jumpIndex % needsDecisionIds.length;
