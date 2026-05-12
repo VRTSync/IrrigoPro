@@ -9,7 +9,13 @@ import React, {
   useState,
 } from "react";
 
-import { ApiError, apiRequest, setToken, setUnauthorizedHandler } from "@/lib/api";
+import {
+  ApiError,
+  apiRequest,
+  getStoredTokens,
+  setToken,
+  setUnauthorizedHandler,
+} from "@/lib/api";
 
 const USER_CACHE_KEY = "irrigopro.mobile.user.v1";
 
@@ -27,6 +33,13 @@ export type MobileUser = {
 type LoginResponse = {
   token: string;
   expiresAt: string;
+  // Task #521 — present on every server >= the refresh-token rollout.
+  // Optional in the type so the client compiles against older API
+  // builds (and we degrade to no-refresh behavior in that case).
+  accessToken?: string;
+  accessTokenExpiresAt?: string;
+  refreshToken?: string;
+  refreshTokenExpiresAt?: string;
   user: MobileUser;
 };
 
@@ -114,8 +127,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: { username, password, deviceName: deviceName ?? null },
         handle401: false,
       });
-      await setToken(result.token);
+      // Prefer the explicit access/refresh shape; fall back to the
+      // legacy single-token field if talking to a pre-Task #521 server.
+      const accessToken = result.accessToken ?? result.token;
+      await setToken({
+        accessToken,
+        accessTokenExpiresAt: result.accessTokenExpiresAt ?? result.expiresAt ?? null,
+        refreshToken: result.refreshToken ?? null,
+        refreshTokenExpiresAt: result.refreshTokenExpiresAt ?? null,
+      });
       await AsyncStorage.setItem(USER_CACHE_KEY, JSON.stringify(result.user));
+      // Trigger the user-change effect in `useSyncEngine` (which calls
+      // resetAuthFailedEntries + drainQueue) by setting the user last.
       setUser(result.user);
     },
     [],
@@ -126,8 +149,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signOutInFlight.current = true;
     try {
       try {
+        // Pass the refresh token so the server can revoke it
+        // explicitly even if the access token has already expired and
+        // would otherwise have left the refresh half live for 90 days.
+        const stored = await getStoredTokens().catch(() => null);
         await apiRequest("/api/auth/mobile-logout", {
           method: "POST",
+          body: stored?.refreshToken ? { refreshToken: stored.refreshToken } : {},
           handle401: false,
         });
       } catch {

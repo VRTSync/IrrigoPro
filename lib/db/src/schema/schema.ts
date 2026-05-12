@@ -1294,11 +1294,14 @@ export function deriveIssueGroup(issueType: string): "quick_fix" | "advanced" | 
   return (seed?.issueGroup ?? "advanced");
 }
 
-// Long-lived bearer tokens used by the mobile app to stay signed in
-// across launches. Tokens are stored hashed (sha256); the raw token is only
-// returned to the client at login time. See the M1 mobile-auth task for the
-// surrounding endpoint contract.
-export const mobileTokens = pgTable("mobile_tokens", {
+// Long-lived refresh tokens used by the mobile app (Task #521). Issued
+// alongside a short-lived access token at login; presented to
+// `/api/auth/mobile-refresh` to mint a fresh access token without making
+// the field tech sign in again. Hashed (sha256) at rest. A single
+// refresh token can have multiple access tokens minted from it over its
+// lifetime; logout revokes the refresh token and the cascade-revokes
+// every access token whose `refreshTokenId` points at it.
+export const mobileRefreshTokens = pgTable("mobile_refresh_tokens", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id).notNull(),
   tokenHash: text("token_hash").notNull().unique(),
@@ -1308,8 +1311,34 @@ export const mobileTokens = pgTable("mobile_tokens", {
   expiresAt: timestamp("expires_at").notNull(),
   revokedAt: timestamp("revoked_at"),
 }, (table) => ({
+  userIdx: index("mobile_refresh_tokens_user_id_idx").on(table.userId),
+  tokenHashIdx: index("mobile_refresh_tokens_token_hash_idx").on(table.tokenHash),
+}));
+
+export const insertMobileRefreshTokenSchema = createInsertSchema(mobileRefreshTokens);
+export type MobileRefreshToken = typeof mobileRefreshTokens.$inferSelect;
+export type InsertMobileRefreshToken = z.infer<typeof insertMobileRefreshTokenSchema>;
+
+// Short-lived bearer tokens used by the mobile app to authorize requests.
+// Pre-Task #521 these were the only token type and were minted with a 90 day
+// TTL; new logins now mint a 1 hour access token here plus a 90 day refresh
+// token in `mobileRefreshTokens`. Legacy long-lived rows continue to
+// authenticate until they expire naturally; their `refreshTokenId` is null.
+export const mobileTokens = pgTable("mobile_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  deviceName: text("device_name"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  // Nullable for legacy rows minted before Task #521.
+  refreshTokenId: integer("refresh_token_id").references(() => mobileRefreshTokens.id),
+}, (table) => ({
   userIdx: index("mobile_tokens_user_id_idx").on(table.userId),
   tokenHashIdx: index("mobile_tokens_token_hash_idx").on(table.tokenHash),
+  refreshIdx: index("mobile_tokens_refresh_token_id_idx").on(table.refreshTokenId),
 }));
 
 export const insertMobileTokenSchema = createInsertSchema(mobileTokens);

@@ -22,6 +22,9 @@ import {
   mobileTokens,
   type MobileToken,
   type InsertMobileToken,
+  mobileRefreshTokens,
+  type MobileRefreshToken,
+  type InsertMobileRefreshToken,
   missingPhotosNotifications,
   aiGenerationLogs,
   notifications,
@@ -317,11 +320,15 @@ export interface IStorage {
   }>;
   hardDeleteUserWithCascade(userId: number): Promise<boolean>;
 
-  // Mobile bearer-token auth (M1)
+  // Mobile bearer-token auth (M1 + Task #521 refresh tokens)
   createMobileToken(token: InsertMobileToken): Promise<MobileToken>;
   getActiveMobileTokenByHash(tokenHash: string): Promise<MobileToken | undefined>;
   revokeMobileToken(tokenHash: string): Promise<boolean>;
   revokeAllMobileTokensForUser(userId: number): Promise<number>;
+  createMobileRefreshToken(token: InsertMobileRefreshToken): Promise<MobileRefreshToken>;
+  getActiveMobileRefreshTokenByHash(tokenHash: string): Promise<MobileRefreshToken | undefined>;
+  revokeMobileRefreshToken(tokenHash: string): Promise<boolean>;
+  revokeMobileRefreshTokenById(id: number): Promise<boolean>;
 
   // Customers
   getCustomers(companyId?: number): Promise<Customer[]>;
@@ -1320,30 +1327,154 @@ export class DatabaseStorage implements IStorage {
     return bumped;
   }
 
+  // Revokes the access token whose sha256 hash matches `tokenHash` AND any
+  // refresh token paired with it (Task #521). Logout funnels through here
+  // so the field tech tearing down a session kills the whole pair, not
+  // just the access half.
   async revokeMobileToken(tokenHash: string): Promise<boolean> {
-    const result = await db
-      .update(mobileTokens)
-      .set({ revokedAt: new Date() })
-      .where(
-        and(
-          eq(mobileTokens.tokenHash, tokenHash),
-          isNull(mobileTokens.revokedAt),
-        ),
-      );
-    return (result.rowCount ?? 0) > 0;
+    const now = new Date();
+    return await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ id: mobileTokens.id, refreshTokenId: mobileTokens.refreshTokenId, revokedAt: mobileTokens.revokedAt })
+        .from(mobileTokens)
+        .where(eq(mobileTokens.tokenHash, tokenHash));
+      if (!row) return false;
+      let revoked = false;
+      if (row.revokedAt == null) {
+        const upd = await tx
+          .update(mobileTokens)
+          .set({ revokedAt: now })
+          .where(and(eq(mobileTokens.id, row.id), isNull(mobileTokens.revokedAt)));
+        revoked = (upd.rowCount ?? 0) > 0;
+      }
+      if (row.refreshTokenId != null) {
+        await tx
+          .update(mobileRefreshTokens)
+          .set({ revokedAt: now })
+          .where(
+            and(
+              eq(mobileRefreshTokens.id, row.refreshTokenId),
+              isNull(mobileRefreshTokens.revokedAt),
+            ),
+          );
+        // Cascade-revoke any sibling access tokens minted off the same
+        // refresh token so refreshing again from a stale access token
+        // can't slip back in.
+        await tx
+          .update(mobileTokens)
+          .set({ revokedAt: now })
+          .where(
+            and(
+              eq(mobileTokens.refreshTokenId, row.refreshTokenId),
+              isNull(mobileTokens.revokedAt),
+            ),
+          );
+      }
+      return revoked;
+    });
   }
 
   async revokeAllMobileTokensForUser(userId: number): Promise<number> {
-    const result = await db
-      .update(mobileTokens)
-      .set({ revokedAt: new Date() })
+    const now = new Date();
+    return await db.transaction(async (tx) => {
+      const accessRes = await tx
+        .update(mobileTokens)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(mobileTokens.userId, userId),
+            isNull(mobileTokens.revokedAt),
+          ),
+        );
+      await tx
+        .update(mobileRefreshTokens)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(mobileRefreshTokens.userId, userId),
+            isNull(mobileRefreshTokens.revokedAt),
+          ),
+        );
+      return accessRes.rowCount ?? 0;
+    });
+  }
+
+  // ── Mobile refresh tokens (Task #521) ───────────────────────────────────
+  async createMobileRefreshToken(
+    token: InsertMobileRefreshToken,
+  ): Promise<MobileRefreshToken> {
+    const [row] = await db.insert(mobileRefreshTokens).values(token).returning();
+    return row;
+  }
+
+  async getActiveMobileRefreshTokenByHash(
+    tokenHash: string,
+  ): Promise<MobileRefreshToken | undefined> {
+    // Mirrors getActiveMobileTokenByHash: bump lastUsedAt atomically
+    // with the active-row predicate so a concurrent revoke can't slip
+    // through between a SELECT and UPDATE.
+    const now = new Date();
+    const [bumped] = await db
+      .update(mobileRefreshTokens)
+      .set({ lastUsedAt: now })
       .where(
         and(
-          eq(mobileTokens.userId, userId),
-          isNull(mobileTokens.revokedAt),
+          eq(mobileRefreshTokens.tokenHash, tokenHash),
+          isNull(mobileRefreshTokens.revokedAt),
+          gt(mobileRefreshTokens.expiresAt, now),
         ),
-      );
-    return result.rowCount ?? 0;
+      )
+      .returning();
+    if (!bumped) return undefined;
+    if (bumped.revokedAt != null || bumped.expiresAt <= now) return undefined;
+    return bumped;
+  }
+
+  async revokeMobileRefreshToken(tokenHash: string): Promise<boolean> {
+    const now = new Date();
+    return await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ id: mobileRefreshTokens.id, revokedAt: mobileRefreshTokens.revokedAt })
+        .from(mobileRefreshTokens)
+        .where(eq(mobileRefreshTokens.tokenHash, tokenHash));
+      if (!row) return false;
+      if (row.revokedAt != null) return false;
+      const upd = await tx
+        .update(mobileRefreshTokens)
+        .set({ revokedAt: now })
+        .where(and(eq(mobileRefreshTokens.id, row.id), isNull(mobileRefreshTokens.revokedAt)));
+      // Cascade-revoke linked access tokens.
+      await tx
+        .update(mobileTokens)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(mobileTokens.refreshTokenId, row.id),
+            isNull(mobileTokens.revokedAt),
+          ),
+        );
+      return (upd.rowCount ?? 0) > 0;
+    });
+  }
+
+  async revokeMobileRefreshTokenById(id: number): Promise<boolean> {
+    const now = new Date();
+    return await db.transaction(async (tx) => {
+      const upd = await tx
+        .update(mobileRefreshTokens)
+        .set({ revokedAt: now })
+        .where(and(eq(mobileRefreshTokens.id, id), isNull(mobileRefreshTokens.revokedAt)));
+      await tx
+        .update(mobileTokens)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(mobileTokens.refreshTokenId, id),
+            isNull(mobileTokens.revokedAt),
+          ),
+        );
+      return (upd.rowCount ?? 0) > 0;
+    });
   }
 
   // Customers

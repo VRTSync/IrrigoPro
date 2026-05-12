@@ -23,6 +23,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { generateClientId } from "../uuid";
 
+// Persistence adapter — defaults to AsyncStorage; swappable for the
+// node:test harness via `__setQueueStorageForTests` so queue logic can
+// be exercised without React Native's native module bridge.
+type QueueStorageAdapter = {
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+};
+let storage: QueueStorageAdapter = {
+  getItem: (key) => AsyncStorage.getItem(key),
+  setItem: (key, value) => AsyncStorage.setItem(key, value),
+};
+export function __setQueueStorageForTests(next: QueueStorageAdapter): void {
+  storage = next;
+}
+
 const STORAGE_KEY_BASE = "irrigopro.sync.queue.v3";
 const ANON_SESSION = "_anon";
 
@@ -33,6 +48,16 @@ export type QueueEntryKind =
   | "billing-sheet-photo";
 
 export type QueueEntryStatus = "pending" | "failed" | "conflict";
+
+/**
+ * Why an entry's last send failed (Task #521). `auth` marks rows that
+ * 401'd against the server — typically because the access token expired
+ * AND the refresh token was also gone/expired, so the field tech got
+ * bounced back to sign-in. We tag those rows so the next successful
+ * sign-in can flip them back to `pending` and drain them, rather than
+ * leaving the tech to manually Force Resync from Profile.
+ */
+export type QueueFailureReason = "auth" | null;
 
 export type WetCheckPhotoPayload = {
   localUri: string;
@@ -77,6 +102,10 @@ export type QueueEntry = {
   status: QueueEntryStatus;
   attempts: number;
   lastError: string | null;
+  /** Why the most recent attempt failed; null when never failed or
+   *  reset back to pending. Optional for backwards compatibility with
+   *  rows persisted before Task #521. */
+  failureReason?: QueueFailureReason;
   createdAt: number;
   updatedAt: number;
 };
@@ -94,7 +123,7 @@ function storageKey(): string {
 
 async function readFromStorage(): Promise<QueueEntry[]> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey());
+    const raw = await storage.getItem(storageKey());
     if (!raw) return [];
     const parsed = JSON.parse(raw) as QueueEntry[];
     return Array.isArray(parsed) ? parsed : [];
@@ -122,7 +151,7 @@ async function loadInitial(): Promise<QueueEntry[]> {
 async function persist(): Promise<void> {
   const snapshot = cache ?? [];
   try {
-    await AsyncStorage.setItem(storageKey(), JSON.stringify(snapshot));
+    await storage.setItem(storageKey(), JSON.stringify(snapshot));
   } catch {
     /* AsyncStorage failure is non-fatal — the in-memory queue is still
        intact and the next persist call will retry. */
@@ -185,6 +214,7 @@ export async function enqueue(input: EnqueueInput): Promise<QueueEntry> {
     status: "pending",
     attempts: 0,
     lastError: null,
+    failureReason: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -196,7 +226,10 @@ export async function enqueue(input: EnqueueInput): Promise<QueueEntry> {
 export async function updateEntry(
   id: string,
   patch: Partial<
-    Pick<QueueEntry, "status" | "attempts" | "lastError" | "billingPhoto">
+    Pick<
+      QueueEntry,
+      "status" | "attempts" | "lastError" | "billingPhoto" | "failureReason"
+    >
   >,
 ): Promise<void> {
   await loadInitial();
@@ -227,9 +260,70 @@ export async function markAllPending(): Promise<void> {
   cache = cache.map((e) =>
     e.status === "pending"
       ? e
-      : { ...e, status: "pending", lastError: null, updatedAt: now },
+      : {
+          ...e,
+          status: "pending",
+          lastError: null,
+          failureReason: null,
+          updatedAt: now,
+        },
   );
   await persist();
+}
+
+/**
+ * Recognize legacy auth-failure rows persisted before Task #521 added
+ * the structured `failureReason` tag. Pre-#521 builds left only the
+ * `lastError` string behind, so we sniff for the strings the API layer
+ * uses for 401s ("Authentication required" from requireAuthentication
+ * + the verbatim `Request failed (401)` from `apiRequest`) so a tech
+ * upgrading the app with stranded rows still gets them auto-replayed
+ * on the next sign-in.
+ */
+function looksLikeAuthFailure(lastError: string | null): boolean {
+  if (!lastError) return false;
+  const lower = lastError.toLowerCase();
+  return (
+    lower.includes("authentication required") ||
+    lower.includes("(401)") ||
+    lower.includes("invalid or expired") ||
+    lower.includes("unauthorized")
+  );
+}
+
+/**
+ * Flip every entry that previously failed with a 401 back to `pending`
+ * (Task #521). Called from `useSyncEngine` after a successful re-login
+ * so rows that 401'd on the now-expired credentials drain automatically
+ * under the fresh access token. Returns the count of entries reset so
+ * callers can decide whether to immediately trigger `drainQueue`.
+ *
+ * Matches both the structured `failureReason === "auth"` tag (set by
+ * the engine on 401s post-Task #521) and the legacy plain-text
+ * `lastError` shape persisted by older builds.
+ */
+export async function resetAuthFailedEntries(): Promise<number> {
+  await loadInitial();
+  if (!cache) return 0;
+  const now = Date.now();
+  let count = 0;
+  cache = cache.map((e) => {
+    if (e.status !== "failed") return e;
+    const isAuth =
+      e.failureReason === "auth" ||
+      (e.failureReason == null && looksLikeAuthFailure(e.lastError));
+    if (!isAuth) return e;
+    count += 1;
+    return {
+      ...e,
+      status: "pending",
+      lastError: null,
+      failureReason: null,
+      updatedAt: now,
+    };
+  });
+  if (count > 0) await persist();
+  return count;
 }
 
 export async function ensureLoaded(): Promise<void> {
@@ -267,4 +361,13 @@ export async function setActiveSession(sessionId: string | null): Promise<void> 
 
 export function getActiveSession(): string {
   return activeSession;
+}
+
+/** Test seam — drops in-memory queue state so the next call re-reads from
+ *  the (swappable) storage adapter under the anon session. */
+export function __resetQueueStateForTests(): void {
+  cache = null;
+  loadingPromise = null;
+  listeners.clear();
+  activeSession = ANON_SESSION;
 }

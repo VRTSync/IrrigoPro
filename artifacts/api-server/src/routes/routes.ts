@@ -1917,13 +1917,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Mobile bearer-token auth (M1) ─────────────────────────────────────────
-  // POST /api/auth/mobile-login — issues a long-lived (90 day) bearer token
-  // for field techs and irrigation managers signing in from the mobile app.
-  // Mirrors the web /api/auth/login checks (bcrypt, isActive, email
-  // verification) and additionally restricts by role.
-  const MOBILE_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+  // ── Mobile bearer-token auth (M1 + Task #521 refresh tokens) ────────────
+  // POST /api/auth/mobile-login — issues a short-lived access token plus a
+  // long-lived refresh token for field techs and irrigation managers signing
+  // in from the mobile app. Mirrors the web /api/auth/login checks (bcrypt,
+  // isActive, email verification) and additionally restricts by role.
+  //
+  // Pre-Task #521 the access token *was* the only token and lasted 90 days;
+  // we now mint a 1 hour access token here plus a 90 day refresh token via
+  // POST /api/auth/mobile-refresh. Existing pre-#521 long-lived access
+  // tokens already in the wild keep authenticating until natural expiry.
+  const MOBILE_ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+  const MOBILE_REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
   const MOBILE_LOGIN_ALLOWED_ROLES = new Set(['field_tech', 'irrigation_manager']);
+
+  function mintMobileAccessToken(): { rawToken: string; tokenHash: string } {
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    return { rawToken, tokenHash };
+  }
 
   function safeUserShape(user: any) {
     const {
@@ -1975,20 +1987,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const expiresAt = new Date(Date.now() + MOBILE_TOKEN_TTL_MS);
+      const deviceLabel =
+        typeof deviceName === 'string' && deviceName.length > 0 ? deviceName : null;
+      const now = Date.now();
+      const accessExpiresAt = new Date(now + MOBILE_ACCESS_TOKEN_TTL_MS);
+      const refreshExpiresAt = new Date(now + MOBILE_REFRESH_TOKEN_TTL_MS);
 
+      // Mint refresh token first so the access row can link to it.
+      const rawRefreshToken = crypto.randomBytes(32).toString('hex');
+      const refreshTokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+      const refreshRow = await storage.createMobileRefreshToken({
+        userId: user.id,
+        tokenHash: refreshTokenHash,
+        deviceName: deviceLabel,
+        expiresAt: refreshExpiresAt,
+      });
+
+      const { rawToken: rawAccessToken, tokenHash: accessTokenHash } = mintMobileAccessToken();
       await storage.createMobileToken({
         userId: user.id,
-        tokenHash,
-        deviceName: typeof deviceName === 'string' && deviceName.length > 0 ? deviceName : null,
-        expiresAt,
+        tokenHash: accessTokenHash,
+        deviceName: deviceLabel,
+        expiresAt: accessExpiresAt,
+        refreshTokenId: refreshRow.id,
       });
 
       res.json({
-        token: rawToken,
-        expiresAt: expiresAt.toISOString(),
+        // `token` is preserved for one release so older app builds (which
+        // only know about a single `token` field) keep authenticating.
+        token: rawAccessToken,
+        accessToken: rawAccessToken,
+        accessTokenExpiresAt: accessExpiresAt.toISOString(),
+        refreshToken: rawRefreshToken,
+        refreshTokenExpiresAt: refreshExpiresAt.toISOString(),
+        // `expiresAt` retained for backward compatibility; matches accessTokenExpiresAt.
+        expiresAt: accessExpiresAt.toISOString(),
         user: safeUserShape(user),
       });
     } catch (error) {
@@ -1997,7 +2030,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/auth/mobile-refresh — exchanges a valid refresh token for a
+  // fresh access token. Returns the same shape as login (without re-issuing
+  // the refresh token; single-long-lived-refresh policy for this pass).
+  app.post("/api/auth/mobile-refresh", async (req, res) => {
+    try {
+      const { refreshToken, deviceName } = req.body ?? {};
+      if (!refreshToken || typeof refreshToken !== 'string') {
+        res.status(400).json({ message: "Refresh token is required" });
+        return;
+      }
+      const refreshTokenHash = crypto
+        .createHash('sha256')
+        .update(refreshToken)
+        .digest('hex');
+      const refreshRow = await storage.getActiveMobileRefreshTokenByHash(refreshTokenHash);
+      if (!refreshRow) {
+        res.status(401).json({ message: "Invalid or expired refresh token" });
+        return;
+      }
+      const user = await storage.getUser(refreshRow.userId);
+      if (!user || !user.isActive) {
+        // Belt-and-suspenders: revoke the refresh token so a deactivated
+        // user can't keep minting access tokens.
+        await storage.revokeMobileRefreshTokenById(refreshRow.id).catch(() => undefined);
+        res.status(401).json({ message: "Invalid or expired refresh token" });
+        return;
+      }
+
+      const deviceLabel =
+        typeof deviceName === 'string' && deviceName.length > 0
+          ? deviceName
+          : refreshRow.deviceName ?? null;
+      const accessExpiresAt = new Date(Date.now() + MOBILE_ACCESS_TOKEN_TTL_MS);
+      const { rawToken: rawAccessToken, tokenHash: accessTokenHash } = mintMobileAccessToken();
+      await storage.createMobileToken({
+        userId: user.id,
+        tokenHash: accessTokenHash,
+        deviceName: deviceLabel,
+        expiresAt: accessExpiresAt,
+        refreshTokenId: refreshRow.id,
+      });
+
+      res.json({
+        token: rawAccessToken,
+        accessToken: rawAccessToken,
+        accessTokenExpiresAt: accessExpiresAt.toISOString(),
+        // Refresh token is unchanged; echoed so clients that lost the
+        // expiry locally can re-cache it.
+        refreshTokenExpiresAt: refreshRow.expiresAt.toISOString(),
+        expiresAt: accessExpiresAt.toISOString(),
+        user: safeUserShape(user),
+      });
+    } catch (error) {
+      console.error('Mobile refresh error:', error);
+      res.status(500).json({ message: "Refresh failed" });
+    }
+  });
+
   // POST /api/auth/mobile-logout — idempotent; always returns { ok: true }.
+  // Revokes both the access token presented as the bearer (which cascade-
+  // revokes its paired refresh token + any sibling access tokens) and the
+  // refresh token if explicitly supplied in the body.
   app.post("/api/auth/mobile-logout", async (req, res) => {
     try {
       const authHeader = req.headers['authorization'];
@@ -2007,6 +2101,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
           await storage.revokeMobileToken(tokenHash);
         }
+      }
+      const bodyRefresh = (req.body ?? {}).refreshToken;
+      if (typeof bodyRefresh === 'string' && bodyRefresh.length > 0) {
+        const refreshHash = crypto.createHash('sha256').update(bodyRefresh).digest('hex');
+        await storage.revokeMobileRefreshToken(refreshHash);
       }
       res.json({ ok: true });
     } catch (error) {

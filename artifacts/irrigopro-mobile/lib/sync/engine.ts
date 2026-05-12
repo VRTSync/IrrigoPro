@@ -271,10 +271,13 @@ export async function attemptEntry(entry: QueueEntry): Promise<AttemptResult> {
       fireConflict(entry, err);
       return { kind: "conflict", error: err };
     }
+    // Task #521 — tag 401s so a fresh sign-in can auto-replay them.
+    const isAuthFailure = err instanceof ApiError && err.status === 401;
     await updateEntry(entry.id, {
       status: "failed",
       attempts: entry.attempts + 1,
       lastError: err instanceof Error ? err.message : String(err),
+      failureReason: isAuthFailure ? "auth" : null,
     });
     return { kind: "failed", error: err };
   }

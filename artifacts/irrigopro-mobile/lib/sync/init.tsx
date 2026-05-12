@@ -21,7 +21,7 @@ import {
 } from "./cache-persistence";
 import { drainQueue, setEngineQueryClient } from "./engine";
 import { startNetworkTracking, subscribeReconnect } from "./network";
-import { ensureLoaded, setActiveSession } from "./queue";
+import { ensureLoaded, resetAuthFailedEntries, setActiveSession } from "./queue";
 
 const DRAIN_INTERVAL_MS = 30_000;
 
@@ -52,6 +52,10 @@ export function useSyncEngine(): boolean {
         qc.clear();
       } else {
         await setActiveCacheSession(qc, sessionId);
+        // Task #521 — flip any rows that previously 401'd back to
+        // pending now that we have a fresh access token in hand. The
+        // drainQueue() call below picks them up under the new bearer.
+        await resetAuthFailedEntries().catch(() => 0);
       }
       if (!cancelled) {
         // Drain immediately in case there are persisted entries waiting
