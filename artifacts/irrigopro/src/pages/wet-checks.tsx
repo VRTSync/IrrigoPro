@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, authedPhotoSrc, queryClient } from "@/lib/queryClient";
+import { apiRequest, authedPhotoSrc, parseApiError, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -1651,14 +1651,74 @@ export function ZoneScreen({
     queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`),
   });
 
-  const deleteFindingMut = useMutation({
-    mutationFn: (f: { id: number; clientId: string | null }) => {
+  // Task #518 — optimistic remove + rollback toast. Previously the server
+  // could respond 200 `{ ok: false }` when the finding was non-pending,
+  // which apiRequest treats as success and the mutation silently
+  // ignored — the trash icon appeared to do nothing. The server now
+  // returns 4xx on refusal (404 / 409 with a reason); we surface the
+  // failure to the tech and put the row back where it was.
+  const deleteFindingQueryKey: readonly unknown[] = ["/api/wet-checks", wetCheckId];
+  type DeleteFindingCtx = { previous: WetCheckWithDetails | undefined };
+  // Type guard for the legacy `{ ok: false, message?: string }` response
+  // shape — keeps us off `any` casts in the mutation body.
+  function isLegacyOkFalse(v: unknown): v is { ok: false; message?: string } {
+    return (
+      typeof v === "object" &&
+      v !== null &&
+      "ok" in v &&
+      (v as { ok: unknown }).ok === false
+    );
+  }
+  const deleteFindingMut = useMutation<unknown, Error, { id: number; clientId: string | null }, DeleteFindingCtx>({
+    mutationFn: async (f) => {
       if (isOfflineQueueEnabled() && f.clientId) {
-        return offlineDeleteFinding(f.clientId, f.id);
+        await offlineDeleteFinding(f.clientId, f.id);
+        return { ok: true };
       }
-      return apiRequest(`/api/wet-checks/findings/${f.id}`, "DELETE");
+      const res = await apiRequest(`/api/wet-checks/findings/${f.id}`, "DELETE");
+      // Defensive: pre-Task-#518 servers (or a future regression) could
+      // return HTTP 200 `{ ok: false }`. Treat that as a refusal so the
+      // onError rollback runs and the tech sees a toast instead of a
+      // ghost-deleted finding.
+      if (isLegacyOkFalse(res)) {
+        throw new Error(
+          typeof res.message === "string" && res.message.length > 0
+            ? res.message
+            : "Couldn't delete finding — please retry",
+        );
+      }
+      return res ?? { ok: true };
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
+    onMutate: async (vars) => {
+      // Optimistic remove: drop the finding (and any photos linked to it)
+      // from the cached wet check so the trash icon feels instant.
+      await queryClient.cancelQueries({ queryKey: deleteFindingQueryKey });
+      const previous = queryClient.getQueryData<WetCheckWithDetails>(deleteFindingQueryKey);
+      if (previous) {
+        queryClient.setQueryData<WetCheckWithDetails>(deleteFindingQueryKey, {
+          ...previous,
+          zoneRecords: previous.zoneRecords.map((zr) => ({
+            ...zr,
+            findings: zr.findings.filter((f) => f.id !== vars.id),
+          })),
+          photos: previous.photos.filter((p) => p.findingId !== vars.id),
+        });
+      }
+      return { previous };
+    },
+    onError: (e, _vars, ctx) => {
+      // Rollback first so the row reappears, then surface the reason.
+      if (ctx?.previous) {
+        queryClient.setQueryData(deleteFindingQueryKey, ctx.previous);
+      }
+      const fallback = e instanceof Error && e.message ? e.message : "Please try again.";
+      toast({
+        title: "Couldn't delete finding",
+        description: parseApiError(e, fallback),
+        variant: "destructive",
+      });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] }),
   });
 
   // Task #455 — counts of findings + finding-level photos used by both the

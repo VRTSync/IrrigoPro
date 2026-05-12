@@ -615,15 +615,45 @@ export async function deleteFinding(findingClientId: string, findingId: number |
     return;
   }
   const db = await openOfflineDB();
+  // Task #518 — capture the wet-check clientId BEFORE we drop the
+  // finding mirror so the engine can:
+  //   (a) clear the readySet parent gate (the resolver can satisfy a
+  //       wet-check parent via the wet-check mirror — but it could not
+  //       satisfy a finding parent once we'd deleted the finding
+  //       mirror, which used to leave finding.delete mutations stuck
+  //       in `pending` forever for findings that pre-existed online),
+  //   (b) resolve the wet-check id on a 409 refusal so
+  //       refreshMirrorFromServer can put the deleted row back —
+  //       findWetCheckIdForMutation reads `placeholders.wc`.
+  const fMirror = await db.get("wetCheckFindings", findingClientId);
+  let wetCheckClientId: string | undefined;
+  if (fMirror?.zoneRecordClientId) {
+    const zr = await db.get("wetCheckZoneRecords", fMirror.zoneRecordClientId);
+    wetCheckClientId = zr?.wetCheckClientId;
+  }
   await deleteFindingMirror(db, findingClientId);
+  const hasServerId = findingId != null;
+  // Bake the server id into the urlTemplate when we know it (legacy
+  // form, mirrors api.ts:830) so the placeholder resolver doesn't need
+  // a finding mirror that we just deleted. Only fall back to the
+  // `{{f}}` placeholder for offline-created findings whose server id
+  // arrives via a still-queued finding.create mutation.
+  const placeholders: Record<string, string> = {};
+  if (!hasServerId) placeholders.f = findingClientId;
+  if (wetCheckClientId) placeholders.wc = wetCheckClientId;
   await getSyncEngine().enqueue(newMutation({
     kind: "finding.delete",
     method: "DELETE",
-    urlTemplate: "/api/wet-checks/findings/{{f}}",
+    urlTemplate: hasServerId
+      ? `/api/wet-checks/findings/${findingId}`
+      : "/api/wet-checks/findings/{{f}}",
     body: undefined,
     clientId: uuid(),
-    parentClientId: findingClientId,
-    placeholders: { f: findingClientId },
+    // Pre-existing online findings have no in-flight create to wait
+    // on; gate on the wet check (which we know exists) when we have
+    // its clientId, otherwise leave parentClientId null.
+    parentClientId: hasServerId ? (wetCheckClientId ?? null) : findingClientId,
+    placeholders,
   }));
 }
 

@@ -210,6 +210,61 @@ export class BillingSheetInvoicedError extends Error {
   }
 }
 
+// Task #518 — Thrown by deleteWetCheckFinding so the route layer can map
+// each refusal to a specific 404/409 with a tech-friendly message instead
+// of silently returning HTTP 200 + `{ ok: false }`.
+export class WetCheckFindingNotFoundError extends Error {
+  findingId: number;
+  constructor(findingId: number) {
+    super(`Wet check finding #${findingId} not found`);
+    this.name = "WetCheckFindingNotFoundError";
+    this.findingId = findingId;
+  }
+}
+// The wet check the finding belongs to has been submitted/approved/etc —
+// no more tech edits are allowed. Lets the route 409 with the actual
+// reason instead of the bare `assertWetCheckEditableByTech` thrown
+// `Error("Cannot edit wet check in status submitted")`.
+export class WetCheckFindingNotEditableError extends Error {
+  findingId: number;
+  status: string;
+  constructor(findingId: number, status: string) {
+    super(
+      `Cannot delete finding — wet check is ${status} and no longer editable in the field`,
+    );
+    this.name = "WetCheckFindingNotEditableError";
+    this.findingId = findingId;
+    this.status = status;
+  }
+}
+// The finding has already been routed downstream (billing sheet / estimate
+// / work order). Deleting would orphan the downstream record, so we 409.
+export class WetCheckFindingAlreadyConvertedError extends Error {
+  findingId: number;
+  target: "billing_sheet" | "estimate" | "work_order" | "unknown";
+  targetId: number | null;
+  constructor(
+    findingId: number,
+    target: "billing_sheet" | "estimate" | "work_order" | "unknown",
+    targetId: number | null,
+  ) {
+    const label =
+      target === "billing_sheet" ? "billing sheet"
+      : target === "estimate" ? "estimate"
+      : target === "work_order" ? "work order"
+      : "downstream record";
+    super(
+      targetId != null
+        ? `Cannot delete finding — already routed to ${label} #${targetId}. Remove it from the ${label} first.`
+        : `Cannot delete finding — already converted to a ${label}. Remove it from the ${label} first.`,
+    );
+    this.name = "WetCheckFindingAlreadyConvertedError";
+    this.findingId = findingId;
+    this.target = target;
+    this.targetId = targetId;
+  }
+}
+
 // Thrown by setCustomerControllerCount when the requested count would remove
 // one or more controllers that still have zoneCount > 0 and the caller did not
 // pass `confirmDeleteWithZones: true`. Surface mapped to HTTP 409 by routes.
@@ -6196,9 +6251,46 @@ export class DatabaseStorage implements IStorage {
 
   async deleteWetCheckFinding(id: number, companyId: number): Promise<boolean> {
     const [f] = await db.select().from(wetCheckFindings).where(eq(wetCheckFindings.id, id));
-    if (!f) return false;
-    await this.assertWetCheckEditableByTech(f.wetCheckId, companyId);
-    if (f.resolution !== "pending") return false;
+    // Task #518 — surface refusals as typed errors so the route layer can
+    // emit 404/409 with reason codes. Returning `false` previously caused
+    // the route to respond 200 `{ ok: false }`, which the FindingSheet's
+    // delete button silently ignored.
+    if (!f) throw new WetCheckFindingNotFoundError(id);
+    // Tenant scoping: still verify the finding belongs to the caller's
+    // company before peeking at any other fields.
+    const wc = await this.assertWetCheckBelongsToCompany(f.wetCheckId, companyId);
+    // Already routed downstream — deleting would orphan the billing
+    // sheet / estimate / work order line. The conversion fields outlive
+    // the wet check's `in_progress` window, so check them up front.
+    if (f.billingSheetId != null) {
+      throw new WetCheckFindingAlreadyConvertedError(id, "billing_sheet", f.billingSheetId);
+    }
+    if (f.estimateId != null) {
+      throw new WetCheckFindingAlreadyConvertedError(id, "estimate", f.estimateId);
+    }
+    if (f.workOrderId != null) {
+      throw new WetCheckFindingAlreadyConvertedError(id, "work_order", f.workOrderId);
+    }
+    // Belt-and-suspenders: `convertedAt` is normally set together with
+    // one of the FK columns above, but if drifted data exists with
+    // only `convertedAt` populated we still refuse the delete instead
+    // of orphaning whatever downstream record it pointed at.
+    if (f.convertedAt != null) {
+      throw new WetCheckFindingAlreadyConvertedError(id, "unknown", null);
+    }
+    // Field-tech editability gate: only `in_progress` wet checks accept
+    // tech edits. Once submitted/approved/etc the manager owns the row.
+    // We check this AFTER the converted-finding gate so a converted row
+    // returns the more actionable "already on billing sheet" message
+    // instead of a generic "wet check not editable" 409.
+    if (wc.status !== "in_progress") {
+      throw new WetCheckFindingNotEditableError(id, wc.status);
+    }
+    // Allow tech to delete ANY non-converted finding on an in_progress
+    // wet check, including ones already marked repaired_in_field /
+    // completed_in_field — the previous `f.resolution !== "pending"`
+    // guard was too strict and caused the trash button to silently
+    // fail on completed-in-field findings.
     const result = await db.delete(wetCheckFindings).where(eq(wetCheckFindings.id, id));
     return (result.rowCount ?? 0) > 0;
   }

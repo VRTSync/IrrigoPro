@@ -1,7 +1,15 @@
 import express, { type Express } from "express";
 import type { Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage, WetCheckHasInvoicedRecordsError, ControllerHasZonesError, BillingSheetInvoicedError } from "../storage";
+import {
+  storage,
+  WetCheckHasInvoicedRecordsError,
+  ControllerHasZonesError,
+  BillingSheetInvoicedError,
+  WetCheckFindingNotFoundError,
+  WetCheckFindingNotEditableError,
+  WetCheckFindingAlreadyConvertedError,
+} from "../storage";
 import { classifyWetCheckPhotoError as _classifyWetCheckPhotoError, logPhotoErrorContext as _logPhotoErrorContext } from "./wet-check-photo-errors";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
@@ -11939,15 +11947,68 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.delete("/api/wet-checks/findings/:id", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
     if (!isFieldRole(req.authenticatedUserRole)) { res.status(403).json({ message: "Forbidden" }); return; }
+    const findingId = parseInt(req.params.id);
+    if (!Number.isFinite(findingId) || findingId <= 0) {
+      res.status(400).json({ message: "Invalid finding id" }); return;
+    }
     try {
-      const ok = await storage.deleteWetCheckFinding(parseInt(req.params.id), cid);
-      res.json({ ok });
-    } catch (e: any) {
+      const ok = await storage.deleteWetCheckFinding(findingId, cid);
+      // Belt-and-suspenders: with the typed-error refactor a missing row
+      // throws WetCheckFindingNotFoundError, but if a future change ever
+      // returns false again we still want to surface a 404 instead of
+      // the previous silent 200 `{ ok: false }`.
+      if (!ok) {
+        res.status(404).json({ message: "Wet check finding not found", reason: "not_found" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      // Task #518 — typed-error mapping so the FindingSheet's red trash
+      // button can show an actionable toast instead of swallowing a
+      // 200 `{ ok: false }`.
+      if (e instanceof WetCheckFindingNotFoundError) {
+        res.status(404).json({ message: e.message, reason: "not_found" });
+        return;
+      }
+      if (e instanceof WetCheckFindingAlreadyConvertedError) {
+        res.status(409).json({
+          message: e.message,
+          reason: "already_converted",
+          target: e.target,
+          targetId: e.targetId,
+        });
+        return;
+      }
+      if (e instanceof WetCheckFindingNotEditableError) {
+        res.status(409).json({
+          message: e.message,
+          reason: "wet_check_not_editable",
+          wetCheckStatus: e.status,
+        });
+        return;
+      }
       const { status, message } = classifyAndLog(req, e, {
         op: "deleteWetCheckFinding",
-        ctx: { cid, findingId: req.params.id },
+        ctx: { cid, findingId },
         fallbackStatus: 400,
         fallbackMessage: "Couldn't delete finding — please retry",
+        recognized: [
+          // The legacy `assertWetCheckEditableByTech` and the
+          // tenant-scoping `assertWetCheckBelongsToCompany` both throw
+          // bare Errors with these substrings. Map them to 409/404 so a
+          // pre-typed-error code path that slips past the explicit
+          // `instanceof` guards above still surfaces correctly.
+          {
+            test: (_e, raw) => /Cannot edit wet check in status/.test(raw),
+            status: 409,
+            message: (_e, raw) => raw,
+          },
+          {
+            test: (_e, raw) => /not found for company/.test(raw),
+            status: 404,
+            message: "Wet check finding not found",
+          },
+        ],
       });
       res.status(status).json({ message });
     }
