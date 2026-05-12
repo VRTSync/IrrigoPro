@@ -51,12 +51,15 @@ export const regressionAfterDeployRule: Rule = {
 
       if (firing) {
         // Flag every regression group so the Crashes badge lights up.
+        // NOTE: drizzle's sql template expands a JS array as a list of
+        // placeholders (`$1, $2, ...`), so `ANY($1::text[])` doesn't work
+        // here — we have to build an `IN (...)` list with sql.join instead.
         const fingerprints = rows.map((r) => r.fingerprint);
         try {
           await db.execute(sql`
             UPDATE app_event_groups
             SET is_regression = true, updated_at = now()
-            WHERE fingerprint = ANY(${fingerprints}::text[])
+            WHERE fingerprint IN (${sql.join(fingerprints.map((f) => sql`${f}`), sql`, `)})
               AND is_regression = false
           `);
         } catch { /* best-effort */ }

@@ -99,13 +99,44 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
   }
 
   // Look up the active (open or mitigated) incident for this rule.
+  // NOTE: raw `db.execute` returns column names as-is from Postgres (snake_case),
+  // so we must alias every camelCase field the state machine reads below —
+  // otherwise `live.cleanSinceAt` / `live.fireCount` / etc. silently come back
+  // as `undefined` and the open→mitigated→resolved transitions never fire.
   const liveRes = await db.execute<IncidentRow>(sql`
-    SELECT * FROM incidents
+    SELECT id,
+           rule_id          AS "ruleId",
+           severity,
+           status,
+           summary,
+           started_at       AS "startedAt",
+           last_firing_at   AS "lastFiringAt",
+           clean_since_at   AS "cleanSinceAt",
+           mitigated_at     AS "mitigatedAt",
+           resolved_at      AS "resolvedAt",
+           affected_companies AS "affectedCompanies",
+           affected_users     AS "affectedUsers",
+           details,
+           fire_count       AS "fireCount"
+    FROM incidents
     WHERE rule_id = ${rule.id} AND status IN ('open','mitigated')
     ORDER BY started_at DESC
     LIMIT 1
   `);
-  const live = liveRes.rows?.[0] ?? null;
+  // Raw `db.execute` skips drizzle/pg-types parsers, so timestamp columns
+  // arrive as strings. Re-hydrate them so the comparisons below
+  // (`cleanSince.getTime()` etc.) don't blow up.
+  const liveRaw = liveRes.rows?.[0] ?? null;
+  const live: IncidentRow | null = liveRaw
+    ? {
+        ...(liveRaw as IncidentRow),
+        startedAt: liveRaw.startedAt ? new Date(liveRaw.startedAt as unknown as string) : liveRaw.startedAt,
+        lastFiringAt: liveRaw.lastFiringAt ? new Date(liveRaw.lastFiringAt as unknown as string) : liveRaw.lastFiringAt,
+        cleanSinceAt: liveRaw.cleanSinceAt ? new Date(liveRaw.cleanSinceAt as unknown as string) : null,
+        mitigatedAt: liveRaw.mitigatedAt ? new Date(liveRaw.mitigatedAt as unknown as string) : null,
+        resolvedAt: liveRaw.resolvedAt ? new Date(liveRaw.resolvedAt as unknown as string) : null,
+      }
+    : null;
 
   if (result.firing) {
     // Side-effects (e.g. lockout) before the state machine — they
@@ -318,3 +349,10 @@ export function stopIncidentRunner(): void {
 
 // Exposed for tests / manual ad-hoc evaluation.
 export { tick as runIncidentRunnerOnce };
+export {
+  evaluateRule,
+  withAdvisoryLock,
+  ADVISORY_LOCK_KEY,
+  MITIGATE_AFTER_MS,
+  RESOLVE_AFTER_MS,
+};
