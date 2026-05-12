@@ -103,31 +103,39 @@ function groupHasActive(group: NavGroup, activePath: string | null): boolean {
 }
 
 function useNavBadges(enabled: boolean): NavBadgeMap {
-  const { data: pendingParts = [] } = useQuery<Part[]>({
+  // Task #539 — see notification-system.tsx: the workspace queryFn
+  // default returns `null` on 401 (so destructure defaults like
+  // `data = []` DO NOT apply). Coerce each badge query through
+  // `Array.isArray(...) ? ... : []` so a logged-out probe can never
+  // resurface as a render-time `i.some` / `i.length` crash.
+  const { data: pendingPartsRaw } = useQuery<Part[] | null>({
     queryKey: ["/api/parts/pending-approval"],
     enabled,
     refetchInterval: 60000,
   });
-  const { data: pendingReviews = [] } = useQuery<ManualPartReview[]>({
+  const { data: pendingReviewsRaw } = useQuery<ManualPartReview[] | null>({
     queryKey: ["/api/manual-part-reviews"],
     enabled,
     refetchInterval: 60000,
   });
-  const { data: wetCheckPending = [] } = useQuery<unknown[]>({
+  const { data: wetCheckPendingRaw } = useQuery<unknown[] | null>({
     queryKey: ["/api/wet-checks/pending-review"],
     enabled,
     refetchInterval: 60000,
   });
-  const { data: pendingEstimates = [] } = useQuery<Estimate[]>({
+  const { data: pendingEstimatesRaw } = useQuery<Estimate[] | null>({
     queryKey: ["/api/estimates/pending-approval"],
     enabled,
     refetchInterval: 60000,
   });
+  const pendingParts = Array.isArray(pendingPartsRaw) ? pendingPartsRaw : [];
+  const pendingReviews = Array.isArray(pendingReviewsRaw) ? pendingReviewsRaw : [];
+  const wetCheckPending = Array.isArray(wetCheckPendingRaw) ? wetCheckPendingRaw : [];
+  const pendingEstimates = Array.isArray(pendingEstimatesRaw) ? pendingEstimatesRaw : [];
   return {
-    partsPendingApproval:
-      (pendingParts?.length || 0) + (pendingReviews?.length || 0),
-    wetCheckReviews: wetCheckPending?.length || 0,
-    estimatesPendingApproval: pendingEstimates?.length || 0,
+    partsPendingApproval: pendingParts.length + pendingReviews.length,
+    wetCheckReviews: wetCheckPending.length,
+    estimatesPendingApproval: pendingEstimates.length,
   };
 }
 

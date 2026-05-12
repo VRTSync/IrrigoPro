@@ -82,6 +82,15 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Task #539 — emit production source maps but DO NOT reference them
+    // from the bundle (`hidden` strips the trailing
+    // `//# sourceMappingURL=...` comment). The .map files land in
+    // dist/public/assets next to the chunks so we can keep them
+    // server-side or upload to error tracking, but they are never
+    // requested by end users' browsers — the public bundle stays
+    // unmapped. Pair this with not serving `*.map` from the public
+    // host (or 404'ing them) when deploying as a separate static site.
+    sourcemap: "hidden",
   },
   server: {
     port,

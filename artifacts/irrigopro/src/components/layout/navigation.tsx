@@ -48,28 +48,35 @@ export default function Navigation() {
   // doubles it on 3G, and backs off to 5min on 2G/saveData.
   const badgePollMs = adaptiveRefetchInterval(60_000);
 
-  // Fetch pending parts approval count for billing manager badge
-  const { data: pendingParts = [] } = useQuery<Part[]>({
+  // Fetch pending parts approval count for billing manager badge.
+  // Task #539 — these badge counts use `?.length || 0` already, but the
+  // workspace queryFn default returns `null` on 401, so be explicit:
+  // coerce to a real array before any `.length` / `.some` access so a
+  // logged-out probe can never resurface as a render-time crash.
+  const { data: pendingPartsRaw } = useQuery<Part[] | null>({
     queryKey: ["/api/parts/pending-approval"],
     enabled: userRole === 'billing_manager' || userRole === 'company_admin',
     refetchInterval: badgePollMs,
   });
-  const { data: pendingReviews = [] } = useQuery<ManualPartReview[]>({
+  const { data: pendingReviewsRaw } = useQuery<ManualPartReview[] | null>({
     queryKey: ["/api/manual-part-reviews"],
     enabled: userRole === 'billing_manager' || userRole === 'company_admin',
     refetchInterval: badgePollMs,
   });
-  const pendingApprovalCount = (pendingParts?.length || 0) + (pendingReviews?.length || 0);
+  const pendingParts: Part[] = Array.isArray(pendingPartsRaw) ? pendingPartsRaw : [];
+  const pendingReviews: ManualPartReview[] = Array.isArray(pendingReviewsRaw) ? pendingReviewsRaw : [];
+  const pendingApprovalCount = pendingParts.length + pendingReviews.length;
 
   // Slice 7: estimates awaiting manager review. Surfaced as a badge on the
   // Operations dropdown for company_admin and the Billing dropdown for
   // billing_manager so reviewers can see at a glance there is work to do.
-  const { data: pendingEstimates = [] } = useQuery<Estimate[]>({
+  const { data: pendingEstimatesRaw } = useQuery<Estimate[] | null>({
     queryKey: ["/api/estimates/pending-approval"],
     enabled: userRole === 'billing_manager' || userRole === 'company_admin',
     refetchInterval: badgePollMs,
   });
-  const pendingEstimateCount = pendingEstimates?.length || 0;
+  const pendingEstimates: Estimate[] = Array.isArray(pendingEstimatesRaw) ? pendingEstimatesRaw : [];
+  const pendingEstimateCount = pendingEstimates.length;
 
   // Fetch company profile to get company logo
   const { data: company } = useQuery({

@@ -37,12 +37,24 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
   // pay a 30s notification poll on top of whatever they're actually doing.
   const notifyPollMs = adaptiveRefetchInterval(30_000);
 
-  // Fetch notifications
-  const { data: notifications = [] } = useQuery<Notification[]>({
+  // Fetch notifications.
+  //
+  // Task #539 — the workspace `getQueryFn` default returns `null` on a
+  // 401 response (so logged-out probes don't throw), which means the
+  // `data: notifications = []` destructure default DOES NOT kick in for
+  // an unauthenticated session — `notifications` would be `null`, not
+  // `[]`. Calling `.some(...)` / `.map(...)` / `.length` on that null
+  // is exactly the "null is not an object (evaluating 'i.some')" cold-
+  // load crash captured by the new error boundary. Coerce to a real
+  // array here before any render-time array method touches it.
+  const { data: notificationsRaw } = useQuery<Notification[] | null>({
     queryKey: ["/api/notifications", userId],
     queryFn: () => apiRequest(`/api/notifications/${userId}`, "GET"),
     refetchInterval: notifyPollMs,
   });
+  const notifications: Notification[] = Array.isArray(notificationsRaw)
+    ? notificationsRaw
+    : [];
 
   // Fetch unread count
   const { data: countData } = useQuery<{ count: number }>({
