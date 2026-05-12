@@ -1,7 +1,24 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { execSync } from "child_process";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+
+// Task #544 — short build hash injected into the client bundle so the
+// /api/client-errors trail can tell us exactly which deployed bundle a
+// crash came from. Falls back to a timestamp if git isn't available
+// (e.g. inside a published image without a .git directory).
+function resolveBuildHash(): string {
+  if (process.env.VITE_BUILD_HASH) return process.env.VITE_BUILD_HASH;
+  try {
+    return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+  } catch {
+    return `t${Date.now().toString(36)}`;
+  }
+}
+const BUILD_HASH = resolveBuildHash();
 
 const rawPort = process.env.PORT;
 
@@ -45,6 +62,10 @@ function virtualPwaRegisterPlugin(): Plugin {
 
 export default defineConfig({
   base: basePath,
+  define: {
+    // Surfaced to client code as `import.meta.env.VITE_BUILD_HASH`.
+    "import.meta.env.VITE_BUILD_HASH": JSON.stringify(BUILD_HASH),
+  },
   plugins: [
     react(),
     runtimeErrorOverlay(),

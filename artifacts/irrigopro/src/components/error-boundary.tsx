@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { safeGet } from "@/utils/safeStorage";
 
 interface Props {
   children: ReactNode;
@@ -10,6 +11,40 @@ interface State {
   componentStack: string | null;
   showDetails: boolean;
   copied: boolean;
+  isChunkLoadError: boolean;
+  chunkRetrying: boolean;
+}
+
+// Task #544 — narrow detection for the lazy-route chunk fetch failures
+// shipped by Task #532's code splitting. Webpack/Vite both throw an
+// error whose `name === "ChunkLoadError"` (or whose message contains
+// "Loading chunk … failed" / "Failed to fetch dynamically imported
+// module") when a per-route chunk fetch dies mid-navigation on a flaky
+// LTE link. We special-case those so techs see "Reconnect and reload"
+// instead of the generic crash card and we get exactly one auto-retry.
+function isChunkLoadError(err: Error | null): boolean {
+  if (!err) return false;
+  if (err.name === "ChunkLoadError") return true;
+  const msg = err.message || "";
+  return (
+    /Loading chunk \d+ failed/i.test(msg) ||
+    /Failed to fetch dynamically imported module/i.test(msg) ||
+    /error loading dynamically imported module/i.test(msg) ||
+    /Importing a module script failed/i.test(msg)
+  );
+}
+
+const CHUNK_RETRY_FLAG = "irrigopro:chunkRetry";
+
+function readUserContext(): { userId: number | null; role: string } {
+  try {
+    const raw = safeGet("user");
+    if (!raw) return { userId: null, role: "" };
+    const u = JSON.parse(raw) as { id?: number; role?: string };
+    return { userId: typeof u?.id === "number" ? u.id : null, role: u?.role ?? "" };
+  } catch {
+    return { userId: null, role: "" };
+  }
 }
 
 export class AppErrorBoundary extends Component<Props, State> {
@@ -19,15 +54,77 @@ export class AppErrorBoundary extends Component<Props, State> {
     componentStack: null,
     showDetails: false,
     copied: false,
+    isChunkLoadError: false,
+    chunkRetrying: false,
   };
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true, error };
+    return { hasError: true, error, isChunkLoadError: isChunkLoadError(error) };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error("[boot] React error boundary caught:", error, info?.componentStack);
-    this.setState({ componentStack: info?.componentStack ?? null });
+    const componentStack = info?.componentStack ?? null;
+    console.error("[boot] React error boundary caught:", error, componentStack);
+    this.setState({ componentStack });
+
+    // Task #544 — fire-and-forget server log so the next regression doesn't
+    // depend on a tech screenshotting their console. Best-effort: any
+    // failure is swallowed so we never compound the boundary error.
+    try {
+      const buildHash = import.meta.env.VITE_BUILD_HASH ?? "";
+      const { userId, role } = readUserContext();
+      const payload = {
+        name: error?.name ?? "Error",
+        message: error?.message ?? "",
+        stack: error?.stack ?? "",
+        componentStack: componentStack ?? "",
+        url: typeof window !== "undefined" ? window.location.href : "",
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+        buildHash,
+        userId,
+        role,
+      };
+      const body = JSON.stringify(payload);
+      const url = "/api/client-errors";
+      let sent = false;
+      if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+        try {
+          sent = navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+        } catch { /* fall through to fetch */ }
+      }
+      if (!sent && typeof fetch === "function") {
+        void fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          keepalive: true,
+          credentials: "include",
+        }).catch(() => { /* ignore */ });
+      }
+    } catch (reportErr) {
+      console.warn("[boot] client-errors report failed:", reportErr);
+    }
+
+    // Task #544 — ChunkLoadError UX. If we lost a lazy chunk and the
+    // device is currently online, do exactly one automatic reload after
+    // a short delay so a transient LTE blip self-heals without the user
+    // ever seeing the crash card. The sessionStorage flag guarantees we
+    // never loop: a second chunk failure in the same session falls
+    // through to the visible "Reconnect and reload" UI.
+    if (isChunkLoadError(error)) {
+      let alreadyRetried = false;
+      try {
+        alreadyRetried = sessionStorage.getItem(CHUNK_RETRY_FLAG) === "1";
+      } catch { /* sessionStorage may be unavailable */ }
+      const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
+      if (online && !alreadyRetried) {
+        try { sessionStorage.setItem(CHUNK_RETRY_FLAG, "1"); } catch { /* ignore */ }
+        this.setState({ chunkRetrying: true });
+        window.setTimeout(() => {
+          try { window.location.reload(); } catch { /* ignore */ }
+        }, 1200);
+      }
+    }
   }
 
   private handleReload = () => {
@@ -113,6 +210,30 @@ export class AppErrorBoundary extends Component<Props, State> {
       .map((l) => l.trim())
       .find((l) => l && !l.startsWith(errorName) && !l.includes(message)) ?? "";
 
+    // Task #544 — in dev / preview builds, expand the technical details
+    // by default so the next regression is visible without a server
+    // round-trip. Production keeps the collapsed UX.
+    const isDevBuild =
+      import.meta.env.DEV === true || import.meta.env.MODE !== "production";
+    const showDetails = this.state.showDetails || isDevBuild;
+
+    // Task #544 — ChunkLoadError UX. Lazy-route fetch failures get a
+    // distinct, calm "Reconnect and reload" card instead of the generic
+    // crash. If the auto-retry already fired (chunkRetrying = true),
+    // show a transient "Reloading…" state so techs aren't presented
+    // with a button they don't need to tap.
+    const isChunk = this.state.isChunkLoadError;
+    const heading = isChunk
+      ? this.state.chunkRetrying
+        ? "Reloading…"
+        : "Reconnect and reload"
+      : "Something went wrong loading the app";
+    const blurb = isChunk
+      ? this.state.chunkRetrying
+        ? "Connection blip — finishing the page load."
+        : "We couldn't finish loading the next screen. Check your signal, then tap Reload."
+      : "We couldn't finish loading IrrigoPro. Check your connection and try again.";
+
     return (
       <div
         style={{
@@ -138,12 +259,12 @@ export class AppErrorBoundary extends Component<Props, State> {
           }}
         >
           <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8, color: "#111827" }}>
-            Something went wrong loading the app
+            {heading}
           </h1>
           <p style={{ color: "#4b5563", marginBottom: 20, fontSize: 14 }}>
-            We couldn&apos;t finish loading IrrigoPro. Check your connection and try
-            again.
+            {blurb}
           </p>
+          {!(isChunk && this.state.chunkRetrying) && (
           <button
             onClick={this.handleReload}
             style={{
@@ -160,22 +281,25 @@ export class AppErrorBoundary extends Component<Props, State> {
           >
             Reload
           </button>
-          <div style={{ marginTop: 16 }}>
-            <button
-              onClick={this.toggleDetails}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#6b7280",
-                fontSize: 12,
-                cursor: "pointer",
-                textDecoration: "underline",
-              }}
-            >
-              {this.state.showDetails ? "Hide details" : "Show details"}
-            </button>
-          </div>
-          {this.state.showDetails && (
+          )}
+          {!isDevBuild && (
+            <div style={{ marginTop: 16 }}>
+              <button
+                onClick={this.toggleDetails}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#6b7280",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                {this.state.showDetails ? "Hide details" : "Show details"}
+              </button>
+            </div>
+          )}
+          {showDetails && (
             <div style={{ marginTop: 12, textAlign: "left" }}>
               <div
                 style={{

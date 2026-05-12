@@ -964,6 +964,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ enabled });
   });
 
+  // Task #544 — fire-and-forget client-side error trail. AppErrorBoundary
+  // POSTs whatever it caught (name, message, stack, componentStack, url,
+  // userAgent, buildHash, userId, role) so the next "white screen" report
+  // doesn't depend on a tech screenshotting the console. v1 just logs via
+  // req.log; no DB write. Always returns 204 so a logging failure never
+  // surfaces as a follow-on error in the boundary.
+  app.post("/api/client-errors", express.json({ limit: "64kb" }), (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const pick = (k: string): string => {
+        const v = body[k];
+        return typeof v === "string" ? v.slice(0, 4000) : "";
+      };
+      req.log.error(
+        {
+          clientError: {
+            name: pick("name"),
+            message: pick("message"),
+            stack: pick("stack"),
+            componentStack: pick("componentStack"),
+            url: pick("url"),
+            userAgent: pick("userAgent") || req.headers["user-agent"] || "",
+            buildHash: pick("buildHash"),
+            userId: body.userId ?? null,
+            role: pick("role"),
+          },
+        },
+        "client error boundary report",
+      );
+    } catch (err) {
+      try { req.log.warn({ err }, "client error logging failed"); } catch { /* ignore */ }
+    }
+    res.status(204).end();
+  });
+
   // Serve company logo images directly (binary response)
   app.get("/api/company-logo/:logoId", async (req, res) => {
     const logoId = req.params.logoId;
