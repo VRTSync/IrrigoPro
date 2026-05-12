@@ -756,7 +756,18 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     const records = zonesByLetter(activeLetter);
     const zoneRecord = records.find(z => z.zoneNumber === activeZone);
     return (
+      // Task #511 — `key` forces a fresh mount whenever the tech advances
+      // to a different zone. Without it, ZoneScreen (and the FindingSheet
+      // it owns) is the same React instance across zones, so per-zone
+      // local state — the Needs Work form (selected part, qty, labor
+      // hours, notes, mark-complete toggle, no-part-needed toggle,
+      // pending photos), the open finding sheet, the pending revert
+      // dialog, and the inline Mark Zone Complete confirm — would leak
+      // onto the next zone after `onAdvance()` flipped only the
+      // `activeZone` prop. Remounting on `${letter}-${zone}` resets all
+      // that state to defaults so each zone opens as a clean slate.
       <ZoneScreen
+        key={`zone-${activeLetter}-${activeZone}`}
         wetCheckId={wc.id ?? id ?? 0}
         wetCheckClientId={wc.clientId ?? null}
         customerId={wc.customerId}
@@ -1254,7 +1265,11 @@ type FindingSheetState =
   | { open: true; mode: "create"; issueType: string }
   | { open: true; mode: "edit"; finding: WetCheckFinding };
 
-function ZoneScreen({
+// Exported for tests (Task #511 regression). Production callers use this
+// via the parent's render branch in WetCheckDetail; the parent always
+// keys it by `${activeLetter}-${activeZone}` so each zone gets a fresh
+// mount.
+export function ZoneScreen({
   wetCheckId,
   wetCheckClientId,
   customerId,
