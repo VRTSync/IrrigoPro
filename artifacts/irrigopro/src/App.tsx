@@ -113,28 +113,57 @@ function Router() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Clear stale cache on app startup
-    clearStaleCache();
-    
-    // Check for saved user in localStorage and validate session
-    const refreshUserSession = async () => {
-      const savedUser = safeGet("user");
-      if (savedUser) {
-        try {
-          const userData = JSON.parse(savedUser);
-          // Production user session initialization
-          setUser(userData);
-        } catch (error) {
-          console.error("Error parsing user data:", error);
-          safeRemove("user");
-        }
-      } else {
-        console.log("No saved user found");
-      }
+    let cancelled = false;
+
+    // Boot timeout: never strand on the spinner. If the session refresh
+    // hasn't resolved within ~4s, fall through to the unauthenticated
+    // routes (login screen) so field techs on slow connections see
+    // *something* rather than a permanent loading state.
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      console.warn("[boot] session refresh timed out — falling through to login");
       setIsLoading(false);
+    }, 4000);
+
+    // Check for saved user in localStorage and validate session.
+    // Wrapped end-to-end in try/catch so a thrown safeGet/JSON.parse cannot
+    // strand the app on a blank screen.
+    const refreshUserSession = async () => {
+      try {
+        try {
+          clearStaleCache();
+        } catch (cacheErr) {
+          console.warn("[boot] clearStaleCache failed:", cacheErr);
+        }
+
+        const savedUser = safeGet("user");
+        if (savedUser) {
+          try {
+            const userData = JSON.parse(savedUser);
+            if (!cancelled) setUser(userData);
+          } catch (parseErr) {
+            console.error("[boot] error parsing saved user:", parseErr);
+            try { safeRemove("user"); } catch { /* ignore */ }
+          }
+        } else {
+          console.log("[boot] no saved user found");
+        }
+      } catch (err) {
+        console.error("[boot] session refresh failed:", err);
+      } finally {
+        if (!cancelled) {
+          window.clearTimeout(timeoutId);
+          setIsLoading(false);
+        }
+      }
     };
-    
-    refreshUserSession();
+
+    void refreshUserSession();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
   }, []);
 
   if (isLoading) {
