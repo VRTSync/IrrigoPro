@@ -1,0 +1,23 @@
+Overall it's a solid plan — the framing is right (third white-screen regression in a row, so pair the fix with a guard) and the suspects are the right ones. A few things I'd push back on or sharpen before they start coding:
+1. The plan starts from the wrong place. Step 1 says "reproduce in the running preview." If you can't repro it there (very likely — this smells like a real-device / cached-SW issue), the rest of the plan goes off the rails. The first step should be get a real client-side error from an affected tech — either the "Copy diagnostics" output from the existing error boundary, or just a screenshot of the console. Otherwise the engineer will pick a plausible-looking suspect (BillingSheetWizard preload, NotificationSystem, etc.), "fix" it, and you'll have a fourth regression.
+2. It ignores the most likely cause: stale service worker. Tasks #531/#539/#540 already shipped the fixes for every render crash they could find. If techs are still white-screening, the strongest hypothesis is they're loading the old broken bundle from the cached SW on their phones. That's not something this PR can fix in code — it's an ops fix:
+VITE_OFFLINE_SERVICE_WORKER=false  → redeploy → wait one load cycle → flip back on
+That kill switch already exists in lib/registerSW.ts (lines 36–48). The plan should explicitly require ruling this out by having one affected tech hard-clear site data and confirm the issue persists with a fresh cache before writing any code.
+3. The regression guard is the right idea but under-specified. "Show the actual error in dev/preview" is fine, but the prod-side trail is what matters — you don't get screenshots from techs. Two concrete things to add:
+
+In componentDidCatch, fire-and-forget POST /api/client-errors with { name, message, stack, componentStack, url, ua, buildHash, userId, role }. Even if /api/client-errors doesn't exist yet, stubbing it is ~10 lines on the server.
+Include the bundle/build hash in the payload. Half the value of the next investigation is knowing whether the tech was on the broken old chunk or the fixed new one.
+
+4. It doesn't account for ChunkLoadError. Task #532 just shipped route-level code splitting. On a flaky LTE connection, a lazy chunk can fail to load mid-navigation, throw, and land in componentDidCatch — which renders the near-white "Something went wrong" page that matches the symptom exactly. The guard step should special-case ChunkLoadError (name match) with a "Reconnect and reload" message and a one-shot auto-retry, not bucket it with generic render crashes.
+5. Verification must happen on a real phone, not preview. This is implied but should be a hard requirement in "Done looks like." A passing preview build means nothing here.
+6. Minor: the UpdatingSplash auto-fire theory is easy to falsify in 30 seconds. setUpdating(true) is only called inside triggerUpdate, which is only wired to the toast action button. Adding console.log("[sw] triggerUpdate fired") will instantly tell you whether the splash is the culprit. Cheaper than the rest of the investigation.
+If I were rewriting the steps:
+1. Collect: get diagnostics from one affected tech (Copy button or console).
+   Confirm whether they're loading the new bundle hash.
+2. If old bundle hash: flip VITE_OFFLINE_SERVICE_WORKER=false, redeploy,
+   flip back. No code change needed.
+3. If new bundle hash: fix the specific error from step 1.
+4. Regardless: add componentDidCatch → server log + bundle hash, and
+   ChunkLoadError-specific UX. This is what makes the *next* one cheap.
+5. Verify on a real phone across roles. Typecheck.
+The plan as written would probably ship a fix, but might not ship the fix — and would skip the kill-switch path that could unblock techs in minutes instead of hours.
