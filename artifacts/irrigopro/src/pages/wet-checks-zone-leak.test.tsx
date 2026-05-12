@@ -152,7 +152,13 @@ describe("Task #511 — needs-work info must not leak to the next zone", () => {
   it("static guard: wet-checks.tsx keys <ZoneScreen> by both letter and zone number", () => {
     // Backstop: if a future refactor drops or weakens the key, this
     // fails loudly even if no one re-runs the behavioral test.
-    const src = fs.readFileSync(path.resolve(__dirname, "wet-checks.tsx"), "utf8");
+    // Task #563 — the wet-check page was split into per-component files
+    // under `wet-checks/`. The `<ZoneScreen>` JSX now lives in
+    // `WetCheckDetail.tsx`; `wet-checks.tsx` is just a barrel re-export.
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "wet-checks/WetCheckDetail.tsx"),
+      "utf8",
+    );
     const tag = src.match(/<ZoneScreen\b[\s\S]*?\/>/);
     expect(tag).not.toBeNull();
     const tagText = tag![0];
