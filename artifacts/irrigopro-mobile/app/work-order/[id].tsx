@@ -44,6 +44,8 @@ type WorkOrder = {
   workLocationLat: string | null;
   workLocationLng: string | null;
   workLocationAddress: string | null;
+  controllerLetter: string | null;
+  zoneNumber: number | null;
 };
 
 type WetCheck = {
@@ -374,6 +376,25 @@ export default function WorkOrderDetailScreen() {
               ) : null}
               {wo.branchName ? (
                 <DetailRow label="Branch" value={wo.branchName} colors={colors} />
+              ) : null}
+              {wo.controllerLetter || wo.zoneNumber != null ? (
+                <DetailRow
+                  label="Controller / Zone"
+                  value={[
+                    wo.controllerLetter ? `Controller ${wo.controllerLetter}` : null,
+                    wo.zoneNumber != null ? `Zone ${wo.zoneNumber}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  colors={colors}
+                />
+              ) : null}
+              {wo.workLocationLat && wo.workLocationLng ? (
+                <DetailRow
+                  label="Pinned location"
+                  value={`${Number(wo.workLocationLat).toFixed(6)}, ${Number(wo.workLocationLng).toFixed(6)}`}
+                  colors={colors}
+                />
               ) : null}
               {wo.priority ? (
                 <DetailRow

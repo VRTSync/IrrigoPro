@@ -45,6 +45,8 @@ import {
   History,
   X,
   Navigation,
+  Cpu,
+  ExternalLink,
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { useToast } from "@/hooks/use-toast";
@@ -602,6 +604,111 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
                 </CardContent>
               </Card>
             </div>
+
+            {/* Pinned Work Location & Controller/Zone (Task #344) */}
+            {(() => {
+              const lat =
+                workOrder.workLocationLat != null
+                  ? parseFloat(String(workOrder.workLocationLat))
+                  : NaN;
+              const lng =
+                workOrder.workLocationLng != null
+                  ? parseFloat(String(workOrder.workLocationLng))
+                  : NaN;
+              const hasPin = Number.isFinite(lat) && Number.isFinite(lng);
+              const hasControllerZone =
+                !!workOrder.controllerLetter || workOrder.zoneNumber != null;
+              if (!hasPin && !hasControllerZone) return null;
+              const cardTitle = hasPin
+                ? "Pinned Work Location"
+                : "Location & Controller/Zone";
+              const mapsUrl = hasPin
+                ? buildMapsUrl({
+                    lat: workOrder.workLocationLat,
+                    lng: workOrder.workLocationLng,
+                    address:
+                      workOrder.workLocationAddress ||
+                      workOrder.projectAddress ||
+                      undefined,
+                    label:
+                      workOrder.workLocationAddress ||
+                      workOrder.projectAddress ||
+                      workOrder.customerName ||
+                      undefined,
+                  })
+                : null;
+              return (
+                <Card data-testid="card-pinned-location">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <MapPin className="w-5 h-5 text-blue-600" />
+                      {cardTitle}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {hasPin && (
+                      <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <span
+                          className="font-mono text-gray-700"
+                          data-testid="text-pinned-coords"
+                        >
+                          {lat.toFixed(6)}, {lng.toFixed(6)}
+                        </span>
+                        {mapsUrl && (
+                          <a
+                            href={mapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 underline"
+                            data-testid="link-view-pin-on-map"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            View on map
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {(workOrder.controllerLetter || workOrder.zoneNumber != null) && (
+                      <div
+                        className="flex items-center gap-1.5 text-sm"
+                        data-testid="text-controller-zone"
+                      >
+                        <Cpu className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                        <div className="text-gray-900">
+                          {workOrder.controllerLetter && (
+                            <>
+                              <span className="text-gray-500">Controller: </span>
+                              <span className="font-medium">{workOrder.controllerLetter}</span>
+                            </>
+                          )}
+                          {workOrder.controllerLetter && workOrder.zoneNumber != null && (
+                            <span className="mx-2 text-gray-300">•</span>
+                          )}
+                          {workOrder.zoneNumber != null && (
+                            <>
+                              <span className="text-gray-500">Zone: </span>
+                              <span className="font-medium">{workOrder.zoneNumber}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {hasPin && (
+                      <div className="rounded-lg overflow-hidden border border-gray-200">
+                        <iframe
+                          title="Pinned work location"
+                          width="100%"
+                          height="220"
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.003}%2C${lat - 0.002}%2C${lng + 0.003}%2C${lat + 0.002}&layer=mapnik&marker=${lat}%2C${lng}`}
+                        />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Assignment and Progress Details */}
             <Card>
