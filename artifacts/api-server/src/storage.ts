@@ -563,6 +563,7 @@ export interface IStorage {
     technicianName: string;
     status: string;
     invoiceId: number | null;
+    quickbooksInvoiceId: string | null;
     partId: number;
     partName: string;
     quantity: string;
@@ -3263,6 +3264,7 @@ export class DatabaseStorage implements IStorage {
         ''::text              AS technician_name,
         inv.status            AS status,
         ii.invoice_id         AS invoice_id,
+        inv.quickbooks_invoice_id AS quickbooks_invoice_id,
         ii.part_id            AS part_id,
         ii.part_name          AS part_name,
         ii.quantity           AS quantity,
@@ -3299,6 +3301,7 @@ export class DatabaseStorage implements IStorage {
           technicianName: String(r.technician_name ?? ''),
           status: String(r.status ?? ''),
           invoiceId: r.invoice_id == null ? null : Number(r.invoice_id),
+          quickbooksInvoiceId: r.quickbooks_invoice_id == null ? null : String(r.quickbooks_invoice_id),
           partId: Number(r.part_id),
           partName: String(r.part_name ?? ''),
           quantity: String(r.quantity ?? '0'),
@@ -3347,6 +3350,11 @@ export class DatabaseStorage implements IStorage {
       newPartsSubtotal: string;
       oldTotalAmount: string;
       newTotalAmount: string;
+      // Task #173: surface a heads-up when an invoice repair touches an
+      // already-paid invoice or one that has been pushed to QuickBooks so
+      // the operator knows to also fix the customer-facing copy in QBO.
+      invoicePaid?: boolean;
+      sentToQuickBooks?: boolean;
       updatedItems: Array<{
         itemId: number;
         partName: string;
@@ -3571,6 +3579,9 @@ export class DatabaseStorage implements IStorage {
           newPartsSubtotal: (oldPartsSubtotal + parentDifference).toFixed(2),
           oldTotalAmount: oldTotalAmount.toFixed(2),
           newTotalAmount: (oldTotalAmount + parentDifference).toFixed(2),
+          // Task #173: heads-up flags for the dry-run preview UI.
+          invoicePaid: String(inv.status ?? '').toLowerCase() === 'paid',
+          sentToQuickBooks: inv.quickbooksInvoiceId != null && String(inv.quickbooksInvoiceId).length > 0,
           updatedItems,
         });
         grandDifference += parentDifference;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ArrowLeft, AlertTriangle, RefreshCw, Wrench, ShieldCheck, Lock } from "lucide-react";
+import { ArrowLeft, AlertTriangle, RefreshCw, Wrench, ShieldCheck, Lock, DollarSign, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,6 +32,7 @@ interface AuditRow {
   technicianName: string;
   status: string;
   invoiceId: number | null;
+  quickbooksInvoiceId: string | null;
   partId: number;
   partName: string;
   quantity: string;
@@ -56,6 +57,8 @@ interface RepairParentSummary {
   newPartsSubtotal: string;
   oldTotalAmount: string;
   newTotalAmount: string;
+  invoicePaid?: boolean;
+  sentToQuickBooks?: boolean;
   updatedItems: Array<{
     itemId: number;
     partName: string;
@@ -298,15 +301,50 @@ export default function BillingZeroPriceAuditPage() {
                 <CardContent className="space-y-3 max-h-96 overflow-auto">
                   {preview.parents.map((p) => (
                     <div key={`${p.source}:${p.parentId}`} className="border rounded p-3 bg-amber-50">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-semibold">
-                          <Badge variant="secondary" className="mr-2">{sourceLabel(p.source)}</Badge>
+                      <div className="flex justify-between items-center mb-2 gap-2 flex-wrap">
+                        <span className="font-semibold flex items-center gap-1 flex-wrap">
+                          <Badge variant="secondary" className="mr-1">{sourceLabel(p.source)}</Badge>
                           {p.parentNumber}
+                          {p.invoicePaid && (
+                            <Badge
+                              variant="destructive"
+                              className="bg-amber-600 hover:bg-amber-600"
+                              data-testid={`preview-badge-paid-${p.parentId}`}
+                            >
+                              <DollarSign className="w-3 h-3 mr-0.5" />
+                              paid
+                            </Badge>
+                          )}
+                          {p.sentToQuickBooks && (
+                            <Badge
+                              variant="destructive"
+                              className="bg-blue-700 hover:bg-blue-700"
+                              data-testid={`preview-badge-qbo-${p.parentId}`}
+                            >
+                              <ExternalLink className="w-3 h-3 mr-0.5" />
+                              sent to QuickBooks
+                            </Badge>
+                          )}
                         </span>
                         <span className="text-sm">
                           Total: {fmtMoney(p.oldTotalAmount)} → <strong>{fmtMoney(p.newTotalAmount)}</strong>
                         </span>
                       </div>
+                      {(p.invoicePaid || p.sentToQuickBooks) && (
+                        <p
+                          className="text-xs text-amber-800 mb-2 flex items-start gap-1"
+                          data-testid={`preview-warning-note-${p.parentId}`}
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                          <span>
+                            Heads up: this invoice is{" "}
+                            {p.invoicePaid && <strong>already paid</strong>}
+                            {p.invoicePaid && p.sentToQuickBooks && " and "}
+                            {p.sentToQuickBooks && <strong>already in QuickBooks</strong>}
+                            . Applying this repair will change the invoice total in IrrigoPro — you'll likely also need to adjust the invoice in QuickBooks so the customer-facing copy matches.
+                          </span>
+                        </p>
+                      )}
                       <ul className="text-sm space-y-1">
                         {p.updatedItems.map((it) => (
                           <li key={it.itemId} className="flex justify-between">
@@ -380,10 +418,34 @@ export default function BillingZeroPriceAuditPage() {
                               +{fmtMoney(r.difference)}
                             </td>
                             <td className="p-3">
-                              <Badge variant="outline">{r.status}</Badge>
-                              {r.invoiceId && (
-                                <Badge variant="secondary" className="ml-1">invoiced</Badge>
-                              )}
+                              <div className="flex flex-wrap gap-1 items-center">
+                                <Badge variant="outline">{r.status}</Badge>
+                                {r.invoiceId && (
+                                  <Badge variant="secondary">invoiced</Badge>
+                                )}
+                                {r.source === "invoice" && r.status?.toLowerCase() === "paid" && (
+                                  <Badge
+                                    variant="destructive"
+                                    className="bg-amber-600 hover:bg-amber-600"
+                                    data-testid={`badge-paid-${r.itemId}`}
+                                    title="This invoice is already marked paid. Repairing it will silently change the total — you may also need to adjust the customer copy."
+                                  >
+                                    <DollarSign className="w-3 h-3 mr-0.5" />
+                                    paid
+                                  </Badge>
+                                )}
+                                {r.source === "invoice" && r.quickbooksInvoiceId && (
+                                  <Badge
+                                    variant="destructive"
+                                    className="bg-blue-700 hover:bg-blue-700"
+                                    data-testid={`badge-qbo-${r.itemId}`}
+                                    title={`Sent to QuickBooks (id ${r.quickbooksInvoiceId}). Also adjust the invoice in QuickBooks to keep the customer-facing copy in sync.`}
+                                  >
+                                    <ExternalLink className="w-3 h-3 mr-0.5" />
+                                    sent to QuickBooks
+                                  </Badge>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
