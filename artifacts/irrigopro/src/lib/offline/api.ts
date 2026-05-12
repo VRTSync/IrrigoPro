@@ -438,18 +438,39 @@ export async function updateFinding(findingClientId: string, findingId: number |
   }));
 }
 
-// Queue a photo→finding link PATCH. The {{f}} placeholder resolves to the
-// server id of the finding once its `finding.create` mutation completes,
-// so this works whether the link is queued before or after the create
-// drains.
-export async function linkPhotoToFinding(
-  photoId: number,
-  findingClientId: string,
-  findingId?: number,
-): Promise<void> {
+// Queue a photo→finding link PATCH.
+//
+// Task #510 — the photo is addressed by its `clientId` via a new `{{p}}`
+// placeholder so the engine resolves it to the photo's server id at
+// dispatch time (the same way `{{f}}` resolves a finding's server id).
+// We also set `parentClientId` to the photo's own clientId so the
+// queue's existing "wait for parent to complete" gate keeps the link
+// PATCH from racing the upload — the engine treats every queued
+// mutation sharing a clientId as a parent for any other mutation
+// targeting that clientId.
+//
+// Callers that already hold a real positive server id (e.g. the
+// removePendingPhoto / delete paths) keep the direct-id path: pass
+// `photoId` and we hit `/api/wet-checks/photos/:id` immediately when
+// the offline queue is disabled.
+export interface LinkPhotoToFindingInput {
+  /** clientId of the photo (always present for offline-queued uploads). */
+  photoClientId: string;
+  /** Optional positive server id for the photo (used when offline queue is disabled). */
+  photoId?: number | null;
+  /** clientId of the finding (used to resolve {{f}} via the finding mirror or queued create). */
+  findingClientId: string;
+  /** Optional positive server id for the finding (required when offline queue is disabled). */
+  findingId?: number | null;
+}
+
+export async function linkPhotoToFinding(input: LinkPhotoToFindingInput): Promise<void> {
+  const { photoClientId, photoId, findingClientId, findingId } = input;
   if (!isOfflineQueueEnabled()) {
-    if (findingId == null) {
-      throw new Error("linkPhotoToFinding: findingId required when offline queue is disabled");
+    if (photoId == null || photoId < 0 || findingId == null) {
+      throw new Error(
+        "linkPhotoToFinding: positive photoId and findingId required when offline queue is disabled",
+      );
     }
     await apiRequest(`/api/wet-checks/photos/${photoId}`, "PATCH", { findingId });
     return;
@@ -457,12 +478,33 @@ export async function linkPhotoToFinding(
   await getSyncEngine().enqueue(newMutation({
     kind: "photo.link",
     method: "PATCH",
-    urlTemplate: `/api/wet-checks/photos/${photoId}`,
+    urlTemplate: `/api/wet-checks/photos/{{p}}`,
     body: { findingId: "{{f}}" },
     clientId: uuid(),
-    parentClientId: findingClientId,
-    placeholders: { f: findingClientId },
+    // Gate on the photo's upload mutation completing first; sharing a
+    // clientId means the engine's parent-satisfied check waits for the
+    // upload before dispatching the link PATCH.
+    parentClientId: photoClientId,
+    placeholders: { p: photoClientId, f: findingClientId },
   }));
+}
+
+// Test helper — surface the placeholder-based queue payload without
+// needing to actually have the engine running. Not exported in the
+// public API; only the unit tests reach for this.
+export function __buildPhotoLinkMutationForTests(
+  photoClientId: string,
+  findingClientId: string,
+): QueuedMutation {
+  return newMutation({
+    kind: "photo.link",
+    method: "PATCH",
+    urlTemplate: `/api/wet-checks/photos/{{p}}`,
+    body: { findingId: "{{f}}" },
+    clientId: uuid(),
+    parentClientId: photoClientId,
+    placeholders: { p: photoClientId, f: findingClientId },
+  });
 }
 
 // 4C — capture-and-queue a wet check photo. Compresses with the web

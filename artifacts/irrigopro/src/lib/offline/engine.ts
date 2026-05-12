@@ -183,7 +183,105 @@ export class SyncEngine {
       this.heartbeatTimer = setInterval(() => { this.heartbeat().catch(() => {}); }, this.heartbeatIntervalMs);
     }
     await this.ensureDB();
+    // Task #510 — one-shot cleanup of legacy `photo.link` mutations
+    // whose urlTemplate baked in a negative client-side id (e.g.
+    // `/api/wet-checks/photos/-1714768241234`). Those will never
+    // resolve to a real server id and would otherwise loop until the
+    // retry cap kicks in. We cancel them so the queue clears and the
+    // tech is free to re-link photos by editing the finding. Any
+    // accompanying `photo.upload` rows with valid bytes stay intact —
+    // the photo still ends up on the server, just not auto-attached.
+    try {
+      await this.cleanupLegacyPhotoLinks();
+    } catch (err) {
+      console.warn("[offline-engine] legacy photo.link cleanup failed:", err);
+    }
     this.scheduleTick();
+  }
+
+  // Scan the queue for `photo.link` mutations whose urlTemplate still
+  // embeds a negative numeric id (the pre-Task-#510 shape). For each
+  // legacy row we try to recover by pairing it with a completed
+  // `photo.upload` mutation for the same finding (matched by
+  // `placeholders.f` / `parentClientId`, ordered by createdAt so the
+  // first link gets the first upload). Recoverable rows are rewritten
+  // into the modern `{{p}}` shape and re-queued; truly orphaned rows
+  // (no matching completed upload, or a sibling already claimed it)
+  // are cancelled so they stop looping forever. Returns the total
+  // number of legacy rows acted on. Exposed so tests can drive the
+  // cleanup deterministically without spinning up the full engine
+  // lifecycle.
+  async cleanupLegacyPhotoLinks(): Promise<number> {
+    const db = await this.ensureDB();
+    const all = await listAllMutations(db);
+    const isLegacy = (m: QueuedMutation) =>
+      m.kind === "photo.link" &&
+      m.status !== "completed" &&
+      /\/api\/wet-checks\/photos\/-\d+/.test(m.urlTemplate);
+
+    const legacy = all.filter(isLegacy).sort((a, b) => a.createdAt - b.createdAt);
+    if (legacy.length === 0) return 0;
+
+    // Index completed photo.uploads (with a real resolvedId) by the
+    // finding clientId we can correlate against. The legacy enqueue
+    // path always wrote `placeholders.f` on the link AND on the
+    // upload, so that's the most reliable join key; we fall back to
+    // parentClientId for older rows that only set the parent.
+    const findingKey = (m: QueuedMutation): string | null =>
+      (m.placeholders?.f as string | undefined) ?? m.parentClientId ?? null;
+
+    const uploadsByFinding = new Map<string, QueuedMutation[]>();
+    for (const m of all) {
+      if (m.kind !== "photo.upload") continue;
+      if (m.status !== "completed") continue;
+      if (m.resolvedId == null) continue;
+      const key = findingKey(m);
+      if (!key) continue;
+      if (!uploadsByFinding.has(key)) uploadsByFinding.set(key, []);
+      uploadsByFinding.get(key)!.push(m);
+    }
+    for (const arr of uploadsByFinding.values()) {
+      arr.sort((a, b) => a.createdAt - b.createdAt);
+    }
+
+    let rewritten = 0;
+    let cancelled = 0;
+    for (const link of legacy) {
+      const key = findingKey(link);
+      const candidates = key ? uploadsByFinding.get(key) ?? [] : [];
+      const match = candidates.shift(); // claim earliest available upload
+      if (match) {
+        await updateMutation(db, link.id, {
+          urlTemplate: "/api/wet-checks/photos/{{p}}",
+          parentClientId: match.clientId,
+          placeholders: {
+            ...(link.placeholders ?? {}),
+            p: match.clientId,
+            // Keep f if it was set; otherwise default to the finding key.
+            f: (link.placeholders?.f as string | undefined) ?? key ?? "",
+          },
+          status: "pending",
+          attemptCount: 0,
+          lastAttemptAt: null,
+          lastError: null,
+        });
+        rewritten++;
+      } else {
+        await deleteMutation(db, link.id);
+        this.inFlight.delete(link.id);
+        this.aborts.delete(link.id);
+        cancelled++;
+      }
+    }
+
+    if (rewritten > 0 || cancelled > 0) {
+      console.info(
+        `[offline-engine] legacy photo.link cleanup — rewrote ${rewritten}, cancelled ${cancelled} orphan(s)`,
+      );
+      await this.broadcastState();
+      if (rewritten > 0) this.scheduleTick();
+    }
+    return rewritten + cancelled;
   }
 
   stop(): void {

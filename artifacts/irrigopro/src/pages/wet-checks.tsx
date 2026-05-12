@@ -42,7 +42,8 @@ import {
 } from "@/lib/offline/api";
 import { tintForControllerLetter } from "@/lib/lifecycle";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
-import { OfflineStrip, OfflineSyncUI } from "@/components/offline/sync-ui";
+import { openOfflineDB, putFindingMirror } from "@/lib/offline/db";
+import { OfflineStrip, OfflineSyncUI, useSyncEngineState } from "@/components/offline/sync-ui";
 import type {
   Customer,
   WorkOrder,
@@ -369,18 +370,35 @@ function PhotoCaptureButton({
 
 function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boolean }) {
   const { toast } = useToast();
-  // Optimistic photos created by the offline-photos queue carry a
-  // negative id and a local blob:/data: URL. We must not route those
-  // through the authed proxy (it would 404), and we hide the delete
-  // button until the upload resolves and the real id arrives.
-  const isOptimistic = photo.id < 0;
+  // Task #510 — split "bytes still uploading" from "no server row yet"
+  // so the lightbox tap target is available the moment the upload
+  // finalize POST returns, even if a follow-up `photo.link` PATCH is
+  // still queued. We read the engine's view of the queue (the same
+  // source the Sync queue UI uses) so we don't duplicate state.
+  const photoClientId = (photo as { clientId?: string | null }).clientId ?? null;
+  const snap = useSyncEngineState(isOfflineQueueEnabled());
+  const uploadMut = photoClientId
+    ? snap.mutations.find(
+        (m) => m.kind === "photo.upload" && m.clientId === photoClientId,
+      )
+    : undefined;
+  const uploading =
+    !!uploadMut && (uploadMut.status === "pending" || uploadMut.status === "syncing");
+
   const isLocalUrl =
     typeof photo.url === "string" &&
     (photo.url.startsWith("blob:") || photo.url.startsWith("data:"));
+  const hasServerUrl =
+    !isLocalUrl && typeof photo.url === "string" && photo.url.length > 0;
+  const hasServerId = photo.id > 0;
+
   const src = isLocalUrl ? photo.url : authedPhotoSrc(photo.url, "thumb");
-  // Lightbox: tap a thumb to open the medium variant in a new tab.
-  // Skipped for optimistic / local blobs which have no server variants yet.
-  const fullSrc = isLocalUrl || isOptimistic ? null : authedPhotoSrc(photo.url, "medium");
+  // Lightbox: tap a thumb to open the medium variant in a new tab. As
+  // soon as the photo has a server URL and its upload mutation has
+  // drained, we open it — the link PATCH being stuck no longer blocks
+  // the tap target.
+  const fullSrc =
+    hasServerUrl && !uploading ? authedPhotoSrc(photo.url, "medium") : null;
   const delMut = useMutation({
     mutationFn: () => apiRequest(`/api/wet-checks/photos/${photo.id}`, "DELETE"),
     onSuccess: () => {
@@ -397,7 +415,7 @@ function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boo
       ) : (
         <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
       )}
-      {isOptimistic && (
+      {uploading && (
         <div
           className="absolute inset-0 flex items-center justify-center bg-black/30"
           data-testid={`photo-thumb-${photo.id}-uploading`}
@@ -405,7 +423,7 @@ function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boo
           <Loader2 className="w-5 h-5 text-white animate-spin" />
         </div>
       )}
-      {canDelete && !isOptimistic && (
+      {canDelete && hasServerId && (
         <button
           type="button"
           onClick={() => delMut.mutate()}
@@ -415,6 +433,93 @@ function PhotoThumb({ photo, canDelete }: { photo: WetCheckPhoto; canDelete: boo
           <Trash2 className="w-3 h-3" />
         </button>
       )}
+    </div>
+  );
+}
+
+// Pre-save pending photos grid for the FindingSheet. Mirrors PhotoThumb's
+// Task #510 logic: open the lightbox as soon as the upload finalizes,
+// keep the spinner overlay until then, and only allow remove once we
+// have a real server id (or no offline-queue clientId at all).
+function PendingPhotosGrid({
+  pendingPhotos,
+  onRemove,
+}: {
+  pendingPhotos: WetCheckPhoto[];
+  onRemove: (id: number) => void;
+}) {
+  const snap = useSyncEngineState(isOfflineQueueEnabled());
+  return (
+    <div className="flex flex-wrap gap-2" data-testid="pending-photos">
+      {pendingPhotos.map((p) => {
+        const photoClientId = (p as { clientId?: string | null }).clientId ?? null;
+        const uploadMut = photoClientId
+          ? snap.mutations.find(
+              (m) => m.kind === "photo.upload" && m.clientId === photoClientId,
+            )
+          : undefined;
+        const uploading =
+          !!uploadMut &&
+          (uploadMut.status === "pending" || uploadMut.status === "syncing");
+        const isLocal =
+          typeof p.url === "string" &&
+          (p.url.startsWith("blob:") || p.url.startsWith("data:"));
+        const hasServerUrl =
+          !isLocal && typeof p.url === "string" && p.url.length > 0;
+        const hasServerId = p.id > 0;
+        const src = isLocal ? p.url : authedPhotoSrc(p.url, "thumb");
+        const fullSrc =
+          hasServerUrl && !uploading ? authedPhotoSrc(p.url, "medium") : null;
+        return (
+          <div
+            key={p.id}
+            className="relative inline-block w-20 h-20 rounded overflow-hidden border"
+            data-testid={`pending-photo-${p.id}`}
+          >
+            {fullSrc ? (
+              <a
+                href={fullSrc}
+                target="_blank"
+                rel="noreferrer"
+                className="block w-full h-full"
+              >
+                <img
+                  src={src}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </a>
+            ) : (
+              <img
+                src={src}
+                alt=""
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            )}
+            {uploading && (
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-black/30"
+                data-testid={`pending-photo-${p.id}-uploading`}
+              >
+                <Loader2 className="w-5 h-5 text-white animate-spin" />
+              </div>
+            )}
+            {hasServerId && (
+              <button
+                type="button"
+                onClick={() => onRemove(p.id)}
+                className="absolute top-0 right-0 bg-black/60 text-white p-0.5 rounded-bl"
+                aria-label="Remove queued photo"
+                data-testid={`remove-pending-photo-${p.id}`}
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2215,8 +2320,21 @@ function FindingSheet({
         });
         createdId = res.id ?? null;
         if (pendingPhotos.length > 0) {
+          // Task #510 — address each photo by its own clientId so the
+          // queued PATCH carries the {{p}} placeholder, not the
+          // optimistic negative numeric id. The engine waits for the
+          // upload to complete and then dispatches against the real
+          // server photo id.
           await Promise.all(
-            pendingPhotos.map((p) => offlineLinkPhotoToFinding(p.id, findingClientId)),
+            pendingPhotos
+              .filter((p) => p.clientId)
+              .map((p) =>
+                offlineLinkPhotoToFinding({
+                  photoClientId: p.clientId!,
+                  photoId: p.id > 0 ? p.id : undefined,
+                  findingClientId,
+                }),
+              ),
           );
         }
       } else {
@@ -2227,18 +2345,51 @@ function FindingSheet({
         );
         createdId = created?.id ?? null;
         if (pendingPhotos.length > 0 && createdId != null) {
-          const results = await Promise.allSettled(
-            pendingPhotos.map((p) =>
-              apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: createdId }),
-            ),
-          );
-          const failed = results.filter((r) => r.status === "rejected").length;
-          if (failed > 0) {
-            toast({
-              title: "Some photos didn't attach",
-              description: `${failed} photo(s) couldn't be linked to the finding. You can re-add them by editing it.`,
-              variant: "destructive",
+          if (isOfflineQueueEnabled()) {
+            // Photos may have been captured via the offline-photos
+            // pipeline (negative id, blob URL, queued upload). Route
+            // the link through the engine so it waits for each upload
+            // to complete before dispatching the PATCH against the
+            // real server id. Seed the finding mirror with the id we
+            // just got back so the {{f}} placeholder resolves
+            // immediately for queued links.
+            const db = await openOfflineDB();
+            await putFindingMirror(db, {
+              clientId: findingClientId,
+              id: createdId,
+              zoneRecordClientId:
+                zoneRecordClientId ?? `server-zr-${zoneRecordId}`,
+              zoneRecordId: zoneRecordId ?? undefined,
+              wetCheckId,
+              data: { ...payload, id: createdId, clientId: findingClientId, issueType },
+              updatedAt: Date.now(),
             });
+            await Promise.all(
+              pendingPhotos
+                .filter((p) => p.clientId)
+                .map((p) =>
+                  offlineLinkPhotoToFinding({
+                    photoClientId: p.clientId!,
+                    photoId: p.id > 0 ? p.id : undefined,
+                    findingClientId,
+                    findingId: createdId,
+                  }),
+                ),
+            );
+          } else {
+            const results = await Promise.allSettled(
+              pendingPhotos.map((p) =>
+                apiRequest(`/api/wet-checks/photos/${p.id}`, "PATCH", { findingId: createdId }),
+              ),
+            );
+            const failed = results.filter((r) => r.status === "rejected").length;
+            if (failed > 0) {
+              toast({
+                title: "Some photos didn't attach",
+                description: `${failed} photo(s) couldn't be linked to the finding. You can re-add them by editing it.`,
+                variant: "destructive",
+              });
+            }
           }
         }
       }
@@ -2393,60 +2544,10 @@ function FindingSheet({
                       : "Pick a zone before adding photos."}
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-2" data-testid="pending-photos">
-                    {pendingPhotos.map(p => {
-                      const isLocal =
-                        typeof p.url === "string" &&
-                        (p.url.startsWith("blob:") || p.url.startsWith("data:"));
-                      const isOptimistic = p.id < 0;
-                      const src = isLocal ? p.url : authedPhotoSrc(p.url, "thumb");
-                      const fullSrc = isLocal || isOptimistic ? null : authedPhotoSrc(p.url, "medium");
-                      return (
-                        <div
-                          key={p.id}
-                          className="relative inline-block w-20 h-20 rounded overflow-hidden border"
-                          data-testid={`pending-photo-${p.id}`}
-                        >
-                          {fullSrc ? (
-                            <a href={fullSrc} target="_blank" rel="noreferrer" className="block w-full h-full">
-                              <img
-                                src={src}
-                                alt=""
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                              />
-                            </a>
-                          ) : (
-                            <img
-                              src={src}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                            />
-                          )}
-                          {isOptimistic && (
-                            <div
-                              className="absolute inset-0 flex items-center justify-center bg-black/30"
-                              data-testid={`pending-photo-${p.id}-uploading`}
-                            >
-                              <Loader2 className="w-5 h-5 text-white animate-spin" />
-                            </div>
-                          )}
-                          {!isOptimistic && (
-                            <button
-                              type="button"
-                              onClick={() => removePendingPhoto(p.id)}
-                              className="absolute top-0 right-0 bg-black/60 text-white p-0.5 rounded-bl"
-                              aria-label="Remove queued photo"
-                              data-testid={`remove-pending-photo-${p.id}`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <PendingPhotosGrid
+                    pendingPhotos={pendingPhotos}
+                    onRemove={removePendingPhoto}
+                  />
                 )}
               </div>
             )

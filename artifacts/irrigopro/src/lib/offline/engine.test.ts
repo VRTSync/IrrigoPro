@@ -223,6 +223,308 @@ describe("SyncEngine retry cap (Task #501)", () => {
     expect(all[0].lastError ?? "").toMatch(/gave_up_after_5_minutes/);
   });
 
+  it("Task #510 — photo.link uses {{p}} to resolve the photo's server id from its upload", async () => {
+    let now = 1_000;
+    const db = await openOfflineDB();
+    await putPhotoBlob(db, {
+      clientId: "photo-cid-1",
+      blob: new Blob(["bytes"], { type: "image/jpeg" }),
+      contentType: "image/jpeg",
+      name: "shot.jpg",
+      byteSize: 5,
+      capturedAt: now,
+      compressed: true,
+    });
+    // Pre-seed a finding mirror so {{f}} resolves to id 42 immediately.
+    await db.put("wetCheckFindings", {
+      clientId: "finding-cid-1",
+      id: 42,
+      zoneRecordClientId: "zr-cid-1",
+      zoneRecordId: 7,
+      wetCheckId: 123,
+      data: { id: 42, clientId: "finding-cid-1" },
+      updatedAt: now,
+    });
+
+    const calls: Array<{ method: string; url: string; body?: any }> = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      const method = (init?.method ?? "GET").toUpperCase();
+      let body: any = undefined;
+      if (init?.body && typeof init.body === "string") {
+        try { body = JSON.parse(init.body); } catch { body = init.body; }
+      }
+      calls.push({ method, url, body });
+      if (url.startsWith("/api/upload/photo?")) {
+        return new Response(
+          JSON.stringify({ signedUrl: "https://signed.example/put", url: "https://cdn.example/p.jpg" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "https://signed.example/put") {
+        return new Response("", { status: 200 });
+      }
+      if (url === "/api/upload/photo/finalize") {
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/wet-checks/123/photos") {
+        return new Response(
+          JSON.stringify({ id: 9999, url: "https://cdn.example/p.jpg" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "/api/wet-checks/photos/9999") {
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("unexpected", { status: 500 });
+    };
+
+    const engine = new SyncEngine({
+      fetchImpl,
+      now: () => now,
+      heartbeatIntervalMs: 0,
+      maxConcurrent: 2,
+    });
+    engine.setOnline(true);
+
+    // Enqueue the upload (clientId = photo cid; the engine will set
+    // resolvedId from the metadata POST response.id = 9999).
+    await engine.enqueue({
+      id: "mut-upload-1",
+      kind: "photo.upload",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/123/photos",
+      body: { caption: "hello" },
+      clientId: "photo-cid-1",
+      parentClientId: null,
+      placeholders: {},
+      attemptCount: 0,
+      lastAttemptAt: null,
+      lastError: null,
+      status: "pending",
+      createdAt: now,
+      resolvedId: null,
+    });
+    // Enqueue the link with {{p}} pointing at the photo cid and {{f}}
+    // at the (already-mirrored) finding cid. parentClientId = photo cid
+    // gates the link on the upload completing first.
+    await engine.enqueue({
+      id: "mut-link-1",
+      kind: "photo.link",
+      method: "PATCH",
+      urlTemplate: "/api/wet-checks/photos/{{p}}",
+      body: { findingId: "{{f}}" },
+      clientId: "link-cid-1",
+      parentClientId: "photo-cid-1",
+      placeholders: { p: "photo-cid-1", f: "finding-cid-1" },
+      attemptCount: 0,
+      lastAttemptAt: null,
+      lastError: null,
+      status: "pending",
+      createdAt: now,
+      resolvedId: null,
+    });
+
+    await engine.drainAll();
+
+    const after = await listAllMutations(await openOfflineDB());
+    const upload = after.find((m) => m.id === "mut-upload-1")!;
+    const link = after.find((m) => m.id === "mut-link-1")!;
+    expect(upload.status).toBe("completed");
+    expect(upload.resolvedId).toBe(9999);
+    expect(link.status).toBe("completed");
+
+    // The link PATCH must have been issued against the resolved
+    // server id, with the finding id substituted into the body.
+    const patchCall = calls.find(
+      (c) => c.method === "PATCH" && c.url === "/api/wet-checks/photos/9999",
+    );
+    expect(patchCall, "PATCH against resolved photo id").toBeDefined();
+    expect(patchCall!.body).toEqual({ findingId: 42 });
+    // And we never tried to PATCH a negative-id URL.
+    expect(
+      calls.find((c) => /\/api\/wet-checks\/photos\/-\d+/.test(c.url)),
+    ).toBeUndefined();
+  });
+
+  it("Task #510 — cleanupLegacyPhotoLinks rewrites recoverable legacy links and cancels orphans", async () => {
+    const now = 1_000;
+    const db = await freshDb();
+    // Recoverable: legacy link for finding-X has a matching completed
+    // photo.upload (resolvedId = 555). After cleanup it must be
+    // rewritten into the {{p}} shape, parented on the upload, and
+    // re-queued (status=pending, attemptCount=0).
+    await db.put("mutationQueue", {
+      id: "upload-recoverable",
+      kind: "photo.upload",
+      method: "POST",
+      urlTemplate: "/api/wet-checks/123/photos",
+      body: {},
+      clientId: "photo-cid-recoverable",
+      parentClientId: "finding-cid-x",
+      placeholders: { f: "finding-cid-x" },
+      attemptCount: 1,
+      lastAttemptAt: now,
+      lastError: null,
+      status: "completed",
+      createdAt: now - 100,
+      resolvedId: 555,
+    });
+    await db.put("mutationQueue", {
+      id: "legacy-recoverable",
+      kind: "photo.link",
+      method: "PATCH",
+      urlTemplate: "/api/wet-checks/photos/-1714768241234",
+      body: { findingId: "{{f}}" },
+      clientId: "link-legacy-1",
+      parentClientId: "finding-cid-x",
+      placeholders: { f: "finding-cid-x" },
+      attemptCount: 4,
+      lastAttemptAt: now,
+      lastError: "404",
+      status: "failed",
+      createdAt: now - 50,
+      resolvedId: null,
+    });
+    // Orphan: legacy link for finding-Y with NO completed upload to
+    // pair with. Must be deleted outright.
+    await db.put("mutationQueue", {
+      id: "legacy-orphan",
+      kind: "photo.link",
+      method: "PATCH",
+      urlTemplate: "/api/wet-checks/photos/-987654",
+      body: { findingId: "{{f}}" },
+      clientId: "link-legacy-2",
+      parentClientId: "finding-cid-y",
+      placeholders: { f: "finding-cid-y" },
+      attemptCount: 1,
+      lastAttemptAt: null,
+      lastError: null,
+      status: "failed",
+      createdAt: now,
+      resolvedId: null,
+    });
+    // Modern row — must NOT be touched.
+    await db.put("mutationQueue", {
+      id: "modern-1",
+      kind: "photo.link",
+      method: "PATCH",
+      urlTemplate: "/api/wet-checks/photos/{{p}}",
+      body: { findingId: "{{f}}" },
+      clientId: "link-modern-1",
+      parentClientId: "photo-cid-modern",
+      placeholders: { p: "photo-cid-modern", f: "finding-cid-z" },
+      attemptCount: 0,
+      lastAttemptAt: null,
+      lastError: null,
+      status: "pending",
+      createdAt: now,
+      resolvedId: null,
+    });
+
+    const engine = new SyncEngine({
+      fetchImpl: async () => new Response("nope", { status: 500 }),
+      now: () => now,
+      heartbeatIntervalMs: 0,
+      maxConcurrent: 1,
+    });
+    const acted = await engine.cleanupLegacyPhotoLinks();
+    expect(acted).toBe(2); // 1 rewrite + 1 cancel
+
+    const remaining = await listAllMutations(await openOfflineDB());
+    const remainingIds = remaining.map((m) => m.id).sort();
+    // Orphan deleted; recoverable + upload + modern remain.
+    expect(remainingIds).toEqual(["legacy-recoverable", "modern-1", "upload-recoverable"]);
+
+    const rewritten = remaining.find((m) => m.id === "legacy-recoverable")!;
+    expect(rewritten.urlTemplate).toBe("/api/wet-checks/photos/{{p}}");
+    expect(rewritten.parentClientId).toBe("photo-cid-recoverable");
+    expect(rewritten.placeholders).toEqual({
+      p: "photo-cid-recoverable",
+      f: "finding-cid-x",
+    });
+    expect(rewritten.status).toBe("pending");
+    expect(rewritten.attemptCount).toBe(0);
+    expect(rewritten.lastError).toBeNull();
+    expect(rewritten.lastAttemptAt).toBeNull();
+
+    // Modern row is untouched.
+    const modern = remaining.find((m) => m.id === "modern-1")!;
+    expect(modern.urlTemplate).toBe("/api/wet-checks/photos/{{p}}");
+    expect(modern.attemptCount).toBe(0);
+  });
+
+  it("Task #510 — when multiple legacy links share a finding, each pairs with a distinct upload", async () => {
+    const now = 1_000;
+    const db = await freshDb();
+    // Two completed uploads for the same finding, two legacy links;
+    // each link should pair with a distinct upload (createdAt order).
+    for (const [id, cid, ts] of [
+      ["upload-A", "photo-A", now - 100],
+      ["upload-B", "photo-B", now - 50],
+    ] as const) {
+      await db.put("mutationQueue", {
+        id,
+        kind: "photo.upload",
+        method: "POST",
+        urlTemplate: "/api/wet-checks/1/photos",
+        body: {},
+        clientId: cid,
+        parentClientId: "finding-cid-x",
+        placeholders: { f: "finding-cid-x" },
+        attemptCount: 1,
+        lastAttemptAt: ts,
+        lastError: null,
+        status: "completed",
+        createdAt: ts,
+        resolvedId: id === "upload-A" ? 100 : 200,
+      });
+    }
+    for (const [id, ts] of [
+      ["link-1", now - 40],
+      ["link-2", now - 30],
+    ] as const) {
+      await db.put("mutationQueue", {
+        id,
+        kind: "photo.link",
+        method: "PATCH",
+        urlTemplate: `/api/wet-checks/photos/-${ts}`,
+        body: { findingId: "{{f}}" },
+        clientId: id,
+        parentClientId: "finding-cid-x",
+        placeholders: { f: "finding-cid-x" },
+        attemptCount: 0,
+        lastAttemptAt: null,
+        lastError: null,
+        status: "pending",
+        createdAt: ts,
+        resolvedId: null,
+      });
+    }
+
+    const engine = new SyncEngine({
+      fetchImpl: async () => new Response("nope", { status: 500 }),
+      now: () => now,
+      heartbeatIntervalMs: 0,
+      maxConcurrent: 1,
+    });
+    expect(await engine.cleanupLegacyPhotoLinks()).toBe(2);
+
+    const all = await listAllMutations(await openOfflineDB());
+    const link1 = all.find((m) => m.id === "link-1")!;
+    const link2 = all.find((m) => m.id === "link-2")!;
+    // Earliest link claims earliest upload.
+    expect(link1.placeholders.p).toBe("photo-A");
+    expect(link2.placeholders.p).toBe("photo-B");
+    expect(link1.parentClientId).toBe("photo-A");
+    expect(link2.parentClientId).toBe("photo-B");
+  });
+
   it("does not give up while attempts and age remain under the caps", async () => {
     let now = 1_000;
     const fetchImpl: typeof fetch = async () => new Response("oops", { status: 503 });
