@@ -237,15 +237,38 @@ export default function ProfileScreen() {
 
           {sync.entries.length > 0 ? (
             <View style={styles.entriesWrap}>
+              {sync.entries.some(
+                (e) => e.status === "failed" && e.failureReason === "auth",
+              ) ? (
+                <View
+                  style={[
+                    styles.authBanner,
+                    {
+                      backgroundColor: "#fef3c7",
+                      borderColor: "#fcd34d",
+                      borderRadius: 8,
+                    },
+                  ]}
+                >
+                  <Feather name="log-in" size={14} color="#854d0e" />
+                  <Text style={[styles.authBannerText, { color: "#854d0e" }]}>
+                    Sign in again to retry the changes waiting on your session.
+                  </Text>
+                </View>
+              ) : null}
               {sync.entries.map((e) => {
-                const tone =
-                  e.status === "conflict"
+                const isAuthFailed =
+                  e.status === "failed" && e.failureReason === "auth";
+                const tone = isAuthFailed
+                  ? "#854d0e"
+                  : e.status === "conflict"
                     ? "#b45309"
                     : e.status === "failed"
                       ? "#991b1b"
                       : "#854d0e";
-                const statusLabel =
-                  e.status === "pending"
+                const statusLabel = isAuthFailed
+                  ? "Awaiting sign-in"
+                  : e.status === "pending"
                     ? sync.online
                       ? "Pending"
                       : "Waiting for connection"
@@ -267,11 +290,38 @@ export default function ProfileScreen() {
                       >
                         {e.label}
                       </Text>
-                      <Text style={[styles.entryMeta, { color: tone }]}>
-                        {statusLabel}
-                        {e.attempts > 0 ? ` · ${e.attempts} attempt${e.attempts === 1 ? "" : "s"}` : ""}
-                      </Text>
-                      {e.lastError ? (
+                      <View style={styles.entryStatusRow}>
+                        {isAuthFailed ? (
+                          <View
+                            style={[
+                              styles.pill,
+                              {
+                                backgroundColor: "#fef3c7",
+                                borderColor: "#fcd34d",
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.pillText, { color: "#854d0e" }]}>
+                              Awaiting sign-in
+                            </Text>
+                          </View>
+                        ) : (
+                          <Text style={[styles.entryMeta, { color: tone }]}>
+                            {statusLabel}
+                          </Text>
+                        )}
+                        {e.attempts > 0 ? (
+                          <Text
+                            style={[
+                              styles.entryMeta,
+                              { color: colors.mutedForeground },
+                            ]}
+                          >
+                            {`${e.attempts} attempt${e.attempts === 1 ? "" : "s"}`}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {e.lastError && !isAuthFailed ? (
                         <Text
                           style={[styles.entryMeta, { color: colors.mutedForeground }]}
                           numberOfLines={2}
@@ -375,6 +425,30 @@ const styles = StyleSheet.create({
   },
   entryLabel: { fontSize: 14, fontWeight: "600" },
   entryMeta: { fontSize: 12, marginTop: 2 },
+  entryStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 4,
+  },
+  pill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  pillText: { fontSize: 11, fontWeight: "600" },
+  authBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 4,
+  },
+  authBannerText: { fontSize: 12, flex: 1, fontWeight: "500" },
   discardButton: { padding: 6 },
   heading: { fontSize: 28, fontWeight: "700", marginTop: 4 },
   card: {
