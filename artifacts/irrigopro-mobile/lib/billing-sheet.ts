@@ -1,13 +1,14 @@
 // Shared billing-sheet mutation helpers for the mobile app (Task #492 / M7).
 //
 // Mirrors `wet-check.ts`: every billing-sheet mutation funnels through
-// `billingSheetMutate` so the M8 offline queue can wrap them later
-// without touching every call site. Each request gets a fresh UUID
-// `clientId` (server may ignore it for endpoints without dedupe; sending
-// it keeps every device-side mutation log line traceable through one
-// shared id field, identical to the wet-check pipeline).
+// `billingSheetMutate` so the M8 offline queue (`lib/sync`) can wrap
+// them transparently. The queue entry id is reused as the wire
+// `clientId` so a server retry is deduped via the existing per-row
+// uniqueness index.
 
-import { ApiError, apiRequest } from "./api";
+import { ApiError } from "./api";
+import { attemptEntry, drainQueue } from "./sync/engine";
+import { enqueue } from "./sync/queue";
 import { generateClientId } from "./uuid";
 
 export class BillingSheetConflictError extends Error {
@@ -28,30 +29,83 @@ export type BillingSheetMutationOptions<
   method: "POST" | "PATCH" | "DELETE";
   body?: TBody;
   withClientId?: boolean;
+  /** Stable scope id used by the queue (existing sheet id when known). */
+  billingSheetId?: number;
+  /** Fallback scope key when sheet has no id yet (e.g. work order id). */
+  scopeFallback?: string;
+  /** Short label shown in Profile diagnostics. */
+  label: string;
 };
+
+export type BillingSheetMutateResult<T> = T & { _offlineQueued?: boolean };
+
+function scopeKey(opts: BillingSheetMutationOptions<Record<string, unknown> | undefined>): string {
+  if (opts.billingSheetId != null) return `bs:${opts.billingSheetId}`;
+  if (opts.scopeFallback) return `bs-${opts.scopeFallback}`;
+  return `bs-path:${opts.path}`;
+}
+
+function makeOptimistic<T>(
+  opts: BillingSheetMutationOptions<Record<string, unknown> | undefined>,
+): T {
+  if (opts.method === "DELETE" || opts.method === "PATCH") {
+    return { ok: true, _offlineQueued: true } as unknown as T;
+  }
+  const tempId = -Math.floor(Date.now() + Math.random() * 1000);
+  return {
+    id: tempId,
+    billingNumber: "PENDING",
+    status: "draft",
+    ...((opts.body as Record<string, unknown> | undefined) ?? {}),
+    _offlineQueued: true,
+  } as unknown as T;
+}
 
 export async function billingSheetMutate<
   TResponse,
   TBody extends Record<string, unknown> | undefined = undefined,
->(opts: BillingSheetMutationOptions<TBody>): Promise<TResponse> {
+>(opts: BillingSheetMutationOptions<TBody>): Promise<BillingSheetMutateResult<TResponse>> {
   const attachId = opts.withClientId ?? true;
-  const body = attachId
-    ? {
-        ...((opts.body as Record<string, unknown> | undefined) ?? {}),
-        clientId: generateClientId(),
-      }
-    : opts.body;
-  try {
-    return await apiRequest<TResponse>(opts.path, {
-      method: opts.method,
-      body,
-    });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 409) {
-      throw new BillingSheetConflictError(err.message, err.data);
-    }
-    throw err;
+  const baseBody = (opts.body as Record<string, unknown> | undefined) ?? null;
+
+  // Pre-generate the id and bake `clientId` into the body BEFORE the
+  // entry hits storage, so a hard kill between enqueue and send still
+  // leaves a fully replayable row. The entry id doubles as the wire
+  // `clientId` so the server's per-row uniqueness index dedupes any
+  // retries.
+  const id = generateClientId();
+  const wireBody = attachId
+    ? { ...(baseBody ?? {}), clientId: id }
+    : baseBody;
+
+  const entry = await enqueue({
+    id,
+    kind: "billing-sheet",
+    scopeKey: scopeKey(opts),
+    path: opts.path,
+    method: opts.method,
+    body: wireBody,
+    photo: null,
+    label: opts.label,
+  });
+
+  const result = await attemptEntry(entry);
+  if (result.kind === "sent") {
+    drainQueue().catch(() => undefined);
+    return result.data as BillingSheetMutateResult<TResponse>;
   }
+  if (result.kind === "queued" || result.kind === "deferred") {
+    // `deferred` is unreachable for billing-sheet (only billing-sheet-photo
+    // entries defer), but the union forces us to handle it; treat like
+    // `queued` so the UI gets an optimistic placeholder.
+    return makeOptimistic<BillingSheetMutateResult<TResponse>>(opts);
+  }
+  if (result.kind === "conflict") {
+    throw new BillingSheetConflictError(result.error.message, result.error.data);
+  }
+  if (result.error instanceof ApiError) throw result.error;
+  if (result.error instanceof Error) throw result.error;
+  throw new Error(typeof result.error === "string" ? result.error : "Request failed");
 }
 
 export const billingSheetDetailQueryKey = (id: number) =>

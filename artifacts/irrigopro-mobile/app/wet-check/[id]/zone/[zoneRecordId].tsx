@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -27,8 +27,14 @@ import {
   deleteLocalPhoto,
   ensureCameraPermission,
   type LocalPhoto,
-  uploadLocalPhotoToStorage,
 } from "@/lib/photo-upload";
+import { drainQueue } from "@/lib/sync/engine";
+import { isOfflineQueuedResult } from "@/lib/sync/errors";
+import { removeEntry, updateEntry } from "@/lib/sync/queue";
+import {
+  useScopeConflictTick,
+  useSyncStatus,
+} from "@/lib/sync/use-sync-status";
 import {
   WetCheckConflictError,
   wetCheckDetailQueryKey,
@@ -187,10 +193,68 @@ export default function ZoneDetailScreen() {
   // thumbnail instantly. On a successful upload we delete the local file
   // and let the server query refetch.
   type PendingPhoto = LocalPhoto & {
-    status: "uploading" | "error";
+    status: "uploading" | "queued" | "error";
     error?: string;
   };
   const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
+
+  // Surface 409s discovered by background queue drains in the same
+  // conflict banner as inline-mutation conflicts.
+  const conflictTick = useScopeConflictTick(
+    wetCheckId != null ? `wc:${wetCheckId}` : null,
+  );
+  useEffect(() => {
+    if (conflictTick > 0) setConflict(true);
+  }, [conflictTick]);
+
+  // Subscribe to the offline queue so we can:
+  //  (a) re-seed `queued` thumbnails for photos captured in a prior app
+  //      session (so a relaunch shows them until the engine drains
+  //      them), and
+  //  (b) drop `queued` rows once the engine has actually sent them. The
+  //      engine deletes the local file on success, so we remove our
+  //      row when no matching queue entry remains.
+  //
+  // We match queue entries to this screen via wetCheckId in the
+  // scopeKey + the photo's zoneRecordId. Use clientId (= queue entry
+  // id) as the stable PendingPhoto key so retry/cancel keep working
+  // identically for restored rows.
+  const { entries: queueEntries } = useSyncStatus();
+  useEffect(() => {
+    if (wetCheckId == null || zoneRecordId == null) return;
+    setPendingPhotos((prev) => {
+      const queuedPhotosForThisZone = queueEntries.filter(
+        (e) =>
+          e.kind === "wet-check-photo" &&
+          e.scopeKey === `wc:${wetCheckId}` &&
+          e.photo?.zoneRecordId === zoneRecordId,
+      );
+      const seen = new Set(prev.map((p) => p.clientId));
+      const additions: PendingPhoto[] = [];
+      for (const e of queuedPhotosForThisZone) {
+        if (!e.photo) continue;
+        if (seen.has(e.id)) continue;
+        additions.push({
+          clientId: e.id,
+          localUri: e.photo.localUri,
+          takenAt: e.photo.takenAt,
+          zoneRecordId: e.photo.zoneRecordId,
+          findingId: e.photo.findingId,
+          status: "queued",
+        });
+      }
+      const survivors = prev.filter((p) => {
+        if (p.status !== "queued") return true;
+        return queuedPhotosForThisZone.some(
+          (e) => e.photo?.localUri === p.localUri,
+        );
+      });
+      if (additions.length === 0 && survivors.length === prev.length) {
+        return prev;
+      }
+      return [...survivors, ...additions];
+    });
+  }, [queueEntries, wetCheckId, zoneRecordId]);
 
   const detailQuery = useQuery({
     queryKey:
@@ -273,6 +337,8 @@ export default function ZoneDetailScreen() {
         path: `/api/wet-checks/zone-records/${zoneRecordId}`,
         method: "PATCH",
         body: { status: next },
+        wetCheckId: wetCheckId ?? undefined,
+        label: "Update zone status",
       });
     },
     onMutate: async (next) => {
@@ -340,6 +406,8 @@ export default function ZoneDetailScreen() {
         path: `/api/wet-checks/zone-records/${zoneRecordId}/findings`,
         method: "POST",
         body: input,
+        wetCheckId: wetCheckId ?? undefined,
+        label: "Add finding",
       });
     },
     onSuccess: () => {
@@ -371,6 +439,8 @@ export default function ZoneDetailScreen() {
       return wetCheckMutate<{ ok: boolean }>({
         path: `/api/wet-checks/findings/${findingId}`,
         method: "DELETE",
+        wetCheckId: wetCheckId ?? undefined,
+        label: "Remove finding",
       });
     },
     onSuccess: () => {
@@ -392,43 +462,59 @@ export default function ZoneDetailScreen() {
       wetCheckId != null
         ? wetCheckMutationKey(wetCheckId, "photo-add")
         : ["wet-check", "mutation", -1, "photo-add"],
-    mutationFn: async (pending: PendingPhoto): Promise<WetCheckPhoto> => {
+    mutationFn: async (
+      pending: PendingPhoto,
+    ): Promise<WetCheckPhoto | { _offlineQueued: true }> => {
       if (wetCheckId == null) throw new Error("Missing wet check id");
-      const url = await uploadLocalPhotoToStorage(pending.localUri);
-      // Re-use the shared mutation helper so the M8 offline queue can
-      // wrap the metadata POST later. Pass our own clientId (the same one
-      // anchoring the local file) so a retry is server-deduped.
-      const created = await wetCheckMutate<
-        WetCheckPhoto,
-        {
-          url: string;
-          takenAt: string;
-          zoneRecordId: number | null;
-          findingId: number | null;
-          clientId: string;
-        }
-      >({
+      // Funnel the entire sign+PUT+POST sequence through the offline
+      // queue. When online the engine attempts immediately and the
+      // helper resolves with the real `WetCheckPhoto`; when offline (or
+      // the upload itself fails with a network error) the helper resolves
+      // with a synthetic `_offlineQueued` placeholder and the engine
+      // retries on the next drain.
+      return wetCheckMutate<WetCheckPhoto>({
+        // Reuse the captured photo's clientId as the queue entry id so
+        // pendingPhotos[].clientId === queue entry id. Retry/cancel UI
+        // can then address the exact queue row instead of enqueueing a
+        // duplicate POST on each retry (the server's per-(zone,clientId)
+        // unique index would dedupe regardless, but an extra row would
+        // still get stuck spinning forever).
+        id: pending.clientId,
         path: `/api/wet-checks/${wetCheckId}/photos`,
         method: "POST",
-        withClientId: false,
-        body: {
-          url,
+        withClientId: false, // engine bakes its own clientId into the body
+        wetCheckId,
+        label: "Add photo",
+        isPhoto: true,
+        photo: {
+          localUri: pending.localUri,
           takenAt: pending.takenAt,
           zoneRecordId: pending.zoneRecordId,
           findingId: pending.findingId,
-          clientId: pending.clientId,
         },
       });
-      return created;
     },
-    onSuccess: (_created, pending) => {
+    onSuccess: (created, pending) => {
       setPhotoError(null);
-      deleteLocalPhoto(pending.localUri);
-      setPendingPhotos((prev) =>
-        prev.filter((p) => p.clientId !== pending.clientId),
-      );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
+      );
+      if (isOfflineQueuedResult(created)) {
+        // Keep the local thumbnail visible while the queue waits to drain.
+        // The cleanup useEffect above removes the row once the queue
+        // entry is gone (sent or discarded).
+        setPendingPhotos((prev) =>
+          prev.map((p) =>
+            p.clientId === pending.clientId
+              ? { ...p, status: "queued", error: undefined }
+              : p,
+          ),
+        );
+        return;
+      }
+      // Online success: engine already deleted the local file.
+      setPendingPhotos((prev) =>
+        prev.filter((p) => p.clientId !== pending.clientId),
       );
       if (wetCheckId != null) {
         queryClient.invalidateQueries({
@@ -480,29 +566,34 @@ export default function ZoneDetailScreen() {
     uploadPhotoMutation.mutate(pending);
   }, [wetCheckId, zoneRecordId, isLocked, uploadPhotoMutation]);
 
-  const onRetryPendingPhoto = useCallback(
-    (clientId: string) => {
-      setPendingPhotos((prev) =>
-        prev.map((p) =>
-          p.clientId === clientId
-            ? { ...p, status: "uploading", error: undefined }
-            : p,
-        ),
-      );
-      const target = pendingPhotos.find((p) => p.clientId === clientId);
-      if (target) {
-        uploadPhotoMutation.mutate({
-          ...target,
-          status: "uploading",
-          error: undefined,
-        });
-      }
-    },
-    [pendingPhotos, uploadPhotoMutation],
-  );
+  // Retry an entry that the engine marked failed. The queue is the
+  // source of truth — we re-mark the existing row pending and kick a
+  // drain instead of calling uploadPhotoMutation.mutate (which would
+  // enqueue a *new* row with a *new* clientId and risk duplicate POSTs
+  // on the server). If the row was discarded out from under us (e.g.
+  // by Force Resync's markAllPending or another tab), updateEntry is a
+  // no-op and the cleanup effect above will drop the stale thumbnail
+  // on the next queue tick.
+  const onRetryPendingPhoto = useCallback((clientId: string) => {
+    setPendingPhotos((prev) =>
+      prev.map((p) =>
+        p.clientId === clientId
+          ? { ...p, status: "queued", error: undefined }
+          : p,
+      ),
+    );
+    void updateEntry(clientId, {
+      status: "pending",
+      lastError: null,
+    }).then(() => drainQueue().catch(() => undefined));
+  }, []);
 
+  // Cancel = drop the local file AND remove the durable queue row, so
+  // we don't leave an orphan entry pointing at a deleted file that the
+  // engine will keep failing to upload.
   const onCancelPendingPhoto = useCallback((pending: PendingPhoto) => {
     deleteLocalPhoto(pending.localUri);
+    void removeEntry(pending.clientId);
     setPendingPhotos((prev) =>
       prev.filter((p) => p.clientId !== pending.clientId),
     );
@@ -518,6 +609,8 @@ export default function ZoneDetailScreen() {
       return wetCheckMutate<{ ok: boolean }>({
         path: `/api/wet-checks/photos/${photoId}`,
         method: "DELETE",
+        wetCheckId: wetCheckId ?? undefined,
+        label: "Remove photo",
       });
     },
     onMutate: async (photoId) => {
@@ -906,6 +999,14 @@ export default function ZoneDetailScreen() {
                         {p.status === "uploading" ? (
                           <View style={styles.photoOverlayCenter} pointerEvents="none">
                             <ActivityIndicator color="#ffffff" />
+                          </View>
+                        ) : p.status === "queued" ? (
+                          <View
+                            style={styles.photoOverlayCenter}
+                            pointerEvents="none"
+                            accessibilityLabel="Queued — will upload when back online"
+                          >
+                            <Feather name="cloud-off" size={18} color="#ffffff" />
                           </View>
                         ) : (
                           <View style={styles.photoErrorOverlay}>

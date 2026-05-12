@@ -22,6 +22,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
 import { ApiError, apiRequest } from "@/lib/api";
+import { isOfflineQueuedResult } from "@/lib/sync/errors";
+import { useScopeConflictTick } from "@/lib/sync/use-sync-status";
 import {
   WetCheckConflictError,
   wetCheckDetailQueryKey,
@@ -150,6 +152,13 @@ export default function WetCheckDetailScreen() {
   }, [params.id]);
 
   const [conflict, setConflict] = useState(false);
+
+  // Surface 409s discovered by background queue drains in the same
+  // banner as inline-mutation conflicts.
+  const conflictTick = useScopeConflictTick(id != null ? `wc:${id}` : null);
+  useEffect(() => {
+    if (conflictTick > 0) setConflict(true);
+  }, [conflictTick]);
 
   const detailQuery = useQuery({
     queryKey: id != null ? wetCheckDetailQueryKey(id) : ["wet-check", "missing"],
@@ -319,17 +328,28 @@ export default function WetCheckDetailScreen() {
       return wetCheckMutate<WetCheckDetail & { billingSheetId?: number | null }>({
         path: `/api/wet-checks/${id}/submit`,
         method: "POST",
+        wetCheckId: id,
+        label: "Submit wet check",
       });
     },
     onSuccess: async (data) => {
       setSubmitError(null);
       if (id != null) {
-        // Merge submit response into cache: it contains the updated wet check
-        // top-level fields. Keep zoneRecords/photos from current cache.
-        queryClient.setQueryData<WetCheckDetail | undefined>(
-          wetCheckDetailQueryKey(id),
-          (prev) => (prev ? { ...prev, ...data, zoneRecords: prev.zoneRecords, photos: prev.photos } : prev),
-        );
+        // When the submit was queued offline (synthetic placeholder), skip
+        // the cache merge — its negative `id` would corrupt the wet-check
+        // detail cache. The engine will refetch on successful drain.
+        if (!isOfflineQueuedResult(data)) {
+          // Merge submit response into cache: it contains the updated wet
+          // check top-level fields. Keep zoneRecords/photos from current
+          // cache.
+          queryClient.setQueryData<WetCheckDetail | undefined>(
+            wetCheckDetailQueryKey(id),
+            (prev) =>
+              prev
+                ? { ...prev, ...data, zoneRecords: prev.zoneRecords, photos: prev.photos }
+                : prev,
+          );
+        }
         await queryClient.invalidateQueries({ queryKey: wetCheckDetailQueryKey(id) });
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);

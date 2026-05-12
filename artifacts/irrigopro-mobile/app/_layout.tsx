@@ -17,6 +17,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useColors } from "@/hooks/useColors";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { useSyncEngine } from "@/lib/sync/init";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -41,6 +42,11 @@ function AuthGate() {
   const segments = useSegments();
   const colors = useColors();
 
+  // Hydrate persisted query cache + start the sync engine before
+  // anything else renders. `useSyncEngine` returns true once the cache
+  // is hydrated so the app opens with last-known data offline.
+  const syncHydrated = useSyncEngine();
+
   useEffect(() => {
     if (isLoading) return;
     const onSignIn = segments[0] === "sign-in";
@@ -51,7 +57,7 @@ function AuthGate() {
     }
   }, [user, isLoading, segments, router]);
 
-  if (isLoading) {
+  if (isLoading || !syncHydrated) {
     return (
       <View
         style={{

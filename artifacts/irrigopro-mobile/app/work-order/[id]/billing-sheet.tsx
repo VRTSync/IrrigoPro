@@ -55,11 +55,16 @@ import {
   billingSheetMutationKey,
   fieldTechPartsQueryKey,
 } from "@/lib/billing-sheet";
+import { drainQueue } from "@/lib/sync/engine";
+import { enqueue, removeEntry } from "@/lib/sync/queue";
+import {
+  useScopeConflictTick,
+  useSyncStatus,
+} from "@/lib/sync/use-sync-status";
 import {
   captureBillingSheetPhoto,
   deleteLocalPhoto,
   ensureCameraPermission,
-  uploadLocalPhotoToStorage,
 } from "@/lib/photo-upload";
 import { workOrderBillingSheetQueryKey } from "../[id]";
 
@@ -134,7 +139,13 @@ type PendingPhoto = {
   clientId: string;
   localUri: string;
   takenAt: string;
-  status: "uploading" | "error";
+  /**
+   * `queued`  — sitting in the durable offline queue, waiting on the
+   *             engine (offline, or in create mode waiting on the
+   *             create POST to drain).
+   * `error`   — the engine hit a non-retryable failure for this entry.
+   */
+  status: "queued" | "error";
   error?: string;
 };
 
@@ -290,65 +301,108 @@ export default function BillingSheetScreen() {
   }, [isEdit, sheet, hydrated]);
 
   // ── Photos (shared between create + edit) ──
-  // In create mode, captured photos upload immediately to storage and we
-  // collect their canonical urls to send with the POST. In edit mode we
-  // PATCH the sheet's `photos[]` after each upload.
+  // Every captured photo is enqueued as a durable `billing-sheet-photo`
+  // entry (Task #493 / M8). The engine handles sign → PUT → PATCH for
+  // edit-mode sheets; for create-mode it defers until the create POST
+  // drains, then resolves the new sheet id via
+  // `GET /api/work-orders/:id/billing-sheet` and PATCHes the photo in.
+  // Component state holds only thumbnails — the queue is the source of
+  // truth and we rebuild rows from queue entries on mount, so photos
+  // captured offline survive an app kill/relaunch.
   const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
-  const [uploadedUrls, setUploadedUrls] = useState<string[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
   const existingPhotos = isEdit ? sheet?.photos ?? [] : [];
 
-  // ── Photo upload (sign → PUT → finalize → either collect URL (create)
-  //                  or PATCH the sheet (edit)) ──
-  const photoMutation = useMutation({
-    mutationKey: billingSheetMutationKey(mutationScope, "photo-add"),
-    mutationFn: async (
-      pending: PendingPhoto,
-    ): Promise<{ pending: PendingPhoto; url: string }> => {
-      const url = await uploadLocalPhotoToStorage(pending.localUri);
-      if (isEdit && billingSheetId != null) {
-        const currentPhotos = (sheet?.photos ?? []).slice();
-        const nextPhotos = [...currentPhotos, url];
-        await billingSheetMutate<BillingSheet, { photos: string[] }>({
-          path: `/api/billing-sheets/${billingSheetId}`,
-          method: "PATCH",
-          body: { photos: nextPhotos },
-          withClientId: false,
+  const photoScopeKey = useMemo(() => {
+    if (billingSheetId != null) return `bs:${billingSheetId}`;
+    if (workOrderId != null) return `bs-wo-${workOrderId}`;
+    return null;
+  }, [billingSheetId, workOrderId]);
+
+  // Subscribe to the offline queue:
+  //  (a) Re-seed thumbnails for photos captured in a prior session.
+  //  (b) Drop rows when the engine drains them (the engine deletes the
+  //      local file on success).
+  //  (c) Mirror engine `failed` status into the local row's `error`
+  //      state so the retry/cancel UI works for relaunched rows.
+  const { entries: queueEntries } = useSyncStatus();
+  useEffect(() => {
+    if (photoScopeKey == null) return;
+    setPendingPhotos((prev) => {
+      const matches = queueEntries.filter((e) => {
+        if (e.kind !== "billing-sheet-photo") return false;
+        const bp = e.billingPhoto;
+        if (!bp) return false;
+        if (billingSheetId != null && bp.billingSheetId === billingSheetId) {
+          return true;
+        }
+        if (
+          billingSheetId == null &&
+          workOrderId != null &&
+          bp.workOrderId === workOrderId
+        ) {
+          return true;
+        }
+        return false;
+      });
+      const seen = new Set(prev.map((p) => p.clientId));
+      const additions: PendingPhoto[] = [];
+      for (const e of matches) {
+        const bp = e.billingPhoto;
+        if (!bp) continue;
+        if (seen.has(e.id)) continue;
+        additions.push({
+          clientId: e.id,
+          localUri: bp.localUri,
+          takenAt: bp.takenAt,
+          status: e.status === "failed" ? "error" : "queued",
+          error: e.status === "failed" ? e.lastError ?? undefined : undefined,
         });
       }
-      return { pending, url };
-    },
-    onSuccess: ({ pending, url }) => {
-      setPhotoError(null);
-      deleteLocalPhoto(pending.localUri);
-      setPendingPhotos((prev) =>
-        prev.filter((p) => p.clientId !== pending.clientId),
-      );
-      if (!isEdit) {
-        setUploadedUrls((prev) => [...prev, url]);
-      } else if (billingSheetId != null) {
-        queryClient.invalidateQueries({
-          queryKey: billingSheetDetailQueryKey(billingSheetId),
-        });
+      const survivors = prev.flatMap<PendingPhoto>((p) => {
+        const match = matches.find((e) => e.id === p.clientId);
+        if (!match) return [];
+        const desiredStatus: PendingPhoto["status"] =
+          match.status === "failed" ? "error" : "queued";
+        if (
+          desiredStatus === p.status &&
+          (match.lastError ?? undefined) === p.error
+        ) {
+          return [p];
+        }
+        return [
+          {
+            ...p,
+            status: desiredStatus,
+            error:
+              desiredStatus === "error"
+                ? match.lastError ?? undefined
+                : undefined,
+          },
+        ];
+      });
+      if (additions.length === 0 && survivors.length === prev.length) {
+        // Quick equality check — same length and we already mapped
+        // statuses above; only return a new array if anything changed.
+        const sameStatuses = survivors.every(
+          (s, i) =>
+            s.status === prev[i].status &&
+            s.error === prev[i].error &&
+            s.clientId === prev[i].clientId,
+        );
+        if (sameStatuses) return prev;
       }
-      Haptics.selectionAsync().catch(() => undefined);
-    },
-    onError: (err, pending) => {
-      const m = err instanceof Error ? err.message : "Upload failed";
-      setPendingPhotos((prev) =>
-        prev.map((p) =>
-          p.clientId === pending.clientId
-            ? { ...p, status: "error", error: m }
-            : p,
-        ),
-      );
-      setPhotoError(m);
-    },
-  });
+      return [...survivors, ...additions];
+    });
+  }, [queueEntries, photoScopeKey, billingSheetId, workOrderId]);
 
   const onAddPhoto = useCallback(async () => {
     setPhotoError(null);
+    if (workOrderId == null) {
+      setPhotoError("Work order is missing — cannot add photos.");
+      return;
+    }
     const perm = await ensureCameraPermission();
     if (perm !== "granted") {
       setPhotoError(
@@ -368,26 +422,57 @@ export default function BillingSheetScreen() {
       return;
     }
     if (!captured) return;
-    const pending: PendingPhoto = { ...captured, status: "uploading" };
-    setPendingPhotos((prev) => [...prev, pending]);
-    photoMutation.mutate(pending);
-  }, [mutationScope, photoMutation]);
+    // Use the captured clientId as the queue entry id so the on-disk
+    // queue row and the local thumbnail share a stable key — the
+    // rehydration effect above keys off of `entry.id === pending.clientId`.
+    await enqueue({
+      id: captured.clientId,
+      kind: "billing-sheet-photo",
+      scopeKey: photoScopeKey ?? `bs-wo-${workOrderId}`,
+      path: "/api/billing-sheets/__photo__",
+      method: "PATCH",
+      body: null,
+      photo: null,
+      billingPhoto: {
+        localUri: captured.localUri,
+        takenAt: captured.takenAt,
+        billingSheetId: billingSheetId,
+        workOrderId,
+      },
+      label: isEdit ? "Add billing photo" : "Add billing photo (pending sheet)",
+    });
+    // Optimistically show the thumbnail immediately; the queue
+    // subscriber above will reconcile on its next tick.
+    setPendingPhotos((prev) => {
+      if (prev.some((p) => p.clientId === captured!.clientId)) return prev;
+      return [
+        ...prev,
+        {
+          clientId: captured!.clientId,
+          localUri: captured!.localUri,
+          takenAt: captured!.takenAt,
+          status: "queued",
+        },
+      ];
+    });
+    Haptics.selectionAsync().catch(() => undefined);
+    drainQueue().catch(() => undefined);
+  }, [
+    workOrderId,
+    billingSheetId,
+    isEdit,
+    mutationScope,
+    photoScopeKey,
+  ]);
 
-  const onRetryPendingPhoto = useCallback(
-    (clientId: string) => {
-      const target = pendingPhotos.find((p) => p.clientId === clientId);
-      if (!target) return;
-      const next: PendingPhoto = { ...target, status: "uploading", error: undefined };
-      setPendingPhotos((prev) =>
-        prev.map((p) => (p.clientId === clientId ? next : p)),
-      );
-      photoMutation.mutate(next);
-    },
-    [pendingPhotos, photoMutation],
-  );
+  const onRetryPendingPhoto = useCallback((_clientId: string) => {
+    // Engine is the source of truth for retries; just kick a drain.
+    drainQueue().catch(() => undefined);
+  }, []);
 
-  const onCancelPendingPhoto = useCallback((pending: PendingPhoto) => {
+  const onCancelPendingPhoto = useCallback(async (pending: PendingPhoto) => {
     deleteLocalPhoto(pending.localUri);
+    await removeEntry(pending.clientId);
     setPendingPhotos((prev) =>
       prev.filter((p) => p.clientId !== pending.clientId),
     );
@@ -404,6 +489,8 @@ export default function BillingSheetScreen() {
         method: "PATCH",
         body: { photos: nextPhotos },
         withClientId: false,
+        billingSheetId,
+        label: "Remove photo",
       });
     },
     onSuccess: () => {
@@ -548,6 +635,23 @@ export default function BillingSheetScreen() {
     }
   }, []);
 
+  // Surface 409s discovered by background queue drains in the same
+  // submitError banner as inline-mutation conflicts.
+  const conflictScope =
+    billingSheetId != null
+      ? `bs:${billingSheetId}`
+      : workOrderId != null
+        ? `bs-wo-${workOrderId}`
+        : null;
+  const conflictTick = useScopeConflictTick(conflictScope);
+  useEffect(() => {
+    if (conflictTick > 0) {
+      setSubmitError(
+        "This billing sheet was edited in the office. Refresh to see the latest.",
+      );
+    }
+  }, [conflictTick]);
+
   const handleMutationError = useCallback((err: unknown) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
       () => undefined,
@@ -576,9 +680,16 @@ export default function BillingSheetScreen() {
         path: "/api/billing-sheets",
         method: "POST",
         withClientId: true,
+        scopeFallback: workOrderId != null ? `wo-${workOrderId}` : undefined,
+        label: "Submit billing sheet",
         body: {
           ...body,
-          photos: uploadedUrls,
+          // Photos are handled by the durable offline queue (M8): each
+          // captured photo is enqueued as a `billing-sheet-photo` row
+          // that the engine PATCHes onto the sheet after this create
+          // POST drains. We intentionally send an empty `photos` array
+          // here so create-with-photos works end-to-end offline.
+          photos: [],
           workLocationLat: location ? location.lat : null,
           workLocationLng: location ? location.lng : null,
         },
@@ -615,6 +726,8 @@ export default function BillingSheetScreen() {
         path: `/api/billing-sheets/${billingSheetId}`,
         method: "PATCH",
         withClientId: false,
+        billingSheetId,
+        label: "Save billing sheet",
         body: patch,
       });
     },
@@ -648,6 +761,8 @@ export default function BillingSheetScreen() {
         path: `/api/billing-sheets/${billingSheetId}`,
         method: "PATCH",
         withClientId: false,
+        billingSheetId,
+        label: "Submit billing sheet",
         body: { status: "submitted" },
       });
     },
@@ -670,6 +785,8 @@ export default function BillingSheetScreen() {
               path: `/api/billing-sheets/${billingSheetId}`,
               method: "PATCH",
               withClientId: false,
+              billingSheetId,
+              label: "Backfill work location",
               body: { workLocationLat: loc.lat, workLocationLng: loc.lng },
             });
           } catch {
@@ -699,7 +816,10 @@ export default function BillingSheetScreen() {
     onError: handleMutationError,
   });
 
-  const inFlightUpload = pendingPhotos.some((p) => p.status === "uploading");
+  // Photo uploads happen off-screen in the sync engine now (M8), so
+  // the submit buttons no longer need to wait on them. Queued photos
+  // safely PATCH onto the sheet after the create POST drains.
+  const inFlightUpload = false;
   const anyMutationPending =
     createMutation.isPending ||
     updateMutation.isPending ||
@@ -860,7 +980,6 @@ export default function BillingSheetScreen() {
                 isEdit={isEdit}
                 existingPhotos={existingPhotos}
                 pendingPhotos={pendingPhotos}
-                uploadedUrls={uploadedUrls}
                 onAddPhoto={onAddPhoto}
                 onRetry={onRetryPendingPhoto}
                 onCancelPending={onCancelPendingPhoto}
@@ -1321,7 +1440,6 @@ function PhotoStripSection({
   isEdit,
   existingPhotos,
   pendingPhotos,
-  uploadedUrls,
   onAddPhoto,
   onRetry,
   onCancelPending,
@@ -1334,7 +1452,6 @@ function PhotoStripSection({
   isEdit: boolean;
   existingPhotos: string[];
   pendingPhotos: PendingPhoto[];
-  uploadedUrls: string[];
   onAddPhoto: () => void;
   onRetry: (clientId: string) => void;
   onCancelPending: (p: PendingPhoto) => void;
@@ -1344,8 +1461,7 @@ function PhotoStripSection({
   isRemoving: boolean;
 }) {
   const totalCount =
-    pendingPhotos.length +
-    (isEdit ? existingPhotos.length : uploadedUrls.length);
+    pendingPhotos.length + (isEdit ? existingPhotos.length : 0);
   return (
     <Section title={`Photos (${totalCount})`} colors={colors}>
       {photoError ? (
@@ -1400,7 +1516,7 @@ function PhotoStripSection({
                 accessibilityLabel="Pending billing sheet photo"
               />
               <View style={styles.photoOverlay} pointerEvents="box-none">
-                {p.status === "uploading" ? (
+                {p.status === "queued" ? (
                   <View style={styles.photoOverlayCenter} pointerEvents="none">
                     <ActivityIndicator color="#ffffff" />
                   </View>
@@ -1435,7 +1551,7 @@ function PhotoStripSection({
               </View>
             </View>
           ))}
-          {(isEdit ? existingPhotos : uploadedUrls).map((url) => (
+          {(isEdit ? existingPhotos : []).map((url) => (
             <View
               key={url}
               style={[

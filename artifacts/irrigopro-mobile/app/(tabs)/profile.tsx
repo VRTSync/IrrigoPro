@@ -1,3 +1,4 @@
+import { Feather } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import React, { useState } from "react";
 import {
@@ -5,14 +6,19 @@ import {
   Alert,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { SyncStatusSummary } from "@/components/SyncStatusPill";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/lib/auth-context";
+import { discardEntry, drainQueue } from "@/lib/sync/engine";
+import { markAllPending } from "@/lib/sync/queue";
+import { useSyncStatus } from "@/lib/sync/use-sync-status";
 
 const ROLE_LABELS: Record<string, string> = {
   field_tech: "Field technician",
@@ -26,6 +32,39 @@ export default function ProfileScreen() {
   const colors = useColors();
   const { user, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
+  const sync = useSyncStatus();
+
+  // Force Resync: re-marks every queued entry as pending and drains.
+  // Used when the queue is stuck on a transient server issue and the tech
+  // wants to retry everything at once.
+  const onForceResync = async () => {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      await markAllPending();
+      await drainQueue();
+    } finally {
+      setResyncing(false);
+    }
+  };
+
+  const onDiscardEntry = (id: string, label: string) => {
+    Alert.alert(
+      "Discard change?",
+      `"${label}" will be removed from the queue and won't sync. This can't be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => {
+            discardEntry(id).catch(() => undefined);
+          },
+        },
+      ],
+    );
+  };
 
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
   const displayName = fullName || user?.username || "Signed in";
@@ -61,7 +100,7 @@ export default function ProfileScreen() {
       style={[styles.safe, { backgroundColor: colors.background }]}
       edges={["top", "left", "right"]}
     >
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.container}>
         <Text style={[styles.heading, { color: colors.foreground }]}>Profile</Text>
 
         <View
@@ -117,6 +156,117 @@ export default function ProfileScreen() {
           <Row label="App version" value={appVersion} colors={colors} />
         </View>
 
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              borderRadius: colors.radius,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionHeading, { color: colors.foreground }]}>
+            Sync
+          </Text>
+          <SyncStatusSummary />
+          <Pressable
+            onPress={onForceResync}
+            disabled={resyncing || sync.total === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Force resync now"
+            style={({ pressed }) => [
+              styles.resyncButton,
+              {
+                borderColor: colors.primary,
+                borderRadius: colors.radius - 4,
+                opacity:
+                  sync.total === 0
+                    ? 0.5
+                    : resyncing
+                      ? 0.6
+                      : pressed
+                        ? 0.85
+                        : 1,
+              },
+            ]}
+          >
+            {resyncing ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <>
+                <Feather name="refresh-cw" size={14} color={colors.primary} />
+                <Text style={[styles.resyncText, { color: colors.primary }]}>
+                  Force resync now
+                </Text>
+              </>
+            )}
+          </Pressable>
+
+          {sync.entries.length > 0 ? (
+            <View style={styles.entriesWrap}>
+              {sync.entries.map((e) => {
+                const tone =
+                  e.status === "conflict"
+                    ? "#b45309"
+                    : e.status === "failed"
+                      ? "#991b1b"
+                      : "#854d0e";
+                const statusLabel =
+                  e.status === "pending"
+                    ? sync.online
+                      ? "Pending"
+                      : "Waiting for connection"
+                    : e.status === "conflict"
+                      ? "Conflict"
+                      : "Failed";
+                return (
+                  <View
+                    key={e.id}
+                    style={[
+                      styles.entryRow,
+                      { borderColor: colors.border },
+                    ]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[styles.entryLabel, { color: colors.foreground }]}
+                        numberOfLines={1}
+                      >
+                        {e.label}
+                      </Text>
+                      <Text style={[styles.entryMeta, { color: tone }]}>
+                        {statusLabel}
+                        {e.attempts > 0 ? ` · ${e.attempts} attempt${e.attempts === 1 ? "" : "s"}` : ""}
+                      </Text>
+                      {e.lastError ? (
+                        <Text
+                          style={[styles.entryMeta, { color: colors.mutedForeground }]}
+                          numberOfLines={2}
+                        >
+                          {e.lastError}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Pressable
+                      onPress={() => onDiscardEntry(e.id, e.label)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Discard ${e.label}`}
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.discardButton,
+                        { opacity: pressed ? 0.7 : 1 },
+                      ]}
+                    >
+                      <Feather name="x" size={16} color={colors.destructive} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+
         <Pressable
           onPress={onSignOutPress}
           disabled={signingOut}
@@ -138,7 +288,7 @@ export default function ProfileScreen() {
             </Text>
           )}
         </Pressable>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -169,7 +319,31 @@ function Row({
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  container: { flex: 1, padding: 20, gap: 20 },
+  container: { padding: 20, gap: 20, paddingBottom: 40 },
+  sectionHeading: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
+  resyncButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  resyncText: { fontSize: 14, fontWeight: "600" },
+  entriesWrap: { marginTop: 12, gap: 8 },
+  entryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+  },
+  entryLabel: { fontSize: 14, fontWeight: "600" },
+  entryMeta: { fontSize: 12, marginTop: 2 },
+  discardButton: { padding: 6 },
   heading: { fontSize: 28, fontWeight: "700", marginTop: 4 },
   card: {
     borderWidth: StyleSheet.hairlineWidth,

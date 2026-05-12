@@ -13,9 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { SyncStatusPill } from "@/components/SyncStatusPill";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { drainQueue } from "@/lib/sync/engine";
 
 type WorkOrder = {
   id: number;
@@ -75,6 +77,14 @@ export default function TodayScreen() {
 
   const techId = user?.id;
 
+  // Manual pull-to-refresh on Today is one of the M8 sync drain triggers.
+  // Refetching the work-order list and draining the offline queue are
+  // independent, so we kick both off in parallel from the same gesture.
+  const onPullRefresh = React.useCallback(() => {
+    drainQueue().catch(() => undefined);
+    return refetchRef.current?.();
+  }, []);
+
   const { data, isLoading, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ["work-orders", "by-technician", techId],
     enabled: typeof techId === "number",
@@ -83,6 +93,11 @@ export default function TodayScreen() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
+
+  const refetchRef = React.useRef(refetch);
+  React.useEffect(() => {
+    refetchRef.current = refetch;
+  }, [refetch]);
 
   const todayOrders = useMemo<WorkOrder[]>(() => {
     if (!Array.isArray(data)) return [];
@@ -108,14 +123,7 @@ export default function TodayScreen() {
             {formatTodayHeader()}
           </Text>
         </View>
-        {/* Sync-status pill placeholder — wired up in M8. */}
-        <View
-          style={[
-            styles.syncPillPlaceholder,
-            { borderColor: colors.border, borderRadius: colors.radius - 4 },
-          ]}
-          accessibilityElementsHidden
-        />
+        <SyncStatusPill />
       </View>
 
       {isLoading ? (
@@ -156,7 +164,7 @@ export default function TodayScreen() {
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
-              onRefresh={refetch}
+              onRefresh={onPullRefresh}
               tintColor={colors.primary}
             />
           }
@@ -191,7 +199,7 @@ export default function TodayScreen() {
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
-              onRefresh={refetch}
+              onRefresh={onPullRefresh}
               tintColor={colors.primary}
             />
           }
@@ -284,11 +292,6 @@ const styles = StyleSheet.create({
   headerTextWrap: { flex: 1 },
   headerTitle: { fontSize: 28, fontWeight: "700" },
   headerSubtitle: { fontSize: 14, marginTop: 2 },
-  syncPillPlaceholder: {
-    width: 0,
-    height: 0,
-    borderWidth: 0,
-  },
   center: {
     flex: 1,
     alignItems: "center",
