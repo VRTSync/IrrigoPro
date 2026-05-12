@@ -1,5 +1,6 @@
 import { useLocation, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
@@ -18,7 +19,7 @@ function PendingReviewInbox() {
   // Inbox shows every wet check still awaiting full conversion:
   // freshly-submitted, manager-approved (pricing locked, not yet converted),
   // and partially_converted (some findings routed, others still pending).
-  const { data: rows = [], isLoading } = useQuery<PendingReviewRow[]>({
+  const { data: rows = [], isLoading } = useArrayQuery<PendingReviewRow>({
     queryKey: ["/api/wet-checks/pending-review"],
   });
 

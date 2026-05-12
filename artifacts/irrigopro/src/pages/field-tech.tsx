@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Clock, MapPin, Plus, Trash2, Wrench, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { PartsSearchModal } from "@/components/estimates/parts-search-modal";
 import type { Part } from "@workspace/db/schema";
 
@@ -54,7 +54,7 @@ export default function FieldTech() {
   const { toast } = useToast();
 
   // Fetch property zones
-  const { data: propertyZones = [], isLoading: loadingZones } = useQuery<PropertyZone[]>({
+  const { data: propertyZones = [], isLoading: loadingZones } = useArrayQuery<PropertyZone>({
     queryKey: ["/api/property-zones"],
     enabled: true,
   });

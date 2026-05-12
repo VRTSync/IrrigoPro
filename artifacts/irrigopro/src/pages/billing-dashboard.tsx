@@ -16,7 +16,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { Part, ManualPartReview } from "@workspace/db/schema";
 
 interface CustomerPreview {
@@ -63,7 +63,7 @@ function formatCurrency(amount: number): string {
 }
 
 export default function BillingDashboard() {
-  const { data: customerPreviews = [], isLoading: loadingPreviews } = useQuery<CustomerPreview[]>({
+  const { data: customerPreviews = [], isLoading: loadingPreviews } = useArrayQuery<CustomerPreview>({
     queryKey: ["/api/customers/billing-preview", "all"],
     queryFn: async () => {
       try {
@@ -77,24 +77,24 @@ export default function BillingDashboard() {
     },
   });
 
-  const { data: pendingParts = [] } = useQuery<Part[]>({
+  const { data: pendingParts = [] } = useArrayQuery<Part>({
     queryKey: ["/api/parts/pending-approval"],
     refetchInterval: 60000,
   });
 
-  const { data: manualReviews = [] } = useQuery<ManualPartReview[]>({
+  const { data: manualReviews = [] } = useArrayQuery<ManualPartReview>({
     queryKey: ["/api/manual-part-reviews"],
     refetchInterval: 60000,
   });
 
-  const { data: allWorkOrders = [] } = useQuery<WorkOrderItem[]>({
+  const { data: allWorkOrders = [] } = useArrayQuery<WorkOrderItem>({
     queryKey: ["/api/work-orders"],
     queryFn: () => apiRequest("/api/work-orders"),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
-  const { data: allBillingSheets = [] } = useQuery<BillingSheetItem[]>({
+  const { data: allBillingSheets = [] } = useArrayQuery<BillingSheetItem>({
     queryKey: ["/api/billing-sheets"],
     queryFn: () => apiRequest("/api/billing-sheets"),
     staleTime: 5 * 60 * 1000,

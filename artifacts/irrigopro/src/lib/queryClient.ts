@@ -1,4 +1,10 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryFunction,
+  useQuery,
+  type UseQueryOptions,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { safeGet } from "@/utils/safeStorage";
 
 async function throwIfResNotOk(res: Response) {
@@ -132,6 +138,47 @@ export function authedPhotoSrc(
   if (variant) params.set("variant", variant);
   const qs = params.toString();
   return `/api/photos/${encodeURIComponent(photoId)}${qs ? `?${qs}` : ""}`;
+}
+
+// Task #540 — null-safe array helper for list payloads.
+//
+// `getQueryFn` above returns `null` on a 401 in `returnNull` mode, and
+// many of our endpoints can also legitimately return `null` for nested
+// array fields on freshly-created records (e.g. `wetCheck.zoneRecords`,
+// `zoneRecord.findings`, `wetCheck.photos`). The TypeScript types
+// declare these as `T[]` so the compiler can't catch the mismatch and
+// any `.map / .filter / .length / .flatMap` against the value crashes
+// the page. Always wrap a list value with `asArray()` before calling
+// array methods on it.
+//
+//   const records = asArray(wc.zoneRecords);   // T[] guaranteed
+//   const items = asArray<Item>(maybeItems);   // explicit element type
+export function asArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+// Task #540 — `useArrayQuery<T>` is the canonical wrapper for any list
+// endpoint. It pipes the raw payload through `asArray` via `select`,
+// so `data` is always `T[]` once the query has resolved — even when
+// the global `getQueryFn({ on401: "returnNull" })` returns `null` on
+// a 401. Use it instead of `useQuery<T[]>(...)` for all list reads:
+//
+//   const { data: customers = [], isLoading } = useArrayQuery<Customer>({
+//     queryKey: ["/api/customers"],
+//   });
+//
+// The `= []` destructure default is still required for the loading
+// state (during which `data` is `undefined` because `select` has not
+// run yet); the wrapper guarantees `null` from a 401 collapses to
+// `[]` instead of crashing the page on the first `.map / .filter /
+// .length` call.
+export function useArrayQuery<T>(
+  options: Omit<UseQueryOptions<T[] | null | undefined, Error, T[]>, "select">,
+): UseQueryResult<T[], Error> {
+  return useQuery<T[] | null | undefined, Error, T[]>({
+    ...options,
+    select: (data) => asArray<T>(data as T[] | null | undefined),
+  });
 }
 
 export function parseApiError(error: unknown, fallback: string): string {

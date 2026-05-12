@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient, parseApiError } from "@/lib/queryClient";
+import { apiRequest, queryClient, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,7 +76,7 @@ export default function AdminWetChecksPage() {
     [statusFilter],
   );
 
-  const { data, isLoading, isError, error } = useQuery<AdminWetCheckRow[]>({
+  const { data, isLoading, isError, error } = useArrayQuery<AdminWetCheckRow>({
     queryKey,
     queryFn: async () => {
       const url = statusFilter === "all"

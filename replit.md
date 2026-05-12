@@ -129,6 +129,42 @@ Deferred follow-ups (out of this task's scope, tracked separately):
 - Switch the paginated list endpoints' clients to
   `useInfiniteQuery` and drive the off-by-one with `X-Total-Count`.
 
+## Null-safe list rendering (Task #540)
+
+The frontend's `getQueryFn` returns `null` on 401 (`returnNull` mode)
+and several API endpoints return `null` for nested array fields on
+freshly-created records (e.g. `wetCheck.zoneRecords`,
+`zoneRecord.findings`, `wetCheck.photos`). TypeScript types declare
+those as `T[]` so the compiler can't catch the mismatch — any
+`.map / .filter / .some / .length / .flatMap` against the value
+crashes the page.
+
+Convention:
+
+- For top-level list endpoints, use `useArrayQuery<T>(...)` from
+  `@/lib/queryClient` instead of `useQuery<T[]>(...)`. The wrapper
+  pipes the payload through `asArray()` via `select`, so a `null`
+  from a 401 (`returnNull` mode) collapses to `[]` instead of
+  crashing on the first `.map / .filter / .length` call. Still
+  destructure with a `= []` default to cover the loading state
+  (`select` has not run yet, so `data` is `undefined`):
+  `const { data: rows = [], isLoading } = useArrayQuery<Row>({...});`
+- For nested arrays inside object payloads (e.g.
+  `wetCheck.zoneRecords`, `zoneRecord.findings`), wrap with the
+  shared `asArray()` helper before calling any array method:
+  `const records = asArray(wc.zoneRecords);`
+  `const findings = asArray(zoneRecord?.findings);`
+- Optimistic-update handlers that re-`map` a previous query payload
+  must wrap the same way — the snapshot can have null nested arrays
+  even when the parent object is non-null.
+
+`artifacts/irrigopro/src/pages/wet-checks-null-safe.test.tsx` covers
+the regression with: (a) a static-source guard against direct
+`wc.zoneRecords.<method>` reads, (b) a runtime mount of `ZoneScreen`
+with `findings: null`, and (c) a `useArrayQuery` test that mocks the
+queryFn to return `null` (the 401 `returnNull` path) and confirms
+the consumer sees `[]` instead of crashing.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

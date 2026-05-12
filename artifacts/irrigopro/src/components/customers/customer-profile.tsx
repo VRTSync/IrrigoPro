@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,15 +54,15 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
   const isAdmin = userRole === "company_admin" || userRole === "super_admin" || userRole === "billing_manager";
 
   // Fetch customer-related data
-  const { data: estimates = [] } = useQuery<Estimate[]>({
+  const { data: estimates = [] } = useArrayQuery<Estimate>({
     queryKey: [`/api/customers/${customer.id}/estimates`],
   });
 
-  const { data: workOrders = [] } = useQuery<WorkOrder[]>({
+  const { data: workOrders = [] } = useArrayQuery<WorkOrder>({
     queryKey: [`/api/customers/${customer.id}/work-orders`],
   });
 
-  const { data: billingSheets = [] } = useQuery<BillingSheetWithItems[]>({
+  const { data: billingSheets = [] } = useArrayQuery<BillingSheetWithItems>({
     queryKey: [`/api/customers/${customer.id}/billing-sheets`],
   });
 

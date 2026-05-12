@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Loader2, AlertCircle, Calendar, CheckCircle2, RefreshCw, ClipboardList } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { InvoiceAuditModal } from "./invoice-audit-modal";
 
@@ -48,7 +48,7 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
     },
   });
 
-  const { data: invoices = [], isLoading, error } = useQuery<Invoice[]>({
+  const { data: invoices = [], isLoading, error } = useArrayQuery<Invoice>({
     queryKey: ["/api/invoices", { customerId, limit }],
     queryFn: async () => {
       const params = new URLSearchParams();

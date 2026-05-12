@@ -1,7 +1,7 @@
 import { safeGet } from "@/utils/safeStorage";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { PartsListSkeleton } from "@/components/ui/loading-skeleton";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -125,11 +125,11 @@ function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   const { toast } = useToast();
 
   // Dynamic reference list queries
-  const { data: partCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
-  const { data: partBrands = [] } = useQuery<PartBrand[]>({ queryKey: ["/api/part-settings/brands"] });
-  const { data: partSizes = [] } = useQuery<PartSize[]>({ queryKey: ["/api/part-settings/sizes"] });
-  const { data: partMaterials = [] } = useQuery<PartMaterial[]>({ queryKey: ["/api/part-settings/materials"] });
-  const { data: partFittingTypes = [] } = useQuery<PartFittingType[]>({ queryKey: ["/api/part-settings/fitting-types"] });
+  const { data: partCategories = [] } = useArrayQuery<PartCategory>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: partBrands = [] } = useArrayQuery<PartBrand>({ queryKey: ["/api/part-settings/brands"] });
+  const { data: partSizes = [] } = useArrayQuery<PartSize>({ queryKey: ["/api/part-settings/sizes"] });
+  const { data: partMaterials = [] } = useArrayQuery<PartMaterial>({ queryKey: ["/api/part-settings/materials"] });
+  const { data: partFittingTypes = [] } = useArrayQuery<PartFittingType>({ queryKey: ["/api/part-settings/fitting-types"] });
   
   type PartFormInput = z.input<typeof PartFormSchema>;
   const form = useForm<PartFormInput>({
@@ -583,11 +583,11 @@ function AssemblyFormDialog({ assembly, open, onOpenChange }: AssemblyFormDialog
   const [partSearchQuery, setPartSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   
-  const { data: parts } = useQuery<Part[]>({
+  const { data: parts = [] } = useArrayQuery<Part>({
     queryKey: ["/api/parts"],
   });
 
-  const { data: assemblyCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: assemblyCategories = [] } = useArrayQuery<PartCategory>({ queryKey: ["/api/part-settings/categories"] });
 
   // Filter parts for selection (exclude already selected parts)
   const filteredPartsForSelection = useMemo(() => {
@@ -1051,17 +1051,17 @@ export default function PartsCatalog() {
   const userRole = currentUser?.role || "";
   const canImport = userRole === "company_admin" || userRole === "super_admin";
 
-  const { data: parts, isLoading } = useQuery<Part[]>({
+  const { data: parts = [], isLoading } = useArrayQuery<Part>({
     queryKey: ["/api/parts"],
   });
 
-  const { data: assemblies, isLoading: isLoadingAssemblies } = useQuery<AssemblyWithParts[]>({
+  const { data: assemblies = [], isLoading: isLoadingAssemblies } = useArrayQuery<AssemblyWithParts>({
     queryKey: ["/api/assemblies"],
   });
 
   // Dynamic reference lists for filter dropdowns
-  const { data: filterCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
-  const { data: filterMaterials = [] } = useQuery<PartMaterial[]>({ queryKey: ["/api/part-settings/materials"] });
+  const { data: filterCategories = [] } = useArrayQuery<PartCategory>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: filterMaterials = [] } = useArrayQuery<PartMaterial>({ queryKey: ["/api/part-settings/materials"] });
 
 
 

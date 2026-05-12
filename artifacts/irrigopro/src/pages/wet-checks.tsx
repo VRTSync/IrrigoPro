@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, authedPhotoSrc, parseApiError, queryClient } from "@/lib/queryClient";
+import { apiRequest, asArray, authedPhotoSrc, parseApiError, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -532,10 +532,10 @@ function WetCheckList() {
   const [search, setSearch] = useState("");
   const me = useMemo(() => getCurrentUser(), []);
 
-  const { data: wetChecks = [], isLoading: loadingWcs } = useQuery<WetCheck[]>({
+  const { data: wetChecks = [], isLoading: loadingWcs } = useArrayQuery<WetCheck>({
     queryKey: ["/api/wet-checks"],
   });
-  const { data: techWorkOrders = [] } = useQuery<WorkOrder[]>({
+  const { data: techWorkOrders = [] } = useArrayQuery<WorkOrder>({
     queryKey: ["/api/work-orders", "technician", me?.id],
     queryFn: () => apiRequest(`/api/work-orders?technician=${me!.id}`),
     enabled: !!me?.id,
@@ -564,7 +564,7 @@ function WetCheckList() {
     return out;
   }, [techWorkOrders]);
 
-  const { data: allCustomers = [] } = useQuery<Customer[]>({
+  const { data: allCustomers = [] } = useArrayQuery<Customer>({
     queryKey: ["/api/customers"],
     enabled: !!search.trim(),
   });
@@ -764,7 +764,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     },
   });
 
-  const { data: controllers = [] } = useQuery<PropertyController[]>({
+  const { data: controllers = [] } = useArrayQuery<PropertyController>({
     queryKey: ["/api/properties", wc?.customerId, "controllers"],
     queryFn: () => cachedApiRequest(`/api/properties/${wc!.customerId}/controllers`),
     enabled: !!wc?.customerId,
@@ -849,8 +849,14 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     return <div className="flex justify-center py-10"><Loader2 className="animate-spin" /></div>;
   }
 
+  // Task #540 — `wc.zoneRecords` / `wc.photos` are typed as `T[]` but the
+  // server can return `null` for nested array fields on freshly-created
+  // records. Normalize at the top so every downstream `.map / .filter /
+  // .flatMap / .length` is safe without sprinkling `?? []` everywhere.
+  const wcZoneRecords = asArray(wc.zoneRecords);
+  const wcPhotos = asArray(wc.photos);
   const zonesByLetter = (letter: string) =>
-    wc.zoneRecords.filter(z => z.controllerLetter === letter);
+    wcZoneRecords.filter(z => z.controllerLetter === letter);
 
   const isReadOnly = wc.status !== "in_progress";
 
@@ -882,7 +888,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
         zoneNumber={activeZone}
         zoneCount={zoneCount}
         zoneRecord={zoneRecord}
-        photos={wc.photos.filter(p => p.zoneRecordId === zoneRecord?.id)}
+        photos={wcPhotos.filter(p => p.zoneRecordId === zoneRecord?.id)}
         readOnly={isReadOnly}
         onBack={() => setActiveZone(null)}
         onAdvance={() => {
@@ -952,11 +958,11 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
   }
 
   // Top-level: controllers grid + wet-check level photos
-  const wetCheckLevelPhotos = wc.photos.filter(p => !p.zoneRecordId && !p.findingId);
+  const wetCheckLevelPhotos = wcPhotos.filter(p => !p.zoneRecordId && !p.findingId);
   // Status chip counts so the tech sees at-a-glance what they're about to
   // submit: how many findings are already complete (will auto-bill) vs.
   // still pending a manager decision, plus skipped zones.
-  const allFindings = wc.zoneRecords.flatMap(z => z.findings);
+  const allFindings = wcZoneRecords.flatMap(z => asArray(z.findings));
   const completeCount = allFindings.filter(f => f.resolution === "repaired_in_field").length;
   const pendingFindingCount = allFindings.filter(f => f.resolution === "pending").length;
   // Task #464 — Complete findings that have neither a part nor the
@@ -1069,7 +1075,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     }
     setJumpIndex(idx + 1);
   };
-  const naCount = wc.zoneRecords.filter(z => z.status === "not_applicable").length;
+  const naCount = wcZoneRecords.filter(z => z.status === "not_applicable").length;
   // Task #428 — submit CTA copy + intent counts. Disposition is the tech's
   // self-reported intent and is decoupled from `resolution` (which carries
   // billing/routing semantics).
@@ -1192,7 +1198,7 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
       {!isReadOnly && autoBillEnabled && (
         <FindingsByResolution
           findings={allFindings}
-          zoneRecords={wc.zoneRecords}
+          zoneRecords={wcZoneRecords}
         />
       )}
 
@@ -1349,8 +1355,12 @@ function FindingsByResolution({
 }) {
   const complete = findings.filter(f => f.resolution === "repaired_in_field");
   const pending = findings.filter(f => f.resolution === "pending");
-  const naZones = zoneRecords.filter(z => z.status === "not_applicable");
-  const zoneById = new Map(zoneRecords.map(z => [z.id, z]));
+  // Task #540 — defend against null nested arrays even when the parent
+  // already extracted the prop; the FindingsByResolution callsite is
+  // memoized off `wc.zoneRecords` upstream and may receive null in tests.
+  const safeZoneRecords = asArray(zoneRecords);
+  const naZones = safeZoneRecords.filter(z => z.status === "not_applicable");
+  const zoneById = new Map(safeZoneRecords.map(z => [z.id, z]));
   const label = (f: WetCheckFinding) => {
     const zr = zoneById.get(f.zoneRecordId);
     const loc = zr ? `Zone ${zr.controllerLetter}${zr.zoneNumber}` : `Finding #${f.id}`;
@@ -1553,7 +1563,7 @@ export function ZoneScreen({
         zr.controllerLetter === letter && zr.zoneNumber === zoneNumber;
       queryClient.setQueryData<WetCheckWithDetails>(key, {
         ...previous,
-        zoneRecords: previous.zoneRecords.map((zr) =>
+        zoneRecords: asArray(previous.zoneRecords).map((zr) =>
           matches(zr)
             ? {
                 ...zr,
@@ -1646,7 +1656,7 @@ export function ZoneScreen({
     },
   });
 
-  const { data: issueTypes = [] } = useQuery<IssueTypeConfig[]>({
+  const { data: issueTypes = [] } = useArrayQuery<IssueTypeConfig>({
     queryKey: ["/api/wet-checks/issue-types"],
     queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`),
   });
@@ -1697,11 +1707,11 @@ export function ZoneScreen({
       if (previous) {
         queryClient.setQueryData<WetCheckWithDetails>(deleteFindingQueryKey, {
           ...previous,
-          zoneRecords: previous.zoneRecords.map((zr) => ({
+          zoneRecords: asArray(previous.zoneRecords).map((zr) => ({
             ...zr,
-            findings: zr.findings.filter((f) => f.id !== vars.id),
+            findings: asArray(zr.findings).filter((f) => f.id !== vars.id),
           })),
-          photos: previous.photos.filter((p) => p.findingId !== vars.id),
+          photos: asArray(previous.photos).filter((p) => p.findingId !== vars.id),
         });
       }
       return { previous };
@@ -1724,7 +1734,7 @@ export function ZoneScreen({
   // Task #455 — counts of findings + finding-level photos used by both the
   // "is revert destructive?" gate on the status buttons and the body copy
   // of the confirmation dialog.
-  const findings = zoneRecord?.findings ?? [];
+  const findings = asArray(zoneRecord?.findings);
   const findingIds = new Set(findings.map((f) => f.id));
   const findingPhotos = photos.filter(
     (p) => p.findingId != null && findingIds.has(p.findingId),
@@ -1856,9 +1866,9 @@ export function ZoneScreen({
       if (previous) {
         queryClient.setQueryData<WetCheckWithDetails>(dispositionQueryKey, {
           ...previous,
-          zoneRecords: previous.zoneRecords.map((zr) => ({
+          zoneRecords: asArray(previous.zoneRecords).map((zr) => ({
             ...zr,
-            findings: zr.findings.map((f) =>
+            findings: asArray(zr.findings).map((f) =>
               f.id === vars.id ? { ...f, techDisposition: vars.disposition } : f,
             ),
           })),
@@ -1890,7 +1900,7 @@ export function ZoneScreen({
   // the tech has already reviewed-and-confirmed (vs. ones still mid-edit).
   // The state survives refresh because it lives on the zone record row.
   const [confirmMarkComplete, setConfirmMarkComplete] = useState(false);
-  const findingsCount = zoneRecord?.findings.length ?? 0;
+  const findingsCount = asArray(zoneRecord?.findings).length;
   const markCompleteMut = useMutation({
     mutationFn: async () => {
       const markedAt = new Date().toISOString();
@@ -1936,7 +1946,7 @@ export function ZoneScreen({
             : zr.clientId != null && zr.clientId === zoneRecord.clientId;
         queryClient.setQueryData<WetCheckWithDetails>(key, {
           ...previous,
-          zoneRecords: previous.zoneRecords.map((zr) =>
+          zoneRecords: asArray(previous.zoneRecords).map((zr) =>
             matches(zr) ? { ...zr, markedCompleteAt: stamp } : zr,
           ),
         });
@@ -2153,11 +2163,11 @@ export function ZoneScreen({
       )}
 
       {/* Existing findings */}
-      {zoneRecord && zoneRecord.findings.length > 0 && (
+      {zoneRecord && asArray(zoneRecord.findings).length > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-base">Work added to this zone</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {zoneRecord.findings.map(f => (
+            {asArray(zoneRecord.findings).map(f => (
               <div key={f.id} className="border rounded p-2" data-testid={`finding-${f.id}`}>
                 <div className="flex items-start justify-between">
                   <div className="text-sm">
@@ -2387,7 +2397,7 @@ function FindingSheet({
   // with findingId=null and linked to the new finding once saveMut succeeds.
   const [pendingPhotos, setPendingPhotos] = useState<WetCheckPhoto[]>([]);
 
-  const { data: configs = [] } = useQuery<IssueTypeConfig[]>({ queryKey: ["/api/wet-checks/issue-types"], queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`), enabled: open });
+  const { data: configs = [] } = useArrayQuery<IssueTypeConfig>({ queryKey: ["/api/wet-checks/issue-types"], queryFn: () => cachedApiRequest(`/api/wet-checks/issue-types`), enabled: open });
   const cfg = configs.find(c => c.issueType === issueType);
   // Slice 3 — flag-gated helper text on the Mark Complete toggle. With
   // auto-bill OFF, we restore the Slice 2 wording so the tech isn't

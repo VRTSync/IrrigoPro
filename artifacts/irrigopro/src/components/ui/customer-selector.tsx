@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Plus, User, Building, Mail, Phone, MapPin, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@workspace/db/schema";
 import type { Customer } from "@workspace/db/schema";
 
@@ -76,7 +76,7 @@ export function CustomerSelector({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: customers, isLoading } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading } = useArrayQuery<Customer>({
     queryKey: ["/api/customers", { billingVisible: true }],
     queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });

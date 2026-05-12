@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Plus, Eye, User, CheckCircle, ExternalLink, ThumbsUp, RotateCcw, Clock, Shield, ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { WorkOrder } from "@workspace/db/schema";
 import { CompletedWorkDetailModal } from "@/components/billing/completed-work-detail-modal";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
@@ -29,7 +29,7 @@ export function WorkOrdersManager({ onBack }: WorkOrdersManagerProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
+  const { data: workOrders = [], isLoading } = useArrayQuery<WorkOrder>({
     queryKey: ["/api/work-orders"],
   });
 

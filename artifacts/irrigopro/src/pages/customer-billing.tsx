@@ -38,7 +38,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, parseApiError } from "@/lib/queryClient";
+import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@workspace/db/schema";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { InvoiceList } from "@/components/billing/invoice-list";
@@ -177,13 +177,13 @@ export default function CustomerBilling() {
   }, []);
 
   // Get billing-visible customers only
-  const { data: customers = [], isLoading: loadingCustomers } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading: loadingCustomers } = useArrayQuery<Customer>({
     queryKey: ["/api/customers", { billingVisible: true }],
     queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });
 
   // Get comprehensive customer billing data including work orders, estimates, and billing sheets
-  const { data: customerPreviews = [], isLoading: loadingPreviews } = useQuery<any[]>({
+  const { data: customerPreviews = [], isLoading: loadingPreviews } = useArrayQuery<any>({
     queryKey: ["/api/customers/billing-preview", dateFilter, selectedMonth],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -490,7 +490,7 @@ export default function CustomerBilling() {
   // Task #532 — only need enough rows to find the latest invoice
   // month; the API returns invoices sorted by createdAt desc, so
   // 100 rows is plenty and saves significant bandwidth on field-LTE.
-  const { data: recentInvoicesAll = [] } = useQuery<any[]>({
+  const { data: recentInvoicesAll = [] } = useArrayQuery<any>({
     queryKey: ["/api/invoices", { limit: 100 }],
     queryFn: async () => {
       const res = await fetch("/api/invoices?limit=100");

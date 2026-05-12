@@ -15,7 +15,7 @@ import { CustomerIntegration } from "@/components/integrations/customer-integrat
 import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";
 import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -52,7 +52,7 @@ export default function Customers() {
     }
   }, []);
 
-  const { data: customers, isLoading } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading } = useArrayQuery<Customer>({
     queryKey: ["/api/customers", { billingVisible: true }],
     queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });

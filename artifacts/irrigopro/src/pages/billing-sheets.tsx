@@ -16,7 +16,7 @@ import { BillingSheetViewModal } from "@/components/billing/billing-sheet-view-m
 import { Plus, Search, FileText, Calendar, User, DollarSign, Clock, Check, X, Send, Eye, Edit, Trash2, ChevronRight, ChevronDown, MapPin, Camera, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { BillingSheet } from "@workspace/db/schema";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 
@@ -91,7 +91,7 @@ export default function BillingSheets() {
   // Get billing sheets based on role:
   // - Field techs: only their own billing sheets
   // - Managers/Admins: all billing sheets for oversight, but drafts filtered client-side
-  const { data: billingSheets, isLoading } = useQuery<BillingSheet[]>({
+  const { data: billingSheets = [], isLoading } = useArrayQuery<BillingSheet>({
     queryKey: currentUser?.role === 'field_tech' 
       ? ["/api/billing-sheets", "technician", currentUser?.id]
       : ["/api/billing-sheets"],

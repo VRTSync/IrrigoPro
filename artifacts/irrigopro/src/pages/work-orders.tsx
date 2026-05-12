@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { WorkOrderListSkeleton } from "@/components/ui/loading-skeleton";
 
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, parseApiError } from "@/lib/queryClient";
+import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -126,7 +126,7 @@ export default function WorkOrders() {
   });
 
   // For field techs, only show work orders assigned to them
-  const { data: workOrders, isLoading } = useQuery<WorkOrder[]>({
+  const { data: workOrders = [], isLoading } = useArrayQuery<WorkOrder>({
     queryKey: currentUser?.role === 'field_tech' 
       ? ["/api/work-orders", "technician", currentUser?.id]
       : ["/api/work-orders"],

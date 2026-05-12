@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient, parseApiError } from "@/lib/queryClient";
+import { apiRequest, queryClient, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { safeGet } from "@/utils/safeStorage";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,7 @@ export default function AdminIssueTypesPage() {
 
   const queryKey = ["/api/admin/issue-types"] as const;
 
-  const { data, isLoading, isError, error } = useQuery<IssueTypeConfig[]>({
+  const { data, isLoading, isError, error } = useArrayQuery<IssueTypeConfig>({
     queryKey,
     enabled: allowed,
   });

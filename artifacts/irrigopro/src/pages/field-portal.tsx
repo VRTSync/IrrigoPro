@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Clock, MapPin, Plus, Trash2, Wrench, LogOut, Play, Square, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import companyLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 
 interface User {
@@ -69,13 +69,13 @@ export default function FieldPortal() {
   }, []);
 
   // Fetch property zones
-  const { data: propertyZones } = useQuery<PropertyZone[]>({
+  const { data: propertyZones = [] } = useArrayQuery<PropertyZone>({
     queryKey: ["/api/property-zones"],
     enabled: !!user,
   });
 
   // Fetch active work sessions
-  const { data: workSessions } = useQuery<WorkSession[]>({
+  const { data: workSessions = [] } = useArrayQuery<WorkSession>({
     queryKey: ["/api/field-work-sessions"],
     enabled: !!user,
   });

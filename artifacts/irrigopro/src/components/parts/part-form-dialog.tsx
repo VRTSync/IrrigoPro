@@ -11,7 +11,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@/lib/zod-resolver";
 import { z } from "zod/v4";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { insertPartSchema } from "@workspace/db/schema";
 import type { Part, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@workspace/db/schema";
 
@@ -111,11 +111,11 @@ export interface PartFormDialogProps {
 export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps) {
   const { toast } = useToast();
 
-  const { data: partCategories = [] } = useQuery<PartCategory[]>({ queryKey: ["/api/part-settings/categories"] });
-  const { data: partBrands = [] } = useQuery<PartBrand[]>({ queryKey: ["/api/part-settings/brands"] });
-  const { data: partSizes = [] } = useQuery<PartSize[]>({ queryKey: ["/api/part-settings/sizes"] });
-  const { data: partMaterials = [] } = useQuery<PartMaterial[]>({ queryKey: ["/api/part-settings/materials"] });
-  const { data: partFittingTypes = [] } = useQuery<PartFittingType[]>({ queryKey: ["/api/part-settings/fitting-types"] });
+  const { data: partCategories = [] } = useArrayQuery<PartCategory>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: partBrands = [] } = useArrayQuery<PartBrand>({ queryKey: ["/api/part-settings/brands"] });
+  const { data: partSizes = [] } = useArrayQuery<PartSize>({ queryKey: ["/api/part-settings/sizes"] });
+  const { data: partMaterials = [] } = useArrayQuery<PartMaterial>({ queryKey: ["/api/part-settings/materials"] });
+  const { data: partFittingTypes = [] } = useArrayQuery<PartFittingType>({ queryKey: ["/api/part-settings/fitting-types"] });
 
   type PartFormInput = z.input<typeof PartFormSchema>;
   const form = useForm<PartFormInput>({

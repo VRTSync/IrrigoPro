@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -111,7 +112,7 @@ export function WizardLocationStep({
     }
   }, [customer?.id, value.useDifferentAddress, form]);
 
-  const { data: controllers = [], isLoading: controllersLoading } = useQuery<PropertyController[]>({
+  const { data: controllers = [], isLoading: controllersLoading } = useArrayQuery<PropertyController>({
     queryKey: ["/api/properties", customer?.id, "controllers"],
     enabled: !!customer,
   });

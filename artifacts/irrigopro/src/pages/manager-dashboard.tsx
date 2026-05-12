@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -83,11 +84,11 @@ export default function ManagerDashboard() {
   const [reviewWorkOrder, setReviewWorkOrder] = useState<WorkOrder | null>(null);
   const [reviewBillingSheet, setReviewBillingSheet] = useState<BillingSheet | null>(null);
 
-  const { data: workOrders = [], isLoading: woLoading } = useQuery<WorkOrder[]>({
+  const { data: workOrders = [], isLoading: woLoading } = useArrayQuery<WorkOrder>({
     queryKey: ["/api/work-orders"],
   });
 
-  const { data: billingSheets = [], isLoading: bsLoading } = useQuery<BillingSheet[]>({
+  const { data: billingSheets = [], isLoading: bsLoading } = useArrayQuery<BillingSheet>({
     queryKey: ["/api/billing-sheets"],
   });
 
@@ -95,7 +96,7 @@ export default function ManagerDashboard() {
   // the same /pending-review aggregate that powers the inbox so the tile
   // count and the inbox row count stay in sync without a second source of
   // truth.
-  const { data: pendingWetChecks = [] } = useQuery<unknown[]>({
+  const { data: pendingWetChecks = [] } = useArrayQuery<unknown>({
     queryKey: ["/api/wet-checks/pending-review"],
   });
   const pendingWetCheckCount = pendingWetChecks.length;

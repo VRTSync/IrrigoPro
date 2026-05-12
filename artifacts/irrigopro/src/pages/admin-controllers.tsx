@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safeGet } from "@/utils/safeStorage";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -91,7 +91,7 @@ export default function AdminControllers() {
 
   const isAdmin = userRole === "company_admin" || userRole === "super_admin";
 
-  const { data, isLoading } = useQuery<Row[]>({
+  const { data, isLoading } = useArrayQuery<Row>({
     queryKey: ["/api/admin/customer-controllers"],
     enabled: isAdmin,
   });

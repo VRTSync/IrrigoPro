@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -65,12 +66,12 @@ export function PartsSearchModal({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const { data: parts, isLoading } = useQuery<Part[]>({
+  const { data: parts = [], isLoading } = useArrayQuery<Part>({
     queryKey: ["/api/parts"],
     enabled: open,
   });
 
-  const { data: popularParts } = useQuery<(Part & { usageCount: number })[]>({
+  const { data: popularParts = [] } = useArrayQuery<Part & { usageCount: number }>({
     queryKey: ["/api/parts/popular"],
     enabled: open && popularEnabled,
   });

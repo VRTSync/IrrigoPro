@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Package, ClipboardList, Plus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { WorkOrder } from "@workspace/db/schema";
 import { Link } from "wouter";
 import { BilledBadge } from "@/components/ui/billed-indicator";
@@ -29,7 +29,7 @@ export default function FieldTechDashboard() {
   const currentUser = getCurrentUser();
 
   // Get assigned work orders for this technician
-  const { data: workOrders } = useQuery<WorkOrder[]>({
+  const { data: workOrders = [] } = useArrayQuery<WorkOrder>({
     queryKey: ["/api/work-orders", "technician", currentUser?.id],
     queryFn: () => apiRequest(`/api/work-orders?technician=${currentUser?.id}`, "GET"),
     enabled: !!currentUser?.id,

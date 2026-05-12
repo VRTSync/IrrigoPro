@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -130,7 +131,7 @@ export function EstimateWizardCustomerStep({
   }, [value.customer?.id]);
 
   // Load the customer's controllers (A, B, ...) once a customer is picked.
-  const { data: controllers = [], isLoading: controllersLoading } = useQuery<PropertyController[]>({
+  const { data: controllers = [], isLoading: controllersLoading } = useArrayQuery<PropertyController>({
     queryKey: ["/api/properties", value.customer?.id, "controllers"],
     enabled: !!value.customer,
   });

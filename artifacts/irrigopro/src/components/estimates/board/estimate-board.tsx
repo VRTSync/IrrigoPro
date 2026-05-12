@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import type { Estimate, Customer } from "@workspace/db/schema";
 import type { LifecycleStatus } from "@/lib/lifecycle";
 import { computeLifecycleStatus } from "@/lib/lifecycle";
@@ -76,7 +77,7 @@ export function EstimateBoard({
 
   const isDesktop = useIsDesktop();
 
-  const { data: customers = [] } = useQuery<Customer[]>({
+  const { data: customers = [] } = useArrayQuery<Customer>({
     queryKey: ["/api/customers"],
   });
 

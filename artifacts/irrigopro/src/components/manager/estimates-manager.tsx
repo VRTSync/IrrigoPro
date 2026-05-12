@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus, Eye, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import type { Estimate } from "@workspace/db/schema";
 
@@ -19,7 +19,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: estimates, isLoading } = useQuery<Estimate[]>({
+  const { data: estimates = [], isLoading } = useArrayQuery<Estimate>({
     queryKey: ["/api/estimates"],
   });
 

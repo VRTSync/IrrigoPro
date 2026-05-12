@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MapPin, Search, Eye, Users, Building } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { Customer, SiteMap } from "@workspace/db/schema";
 
 interface SiteMapWithCustomer extends SiteMap {
@@ -26,7 +26,7 @@ export default function SiteMaps() {
   const currentUser = getCurrentUser();
 
   // Fetch billing-visible customers for filtering
-  const { data: billingCustomers } = useQuery<Customer[]>({
+  const { data: billingCustomers = [] } = useArrayQuery<Customer>({
     queryKey: ['/api/customers', { billingVisible: true }],
     queryFn: () => apiRequest('/api/customers?billingVisible=true'),
     enabled: !!currentUser?.id,

@@ -39,6 +39,12 @@ const { apiRequestMock, offlineDeleteFindingMock, toastMock } = vi.hoisted(() =>
 vi.mock("@/lib/queryClient", () => ({
   apiRequest: apiRequestMock,
   authedPhotoSrc: (u: string) => u,
+  // Task #540 — wet-checks.tsx imports `asArray` for null-safe
+  // nested-array reads.
+  asArray: <T,>(v: T[] | null | undefined): T[] =>
+    Array.isArray(v) ? v : [],
+  useArrayQuery: <T,>(_opts: unknown) =>
+    ({ data: [] as T[], isLoading: false, isError: false, isSuccess: true, error: null, refetch: vi.fn() }) as any,
   parseApiError: (e: unknown, fallback: string) => {
     if (e instanceof Error) return e.message || fallback;
     return fallback;

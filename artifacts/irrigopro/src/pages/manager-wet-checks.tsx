@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
 import { HeaderStrip } from "@/components/admin-dashboard/header-strip";
 import { KpiTile } from "@/components/admin-dashboard/kpi-tile";
@@ -51,14 +52,14 @@ export default function ManagerWetChecksPage() {
     }
   }, []);
 
-  const pendingQ = useQuery<PendingReviewRow[]>({
+  const pendingQ = useArrayQuery<PendingReviewRow>({
     queryKey: ["/api/wet-checks/pending-review"],
   });
 
   // Wet-check-sourced billing sheets are tagged with the BS-WC- billing
   // number prefix at conversion time. We pull the full list and filter
   // client-side rather than add a new endpoint for this sub-slice.
-  const billingSheetsQ = useQuery<BillingSheetWithItems[]>({
+  const billingSheetsQ = useArrayQuery<BillingSheetWithItems>({
     queryKey: ["/api/billing-sheets"],
   });
 

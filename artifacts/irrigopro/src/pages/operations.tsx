@@ -1,6 +1,7 @@
 import { safeGet } from "@/utils/safeStorage";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -81,15 +82,15 @@ export default function Operations() {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<any | null>(null);
   const [selectedBillingSheet, setSelectedBillingSheet] = useState<any | null>(null);
 
-  const { data: estimates = [], isLoading: estimatesLoading } = useQuery<Estimate[]>({
+  const { data: estimates = [], isLoading: estimatesLoading } = useArrayQuery<Estimate>({
     queryKey: ["/api/estimates"],
   });
 
-  const { data: workOrders = [], isLoading: workOrdersLoading } = useQuery<WorkOrder[]>({
+  const { data: workOrders = [], isLoading: workOrdersLoading } = useArrayQuery<WorkOrder>({
     queryKey: ["/api/work-orders"],
   });
 
-  const { data: billingSheets = [], isLoading: billingSheetsLoading } = useQuery<BillingSheet[]>({
+  const { data: billingSheets = [], isLoading: billingSheetsLoading } = useArrayQuery<BillingSheet>({
     queryKey: ["/api/billing-sheets"],
   });
 

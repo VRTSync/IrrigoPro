@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ export default function EstimatesPendingApproval() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  const { data: pending = [], isLoading } = useQuery<Estimate[]>({
+  const { data: pending = [], isLoading } = useArrayQuery<Estimate>({
     queryKey: ["/api/estimates/pending-approval"],
     refetchInterval: 60000,
   });

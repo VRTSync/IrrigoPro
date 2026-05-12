@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
 
 import { HeaderStrip, type Health } from "@/components/admin-dashboard/header-strip";
@@ -104,7 +105,7 @@ export default function AdminDashboard() {
     queryKey: ["/api/dashboard/stats"],
     enabled: !!user?.companyId,
   });
-  const billingPreviewQ = useQuery<BillingPreviewRow[]>({
+  const billingPreviewQ = useArrayQuery<BillingPreviewRow>({
     queryKey: ["/api/customers/billing-preview", { dateFilter: "all" }],
     queryFn: async () => {
       const res = await fetch("/api/customers/billing-preview?dateFilter=all", { credentials: "include" });
@@ -113,10 +114,10 @@ export default function AdminDashboard() {
     },
     enabled: !!user?.companyId,
   });
-  const workOrdersQ = useQuery<WorkOrderLite[]>({ queryKey: ["/api/work-orders"], enabled: !!user?.companyId });
-  const billingSheetsQ = useQuery<BillingSheetLite[]>({ queryKey: ["/api/billing-sheets"], enabled: !!user?.companyId });
-  const estimatesQ = useQuery<EstimateLite[]>({ queryKey: ["/api/estimates"], enabled: !!user?.companyId });
-  const invoicesQ = useQuery<InvoiceLite[]>({
+  const workOrdersQ = useArrayQuery<WorkOrderLite>({ queryKey: ["/api/work-orders"], enabled: !!user?.companyId });
+  const billingSheetsQ = useArrayQuery<BillingSheetLite>({ queryKey: ["/api/billing-sheets"], enabled: !!user?.companyId });
+  const estimatesQ = useArrayQuery<EstimateLite>({ queryKey: ["/api/estimates"], enabled: !!user?.companyId });
+  const invoicesQ = useArrayQuery<InvoiceLite>({
     queryKey: ["/api/invoices", { limit: 25 }],
     queryFn: async () => {
       const res = await fetch("/api/invoices?limit=25", { credentials: "include" });
@@ -125,7 +126,7 @@ export default function AdminDashboard() {
     },
     enabled: !!user?.companyId,
   });
-  const techsQ = useQuery<FieldTech[]>({ queryKey: ["/api/users/field-techs"], enabled: !!user?.companyId });
+  const techsQ = useArrayQuery<FieldTech>({ queryKey: ["/api/users/field-techs"], enabled: !!user?.companyId });
 
   // Company profile (for logo + name in header)
   const companyQ = useQuery<{ logo?: string | null; name?: string | null }>({
@@ -141,13 +142,13 @@ export default function AdminDashboard() {
   }, [companyQ.data?.logo]);
 
   // Attention queries — each isolated.
-  const partsApprovalQ = useQuery<unknown[]>({ queryKey: ["/api/parts/pending-approval"], enabled: !!user?.companyId });
-  const manualPartReviewsQ = useQuery<unknown[]>({ queryKey: ["/api/manual-part-reviews"], enabled: !!user?.companyId });
+  const partsApprovalQ = useArrayQuery<unknown>({ queryKey: ["/api/parts/pending-approval"], enabled: !!user?.companyId });
+  const manualPartReviewsQ = useArrayQuery<unknown>({ queryKey: ["/api/manual-part-reviews"], enabled: !!user?.companyId });
   const bsMissingPhotosQ = useQuery<MissingPhotosResp>({ queryKey: ["/api/billing-sheets/missing-photos"], enabled: !!user?.companyId });
   const woMissingPhotosQ = useQuery<MissingPhotosResp>({ queryKey: ["/api/work-orders/missing-photos"], enabled: !!user?.companyId });
   const zeroPriceAuditQ = useQuery<CountResp>({ queryKey: ["/api/admin/billing-sheets/zero-price-audit"], enabled: !!user?.companyId });
   const laborRateAuditQ = useQuery<CountResp>({ queryKey: ["/api/admin/labor-rate-audit"], enabled: !!user?.companyId });
-  const wetCheckPendingQ = useQuery<unknown[]>({ queryKey: ["/api/wet-checks/pending-review"], enabled: !!user?.companyId });
+  const wetCheckPendingQ = useArrayQuery<unknown>({ queryKey: ["/api/wet-checks/pending-review"], enabled: !!user?.companyId });
 
   // ----- Derived metrics -----
 

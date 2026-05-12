@@ -17,7 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@/lib/zod-resolver";
 import { z } from "zod/v4";
-import { apiRequest, queryClient } from "../lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 const userFormSchema = z.object({
@@ -83,7 +83,7 @@ export default function CompanyUserManagement() {
   }, []);
 
   // Fetch company users
-  const { data: users = [], isLoading, error, refetch } = useQuery<User[]>({
+  const { data: users = [], isLoading, error, refetch } = useArrayQuery<User>({
     queryKey: [`/api/company/${currentUser?.companyId}/users`],
     enabled: !!currentUser?.companyId,
     retry: false,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -30,7 +30,7 @@ function RefListSection({ title, queryKey, apiPath, withMarkup = false }: RefLis
   const [addMarkup, setAddMarkup] = useState("0.00");
   const [isAdding, setIsAdding] = useState(false);
 
-  const { data: items = [], isLoading } = useQuery<RefEntry[]>({
+  const { data: items = [], isLoading } = useArrayQuery<RefEntry>({
     queryKey: [queryKey],
   });
 
@@ -295,11 +295,11 @@ function exportPartsSettingsCSV(
 }
 
 export default function PartsSettings() {
-  const { data: categories = [], isLoading: loadingCategories } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/categories"] });
-  const { data: brands = [], isLoading: loadingBrands } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/brands"] });
-  const { data: sizes = [], isLoading: loadingSizes } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/sizes"] });
-  const { data: materials = [], isLoading: loadingMaterials } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/materials"] });
-  const { data: fittingTypes = [], isLoading: loadingFittingTypes } = useQuery<RefEntry[]>({ queryKey: ["/api/part-settings/fitting-types"] });
+  const { data: categories = [], isLoading: loadingCategories } = useArrayQuery<RefEntry>({ queryKey: ["/api/part-settings/categories"] });
+  const { data: brands = [], isLoading: loadingBrands } = useArrayQuery<RefEntry>({ queryKey: ["/api/part-settings/brands"] });
+  const { data: sizes = [], isLoading: loadingSizes } = useArrayQuery<RefEntry>({ queryKey: ["/api/part-settings/sizes"] });
+  const { data: materials = [], isLoading: loadingMaterials } = useArrayQuery<RefEntry>({ queryKey: ["/api/part-settings/materials"] });
+  const { data: fittingTypes = [], isLoading: loadingFittingTypes } = useArrayQuery<RefEntry>({ queryKey: ["/api/part-settings/fitting-types"] });
 
   const isLoading = loadingCategories || loadingBrands || loadingSizes || loadingMaterials || loadingFittingTypes;
 

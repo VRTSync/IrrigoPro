@@ -37,7 +37,7 @@ import {
 import type { WorkOrder, BillingSheet, WorkOrderItem, BillingSheetItem, Customer } from "@workspace/db/schema";
 import { format } from "date-fns";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
-import { apiRequest, parseApiError } from "@/lib/queryClient";
+import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { preparePhotoForUpload } from "@/lib/photo-prep";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
@@ -242,7 +242,7 @@ export function CompletedWorkDetailModal({
       ? `/api/work-orders/${id}/items`
       : `/api/billing-sheets/${id}/items`;
 
-  const { data: items = [] } = useQuery<(WorkOrderItem | BillingSheetItem)[]>({
+  const { data: items = [] } = useArrayQuery<WorkOrderItem | BillingSheetItem>({
     queryKey: [type === "work_order" ? "/api/work-orders" : "/api/billing-sheets", id, "items"],
     queryFn: () => fetch(itemsEndpoint).then((r) => r.json()),
     enabled: open && !!id,

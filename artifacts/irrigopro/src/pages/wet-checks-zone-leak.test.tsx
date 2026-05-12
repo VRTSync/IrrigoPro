@@ -25,6 +25,13 @@ import path from "node:path";
 vi.mock("@/lib/queryClient", () => ({
   apiRequest: vi.fn(),
   authedPhotoSrc: (u: string) => u,
+  // Task #540 — wet-checks.tsx now imports `asArray` for null-safe
+  // nested-array reads. Re-export the real helper here so the mocked
+  // module still satisfies that import.
+  asArray: <T,>(v: T[] | null | undefined): T[] =>
+    Array.isArray(v) ? v : [],
+  useArrayQuery: <T,>(_opts: unknown) =>
+    ({ data: [] as T[], isLoading: false, isError: false, isSuccess: true, error: null, refetch: vi.fn() }) as any,
   queryClient: { invalidateQueries: vi.fn(), cancelQueries: vi.fn(), getQueryData: vi.fn(), setQueryData: vi.fn() },
 }));
 vi.mock("@/lib/offline/engine", () => ({ isOfflineQueueEnabled: () => false }));

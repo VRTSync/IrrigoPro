@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, asArray, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, Check, FileText, Wrench, FileCheck, CheckCircle2 } from "lucide-react";
@@ -83,7 +83,7 @@ export function WetCheckDone({ id }: { id: number }) {
     queryFn: () => apiRequest(`/api/customers/${wc!.customerId}`),
     enabled: !!wc?.customerId,
   });
-  const { data: pending = [] } = useQuery<PendingReviewRow[]>({
+  const { data: pending = [] } = useArrayQuery<PendingReviewRow>({
     queryKey: ["/api/wet-checks/pending-review"],
   });
 
@@ -91,7 +91,10 @@ export function WetCheckDone({ id }: { id: number }) {
 
   const allFindings: FindingItem[] = useMemo(() => {
     if (!wc) return [];
-    return wc.zoneRecords.flatMap(zr => zr.findings.map(f => ({ f, zr })));
+    // Task #540 — null-safe traversal of nested arrays.
+    return asArray(wc.zoneRecords).flatMap(zr =>
+      asArray(zr.findings).map(f => ({ f, zr })),
+    );
   }, [wc]);
 
   const groups = useMemo(() => ({

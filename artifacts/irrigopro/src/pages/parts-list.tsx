@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import type { Part } from "@workspace/db/schema";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { PartFormDialog } from "@/components/parts/part-form-dialog";
 
 type SortColumn = "name" | "sku" | "category" | "size" | "material";
@@ -38,7 +38,7 @@ export default function PartsList() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: parts, isLoading } = useQuery<Part[]>({
+  const { data: parts = [], isLoading } = useArrayQuery<Part>({
     queryKey: ["/api/parts"],
   });
 

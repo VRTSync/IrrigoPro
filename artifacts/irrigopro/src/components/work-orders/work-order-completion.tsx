@@ -30,7 +30,7 @@ import { Separator } from "@/components/ui/separator";
 import { FileUpload } from "@/components/ui/file-upload";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { buildMapsUrl } from "@/lib/maps-url";
 import {
   CheckCircle,
@@ -251,7 +251,7 @@ export function WorkOrderCompletion({
     }
   }, []);
 
-  const { data: parts } = useQuery<Part[]>({
+  const { data: parts = [] } = useArrayQuery<Part>({
     queryKey: ["/api/parts"],
   });
 

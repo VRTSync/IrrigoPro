@@ -19,7 +19,7 @@ import {
   XCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, adaptiveRefetchInterval } from "@/lib/queryClient";
+import { apiRequest, adaptiveRefetchInterval, useArrayQuery } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
 
 interface QuickBooksConnectionProps {
@@ -206,7 +206,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
   const isReconnectRequired = connectionStatus?.connectionStatus === 'reconnect_required';
 
   // Fetch estimates for sync status
-  const { data: estimates = [], error: estimatesError } = useQuery<any[]>({
+  const { data: estimates = [], error: estimatesError } = useArrayQuery<any>({
     queryKey: ["/api/estimates"],
     enabled: true,
     retry: false,

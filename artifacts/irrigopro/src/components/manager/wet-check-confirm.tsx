@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, asArray, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -85,7 +85,7 @@ export function WetCheckConfirm({ id }: { id: number }) {
     queryFn: () => apiRequest(`/api/customers/${wc!.customerId}`),
     enabled: !!wc?.customerId,
   });
-  const { data: issueConfigs = [] } = useQuery<IssueTypeConfig[]>({
+  const { data: issueConfigs = [] } = useArrayQuery<IssueTypeConfig>({
     queryKey: ["/api/wet-checks/issue-types"],
   });
 
@@ -93,7 +93,10 @@ export function WetCheckConfirm({ id }: { id: number }) {
 
   const allFindings: FindingItem[] = useMemo(() => {
     if (!wc) return [];
-    return wc.zoneRecords.flatMap(zr => zr.findings.map(f => ({ f, zr })));
+    // Task #540 — null-safe traversal of nested arrays.
+    return asArray(wc.zoneRecords).flatMap(zr =>
+      asArray(zr.findings).map(f => ({ f, zr })),
+    );
   }, [wc]);
 
   const groups = useMemo(() => {

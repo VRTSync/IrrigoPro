@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, asArray, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -95,8 +95,8 @@ export function WetCheckWizard({ id }: { id: number }) {
     queryFn: () => apiRequest(`/api/customers/${wc!.customerId}`),
     enabled: !!wc?.customerId,
   });
-  const { data: parts = [] } = useQuery<Part[]>({ queryKey: ["/api/parts"] });
-  const { data: issueConfigs = [] } = useQuery<IssueTypeConfig[]>({
+  const { data: parts = [] } = useArrayQuery<Part>({ queryKey: ["/api/parts"] });
+  const { data: issueConfigs = [] } = useArrayQuery<IssueTypeConfig>({
     queryKey: ["/api/wet-checks/issue-types"],
   });
 
@@ -104,7 +104,11 @@ export function WetCheckWizard({ id }: { id: number }) {
 
   const allFindings: FindingItem[] = useMemo(() => {
     if (!wc) return [];
-    return wc.zoneRecords.flatMap(zr => zr.findings.map(f => ({ f, zr })));
+    // Task #540 — null-safe traversal: server may return null for nested
+    // array fields on freshly-created records.
+    return asArray(wc.zoneRecords).flatMap(zr =>
+      asArray(zr.findings).map(f => ({ f, zr })),
+    );
   }, [wc]);
 
   const pendingFindings = useMemo(
@@ -145,7 +149,7 @@ export function WetCheckWizard({ id }: { id: number }) {
   const photosByFinding = useMemo(() => {
     const m = new Map<number, WetCheckPhoto[]>();
     if (!wc) return m;
-    for (const p of wc.photos) {
+    for (const p of asArray(wc.photos)) {
       if (p.findingId == null) continue;
       const arr = m.get(p.findingId) ?? [];
       arr.push(p); m.set(p.findingId, arr);

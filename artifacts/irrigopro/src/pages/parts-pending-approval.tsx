@@ -1,6 +1,6 @@
 import { safeGet } from "@/utils/safeStorage";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -120,11 +120,11 @@ function ManualReviewRow({ review, onApprove, isApproving }: ManualReviewRowProp
 export default function PartsPendingApproval() {
   const { toast } = useToast();
 
-  const { data: pendingParts = [], isLoading: loadingParts } = useQuery<Part[]>({
+  const { data: pendingParts = [], isLoading: loadingParts } = useArrayQuery<Part>({
     queryKey: ["/api/parts/pending-approval"],
   });
 
-  const { data: manualReviews = [], isLoading: loadingReviews } = useQuery<ManualPartReview[]>({
+  const { data: manualReviews = [], isLoading: loadingReviews } = useArrayQuery<ManualPartReview>({
     queryKey: ["/api/manual-part-reviews"],
   });
 

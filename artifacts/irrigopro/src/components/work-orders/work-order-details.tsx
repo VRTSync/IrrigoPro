@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 import { PricingAuditHistory } from "@/components/billing/pricing-audit-history";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import type { WorkOrder, User as UserType } from "@workspace/db/schema";
 import { PhotoImage, usePhotoSignedUrls } from "@/components/ui/photo-image";
 import { buildMapsUrl } from "@/lib/maps-url";
@@ -99,14 +99,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
   }, []);
 
   // Get field technicians for reassignment
-  const { data: fieldTechs } = useQuery<UserType[]>({
+  const { data: fieldTechs = [] } = useArrayQuery<UserType>({
     queryKey: ["/api/users/field-techs"],
   });
 
   // Task #187 — resolve the noPhotosNeededBy user id to a display name.
   // Only fetched when there's actually an id to look up so we don't add
   // an extra request for every work-order open.
-  const { data: allUsers } = useQuery<UserType[]>({
+  const { data: allUsers = [] } = useArrayQuery<UserType>({
     queryKey: ["/api/users"],
     enabled: !!workOrder.noPhotosNeededBy,
   });

@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Cpu, Droplets, Minus, Plus, Loader2 } from "lucide-react";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Customer, PropertyController } from "@workspace/db/schema";
 
@@ -38,7 +38,7 @@ export function IrrigationSystemCard({ customer, canEdit }: IrrigationSystemCard
     Math.min(MAX_CONTROLLERS, customer.totalControllers ?? 1),
   );
 
-  const { data: controllers, isLoading } = useQuery<PropertyController[]>({
+  const { data: controllers = [], isLoading } = useArrayQuery<PropertyController>({
     queryKey: ["/api/properties", customerId, "controllers"],
   });
 

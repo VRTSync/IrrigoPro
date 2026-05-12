@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,7 @@ interface PartWithoutPrice {
 export function PartsListManager({ onBack }: PartsListManagerProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { data: parts, isLoading } = useQuery<PartWithoutPrice[]>({
+  const { data: parts = [], isLoading } = useArrayQuery<PartWithoutPrice>({
     queryKey: ["/api/parts/field-tech"], // This endpoint excludes pricing
   });
 

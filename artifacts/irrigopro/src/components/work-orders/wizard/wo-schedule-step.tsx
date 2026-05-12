@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -53,7 +54,7 @@ export function WoScheduleStep({
   onContinue,
 }: Props) {
   const [photosOpen, setPhotosOpen] = useState(photos.length > 0);
-  const { data: fieldTechs } = useQuery<UserType[]>({
+  const { data: fieldTechs = [] } = useArrayQuery<UserType>({
     queryKey: ["/api/users/field-techs"],
   });
   const allUsers: UserType[] = fieldTechs ?? [];

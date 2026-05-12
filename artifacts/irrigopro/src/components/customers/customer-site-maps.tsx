@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, MapPin, Upload, Eye, Edit, Trash2, Plus } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@workspace/db/schema";
 // Task #532 — lazy-load Leaflet (and the entire color-coded map viewer)
@@ -96,7 +96,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   const { toast } = useToast();
 
   // Fetch customer site maps with error handling
-  const { data: siteMaps, isLoading, error: siteMapsError } = useQuery<SiteMap[]>({
+  const { data: siteMaps = [], isLoading, error: siteMapsError } = useArrayQuery<SiteMap>({
     queryKey: [`/api/customers/${customer.id}/site-maps`],
     retry: 2, // Retry failed requests
     refetchOnWindowFocus: false,
@@ -140,12 +140,12 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
   }, [siteMaps]);
 
   // Fetch controllers and zones for selected project
-  const { data: controllers } = useQuery<Controller[]>({
+  const { data: controllers = [] } = useArrayQuery<Controller>({
     queryKey: [`/api/site-maps/${selectedProject?.id}/controllers`],
     enabled: !!selectedProject,
   });
 
-  const { data: zones } = useQuery<IrrigationZone[]>({
+  const { data: zones = [] } = useArrayQuery<IrrigationZone>({
     queryKey: [`/api/site-maps/${selectedProject?.id}/zones`],
     enabled: !!selectedProject,
   });

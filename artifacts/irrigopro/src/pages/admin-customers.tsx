@@ -9,7 +9,7 @@ import { useState, useEffect } from "react";
 import { Switch } from "@/components/ui/switch";
 import type { Customer } from "@workspace/db/schema";
 import { CustomerForm } from "@/components/customer-form";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -41,7 +41,7 @@ export default function AdminCustomers() {
     }
   }, []);
 
-  const { data: customers, isLoading } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading } = useArrayQuery<Customer>({
     queryKey: ["/api/customers"],
   });
 

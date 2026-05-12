@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useArrayQuery } from '@/lib/queryClient';
 import { notificationService } from '@/lib/notifications';
 
 interface NotificationData {
@@ -20,7 +21,7 @@ export function usePushNotifications(userId: number | undefined) {
   });
 
   // Get all notifications to check for new ones
-  const { data: notifications, dataUpdatedAt } = useQuery<NotificationData[]>({
+  const { data: notifications, dataUpdatedAt } = useArrayQuery<NotificationData>({
     queryKey: ["/api/notifications", userId],
     enabled: !!userId,
     refetchInterval: 120000, // Check every 2 minutes
@@ -35,7 +36,7 @@ export function usePushNotifications(userId: number | undefined) {
 
   // Check for new notifications and show push notifications
   useEffect(() => {
-    if (!notifications || !userId) return;
+    if (!notifications || !userId || !Array.isArray(notifications)) return;
 
     // Get the most recent unread notification
     const recentNotifications = notifications

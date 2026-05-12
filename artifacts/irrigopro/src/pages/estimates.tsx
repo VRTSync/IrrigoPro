@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useArrayQuery } from "@/lib/queryClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
@@ -70,11 +71,11 @@ export default function Estimates() {
     window.history.replaceState({}, "", url.toString());
   }, []);
 
-  const { data: estimates, isLoading, isError } = useQuery<Estimate[]>({
+  const { data: estimates = [], isLoading, isError } = useArrayQuery<Estimate>({
     queryKey: ["/api/estimates"],
   });
 
-  const { data: customers = [] } = useQuery<Customer[]>({
+  const { data: customers = [] } = useArrayQuery<Customer>({
     queryKey: ["/api/customers"],
   });
 

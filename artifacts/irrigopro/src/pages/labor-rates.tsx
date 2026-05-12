@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -19,7 +19,7 @@ export default function LaborRates() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editState, setEditState] = useState<EditState>({ laborRate: "", emergencyLaborRate: "" });
 
-  const { data: customers = [], isLoading } = useQuery<Customer[]>({
+  const { data: customers = [], isLoading } = useArrayQuery<Customer>({
     queryKey: ["/api/customers", { billingVisible: true }],
     queryFn: () => apiRequest("/api/customers?billingVisible=true"),
   });
