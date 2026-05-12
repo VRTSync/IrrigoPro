@@ -348,6 +348,7 @@ import {
   type InsertWetCheckFinding,
   type InsertWetCheckZoneRecord,
   insertIssueTypeConfigSchema,
+  clientErrors,
 } from "@workspace/db";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
@@ -967,36 +968,120 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task #544 — fire-and-forget client-side error trail. AppErrorBoundary
   // POSTs whatever it caught (name, message, stack, componentStack, url,
   // userAgent, buildHash, userId, role) so the next "white screen" report
-  // doesn't depend on a tech screenshotting the console. v1 just logs via
-  // req.log; no DB write. Always returns 204 so a logging failure never
-  // surfaces as a follow-on error in the boundary.
-  app.post("/api/client-errors", express.json({ limit: "64kb" }), (req, res) => {
+  // doesn't depend on a tech screenshotting the console.
+  // Task #545 — also persist to `client_errors` so the admin/super-admin
+  // report page can group recent crashes by buildHash + name without
+  // grepping log files. Cleanup of rows older than 30 days happens here
+  // on a 1-in-50 sample so we don't pay the cost on every request.
+  // Always returns 204 so a logging or DB failure never surfaces as a
+  // follow-on error in the boundary.
+  app.post("/api/client-errors", express.json({ limit: "64kb" }), async (req, res) => {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const pick = (k: string): string => {
         const v = body[k];
         return typeof v === "string" ? v.slice(0, 4000) : "";
       };
-      req.log.error(
-        {
-          clientError: {
-            name: pick("name"),
-            message: pick("message"),
-            stack: pick("stack"),
-            componentStack: pick("componentStack"),
-            url: pick("url"),
-            userAgent: pick("userAgent") || req.headers["user-agent"] || "",
-            buildHash: pick("buildHash"),
-            userId: body.userId ?? null,
-            role: pick("role"),
-          },
-        },
-        "client error boundary report",
-      );
+      const userIdRaw = body.userId;
+      const userIdNum =
+        typeof userIdRaw === "number" && Number.isInteger(userIdRaw) && userIdRaw > 0
+          ? userIdRaw
+          : null;
+      const payload = {
+        name: pick("name") || "Error",
+        message: pick("message"),
+        stack: pick("stack") || null,
+        componentStack: pick("componentStack") || null,
+        url: pick("url") || null,
+        userAgent: pick("userAgent") || (typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"]!.slice(0, 4000) : null),
+        buildHash: pick("buildHash"),
+        userId: userIdNum,
+        role: pick("role") || null,
+      };
+      req.log.error({ clientError: payload }, "client error boundary report");
+      try {
+        await db.insert(clientErrors).values(payload);
+      } catch (dbErr) {
+        try { req.log.warn({ err: dbErr }, "client error persist failed"); } catch { /* ignore */ }
+      }
+      // Best-effort retention sweep: keep ~30 days. Sampled to avoid
+      // hammering the table on every report.
+      if (Math.random() < 0.02) {
+        try {
+          await db
+            .delete(clientErrors)
+            .where(sql`${clientErrors.createdAt} < now() - interval '30 days'`);
+        } catch (cleanupErr) {
+          try { req.log.warn({ err: cleanupErr }, "client error cleanup failed"); } catch { /* ignore */ }
+        }
+      }
     } catch (err) {
       try { req.log.warn({ err }, "client error logging failed"); } catch { /* ignore */ }
     }
     res.status(204).end();
+  });
+
+  // Task #545 — admin/super-admin report. Returns aggregate counts grouped
+  // by (buildHash, name) over the last 30 days plus a sample row, so we
+  // can spot regressions tied to a specific deployed bundle. Limited to
+  // company_admin and super_admin roles — gates on the trusted
+  // `req.authenticatedUserRole` set by `requireAuthentication`, never
+  // raw request headers.
+  type ClientErrorGroupRow = {
+    buildHash: string;
+    name: string;
+    count: number;
+    firstSeen: string;
+    lastSeen: string;
+    sampleMessage: string | null;
+    sampleStack: string | null;
+    sampleUrl: string | null;
+    sampleComponentStack: string | null;
+  };
+  app.get("/api/admin/client-errors", requireAuthentication, async (req, res) => {
+    const role = req.authenticatedUserRole;
+    if (role !== "super_admin" && role !== "company_admin") {
+      res.status(403).json({ message: "Admin access required" });
+      return;
+    }
+    try {
+      const groupsResult = await db.execute<ClientErrorGroupRow>(sql`
+        SELECT
+          build_hash AS "buildHash",
+          name,
+          COUNT(*)::int AS "count",
+          MIN(created_at) AS "firstSeen",
+          MAX(created_at) AS "lastSeen",
+          (ARRAY_AGG(message ORDER BY created_at DESC))[1] AS "sampleMessage",
+          (ARRAY_AGG(stack ORDER BY created_at DESC))[1] AS "sampleStack",
+          (ARRAY_AGG(url ORDER BY created_at DESC))[1] AS "sampleUrl",
+          (ARRAY_AGG(component_stack ORDER BY created_at DESC))[1] AS "sampleComponentStack"
+        FROM client_errors
+        WHERE created_at >= now() - interval '30 days'
+        GROUP BY build_hash, name
+        ORDER BY "count" DESC, "lastSeen" DESC
+        LIMIT 200
+      `);
+      const totalResult = await db.execute<{ total: number }>(sql`
+        SELECT COUNT(*)::int AS "total"
+        FROM client_errors
+        WHERE created_at >= now() - interval '30 days'
+      `);
+      const groups: ClientErrorGroupRow[] = groupsResult.rows ?? [];
+      const totalRow = totalResult.rows?.[0];
+      res.json({
+        windowDays: 30,
+        total: totalRow?.total ?? 0,
+        groups,
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "listClientErrors",
+        ctx: {},
+        fallbackMessage: "Couldn't load crash reports — please retry",
+      });
+      res.status(status).json({ message });
+    }
   });
 
   // Serve company logo images directly (binary response)

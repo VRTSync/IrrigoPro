@@ -38,6 +38,7 @@ const MissingPhotosReport = lazyPage(() => import("@/pages/missing-photos-report
 const WorkOrdersMissingPhotosReport = lazyPage(() => import("@/pages/work-orders-missing-photos-report"));
 const BillingZeroPriceAuditPage = lazyPage(() => import("@/pages/billing-zero-price-audit"));
 const AdminIssueTypesPage = lazyPage(() => import("@/pages/admin-issue-types"));
+const AdminClientErrorsPage = lazyPage(() => import("@/pages/admin-client-errors"));
 const LaborRateAuditPage = lazyPage(() => import("@/pages/labor-rate-audit"));
 const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
 const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
@@ -375,6 +376,7 @@ function Router() {
                   <Route path="/wet-checks/:id" component={WetChecksPage} />
                   <Route path="/system-users" component={SystemUserManagement} />
                   <Route path="/admin/controllers" component={AdminControllers} />
+                  <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
                   <Route path="/user-manager" component={UserManager} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
