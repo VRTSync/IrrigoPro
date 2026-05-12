@@ -40,11 +40,11 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  ToastAndroid,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
 import { API_BASE_URL, ApiError, apiRequest } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -66,6 +66,7 @@ import {
   deleteLocalPhoto,
   ensureCameraPermission,
 } from "@/lib/photo-upload";
+import { friendlyErrorMessage, showToast } from "@/lib/toast";
 import { workOrderBillingSheetQueryKey } from "../[id]";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -173,14 +174,6 @@ const FULL_EDIT_ROLES = new Set([
   "billing_manager",
   "irrigation_manager",
 ]);
-
-function showToast(message: string) {
-  if (Platform.OS === "android") {
-    ToastAndroid.show(message, ToastAndroid.SHORT);
-  } else {
-    Alert.alert("", message);
-  }
-}
 
 function nextRowId(): string {
   return `r-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(
@@ -418,7 +411,7 @@ export default function BillingSheetScreen() {
         scopeKey: String(mutationScope),
       });
     } catch (err) {
-      setPhotoError(err instanceof Error ? err.message : "Couldn't open the camera");
+      setPhotoError(friendlyErrorMessage(err, "Couldn't open the camera"));
       return;
     }
     if (!captured) return;
@@ -502,7 +495,7 @@ export default function BillingSheetScreen() {
       Haptics.selectionAsync().catch(() => undefined);
     },
     onError: (err) => {
-      setPhotoError(err instanceof Error ? err.message : "Couldn't remove photo");
+      setPhotoError(friendlyErrorMessage(err, "Couldn't remove photo"));
     },
   });
 
@@ -662,13 +655,7 @@ export default function BillingSheetScreen() {
       );
       return;
     }
-    const message =
-      err instanceof ApiError
-        ? err.message
-        : err instanceof Error
-          ? err.message
-          : "Couldn't save billing sheet";
-    setSubmitError(message);
+    setSubmitError(friendlyErrorMessage(err, "Couldn't save billing sheet"));
   }, []);
 
   const createMutation = useMutation({
@@ -920,9 +907,7 @@ export default function BillingSheetScreen() {
             </Text>
           </View>
         ) : loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
+          <LoadingScreen />
         ) : woQuery.isError || !wo ? (
           <View style={styles.center}>
             <Feather name="alert-circle" size={32} color={colors.destructive} />
@@ -930,9 +915,7 @@ export default function BillingSheetScreen() {
               Couldn't load work order
             </Text>
             <Text style={[styles.errorBody, { color: colors.mutedForeground }]}>
-              {woQuery.error instanceof Error
-                ? woQuery.error.message
-                : "Something went wrong."}
+              {friendlyErrorMessage(woQuery.error)}
             </Text>
           </View>
         ) : (

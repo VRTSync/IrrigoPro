@@ -20,8 +20,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
-import { ApiError, apiRequest } from "@/lib/api";
+import { apiRequest } from "@/lib/api";
+import { friendlyErrorMessage } from "@/lib/toast";
 import { isOfflineQueuedResult } from "@/lib/sync/errors";
 import { useScopeConflictTick } from "@/lib/sync/use-sync-status";
 import {
@@ -360,10 +362,7 @@ export default function WetCheckDetailScreen() {
         return;
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
-      const message =
-        err instanceof ApiError ? err.message :
-        err instanceof Error ? err.message : "Couldn't submit wet check";
-      setSubmitError(message);
+      setSubmitError(friendlyErrorMessage(err, "Couldn't submit wet check"));
     },
   });
 
@@ -415,9 +414,7 @@ export default function WetCheckDetailScreen() {
             />
           </View>
         ) : detailQuery.isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
+          <LoadingScreen />
         ) : detailQuery.isError || !wcd ? (
           <View style={styles.center}>
             <Feather name="alert-circle" size={32} color={colors.destructive} />
@@ -425,7 +422,7 @@ export default function WetCheckDetailScreen() {
               Couldn't load wet check
             </Text>
             <Text style={[styles.errorBody, { color: colors.mutedForeground }]}>
-              {detailQuery.error instanceof Error ? detailQuery.error.message : "Something went wrong."}
+              {friendlyErrorMessage(detailQuery.error)}
             </Text>
             <RetryButton
               label="Try again"

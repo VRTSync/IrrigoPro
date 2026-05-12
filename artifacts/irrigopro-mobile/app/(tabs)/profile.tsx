@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import Constants from "expo-constants";
+import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -17,8 +18,9 @@ import { SyncStatusSummary } from "@/components/SyncStatusPill";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/lib/auth-context";
 import { discardEntry, drainQueue } from "@/lib/sync/engine";
-import { markAllPending } from "@/lib/sync/queue";
+import { listEntries, markAllPending } from "@/lib/sync/queue";
 import { useSyncStatus } from "@/lib/sync/use-sync-status";
+import { friendlyErrorMessage, showToast } from "@/lib/toast";
 
 const ROLE_LABELS: Record<string, string> = {
   field_tech: "Field technician",
@@ -41,9 +43,39 @@ export default function ProfileScreen() {
   const onForceResync = async () => {
     if (resyncing) return;
     setResyncing(true);
+    if (Platform.OS !== "web") {
+      Haptics.selectionAsync().catch(() => undefined);
+    }
     try {
       await markAllPending();
       await drainQueue();
+      // Inspect the queue *after* the drain finishes so we can give
+      // the tech a calm yes/no answer instead of a silent spinner.
+      const remaining = await listEntries();
+      if (remaining.length === 0) {
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success,
+          ).catch(() => undefined);
+        }
+        showToast("All caught up");
+      } else {
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Warning,
+          ).catch(() => undefined);
+        }
+        showToast(
+          `${remaining.length} change${remaining.length === 1 ? "" : "s"} still waiting`,
+        );
+      }
+    } catch (err) {
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Error,
+        ).catch(() => undefined);
+      }
+      showToast(friendlyErrorMessage(err, "Couldn't resync. Please try again."));
     } finally {
       setResyncing(false);
     }

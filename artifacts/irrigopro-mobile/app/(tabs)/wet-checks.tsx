@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useMemo } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
@@ -13,9 +12,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { friendlyErrorMessage } from "@/lib/toast";
 
 type WetCheckListItem = {
   id: number;
@@ -93,9 +94,7 @@ export default function WetChecksScreen() {
       </View>
 
       {techId == null || isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <LoadingScreen />
       ) : isError ? (
         <View style={styles.center}>
           <Feather name="alert-circle" size={32} color={colors.destructive} />
@@ -103,7 +102,7 @@ export default function WetChecksScreen() {
             Couldn't load wet checks
           </Text>
           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-            {error instanceof Error ? error.message : "Something went wrong."}
+            {friendlyErrorMessage(error)}
           </Text>
           <Pressable
             onPress={() => refetch()}

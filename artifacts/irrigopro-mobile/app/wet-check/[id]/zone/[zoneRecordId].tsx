@@ -20,8 +20,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
 import { ApiError, apiRequest } from "@/lib/api";
+import { friendlyErrorMessage } from "@/lib/toast";
 import {
   captureZonePhoto,
   deleteLocalPhoto,
@@ -320,9 +322,7 @@ export default function ZoneDetailScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
       () => undefined,
     );
-    if (err instanceof ApiError) return err.message;
-    if (err instanceof Error) return err.message;
-    return "Something went wrong";
+    return friendlyErrorMessage(err, "Something went wrong");
   }, [handleConflict]);
 
   // ── Zone status PATCH (optimistic) ──
@@ -556,7 +556,7 @@ export default function ZoneDetailScreen() {
         findingId: null,
       });
     } catch (err) {
-      const m = err instanceof Error ? err.message : "Couldn't open the camera";
+      const m = friendlyErrorMessage(err, "Couldn't open the camera");
       setPhotoError(m);
       return;
     }
@@ -709,9 +709,7 @@ export default function ZoneDetailScreen() {
             <PrimaryButton label="Go back" colors={colors} onPress={() => router.back()} />
           </View>
         ) : detailQuery.isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
+          <LoadingScreen />
         ) : detailQuery.isError || !wc ? (
           <View style={styles.center}>
             <Feather name="alert-circle" size={32} color={colors.destructive} />
@@ -719,7 +717,7 @@ export default function ZoneDetailScreen() {
               Couldn't load zone
             </Text>
             <Text style={[styles.errorBody, { color: colors.mutedForeground }]}>
-              {detailQuery.error instanceof Error ? detailQuery.error.message : "Something went wrong."}
+              {friendlyErrorMessage(detailQuery.error)}
             </Text>
             <PrimaryButton label="Try again" colors={colors} onPress={() => detailQuery.refetch()} />
           </View>

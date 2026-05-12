@@ -5,25 +5,43 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "irrigopro-mobile",
+    "scheme": "irrigopro",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/icon.png",
+      "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#1E5A99"
     },
     "ios": {
       "supportsTablet": false,
+      "bundleIdentifier": "com.irrigopro.mobile",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSCameraUsageDescription": "IrrigoPro uses the camera to attach photos to wet check zones.",
-        "NSPhotoLibraryUsageDescription": "IrrigoPro accesses your photo library to attach existing photos to wet checks.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "IrrigoPro uses the camera to attach photos to wet check zones and billing sheets.",
+        "NSPhotoLibraryUsageDescription": "IrrigoPro accesses your photo library to attach existing photos to wet checks and billing sheets.",
+        "NSPhotoLibraryAddUsageDescription": "IrrigoPro saves photos you capture to your photo library so you have a personal copy.",
         "NSLocationWhenInUseUsageDescription": "IrrigoPro records your location when you save a billing sheet so the office can verify the work site."
       }
     },
-    "android": {},
+    "android": {
+      "package": "com.irrigopro.mobile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#1E5A99"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.INTERNET"
+      ]
+    },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       [
@@ -38,8 +56,8 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "IrrigoPro uses the camera to attach photos to wet check zones.",
-          "photosPermission": "IrrigoPro accesses your photo library to attach existing photos to wet checks."
+          "cameraPermission": "IrrigoPro uses the camera to attach photos to wet check zones and billing sheets.",
+          "photosPermission": "IrrigoPro accesses your photo library to attach existing photos to wet checks and billing sheets."
         }
       ],
       [
@@ -52,6 +70,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
     }
   }
 }

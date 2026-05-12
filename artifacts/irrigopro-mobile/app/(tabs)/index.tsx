@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useMemo } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
@@ -13,11 +12,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadingScreen } from "@/components/Loading";
 import { SyncStatusPill } from "@/components/SyncStatusPill";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { drainQueue } from "@/lib/sync/engine";
+import { friendlyErrorMessage } from "@/lib/toast";
 
 type WorkOrder = {
   id: number;
@@ -127,9 +128,7 @@ export default function TodayScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <LoadingScreen />
       ) : isError ? (
         <View style={styles.center}>
           <Feather name="alert-circle" size={32} color={colors.destructive} />
@@ -137,7 +136,7 @@ export default function TodayScreen() {
             Couldn't load work orders
           </Text>
           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-            {error instanceof Error ? error.message : "Something went wrong."}
+            {friendlyErrorMessage(error)}
           </Text>
           <Pressable
             onPress={() => refetch()}

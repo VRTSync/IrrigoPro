@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { friendlyErrorMessage } from "@/lib/toast";
 
 export default function SignInScreen() {
   const colors = useColors();
@@ -52,6 +53,11 @@ export default function SignInScreen() {
         password,
         deviceName,
       });
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        ).catch(() => undefined);
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {
@@ -62,11 +68,14 @@ export default function SignInScreen() {
               "Mobile sign-in is restricted to field technicians and irrigation managers.",
           );
         } else {
-          setErrorMessage(err.message);
+          setErrorMessage(friendlyErrorMessage(err, err.message));
         }
       } else {
         setErrorMessage(
-          "Couldn't reach the server. Check your connection and try again.",
+          friendlyErrorMessage(
+            err,
+            "Couldn't reach the server. Check your connection and try again.",
+          ),
         );
       }
       if (Platform.OS !== "web") {

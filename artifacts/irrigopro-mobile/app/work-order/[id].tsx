@@ -1,9 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Linking,
   Platform,
@@ -12,13 +12,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  ToastAndroid,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadingScreen } from "@/components/Loading";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/lib/api";
+import { friendlyErrorMessage, showToast } from "@/lib/toast";
 
 type WorkOrder = {
   id: number;
@@ -77,14 +78,6 @@ export const workOrderBillingSheetQueryKey = (id: number) =>
   ["work-order", id, "billing-sheet"] as const;
 export const workOrderWetChecksQueryKey = (id: number) =>
   ["work-order", id, "wet-checks"] as const;
-
-function showToast(message: string) {
-  if (Platform.OS === "android") {
-    ToastAndroid.show(message, ToastAndroid.SHORT);
-  } else {
-    Alert.alert("", message);
-  }
-}
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "Not scheduled";
@@ -165,9 +158,7 @@ export default function WorkOrderDetailScreen() {
   useEffect(() => {
     if (wetChecksQuery.isError) {
       showToast(
-        wetChecksQuery.error instanceof Error
-          ? `Failed to load wet checks: ${wetChecksQuery.error.message}`
-          : "Failed to load wet checks",
+        friendlyErrorMessage(wetChecksQuery.error, "Failed to load wet checks"),
       );
     }
   }, [wetChecksQuery.isError, wetChecksQuery.error]);
@@ -184,9 +175,10 @@ export default function WorkOrderDetailScreen() {
   useEffect(() => {
     if (billingSheetsQuery.isError) {
       showToast(
-        billingSheetsQuery.error instanceof Error
-          ? `Failed to load billing sheets: ${billingSheetsQuery.error.message}`
-          : "Failed to load billing sheets",
+        friendlyErrorMessage(
+          billingSheetsQuery.error,
+          "Failed to load billing sheets",
+        ),
       );
     }
   }, [billingSheetsQuery.isError, billingSheetsQuery.error]);
@@ -204,11 +196,17 @@ export default function WorkOrderDetailScreen() {
         body: { status: "in_progress", startedAt: new Date().toISOString() },
       }),
     onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => undefined,
+      );
       showToast("Work started");
       invalidateWorkOrder();
     },
     onError: (err) => {
-      showToast(err instanceof Error ? err.message : "Couldn't start work");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
+        () => undefined,
+      );
+      showToast(friendlyErrorMessage(err, "Couldn't start work"));
     },
   });
 
@@ -219,11 +217,17 @@ export default function WorkOrderDetailScreen() {
         body: {},
       }),
     onSuccess: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => undefined,
+      );
       showToast("Marked complete");
       invalidateWorkOrder();
     },
     onError: (err) => {
-      showToast(err instanceof Error ? err.message : "Couldn't complete work");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
+        () => undefined,
+      );
+      showToast(friendlyErrorMessage(err, "Couldn't complete work"));
     },
   });
 
@@ -305,9 +309,7 @@ export default function WorkOrderDetailScreen() {
             </Pressable>
           </View>
         ) : isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
+          <LoadingScreen />
         ) : isError || !wo ? (
           <View style={styles.center}>
             <Feather name="alert-circle" size={32} color={colors.destructive} />
@@ -315,7 +317,7 @@ export default function WorkOrderDetailScreen() {
               Couldn't load work order
             </Text>
             <Text style={[styles.errorBody, { color: colors.mutedForeground }]}>
-              {error instanceof Error ? error.message : "Something went wrong."}
+              {friendlyErrorMessage(error)}
             </Text>
             <Pressable
               onPress={() => refetch()}

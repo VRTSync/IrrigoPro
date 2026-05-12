@@ -1,0 +1,67 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "20.18.0",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://app.irrigopro.com"
+      }
+    },
+    "internal": {
+      "extends": "base",
+      "developmentClient": false,
+      "distribution": "internal",
+      "channel": "internal",
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "apk",
+        "resourceClass": "medium"
+      }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "store",
+      "channel": "preview",
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium",
+        "autoIncrement": "buildNumber"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "resourceClass": "medium",
+        "autoIncrement": "versionCode"
+      }
+    },
+    "production": {
+      "extends": "preview",
+      "channel": "production"
+    }
+  },
+  "submit": {
+    "internal": {
+      "ios": {
+        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID",
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
+      },
+      "android": {
+        "track": "internal"
+      }
+    },
+    "preview": {
+      "ios": {
+        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID",
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
+      },
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}
