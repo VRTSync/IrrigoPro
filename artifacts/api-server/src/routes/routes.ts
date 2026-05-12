@@ -351,6 +351,15 @@ import {
 } from "@workspace/db";
 import { clientErrors, appEventGroups, auditLog, incidents } from "@workspace/db/schema";
 import { startIncidentRunner } from "../lib/rules/runner";
+import {
+  loadPagingConfig,
+  savePagingConfig,
+  toPublicConfig,
+  notifyIncidentAcked,
+  sendTestPage,
+  type PagingConfig,
+} from "../lib/rules/paging";
+import { ALL_RULES as ALL_INCIDENT_RULES } from "../lib/rules";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
 import { registerSiteMapRoutes } from "./site-map-routes";
@@ -2465,6 +2474,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actorLabel: ownerLabel,
         details: { ruleId: row.ruleId, severity: row.severity },
       });
+      // Task #569 — resolve the page in PagerDuty / Slack as soon as
+      // a human acknowledges. The matching Rule definition (for the
+      // runbook URL) comes from the in-memory ALL_RULES list; if the
+      // rule has been removed in code we still send a resolve with a
+      // best-effort runbook fallback so the alert closes cleanly.
+      const rule = ALL_INCIDENT_RULES.find((r) => r.id === row.ruleId);
+      const ruleForPaging = rule ?? {
+        id: row.ruleId,
+        runbookUrl: row.runbookUrl ?? "",
+      };
+      try {
+        // Cast through `unknown` because the SQL projection narrows
+        // jsonb fields to `unknown`; the paging module only reads
+        // them as opaque values.
+        await notifyIncidentAcked(
+          row as unknown as import("@workspace/db/schema").IncidentRow,
+          ruleForPaging,
+          ownerLabel,
+        );
+      } catch (err) {
+        try { req.log?.warn({ err, incidentId: row.id }, "paging on ack failed"); }
+        catch { /* ignore */ }
+      }
     }
     return row;
   }
@@ -2523,6 +2555,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "appHealthIncidentBulkAck",
         ctx: {},
         fallbackMessage: "Couldn't acknowledge incidents — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #569 — On-call paging integrations (PagerDuty / Slack) ───────
+  // Lets a super admin store the PagerDuty Events API v2 routing key
+  // and/or a Slack incoming-webhook URL. The rule runner picks these
+  // up via `loadPagingConfig()` on every transition; there's no
+  // process restart required.
+
+  app.get("/api/admin/app-health/integrations", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const cfg = await loadPagingConfig();
+      res.json({ config: toPublicConfig(cfg) });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIntegrationsGet",
+        ctx: {},
+        fallbackMessage: "Couldn't load integrations — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.post("/api/admin/app-health/integrations", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const current = await loadPagingConfig();
+
+      // PagerDuty routing key — `null` clears, missing means "keep
+      // current", any string overwrites. Trim whitespace because the
+      // PagerDuty UI sometimes copies a trailing newline.
+      let pdKey = current.pagerDutyRoutingKey;
+      if (body.pagerDutyRoutingKey === null) {
+        pdKey = "";
+      } else if (typeof body.pagerDutyRoutingKey === "string") {
+        const v = body.pagerDutyRoutingKey.trim();
+        // Don't overwrite a real key with the masked form returned
+        // by GET — clients that re-submit the existing config keep it.
+        if (v && !v.startsWith("*****")) pdKey = v.slice(0, 200);
+      }
+
+      let slackUrl = current.slackWebhookUrl;
+      if (body.slackWebhookUrl === null) {
+        slackUrl = "";
+      } else if (typeof body.slackWebhookUrl === "string") {
+        const v = body.slackWebhookUrl.trim();
+        if (v) {
+          if (!/^https:\/\/hooks\.slack\.com\//i.test(v)) {
+            res.status(400).json({ message: "Slack webhook URL must start with https://hooks.slack.com/" });
+            return;
+          }
+          slackUrl = v.slice(0, 500);
+        }
+      }
+
+      const pdEnabled =
+        typeof body.pagerDutyEnabled === "boolean"
+          ? body.pagerDutyEnabled
+          : current.pagerDutyEnabled;
+      const slackEnabled =
+        typeof body.slackEnabled === "boolean"
+          ? body.slackEnabled
+          : current.slackEnabled;
+
+      let pageSeverities = current.pageSeverities;
+      if (Array.isArray(body.pageSeverities)) {
+        const allowed = new Set(["P1", "P2", "P3", "P4"]);
+        const filtered = (body.pageSeverities as unknown[])
+          .filter((s): s is string => typeof s === "string" && allowed.has(s))
+          .map((s) => s as PagingConfig["pageSeverities"][number]);
+        if (filtered.length > 0) pageSeverities = filtered;
+      }
+
+      // Refuse to enable an integration that has no credential — keeps
+      // the dashboard from advertising "we'll page you" when it can't.
+      if (pdEnabled && !pdKey) {
+        res.status(400).json({ message: "PagerDuty routing key is required to enable PagerDuty paging" });
+        return;
+      }
+      if (slackEnabled && !slackUrl) {
+        res.status(400).json({ message: "Slack webhook URL is required to enable Slack paging" });
+        return;
+      }
+
+      const next: PagingConfig = {
+        pagerDutyEnabled: pdEnabled,
+        pagerDutyRoutingKey: pdKey,
+        slackEnabled,
+        slackWebhookUrl: slackUrl,
+        pageSeverities,
+      };
+
+      const sessionUserId = req.session?.userId;
+      const actorLabel =
+        typeof req.headers["x-user-name"] === "string"
+          ? (req.headers["x-user-name"] as string).slice(0, 200)
+          : sessionUserId != null
+            ? `super_admin#${sessionUserId}`
+            : "super_admin";
+      await savePagingConfig(next, actorLabel);
+      await recordAuditEvent(req, {
+        actionType: "system",
+        action: "integrations.paging.updated",
+        severity: "info",
+        targetType: "app_settings",
+        targetId: "oncallPaging",
+        summary: `Updated on-call paging config (PD=${pdEnabled}, Slack=${slackEnabled}, sev=${pageSeverities.join(",")})`,
+        actorUserId: sessionUserId != null ? Number(sessionUserId) : null,
+        actorLabel,
+        details: {
+          pagerDutyEnabled: pdEnabled,
+          pagerDutyKeyConfigured: pdKey.length > 0,
+          slackEnabled,
+          slackConfigured: slackUrl.length > 0,
+          pageSeverities,
+        },
+      });
+      const fresh = await loadPagingConfig();
+      res.json({ config: toPublicConfig(fresh) });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIntegrationsSave",
+        ctx: {},
+        fallbackMessage: "Couldn't save integrations — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Test-fire: send a synthetic page through whichever channels are
+  // currently enabled so the operator can confirm the routing key /
+  // webhook URL before they trust it. Doesn't write anything to the
+  // `incidents` table.
+  app.post("/api/admin/app-health/integrations/test", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const sentTo = await sendTestPage();
+      res.json({ ok: true, sentTo });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIntegrationsTest",
+        ctx: {},
+        fallbackMessage: "Couldn't send test page — please retry",
       });
       res.status(status).json({ message });
     }

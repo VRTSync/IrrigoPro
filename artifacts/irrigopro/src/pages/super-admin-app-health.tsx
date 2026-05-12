@@ -41,6 +41,7 @@ import { AuditTab } from "@/components/app-health/audit-tab";
 import { SyncTab } from "@/components/app-health/sync-tab";
 import { UsersTab } from "@/components/app-health/users-tab";
 import { ActiveIncidents, AcknowledgeAllButton } from "@/components/app-health/active-incidents";
+import { IntegrationsTab } from "@/components/app-health/integrations-tab";
 
 // Task #550 — Super Admin App Health page (Phase 1).
 // Phase 1 ships the page chrome and the working Crashes tab. The other
@@ -304,6 +305,8 @@ export default function SuperAdminAppHealthPage() {
           onOpenCrash={(fp) => { setActiveTab("crashes"); setDrawerFingerprint(fp); }}
           onOpenAudit={(uid) => { setAuditActor(String(uid)); setActiveTab("audit"); }}
         />
+      ) : activeTab === "integrations" ? (
+        <IntegrationsTab />
       ) : (
         <ComingSoonTab tabKey={activeTab} />
       )}

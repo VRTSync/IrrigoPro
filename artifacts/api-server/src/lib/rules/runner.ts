@@ -3,6 +3,7 @@ import { db } from "../../db";
 import { incidents, auditLog, type IncidentRow } from "@workspace/db/schema";
 import { logger } from "../../logger";
 import { ALL_RULES, type Rule, type RuleEvalResult } from "./index";
+import { notifyIncidentOpened, notifyIncidentResolved } from "./paging";
 
 // The local Logger uses (message, context, metadata) — adapt to a
 // pino-ish shape so the call sites here stay readable.
@@ -138,6 +139,11 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
         await recordTransition(row, "incident.opened",
           rule.severity === "P1" ? "critical" : rule.severity === "P2" ? "error" : "warning");
         log.warn({ ruleId: rule.id, incidentId: row.id, severity: rule.severity }, "incident opened");
+        // Task #569 — page on-call (PagerDuty / Slack) when a fresh
+        // incident opens. Severity gating + integration enablement
+        // are handled inside notifyIncidentOpened.
+        try { await notifyIncidentOpened(row, rule); }
+        catch (err) { log.warn({ err, incidentId: row.id }, "paging on open failed"); }
       }
     } else if (live.status === "mitigated") {
       // Re-fire — flip back to open.
@@ -157,7 +163,14 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
         .where(sql`id = ${live.id}`)
         .returning();
       const row = updated[0];
-      if (row) await recordTransition(row, "incident.reopened", "warning");
+      if (row) {
+        await recordTransition(row, "incident.reopened", "warning");
+        // Task #569 — a reopened incident needs to re-page on-call.
+        // PagerDuty's Events API is idempotent on dedup_key, so a
+        // trigger after a manual resolve will create a fresh alert.
+        try { await notifyIncidentOpened(row, rule); }
+        catch (err) { log.warn({ err, incidentId: row.id }, "paging on reopen failed"); }
+      }
     } else {
       // Still open — refresh in place.
       await db
@@ -205,7 +218,13 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
           .where(sql`id = ${live.id}`)
           .returning();
         const row = updated[0];
-        if (row) await recordTransition(row, "incident.resolved", "info");
+        if (row) {
+          await recordTransition(row, "incident.resolved", "info");
+          // Task #569 — close the page in PagerDuty / Slack once
+          // the incident has stayed clean through the cooldown.
+          try { await notifyIncidentResolved(row, rule); }
+          catch (err) { log.warn({ err, incidentId: row.id }, "paging on resolve failed"); }
+        }
       }
     }
   }
