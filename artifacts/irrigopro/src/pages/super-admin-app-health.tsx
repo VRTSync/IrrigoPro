@@ -40,6 +40,7 @@ import { CompaniesTab } from "@/components/app-health/companies-tab";
 import { AuditTab } from "@/components/app-health/audit-tab";
 import { SyncTab } from "@/components/app-health/sync-tab";
 import { UsersTab } from "@/components/app-health/users-tab";
+import { ActiveIncidents, AcknowledgeAllButton } from "@/components/app-health/active-incidents";
 
 // Task #550 — Super Admin App Health page (Phase 1).
 // Phase 1 ships the page chrome and the working Crashes tab. The other
@@ -225,11 +226,17 @@ export default function SuperAdminAppHealthPage() {
               <SelectItem value="90d">Last 90 days</SelectItem>
             </SelectContent>
           </Select>
+          <AcknowledgeAllButton />
           <Button variant="outline" size="sm" disabled>
             Export
           </Button>
         </div>
       </div>
+
+      {/* Active incidents — Task #553 Phase 4. Stacks one banner per
+          open incident above the hero so the worst news is impossible
+          to miss. Mitigated cooldown shows as a single slim row. */}
+      <ActiveIncidents />
 
       {/* Status hero — Task #550 Phase 2. */}
       <StatusHero windowKey={windowKey} />

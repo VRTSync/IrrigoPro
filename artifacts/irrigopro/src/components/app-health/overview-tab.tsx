@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { buildAuthHeaders, formatRelative } from "./shared";
 import { HealthScoreBar, bucketLabel, type HealthBucket } from "./health-score-bar";
+import { useIncidents, type IncidentRow } from "./active-incidents";
 
 type TimeseriesResponse = {
   window: string;
@@ -104,9 +105,50 @@ export function OverviewTab({
     refetchInterval: 15_000,
   });
 
-  // Critical / error events feed — uses the same audit endpoint that
-  // backs the Audit Log tab so the data is already filtered for
-  // operationally-meaningful events.
+  // Task #553 — interleave live incidents (open + recently resolved)
+  // and operationally-meaningful audit rows (deploys, lockouts, role
+  // changes) into the "Recent critical events" feed so the operator
+  // sees the rule-engine output alongside raw audit signals without
+  // jumping tabs. Audit query is action-based — `deploy.production`
+  // is severity:info but is exactly the kind of row that belongs here.
+  const incidentsQ = useIncidents("open,mitigated,resolved");
+
+  const opsAudit = useQuery<AuditListResponse>({
+    queryKey: ["/api/admin/app-health/audit", "overview-ops-actions", windowKey],
+    queryFn: async () => {
+      const usp = new URLSearchParams({
+        action: [
+          "deploy.production",
+          "auth.lockout",
+          "incident.acked",
+          "user.role_changed",
+          "role.changed",
+        ].join(","),
+        limit: "10",
+      });
+      const ms: Record<string, number> = {
+        "24h": 24 * 60 * 60 * 1000,
+        "7d": 7 * 24 * 60 * 60 * 1000,
+        "30d": 30 * 24 * 60 * 60 * 1000,
+        "90d": 90 * 24 * 60 * 60 * 1000,
+      };
+      if (ms[windowKey]) {
+        usp.set("from", new Date(Date.now() - ms[windowKey]).toISOString());
+      }
+      const res = await fetch(`/api/admin/app-health/audit?${usp}`, {
+        credentials: "include",
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+  // Severity-based audit query kept for warning/error/critical signal —
+  // the merge below dedupes by id so an action row that is also
+  // severity≥warning shows up once.
   const criticalEvents = useQuery<AuditListResponse>({
     queryKey: ["/api/admin/app-health/audit", "overview-critical", windowKey],
     queryFn: async () => {
@@ -148,6 +190,66 @@ export function OverviewTab({
     }
     return out;
   }, [chartData]);
+
+  // Merge incidents (synthesised as feed entries) + audit rows, sort
+  // by occurredAt desc, cap at 10. Incidents appear with a P1/P2 tag
+  // so they're distinguishable from raw audit rows.
+  type FeedItem = {
+    key: string;
+    occurredAt: string;
+    label: string;
+    sub: string;
+    severity: "info" | "warning" | "error" | "critical";
+    badge?: string;
+  };
+  const feedItems = useMemo<FeedItem[]>(() => {
+    const items: FeedItem[] = [];
+    // Recently-resolved incidents only count if they were resolved in
+    // the last 24h — beyond that they're stale for an "ops feed".
+    const RESOLVED_WINDOW_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    for (const i of (incidentsQ.data?.incidents ?? []) as IncidentRow[]) {
+      if (i.status === "resolved") {
+        const t = i.resolvedAt ? Date.parse(i.resolvedAt) : NaN;
+        if (!Number.isFinite(t) || now - t > RESOLVED_WINDOW_MS) continue;
+      }
+      items.push({
+        key: `inc-${i.id}`,
+        occurredAt:
+          i.status === "resolved"
+            ? (i.resolvedAt ?? i.lastFiringAt ?? i.startedAt)
+            : (i.lastFiringAt ?? i.startedAt),
+        label: i.summary,
+        sub: `incident · ${i.ruleId} · ${i.status}`,
+        severity:
+          i.status === "resolved" ? "info"
+          : i.severity === "P1" ? "critical"
+          : i.severity === "P2" ? "error"
+          : "warning",
+        badge: i.severity,
+      });
+    }
+    // Merge audit rows from both queries (action-based + severity-based)
+    // and dedupe by id so a row matching both filters shows once.
+    const seenAudit = new Set<number>();
+    const auditAll = [
+      ...(opsAudit.data?.events ?? []),
+      ...(criticalEvents.data?.events ?? []),
+    ];
+    for (const e of auditAll) {
+      if (seenAudit.has(e.id)) continue;
+      seenAudit.add(e.id);
+      items.push({
+        key: `aud-${e.id}`,
+        occurredAt: e.occurredAt,
+        label: e.summary ?? e.action,
+        sub: `${e.actorLabel ?? "system"} · ${e.action}`,
+        severity: e.severity,
+      });
+    }
+    items.sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1));
+    return items.slice(0, 10);
+  }, [incidentsQ.data, criticalEvents.data, opsAudit.data]);
 
   const attention = useMemo(() => {
     const list = companies.data?.companies ?? [];
@@ -327,29 +429,34 @@ export function OverviewTab({
           <CardTitle className="text-sm">Recent critical events</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          {criticalEvents.isLoading ? (
+          {criticalEvents.isLoading && incidentsQ.isLoading ? (
             <PanelLoading />
           ) : criticalEvents.isError ? (
             <PanelError />
-          ) : (criticalEvents.data?.events ?? []).length === 0 ? (
+          ) : feedItems.length === 0 ? (
             <PanelEmpty text="No elevated events in this window." />
           ) : (
             <ul className="divide-y rounded-md border" data-testid="critical-events-list">
-              {(criticalEvents.data?.events ?? []).map((e) => (
-                <li key={e.id} className="px-3 py-2 flex items-center justify-between gap-3 text-xs">
+              {feedItems.map((it) => (
+                <li key={it.key} className="px-3 py-2 flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0">
-                    <div className="font-medium text-gray-900 truncate">
-                      {e.summary ?? e.action}
+                    <div className="font-medium text-gray-900 truncate flex items-center gap-1.5">
+                      {it.badge && (
+                        <Badge className="bg-red-700 hover:bg-red-700 text-white text-[10px] py-0 px-1.5">
+                          {it.badge}
+                        </Badge>
+                      )}
+                      <span className="truncate">{it.label}</span>
                     </div>
                     <div className="text-[10px] text-gray-500 mt-0.5">
-                      {e.actorLabel ?? "system"} • {e.actionType} • {formatRelative(e.occurredAt)}
+                      {it.sub} • {formatRelative(it.occurredAt)}
                     </div>
                   </div>
                   <Badge
-                    variant={e.severity === "critical" || e.severity === "error" ? "destructive" : "secondary"}
+                    variant={it.severity === "critical" || it.severity === "error" ? "destructive" : "secondary"}
                     className="text-[10px] shrink-0"
                   >
-                    {e.severity}
+                    {it.severity}
                   </Badge>
                 </li>
               ))}

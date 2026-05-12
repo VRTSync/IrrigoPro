@@ -349,7 +349,8 @@ import {
   type InsertWetCheckZoneRecord,
   insertIssueTypeConfigSchema,
 } from "@workspace/db";
-import { clientErrors, appEventGroups, auditLog } from "@workspace/db/schema";
+import { clientErrors, appEventGroups, auditLog, incidents } from "@workspace/db/schema";
+import { startIncidentRunner } from "../lib/rules/runner";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
 import { registerSiteMapRoutes } from "./site-map-routes";
@@ -1832,15 +1833,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         getEventCountBetween(sincePrev, sinceCurrent, ["error", "fatal"]),
         getActiveUsersAt(sinceCurrent),
         getSyncQueueDepth(),
+        // Task #553 — open incidents drive the hero status pulse. We
+        // return both the raw count (for the existing UI tile) and the
+        // worst severity so the pulse can roll up P1→crit, P2→warn.
         (async () => {
           try {
-            const r = await db.execute<{ c: number }>(sql`
-              SELECT COUNT(*)::int AS c FROM app_event_groups
-              WHERE status = 'open' AND severity IN ('error', 'fatal')
-                AND last_seen_at >= now() - interval '24 hours'
+            const r = await db.execute<{ c: number; worst: string | null }>(sql`
+              SELECT COUNT(*)::int AS c,
+                     MIN(severity) AS worst
+              FROM incidents
+              WHERE status = 'open'
             `);
-            return r.rows?.[0]?.c ?? 0;
-          } catch { return 0; }
+            return {
+              count: r.rows?.[0]?.c ?? 0,
+              worstSeverity: r.rows?.[0]?.worst ?? null,
+            };
+          } catch { return { count: 0, worstSeverity: null as string | null }; }
         })(),
       ]);
 
@@ -1868,13 +1876,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activeUsers: active.total,
         syncQueue: sync.depth,
       });
-      // Status pulse:
-      //   ok    — error rate < 0.5% and < 5 fatal+error events in window
-      //   warn  — error rate < 2% or any open incident
-      //   crit  — > 2% errors, any sync_queue.stuck > 0, or > 1 open critical
-      let status: "ok" | "warn" | "crit" = "ok";
-      if (errRate >= 0.02 || sync.stuck > 0 || openIncidents > 1) status = "crit";
-      else if (errRate >= 0.005 || openIncidents > 0 || errorsCurrent > 5) status = "warn";
+      // Status pulse — Task #553 spec: hero pulse is driven solely by
+      // the worst *open* incident severity. P1 → crit, P2 → warn,
+      // anything else (including P3/P4 open incidents and noisy raw
+      // telemetry) leaves the hero green. The legacy error-rate /
+      // sync-queue thresholds now feed Overview KPIs only.
+      const incidentCount = openIncidents.count;
+      const worstSev = openIncidents.worstSeverity;
+      const status: "ok" | "warn" | "crit" =
+        worstSev === "P1" ? "crit" : worstSev === "P2" ? "warn" : "ok";
 
       res.setHeader("Cache-Control", "no-store");
       res.json({
@@ -1890,7 +1900,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         apiP95Prev: previousOnly.p95,
         syncQueueDepth: sync.depth,
         syncQueueStuck: sync.stuck,
-        incidentsOpen: openIncidents,
+        incidentsOpen: incidentCount,
+        incidentsWorstSeverity: worstSev,
         kpisDelta: {
           activeUsers: activeUsersDelta,
           errors: pctChange(errorsCurrent, errorsPrev),
@@ -2276,7 +2287,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           filters.push(sql`actor_label ILIKE ${`%${actor}%`}`);
         }
       }
-      if (action) filters.push(sql`action = ${action}`);
+      if (action) {
+        // Accept comma-separated actions (e.g.
+        // ?action=deploy.production,auth.lockout) so the Overview feed
+        // can pull operationally-meaningful audit rows in one call
+        // regardless of severity.
+        const acts = action.split(",").map((s) => s.trim()).filter(Boolean);
+        if (acts.length === 1) filters.push(sql`action = ${acts[0]}`);
+        else if (acts.length > 1) filters.push(sql`action = ANY(${acts})`);
+      }
       if (actionType) filters.push(sql`action_type = ${actionType}`);
       if (severity) {
         // Accept comma-separated severities (e.g. ?severity=warning,error,critical).
@@ -2318,6 +2337,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "appHealthAudit",
         ctx: {},
         fallbackMessage: "Couldn't load audit log — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #553 (Phase 4) — Incidents detection engine ────────────────
+  // The 60s rule-runner writes rows to `incidents`; these endpoints let
+  // the App Health page render the active-incident banner, drill into
+  // details, and bulk-acknowledge. All gated by `requireSuperAdmin`.
+
+  type IncidentApiRow = {
+    id: number;
+    ruleId: string;
+    severity: string;
+    status: string;
+    trigger: string;
+    summary: string;
+    runbookUrl: string | null;
+    ownerUserId: number | null;
+    ownerLabel: string | null;
+    startedAt: string;
+    lastFiringAt: string;
+    cleanSinceAt: string | null;
+    mitigatedAt: string | null;
+    resolvedAt: string | null;
+    ackedAt: string | null;
+    affectedCompanies: unknown;
+    affectedUsers: unknown;
+    details: unknown;
+    fireCount: number;
+  };
+
+  app.get("/api/admin/app-health/incidents", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const statusRaw = typeof req.query.status === "string" ? req.query.status : "open,mitigated";
+      const ALLOWED = new Set(["open", "mitigated", "resolved"]);
+      const statuses = statusRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => ALLOWED.has(s));
+      if (statuses.length === 0) {
+        res.status(400).json({ message: "status must be open, mitigated, or resolved" });
+        return;
+      }
+      const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
+      const rowsResult = await db.execute<IncidentApiRow>(sql`
+        SELECT id, rule_id AS "ruleId", severity, status, trigger, summary,
+               runbook_url AS "runbookUrl", owner_user_id AS "ownerUserId",
+               owner_label AS "ownerLabel",
+               started_at::text AS "startedAt",
+               last_firing_at::text AS "lastFiringAt",
+               clean_since_at::text AS "cleanSinceAt",
+               mitigated_at::text AS "mitigatedAt",
+               resolved_at::text AS "resolvedAt",
+               acked_at::text AS "ackedAt",
+               affected_companies AS "affectedCompanies",
+               affected_users AS "affectedUsers",
+               details, fire_count AS "fireCount"
+        FROM incidents
+        WHERE status = ANY(${statuses})
+        ORDER BY
+          CASE severity WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END,
+          started_at DESC
+        LIMIT ${limit}
+      `);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ incidents: rowsResult.rows ?? [] });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIncidents",
+        ctx: {},
+        fallbackMessage: "Couldn't load incidents — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Acknowledge a single incident: assigns the current super admin as
+  // owner and flips the row to `mitigated`. Re-acking a mitigated /
+  // resolved row updates the owner only.
+  async function ackOne(req: Request, id: number): Promise<IncidentApiRow | null> {
+    const sessionUserId = req.session?.userId;
+    const ownerUserId = sessionUserId != null ? Number(sessionUserId) : null;
+    const ownerLabel =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string).slice(0, 200)
+        : ownerUserId != null
+          ? `super_admin#${ownerUserId}`
+          : "super_admin";
+    const now = new Date();
+    const updated = await db.execute<IncidentApiRow>(sql`
+      UPDATE incidents
+      SET owner_user_id = ${ownerUserId},
+          owner_label = ${ownerLabel},
+          acked_at = ${now},
+          status = CASE WHEN status = 'open' THEN 'mitigated' ELSE status END,
+          mitigated_at = CASE
+            WHEN status = 'open' AND mitigated_at IS NULL THEN ${now}
+            ELSE mitigated_at
+          END
+      WHERE id = ${id}
+      RETURNING id, rule_id AS "ruleId", severity, status, trigger, summary,
+                runbook_url AS "runbookUrl", owner_user_id AS "ownerUserId",
+                owner_label AS "ownerLabel",
+                started_at::text AS "startedAt",
+                last_firing_at::text AS "lastFiringAt",
+                clean_since_at::text AS "cleanSinceAt",
+                mitigated_at::text AS "mitigatedAt",
+                resolved_at::text AS "resolvedAt",
+                acked_at::text AS "ackedAt",
+                affected_companies AS "affectedCompanies",
+                affected_users AS "affectedUsers",
+                details, fire_count AS "fireCount"
+    `);
+    const row = updated.rows?.[0] ?? null;
+    if (row) {
+      await recordAuditEvent(req, {
+        actionType: "system",
+        action: "incident.acked",
+        severity: "info",
+        targetType: "incident",
+        targetId: String(row.id),
+        summary: `acked: ${row.summary}`,
+        actorUserId: ownerUserId,
+        actorLabel: ownerLabel,
+        details: { ruleId: row.ruleId, severity: row.severity },
+      });
+    }
+    return row;
+  }
+
+  app.post("/api/admin/app-health/incidents/:id/ack", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid incident id" });
+        return;
+      }
+      const row = await ackOne(req, id);
+      if (!row) {
+        res.status(404).json({ message: "Incident not found" });
+        return;
+      }
+      res.json({ incident: row });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIncidentAck",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't acknowledge incident — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.post("/api/admin/app-health/incidents/bulk-ack", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const body = (req.body ?? {}) as { ids?: unknown; all?: unknown };
+      let ids: number[] = [];
+      if (body.all === true) {
+        const r = await db.execute<{ id: number }>(sql`
+          SELECT id FROM incidents WHERE status = 'open' ORDER BY id ASC
+        `);
+        ids = (r.rows ?? []).map((x) => x.id);
+      } else if (Array.isArray(body.ids)) {
+        ids = body.ids
+          .map((v) => Number(v))
+          .filter((n) => Number.isInteger(n) && n > 0);
+      }
+      if (ids.length === 0) {
+        res.json({ acked: 0, incidents: [] });
+        return;
+      }
+      const acked: IncidentApiRow[] = [];
+      for (const id of ids) {
+        const row = await ackOne(req, id);
+        if (row) acked.push(row);
+      }
+      res.json({ acked: acked.length, incidents: acked });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIncidentBulkAck",
+        ctx: {},
+        fallbackMessage: "Couldn't acknowledge incidents — please retry",
       });
       res.status(status).json({ message });
     }
@@ -2491,6 +2696,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }, 60_000);
   // Don't keep the process alive for the rollup timer alone.
   if (typeof rollupTimer.unref === "function") rollupTimer.unref();
+
+  // Task #553 — kick off the incident rule-runner. Internally guarded
+  // by a pg_try_advisory_lock so only one replica drives the loop.
+  startIncidentRunner();
 
   // Customer-name scrubber refresh — Task #552 PII spec. Loads the
   // current set of customer names from the DB into an in-memory regex
