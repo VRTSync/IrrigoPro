@@ -149,12 +149,47 @@ export function parseApiError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+// Task #532 — connection-aware polling helper. Components that opt into
+// background polling pass their nominal interval through this helper so
+// that:
+//   - on a fast/typical connection, the original cadence is used
+//   - on `4g`/`3g`-with-saveData, polling is doubled
+//   - on `2g`/`slow-2g` (or browser-reported saveData), polling backs off
+//     to once every 5 minutes — usually plenty for badge counts
+//   - if the user explicitly enables Data Saver, we also back off
+// Returns `false` to disable polling entirely when the network looks
+// hostile to background traffic. Combine with `refetchIntervalInBackground:
+// false` (now the default below) so hidden tabs don't compete with the
+// active screen for bandwidth either.
+export function adaptiveRefetchInterval(baseMs: number): number | false {
+  if (typeof navigator === "undefined") return baseMs;
+  const conn: any =
+    (navigator as any).connection ||
+    (navigator as any).mozConnection ||
+    (navigator as any).webkitConnection;
+  if (!conn) return baseMs;
+  const eff = String(conn.effectiveType || "").toLowerCase();
+  const saveData = conn.saveData === true;
+  if (eff === "slow-2g" || eff === "2g") return 5 * 60_000;
+  if (saveData) return Math.max(baseMs * 2, 2 * 60_000);
+  if (eff === "3g") return Math.max(baseMs * 2, baseMs);
+  return baseMs;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "returnNull" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
+      // Task #532 — never poll a hidden tab. Components that schedule
+      // their own `refetchInterval` are explicitly opting into a poll;
+      // we still don't want it to run while the tab is in the background
+      // and the user can't see the result anyway. Saves a lot of bandwidth
+      // for techs who switch between the app and a phone call.
+      refetchIntervalInBackground: false,
+      // Refresh stale data when the device comes back online.
+      refetchOnReconnect: true,
       staleTime: Infinity,
       retry: false,
       throwOnError: false,

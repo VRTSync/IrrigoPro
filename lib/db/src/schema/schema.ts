@@ -83,7 +83,11 @@ export const customers = pgTable("customers", {
   propertyBoundaryZoom: integer("property_boundary_zoom").default(18),
   propertyBoundaryAreaAcres: decimal("property_boundary_area_acres", { precision: 12, scale: 4 }),
   propertyBoundaryUpdatedAt: timestamp("property_boundary_updated_at"),
-});
+}, (table) => ({
+  // Task #532 — index company-scoped lookups (the customers list endpoint
+  // and almost every join coming off a customer is filtered by companyId).
+  companyIdx: index("customers_company_idx").on(table.companyId),
+}));
 
 // Site maps and controller management
 export const siteMaps = pgTable("site_maps", {
@@ -246,7 +250,17 @@ export const billingSheets = pgTable("billing_sheets", {
   noPhotosNeededAt: timestamp("no_photos_needed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  // Task #532 — billing sheets are filtered by these foreign keys on every
+  // list / dashboard / report path. Without indexes we are doing seq scans
+  // that show up at the top of pg_stat_statements once the table is more
+  // than a few hundred rows.
+  customerIdx: index("billing_sheets_customer_idx").on(table.customerId),
+  technicianIdx: index("billing_sheets_technician_idx").on(table.technicianId),
+  workOrderIdx: index("billing_sheets_work_order_idx").on(table.workOrderId),
+  invoiceIdx: index("billing_sheets_invoice_idx").on(table.invoiceId),
+  statusCreatedIdx: index("billing_sheets_status_created_idx").on(table.status, table.createdAt),
+}));
 
 // Per-prefix sequence counters for billing sheet numbers (e.g. "BS-2026-").
 // The table is bootstrapped at runtime via raw SQL in
@@ -414,7 +428,15 @@ export const estimates = pgTable("estimates", {
   zoneNumber: integer("zone_number"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  // Task #532 — estimates are filtered by company (almost every list),
+  // by customer (customer profile, billing preview), and by status (the
+  // pending-approval queue). Indexes keep these list endpoints O(log n).
+  companyIdx: index("estimates_company_idx").on(table.companyId),
+  customerIdx: index("estimates_customer_idx").on(table.customerId),
+  statusIdx: index("estimates_status_idx").on(table.status),
+  internalStatusIdx: index("estimates_internal_status_idx").on(table.internalStatus),
+}));
 
 export const estimateItems = pgTable("estimate_items", {
   id: serial("id").primaryKey(),
@@ -621,7 +643,18 @@ export const workOrders = pgTable("work_orders", {
   noPhotosNeededAt: timestamp("no_photos_needed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  // Task #532 — work_orders is the single hottest list table. Every
+  // role's home screen filters by some combination of these FKs. The
+  // composite (status, scheduledDate) index covers the dispatch board
+  // sort, while the assignedTechnicianId / customerId indexes speed up
+  // the per-tech and per-customer views.
+  customerIdx: index("work_orders_customer_idx").on(table.customerId),
+  assignedTechIdx: index("work_orders_assigned_tech_idx").on(table.assignedTechnicianId),
+  invoiceIdx: index("work_orders_invoice_idx").on(table.invoiceId),
+  estimateIdx: index("work_orders_estimate_idx").on(table.estimateId),
+  statusScheduledIdx: index("work_orders_status_scheduled_idx").on(table.status, table.scheduledDate),
+}));
 
 // Work Order Items - copied from estimate items
 export const workOrderItems = pgTable("work_order_items", {

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, adaptiveRefetchInterval } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778514028553.png";
 import { useState, useEffect } from "react";
 import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, type LucideIcon } from "lucide-react";
@@ -42,16 +42,22 @@ export default function Navigation() {
   const userRole = user.role;
   const companyId = user.companyId;
 
+  // Task #532 — connection-aware polling. The 60s cadence is fine on a
+  // good wifi connection but is too aggressive on a tech's truck on
+  // 1-bar LTE. `adaptiveRefetchInterval` keeps it at 60s on fast links,
+  // doubles it on 3G, and backs off to 5min on 2G/saveData.
+  const badgePollMs = adaptiveRefetchInterval(60_000);
+
   // Fetch pending parts approval count for billing manager badge
   const { data: pendingParts = [] } = useQuery<Part[]>({
     queryKey: ["/api/parts/pending-approval"],
     enabled: userRole === 'billing_manager' || userRole === 'company_admin',
-    refetchInterval: 60000,
+    refetchInterval: badgePollMs,
   });
   const { data: pendingReviews = [] } = useQuery<ManualPartReview[]>({
     queryKey: ["/api/manual-part-reviews"],
     enabled: userRole === 'billing_manager' || userRole === 'company_admin',
-    refetchInterval: 60000,
+    refetchInterval: badgePollMs,
   });
   const pendingApprovalCount = (pendingParts?.length || 0) + (pendingReviews?.length || 0);
 
@@ -61,7 +67,7 @@ export default function Navigation() {
   const { data: pendingEstimates = [] } = useQuery<Estimate[]>({
     queryKey: ["/api/estimates/pending-approval"],
     enabled: userRole === 'billing_manager' || userRole === 'company_admin',
-    refetchInterval: 60000,
+    refetchInterval: badgePollMs,
   });
   const pendingEstimateCount = pendingEstimates?.length || 0;
 

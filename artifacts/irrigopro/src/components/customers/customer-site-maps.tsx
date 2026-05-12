@@ -1,5 +1,5 @@
 import { safeGet, safeRemove } from "@/utils/safeStorage";
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,22 @@ import { ArrowLeft, MapPin, Upload, Eye, Edit, Trash2, Plus } from "lucide-react
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Customer, SiteMap, Controller, IrrigationZone } from "@workspace/db/schema";
-import { ColorCodedMapViewer } from "@/components/site-maps/color-coded-map-viewer";
+// Task #532 — lazy-load Leaflet (and the entire color-coded map viewer)
+// so the ~150KB Leaflet bundle is not part of the customers chunk and
+// only loads when the user actually opens the Site Maps tab.
+const ColorCodedMapViewer = lazy(() =>
+  import("@/components/site-maps/color-coded-map-viewer").then((m) => ({
+    default: m.ColorCodedMapViewer,
+  })),
+);
+function MapViewerFallback() {
+  return (
+    <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3" />
+      Loading map…
+    </div>
+  );
+}
 import { customerToBoundary } from "@/hooks/use-customer-boundary";
 import { ControllerUpload } from "@/components/site-maps/controller-upload";
 import { ZoneUpload } from "@/components/site-maps/zone-upload";
@@ -474,6 +489,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
             )}
 
             <TabsContent value="maps" className="space-y-6 mt-6">
+              <Suspense fallback={<MapViewerFallback />}>
               <ColorCodedMapViewer 
                 project={{
                   controllers: (project?.controllers || []).map(c => ({
@@ -517,6 +533,7 @@ export function CustomerSiteMaps({ customer, onBack, userRole }: CustomerSiteMap
                 onZoneClick={(zone) => {}}
                 customerBoundary={customerToBoundary(customer)}
               />
+              </Suspense>
             </TabsContent>
 
             <TabsContent value="data" className="space-y-6 mt-6">

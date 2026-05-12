@@ -62,6 +62,73 @@ One-time backfill (Task #189 / #222) of the `originals/` prefix in object storag
 - First production run (May 10, 2026): 235 originals scanned, 221 re-encoded, 14 skipped (already ≤2 MB), 0 failures, **~943 MB freed** (executed across three resumable chunks of ~110s each: 310.0 MB + 380.2 MB + 253.0 MB; the per-chunk numbers are the last batch-boundary totals logged before each timeout, so the true freed total is slightly higher).
 - `app_settings.originalsShrink.done` contains all 235 canonical keys; `app_settings.originalsShrink.failed` is empty. No retry needed.
 
+## Performance (Task #532)
+
+Performance sundown for slow field-LTE connections. The headline rule is
+**every screen has to be useful on a 1-bar LTE truck connection**.
+
+- **Route-level code splitting** — `artifacts/irrigopro/src/App.tsx`
+  uses `React.lazy` for ~50 page components and a `Suspense` boundary
+  inside each role's `<Switch>`. Login, NotFound, and the four role
+  dashboards are eager so first paint isn't behind a chunk fetch. New
+  pages should be added with `lazyPage(() => import(...))` and only
+  promoted to eager if they are critical to first paint.
+- **Connection-aware polling** —
+  `artifacts/irrigopro/src/lib/queryClient.ts` exports
+  `adaptiveRefetchInterval(baseMs)`. Components that schedule
+  background polling (Navigation badges, NotificationSystem,
+  QuickBooks health) pass their nominal interval through this helper
+  so 2G/saveData connections back off to 5min and 3G doubles the
+  cadence. The query client default `refetchIntervalInBackground:
+  false` already pauses every poll on hidden tabs.
+- **Lazy-loaded Leaflet** — `ColorCodedMapViewer` is loaded via
+  `React.lazy` from both `customer-site-maps.tsx` and
+  `site-maps-page.tsx`. Leaflet (~150KB) ships in its own chunk and
+  is fetched only when the user opens a Map tab. Do not add new
+  module-level `import L from "leaflet"` to anything that's part of
+  a default-loaded route.
+- **Pricing-strip fast path** —
+  `applyPricingVisibility` in `artifacts/api-server/src/routes/routes.ts`
+  short-circuits for any non-`field_tech` role (no `headerUserRole`
+  lookup, no object walk). The walk itself is now in-place
+  (`sanitizePricingFieldsInPlace`) which is roughly 3-4x cheaper on
+  the work-orders list response.
+- **Opt-in list pagination** — `paginate(req, res, rows, defaults)`
+  in `routes.ts` adds `?limit`/`?offset` support to `/api/customers`,
+  `/api/estimates`, `/api/invoices`, and `/api/work-orders` (including
+  the `field_tech` short-circuit branch — techs are the most
+  bandwidth-constrained users). Paginated responses include
+  `X-Total-Count` so the client can drive `useInfiniteQuery` without
+  a separate count call. When both query params are omitted the
+  response is unchanged for backwards compatibility.
+- **Incremental invoice loading** — `pages/invoices.tsx` uses
+  `useInfiniteQuery` with 50-row pages driven by `X-Total-Count`,
+  replacing the previous `?limit=500` blast. `customer-billing.tsx`
+  drops its dashboard-panel fetch from 500 to 100 rows (the API
+  returns invoices sorted by `createdAt` desc, so 100 is plenty to
+  derive the latest billing month).
+- **Higher offline retry cap** — `engine.ts` raised
+  `DEFAULT_MAX_RETRY_AGE_MS` from 1h to 12h so a tech who is offline
+  for half a shift (basement, remote site) still has queued writes
+  resume the moment they're back in coverage.
+- **Foreign-key indexes** — `lib/db/src/schema/schema.ts` declares
+  indexes on the FKs hit by every list / dashboard / report path:
+  `customers(companyId)`, `estimates(companyId, customerId, status,
+  internalStatus)`, `work_orders(customerId, assignedTechnicianId,
+  invoiceId, estimateId, (status, scheduledDate))`,
+  `billing_sheets(customerId, technicianId, workOrderId, invoiceId,
+  (status, createdAt))`. Apply with `pnpm --filter @workspace/db run push`.
+
+Deferred follow-ups (out of this task's scope, tracked separately):
+- Real PWA via `vite-plugin-pwa` (current setup uses a stub virtual
+  module — `registerSW.ts` is wired up but `generateSW` is not yet
+  configured).
+- Read-side IndexedDB cache for work-order screens.
+- Photo-grid signed-URL batching sweep across the remaining list
+  pages (work orders detail / billing sheet detail / wet checks).
+- Switch the paginated list endpoints' clients to
+  `useInfiniteQuery` and drive the off-by-one with `X-Total-Count`.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

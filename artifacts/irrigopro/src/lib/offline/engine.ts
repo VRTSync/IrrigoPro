@@ -76,12 +76,19 @@ export interface EngineOptions {
 }
 
 // Task #501 — default caps. ~8 attempts maps to a worst-case of roughly
-// 1s+2s+4s+8s+16s+30s+30s+30s ≈ 2 minutes of backoff before giving up,
-// and the 1h elapsed cap is a hard backstop for slow-trickle failures
-// (e.g. a mutation that keeps hitting the cap-restart cycle as the user
-// flips back online intermittently).
+// 1s+2s+4s+8s+16s+30s+30s+30s ≈ 2 minutes of backoff before giving up.
+//
+// Task #532 — raise the wall-clock cap from 1 hour to 12 hours. The 1h
+// backstop was originally meant to catch slow-trickle failures, but in
+// practice it also gave up on a tech who is offline for half a shift
+// (no LTE in a basement, on a remote site, etc.). With the new cap,
+// queued writes auto-resume the moment they get back into coverage,
+// even after a long lunch break or a multi-stop morning route. The
+// existing manual Retry / Cancel buttons remain as a fallback, and the
+// retry-cap-exceeded messaging from Task #525 still surfaces *why*
+// something is stuck once it does hit the cap.
 const DEFAULT_MAX_ATTEMPTS = 8;
-const DEFAULT_MAX_RETRY_AGE_MS = 60 * 60 * 1000;
+const DEFAULT_MAX_RETRY_AGE_MS = 12 * 60 * 60 * 1000;
 
 export class SyncEngine {
   private db: OfflineDB | null = null;

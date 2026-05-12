@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, adaptiveRefetchInterval } from "@/lib/queryClient";
 import { formatDistanceToNow } from "date-fns";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 
@@ -33,18 +33,22 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
   // Initialize push notifications
   const { notificationCount, isSupported, permission } = usePushNotifications(userId);
 
+  // Task #532 — connection-aware polling so techs on bad cell signal don't
+  // pay a 30s notification poll on top of whatever they're actually doing.
+  const notifyPollMs = adaptiveRefetchInterval(30_000);
+
   // Fetch notifications
   const { data: notifications = [] } = useQuery<Notification[]>({
     queryKey: ["/api/notifications", userId],
     queryFn: () => apiRequest(`/api/notifications/${userId}`, "GET"),
-    refetchInterval: 30000, // Refetch every 30 seconds
+    refetchInterval: notifyPollMs,
   });
 
   // Fetch unread count
   const { data: countData } = useQuery<{ count: number }>({
     queryKey: ["/api/notifications/count", userId],
     queryFn: () => apiRequest(`/api/notifications/${userId}/count`, "GET"),
-    refetchInterval: 30000,
+    refetchInterval: notifyPollMs,
   });
 
   const unreadCount = countData?.count || 0;

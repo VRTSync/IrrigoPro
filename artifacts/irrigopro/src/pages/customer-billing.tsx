@@ -486,11 +486,14 @@ export default function CustomerBilling() {
     enabled: !!selectedCustomerId,
   });
 
-  // Fetch recent invoices for the dashboard panel
+  // Fetch recent invoices for the dashboard panel.
+  // Task #532 — only need enough rows to find the latest invoice
+  // month; the API returns invoices sorted by createdAt desc, so
+  // 100 rows is plenty and saves significant bandwidth on field-LTE.
   const { data: recentInvoicesAll = [] } = useQuery<any[]>({
-    queryKey: ["/api/invoices"],
+    queryKey: ["/api/invoices", { limit: 100 }],
     queryFn: async () => {
-      const res = await fetch("/api/invoices?limit=500");
+      const res = await fetch("/api/invoices?limit=100");
       if (!res.ok) return [];
       return res.json();
     },

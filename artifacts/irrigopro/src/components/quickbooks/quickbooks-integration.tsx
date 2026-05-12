@@ -19,7 +19,7 @@ import {
   XCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, adaptiveRefetchInterval } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
 
 interface QuickBooksConnectionProps {
@@ -63,7 +63,10 @@ function ConnectionHealthPanel() {
     queryKey: ["/api/quickbooks/health"],
     retry: false,
     throwOnError: false,
-    refetchInterval: 60000,
+    // Task #532 — back off this 60s health poll on slow connections.
+    // The hidden-tab pause is already handled globally by
+    // refetchIntervalInBackground=false in queryClient defaults.
+    refetchInterval: adaptiveRefetchInterval(60_000),
   });
 
   if (isLoading) {

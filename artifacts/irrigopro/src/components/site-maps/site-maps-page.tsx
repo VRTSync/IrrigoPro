@@ -22,7 +22,14 @@ import {
 } from "lucide-react";
 import { ControllerUpload } from "./controller-upload";
 import { ZoneUpload } from "./zone-upload";
-import { ColorCodedMapViewer } from "./color-coded-map-viewer";
+// Task #532 — lazy-load Leaflet via the color-coded map viewer so the
+// ~150KB Leaflet bundle ships in its own chunk, fetched only when the
+// user opens the Map tab.
+const ColorCodedMapViewer = React.lazy(() =>
+  import("./color-coded-map-viewer").then((m) => ({
+    default: m.ColorCodedMapViewer,
+  })),
+);
 import { ColorCodedDataReview } from "./color-coded-data-review";
 import type { ParsedKMLData, KMLController, KMLZone } from "@/lib/kml-parser";
 
@@ -810,11 +817,20 @@ export function SiteMapsPage() {
 
         <TabsContent value="map" className="space-y-6 mt-6">
           {project.controllers.length > 0 ? (
-            <ColorCodedMapViewer
-              project={project}
-              onControllerClick={setSelectedController}
-              onZoneClick={setSelectedZone}
-            />
+            <React.Suspense
+              fallback={
+                <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3" />
+                  Loading map…
+                </div>
+              }
+            >
+              <ColorCodedMapViewer
+                project={project}
+                onControllerClick={setSelectedController}
+                onZoneClick={setSelectedZone}
+              />
+            </React.Suspense>
           ) : (
             <Card>
               <CardContent className="flex items-center justify-center py-16">

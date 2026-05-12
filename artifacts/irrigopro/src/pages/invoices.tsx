@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -207,14 +207,36 @@ export default function InvoicesPage() {
     }
   };
 
-  const { data: invoices = [], isLoading, error } = useQuery<Invoice[]>({
-    queryKey: ["/api/invoices"],
-    queryFn: async () => {
-      const res = await fetch("/api/invoices?limit=500");
+  // Task #532 — switched from useQuery(limit=500) to useInfiniteQuery
+  // with 50-row pages. First paint shows 50 invoices instead of waiting
+  // for up to 500. Driven by the X-Total-Count header set by the
+  // server's `paginate()` helper.
+  const PAGE_SIZE = 50;
+  const {
+    data: invoicePages,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery<{ rows: Invoice[]; total: number; nextOffset: number | null }>({
+    queryKey: ["/api/invoices", { paginated: true, pageSize: PAGE_SIZE }],
+    initialPageParam: 0,
+    queryFn: async ({ pageParam = 0 }) => {
+      const offset = Number(pageParam) || 0;
+      const res = await fetch(`/api/invoices?limit=${PAGE_SIZE}&offset=${offset}`);
       if (!res.ok) throw new Error("Failed to fetch invoices");
-      return res.json();
+      const rows = (await res.json()) as Invoice[];
+      const total = Number(res.headers.get("X-Total-Count") ?? rows.length);
+      const consumed = offset + rows.length;
+      return { rows, total, nextOffset: consumed < total ? consumed : null };
     },
+    getNextPageParam: (last) => last.nextOffset,
   });
+  const invoices = useMemo<Invoice[]>(
+    () => invoicePages?.pages.flatMap((p) => p.rows) ?? [],
+    [invoicePages],
+  );
 
   const syncMutation = useMutation({
     mutationFn: (invoiceId: number) => apiRequest(`/api/invoices/${invoiceId}/sync-quickbooks`, "POST"),
@@ -545,6 +567,27 @@ export default function InvoicesPage() {
             );
           })}
         </div>
+
+        {/* Task #532 — Load more pagination control */}
+        {hasNextPage && (
+          <div className="flex justify-center pt-2">
+            <Button
+              variant="outline"
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+              data-testid="button-load-more-invoices"
+            >
+              {isFetchingNextPage ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Loading more invoices…
+                </>
+              ) : (
+                <>Load more invoices</>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* PDF Preview Modal */}
