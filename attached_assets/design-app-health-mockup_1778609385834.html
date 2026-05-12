@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>IrrigoPro — Super Admin · App Health</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --text: #0f172a;
+    --muted: #64748b;
+    --muted-2: #94a3b8;
+    --brand: #2563eb;
+    --brand-bg: #eff6ff;
+    --ok: #10b981;
+    --ok-bg: #ecfdf5;
+    --warn: #f59e0b;
+    --warn-bg: #fffbeb;
+    --bad: #ef4444;
+    --bad-bg: #fef2f2;
+    --crit: #dc2626;
+    --crit-bg: #fee2e2;
+    --info: #0ea5e9;
+    --info-bg: #f0f9ff;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ----- App chrome ----- */
+  .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  .sidebar { background: #0f172a; color: #e2e8f0; padding: 18px 14px; }
+  .sidebar .brand { font-weight: 700; font-size: 16px; color: white; padding: 4px 8px 18px; letter-spacing: .3px;}
+  .sidebar .brand small { display:block; font-size: 11px; color: #94a3b8; font-weight: 500; margin-top: 2px;}
+  .nav-section { font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: .8px; padding: 14px 8px 6px; }
+  .nav a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 6px;
+    color: #cbd5e1; text-decoration: none; font-size: 13px;
+  }
+  .nav a:hover { background: #1e293b; color: white; }
+  .nav a.active { background: #1e3a8a; color: white; }
+  .nav a .dot { width: 6px; height: 6px; border-radius: 50%; background: #475569;}
+  .nav a.active .dot { background: #60a5fa; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: white; border-bottom: 1px solid var(--border);
+  }
+  .crumbs { font-size: 12px; color: var(--muted); }
+  .crumbs strong { color: var(--text); }
+  .top-actions { display: flex; align-items: center; gap: 8px; }
+  .top-actions .who {
+    font-size: 12px; color: var(--muted); padding: 6px 10px;
+    border: 1px solid var(--border); border-radius: 999px; background: white;
+  }
+
+  .content { padding: 20px 24px 64px; max-width: 1500px; margin: 0 auto; width: 100%; }
+
+  /* ----- Page header ----- */
+  .page-header {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    margin-bottom: 18px;
+  }
+  .page-header h1 { margin: 0; font-size: 22px; letter-spacing: -.01em;}
+  .page-header p { margin: 4px 0 0; color: var(--muted); font-size: 13px;}
+  .toolbar { display: flex; gap: 8px; }
+  .btn {
+    background: white; border: 1px solid var(--border); padding: 7px 12px;
+    border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--text);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: #f1f5f9; }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: white; }
+  .btn.primary:hover { background: #1d4ed8; }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .select {
+    background: white; border: 1px solid var(--border); padding: 7px 10px;
+    border-radius: 8px; font-size: 13px; cursor: pointer;
+  }
+
+  /* ----- Status hero ----- */
+  .hero {
+    display: grid; grid-template-columns: 280px repeat(5, 1fr); gap: 14px;
+    margin-bottom: 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; box-shadow: var(--shadow);
+  }
+  .status-card { display: flex; align-items: center; gap: 14px; }
+  .pulse {
+    position: relative; width: 56px; height: 56px; border-radius: 50%;
+    display: grid; place-items: center;
+  }
+  .pulse::before, .pulse::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+  }
+  .pulse.ok::before { background: var(--ok); opacity: .15; }
+  .pulse.ok::after { background: var(--ok); opacity: .35; animation: pulse 2s infinite; }
+  .pulse.warn::before { background: var(--warn); opacity: .15; }
+  .pulse.warn::after { background: var(--warn); opacity: .35; animation: pulse 1.6s infinite; }
+  .pulse.bad::before { background: var(--bad); opacity: .15; }
+  .pulse.bad::after { background: var(--bad); opacity: .4; animation: pulse 1.1s infinite; }
+  .pulse .core {
+    position: relative; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--ok);
+  }
+  .pulse.warn .core { background: var(--warn); }
+  .pulse.bad .core { background: var(--bad); }
+  @keyframes pulse {
+    0% { transform: scale(.85); opacity: .55; }
+    70% { transform: scale(1.4); opacity: 0; }
+    100% { transform: scale(1.4); opacity: 0; }
+  }
+  .status-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .status-card .value { font-size: 18px; font-weight: 700; margin-top: 2px;}
+  .status-card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .kpi .label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .kpi .value { font-size: 22px; font-weight: 700; margin-top: 4px; letter-spacing: -.01em;}
+  .kpi .delta { font-size: 12px; margin-top: 2px; }
+  .delta.up { color: var(--ok); }
+  .delta.down { color: var(--bad); }
+  .delta.neutral { color: var(--muted); }
+  .spark { height: 28px; margin-top: 6px; }
+
+  /* ----- Active incident ----- */
+  .incident {
+    background: linear-gradient(0deg, #fee2e2, #fff1f2);
+    border: 1px solid #fca5a5; color: #7f1d1d;
+    border-radius: 12px; padding: 12px 14px;
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+  }
+  .incident .ico { width: 28px; height: 28px; border-radius: 50%; background: var(--crit); color: white;
+    display: grid; place-items: center; font-weight: 700; font-size: 14px;}
+  .incident strong { color: #7f1d1d; }
+  .incident .meta { margin-left: auto; font-size: 12px; color: #991b1b; }
+
+  /* ----- Tabs ----- */
+  .tabs {
+    display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+    margin-bottom: 16px; overflow-x: auto;
+  }
+  .tab {
+    padding: 9px 14px; cursor: pointer; font-size: 13px; color: var(--muted);
+    border-bottom: 2px solid transparent; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--brand); border-color: var(--brand); font-weight: 600;}
+  .tab .pill {
+    background: var(--brand-bg); color: var(--brand);
+    font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 600;
+  }
+  .tab .pill.bad { background: var(--crit-bg); color: var(--crit);}
+  .tab .pill.warn { background: var(--warn-bg); color: #92400e;}
+
+  /* ----- Section grid ----- */
+  .grid-12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+  .span-8 { grid-column: span 8; }
+  .span-7 { grid-column: span 7; }
+  .span-5 { grid-column: span 5; }
+  .span-4 { grid-column: span 4; }
+  .span-6 { grid-column: span 6; }
+  .span-12 { grid-column: span 12; }
+
+  .card h3 { margin: 0 0 12px; font-size: 14px; letter-spacing: -.01em;}
+  .card .sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .card-head h3 { margin: 0; }
+  .card-head .actions { display: flex; gap: 6px; }
+  .link { color: var(--brand); font-size: 12px; cursor: pointer; text-decoration: none; }
+  .link:hover { text-decoration: underline; }
+
+  /* ----- Tables ----- */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; font-size: 13px; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600;
+    border-bottom: 1px solid var(--border); background: #fafbfc;}
+  tbody tr { border-bottom: 1px solid #f1f5f9; }
+  tbody tr:hover { background: #f8fafc; cursor: pointer; }
+  tbody tr:last-child { border-bottom: none; }
+  .num { font-variant-numeric: tabular-nums; }
+  .right { text-align: right; }
+  .truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+
+  /* ----- Badges ----- */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .badge.ok    { background: var(--ok-bg);   color: #065f46; border-color: #a7f3d0;}
+  .badge.warn  { background: var(--warn-bg); color: #92400e; border-color: #fde68a;}
+  .badge.bad   { background: var(--bad-bg);  color: #991b1b; border-color: #fecaca;}
+  .badge.crit  { background: var(--crit);    color: white;   border-color: var(--crit);}
+  .badge.info  { background: var(--info-bg); color: #075985; border-color: #bae6fd;}
+  .badge.muted { background: #f1f5f9; color: var(--muted); border-color: var(--border);}
+  .badge.dot::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+  }
+
+  .sev-bar { display: inline-block; width: 4px; height: 14px; border-radius: 2px; vertical-align: middle; margin-right: 6px;}
+  .sev-bar.crit { background: var(--crit); }
+  .sev-bar.bad  { background: var(--bad); }
+  .sev-bar.warn { background: var(--warn); }
+  .sev-bar.info { background: var(--info); }
+
+  /* ----- Health score bar ----- */
+  .score { display: flex; align-items: center; gap: 8px; }
+  .score-bar { width: 80px; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;}
+  .score-bar > span { display: block; height: 100%; background: var(--ok); }
+  .score-bar.warn > span { background: var(--warn); }
+  .score-bar.bad > span { background: var(--bad); }
+  .score-num { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ----- Activity feed ----- */
+  .feed { display: flex; flex-direction: column; gap: 0; }
+  .feed-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f1f5f9;}
+  .feed-item:last-child { border-bottom: none; }
+  .feed-icon {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center; font-size: 13px; font-weight: 700;
+  }
+  .feed-icon.crit { background: var(--crit-bg); color: var(--crit);}
+  .feed-icon.bad  { background: var(--bad-bg);  color: var(--bad);}
+  .feed-icon.warn { background: var(--warn-bg); color: #92400e;}
+  .feed-icon.info { background: var(--info-bg); color: var(--info);}
+  .feed-icon.ok   { background: var(--ok-bg);   color: #047857;}
+  .feed-body { flex: 1; min-width: 0; }
+  .feed-body .title { font-size: 13px; font-weight: 500; }
+  .feed-body .meta  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* ----- Charts (CSS-only sparkline + heat) ----- */
+  .chart-area { position: relative; height: 180px; padding: 8px 0 24px;}
+  .chart-grid { position: absolute; inset: 8px 0 24px; display: flex; flex-direction: column; justify-content: space-between;}
+  .chart-grid > div { border-top: 1px dashed #e2e8f0; height: 0; }
+  .bars { position: absolute; inset: 8px 0 24px; display: flex; align-items: flex-end; gap: 2px; padding: 0 2px;}
+  .bars > div {
+    flex: 1; background: linear-gradient(180deg, #93c5fd, #60a5fa); border-radius: 3px 3px 0 0;
+    position: relative;
+  }
+  .bars > div.err { background: linear-gradient(180deg, #fca5a5, #ef4444); }
+  .bars > div.warn { background: linear-gradient(180deg, #fde68a, #f59e0b);}
+  .chart-x { position: absolute; left: 0; right: 0; bottom: 4px; display: flex; justify-content: space-between; padding: 0 4px; font-size: 10px; color: var(--muted);}
+
+  /* ----- Drawer ----- */
+  .drawer-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.4);
+    opacity: 0; pointer-events: none; transition: opacity .15s;
+    z-index: 60;
+  }
+  .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; right: -640px; bottom: 0; width: 620px; max-width: 95vw;
+    background: white; box-shadow: -10px 0 30px rgba(15,23,42,.15);
+    transition: right .2s ease; z-index: 70; overflow-y: auto;
+  }
+  .drawer.open { right: 0; }
+  .drawer-head { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;}
+  .drawer-head h2 { margin: 0; font-size: 16px; }
+  .drawer-body { padding: 16px 20px; }
+  .drawer .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 18px;}
+  .drawer .stat-row .card { padding: 10px; }
+  .drawer .stat-row .label { font-size: 10px; }
+  .drawer .stat-row .value { font-size: 16px; }
+
+  .stack {
+    background: #0f172a; color: #cbd5e1; padding: 12px; border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    line-height: 1.6; overflow-x: auto;
+  }
+  .stack .red { color: #fca5a5; }
+  .stack .blue { color: #93c5fd; }
+  .stack .dim { color: #64748b; }
+
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); flex-wrap: wrap;}
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px;}
+
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .search {
+    flex: 1; min-width: 220px;
+    background: white; border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 13px;
+  }
+
+  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px;}
+
+  /* Annotation banner (only for this mockup) */
+  .annotate {
+    background: #0f172a; color: #e2e8f0; font-size: 12px;
+    padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .annotate a { color: #93c5fd; }
+
+  /* Hide tabs panels not active */
+  .panel { display: none; }
+  .panel.active { display: block; }
+</style>
+</head>
+<body>
+
+<div class="annotate">
+  <span><strong>Design mockup</strong> · IrrigoPro Super Admin · App Health page — click tabs and rows to explore</span>
+  <span>v0.1 · 2026-05-12</span>
+</div>
+
+<div class="app">
+
+  <!-- ===== Sidebar (visual context only) ===== -->
+  <aside class="sidebar">
+    <div class="brand">IrrigoPro<small>Super Admin</small></div>
+    <div class="nav-section">Tenancy</div>
+    <div class="nav">
+      <a><span class="dot"></span> Companies</a>
+      <a><span class="dot"></span> Users</a>
+      <a><span class="dot"></span> Billing</a>
+    </div>
+    <div class="nav-section">Operations</div>
+    <div class="nav">
+      <a class="active"><span class="dot"></span> App Health</a>
+      <a><span class="dot"></span> Feature Flags</a>
+      <a><span class="dot"></span> Audit Log</a>
+      <a><span class="dot"></span> Integrations</a>
+    </div>
+    <div class="nav-section">Settings</div>
+    <div class="nav">
+      <a><span class="dot"></span> Roles &amp; perms</a>
+      <a><span class="dot"></span> Email templates</a>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+
+    <div class="topbar">
+      <div class="crumbs">Super Admin · <strong>App Health</strong></div>
+      <div class="top-actions">
+        <div class="who">randy.mangel@gmail.com · super_admin</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- Page header -->
+      <div class="page-header">
+        <div>
+          <h1>App Health</h1>
+          <p>Live operational view of every company, user, sync queue, and crash across IrrigoPro.</p>
+        </div>
+        <div class="toolbar">
+          <select class="select">
+            <option>Last 24 hours</option>
+            <option>Last 7 days</option>
+            <option>Last 30 days</option>
+            <option>Last 90 days</option>
+          </select>
+          <button class="btn">Export</button>
+          <button class="btn primary">Acknowledge all</button>
+        </div>
+      </div>
+
+      <!-- Hero status -->
+      <div class="hero">
+        <div class="card status-card">
+          <div class="pulse warn"><div class="core"></div></div>
+          <div>
+            <div class="label">System status</div>
+            <div class="value">Degraded</div>
+            <div class="sub">2 active incidents · 1 P2, 1 P3</div>
+          </div>
+        </div>
+
+        <div class="card kpi">
+          <div class="label">Uptime (24h)</div>
+          <div class="value">99.94%</div>
+          <div class="delta neutral">SLO 99.9% · ok</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Active users now</div>
+          <div class="value">187</div>
+          <div class="delta up">▲ 12 vs. 1h ago</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Errors / 24h</div>
+          <div class="value">1,284</div>
+          <div class="delta down">▲ 38% vs. yesterday</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">API p95</div>
+          <div class="value">412 ms</div>
+          <div class="delta down">▲ 90 ms vs. baseline</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Sync queue</div>
+          <div class="value">73</div>
+          <div class="delta down">14 stuck &gt; 1h</div>
+        </div>
+      </div>
+
+      <!-- Active incident banner -->
+      <div class="incident">
+        <div class="ico">!</div>
+        <div>
+          <div><strong>P2 · Photo upload failure rate elevated</strong> — 14% of wet-check photo uploads have failed in the last 30 minutes (baseline 0.4%). Affecting 3 companies, 18 users.</div>
+          <div class="meta">Started 11:42 AM · Owner: unassigned · <a class="link">Assign · Open runbook · Mute</a></div>
+        </div>
+        <div class="meta">38 min ago</div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <div class="tab active" data-tab="overview">Overview</div>
+        <div class="tab" data-tab="crashes">Crashes &amp; Errors <span class="pill bad">23 new</span></div>
+        <div class="tab" data-tab="companies">Companies <span class="pill">14</span></div>
+        <div class="tab" data-tab="users">Users <span class="pill">418</span></div>
+        <div class="tab" data-tab="sync">Sync &amp; Uploads <span class="pill warn">queue</span></div>
+        <div class="tab" data-tab="integrations">Integrations</div>
+        <div class="tab" data-tab="audit">Audit Log</div>
+      </div>
+
+      <!-- ============ OVERVIEW PANEL ============ -->
+      <div class="panel active" id="panel-overview">
+
+        <div class="grid-12">
+
+          <!-- Error timeline chart -->
+          <div class="card span-8">
+            <div class="card-head">
+              <div>
+                <h3>Errors &amp; performance — last 24 hours</h3>
+                <div class="sub">Hourly buckets · all companies · all event types</div>
+              </div>
+              <div class="actions">
+                <button class="btn ghost">All errors</button>
+                <button class="btn ghost">Photo uploads</button>
+                <button class="btn ghost">Sync</button>
+              </div>
+            </div>
+            <div class="chart-area">
+              <div class="chart-grid">
+                <div></div><div></div><div></div><div></div>
+              </div>
+              <div class="bars" id="bars1"></div>
+              <div class="chart-x">
+                <span>12a</span><span>4a</span><span>8a</span><span>12p</span><span>4p</span><span>8p</span><span>now</span>
+              </div>
+            </div>
+            <div class="legend">
+              <span><span class="sw" style="background:#60a5fa"></span>Requests (×100)</span>
+              <span><span class="sw" style="background:#ef4444"></span>Errors</span>
+              <span><span class="sw" style="background:#f59e0b"></span>Warnings (sync retries)</span>
+            </div>
+          </div>
+
+          <!-- Top problem companies -->
+          <div class="card span-4">
+            <div class="card-head">
+              <h3>Companies needing attention</h3>
+              <a class="link">View all</a>
+            </div>
+            <div class="feed">
+              <div class="feed-item" onclick="openDrawer('company')">
+                <div class="feed-icon crit">G</div>
+                <div class="feed-body">
+                  <div class="title">Green Valley Irrigation</div>
+                  <div class="meta">Health 42 · 412 errors · 8 users affected</div>
+                </div>
+                <span class="badge crit">CRITICAL</span>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon warn">B</div>
+                <div class="feed-body">
+                  <div class="title">Blue Sky Landscaping</div>
+                  <div class="meta">Health 68 · 47 sync conflicts · 3 users</div>
+                </div>
+                <span class="badge warn">WARN</span>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon warn">D</div>
+                <div class="feed-body">
+                  <div class="title">Desert Bloom Services</div>
+                  <div class="meta">Health 71 · slow API · 1 user</div>
+                </div>
+                <span class="badge warn">WARN</span>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon info">P</div>
+                <div class="feed-body">
+                  <div class="title">Pacific Greens Co.</div>
+                  <div class="meta">Health 88 · 4 stale photo uploads</div>
+                </div>
+                <span class="badge info">INFO</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top errors -->
+          <div class="card span-7">
+            <div class="card-head">
+              <h3>Top errors today</h3>
+              <a class="link">Open Crashes &amp; Errors →</a>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Error</th>
+                  <th>Where</th>
+                  <th class="right">Events</th>
+                  <th class="right">Users</th>
+                  <th class="right">Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr onclick="openDrawer('crash')">
+                  <td><span class="sev-bar crit"></span><strong>TypeError: Cannot read 'zoneId' of undefined</strong></td>
+                  <td>wet-checks.tsx · v2.4.1</td>
+                  <td class="right num">847</td>
+                  <td class="right num">31</td>
+                  <td class="right num">2m ago</td>
+                </tr>
+                <tr>
+                  <td><span class="sev-bar bad"></span><strong>NetworkError: photo upload aborted (S3 503)</strong></td>
+                  <td>photo-uploader · v2.4.1</td>
+                  <td class="right num">218</td>
+                  <td class="right num">18</td>
+                  <td class="right num">4m ago</td>
+                </tr>
+                <tr>
+                  <td><span class="sev-bar bad"></span><strong>SyncConflict: work_order updated_at mismatch</strong></td>
+                  <td>sw.ts · offline queue</td>
+                  <td class="right num">94</td>
+                  <td class="right num">12</td>
+                  <td class="right num">11m ago</td>
+                </tr>
+                <tr>
+                  <td><span class="sev-bar warn"></span><strong>Slow PDF render &gt; 8s (invoice)</strong></td>
+                  <td>/api/invoices/render</td>
+                  <td class="right num">63</td>
+                  <td class="right num">9</td>
+                  <td class="right num">22m ago</td>
+                </tr>
+                <tr>
+                  <td><span class="sev-bar warn"></span><strong>GIS tile load timeout</strong></td>
+                  <td>site-maps.tsx · Mapbox</td>
+                  <td class="right num">41</td>
+                  <td class="right num">7</td>
+                  <td class="right num">31m ago</td>
+                </tr>
+                <tr>
+                  <td><span class="sev-bar info"></span><strong>401 from Stripe webhook (retried OK)</strong></td>
+                  <td>billing-webhook</td>
+                  <td class="right num">7</td>
+                  <td class="right num">—</td>
+                  <td class="right num">1h ago</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Recent events feed -->
+          <div class="card span-5">
+            <div class="card-head">
+              <h3>Recent critical events</h3>
+              <a class="link">Open audit log →</a>
+            </div>
+            <div class="feed">
+              <div class="feed-item">
+                <div class="feed-icon crit">!</div>
+                <div class="feed-body">
+                  <div class="title">P2 incident opened — photo upload failure rate</div>
+                  <div class="meta">11:42 AM · auto-detected · 3 companies impacted</div>
+                </div>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon bad">×</div>
+                <div class="feed-body">
+                  <div class="title">New error cluster: zoneId TypeError</div>
+                  <div class="meta">11:31 AM · regression vs. v2.4.0 · Wet Checks</div>
+                </div>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon warn">⚠</div>
+                <div class="feed-body">
+                  <div class="title">Green Valley sync queue &gt; 50 for 1h</div>
+                  <div class="meta">11:18 AM · 14 stuck work orders</div>
+                </div>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon info">i</div>
+                <div class="feed-body">
+                  <div class="title">Deployed v2.4.1 to production</div>
+                  <div class="meta">11:02 AM · Randy · auto-rollback armed</div>
+                </div>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon ok">✓</div>
+                <div class="feed-body">
+                  <div class="title">Stripe webhook recovered</div>
+                  <div class="meta">10:38 AM · 7 events retried successfully</div>
+                </div>
+              </div>
+              <div class="feed-item">
+                <div class="feed-icon warn">⚠</div>
+                <div class="feed-body">
+                  <div class="title">Brittany Cole — 14 failed sign-in attempts</div>
+                  <div class="meta">10:12 AM · Blue Sky Landscaping · auto-locked</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Domain health tiles (IrrigoPro-specific) -->
+          <div class="card span-12">
+            <div class="card-head">
+              <div>
+                <h3>IrrigoPro operational health</h3>
+                <div class="sub">Domain-specific metrics that actually matter for field crews and back office</div>
+              </div>
+              <a class="link">Configure thresholds →</a>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px;">
+              <div class="card" style="box-shadow:none;">
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Photo upload success</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">86.2%</div>
+                <span class="badge bad">below 99% target</span>
+              </div>
+              <div class="card" style="box-shadow:none;">
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Wet checks synced</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">99.1%</div>
+                <span class="badge ok">healthy</span>
+              </div>
+              <div class="card" style="box-shadow:none;">
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">PDF render p95</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">5.8s</div>
+                <span class="badge warn">target &lt; 3s</span>
+              </div>
+              <div class="card" style="box-shadow:none;">
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Invoice gen failures</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">3</div>
+                <span class="badge warn">last 24h</span>
+              </div>
+              <div class="card" style="box-shadow:none;">
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Offline sessions</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">42</div>
+                <span class="badge info">14 still queued</span>
+              </div>
+              <div class="card" style="box-shadow:none;">
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Map tile errors</div>
+                <div style="font-size:20px;font-weight:700;margin-top:4px;">41</div>
+                <span class="badge warn">Mapbox 429s</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ============ CRASHES PANEL ============ -->
+      <div class="panel" id="panel-crashes">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Crashes &amp; errors</h3>
+              <div class="sub">Grouped by fingerprint · resolve, mute, or assign clusters</div>
+            </div>
+            <div class="actions">
+              <button class="btn">Mute</button>
+              <button class="btn">Assign</button>
+              <button class="btn primary">Resolve</button>
+            </div>
+          </div>
+          <div class="filter-row">
+            <input class="search" placeholder="Search errors, files, stack traces, user IDs…" />
+            <select class="select"><option>All severities</option><option>Critical</option><option>Error</option><option>Warning</option></select>
+            <select class="select"><option>All companies</option><option>Green Valley</option><option>Blue Sky</option></select>
+            <select class="select"><option>All versions</option><option>v2.4.1</option><option>v2.4.0</option></select>
+            <select class="select"><option>Status: open</option><option>Muted</option><option>Resolved</option></select>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>Error</th>
+                <th>Component / version</th>
+                <th>Companies</th>
+                <th class="right">Events</th>
+                <th class="right">Users</th>
+                <th>First seen</th>
+                <th>Last seen</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr onclick="openDrawer('crash')">
+                <td><span class="sev-bar crit"></span></td>
+                <td><strong>TypeError: Cannot read 'zoneId' of undefined</strong><br/><span style="color:var(--muted);font-size:12px">at WetChecksPage.handleZoneLeak (wet-checks.tsx:184)</span></td>
+                <td>wet-checks.tsx<br/><span style="color:var(--muted);font-size:11px">v2.4.1</span></td>
+                <td>3 cos</td>
+                <td class="right num">847</td>
+                <td class="right num">31</td>
+                <td>11:31 AM</td>
+                <td>2m ago</td>
+                <td><span class="badge crit">NEW · REGRESSION</span></td>
+              </tr>
+              <tr>
+                <td><span class="sev-bar bad"></span></td>
+                <td><strong>NetworkError: photo upload aborted</strong><br/><span style="color:var(--muted);font-size:12px">S3 503 Slow Down · photo-uploader.ts</span></td>
+                <td>photo-uploader<br/><span style="color:var(--muted);font-size:11px">v2.4.1</span></td>
+                <td>3 cos</td>
+                <td class="right num">218</td>
+                <td class="right num">18</td>
+                <td>9:14 AM</td>
+                <td>4m ago</td>
+                <td><span class="badge bad">OPEN</span></td>
+              </tr>
+              <tr>
+                <td><span class="sev-bar bad"></span></td>
+                <td><strong>SyncConflict: updated_at mismatch (work_order)</strong><br/><span style="color:var(--muted);font-size:12px">CRDT merge fallback at sw.ts:412</span></td>
+                <td>sw.ts (service worker)<br/><span style="color:var(--muted);font-size:11px">v2.4.0+</span></td>
+                <td>5 cos</td>
+                <td class="right num">94</td>
+                <td class="right num">12</td>
+                <td>Yesterday</td>
+                <td>11m ago</td>
+                <td><span class="badge warn">ASSIGNED · Randy</span></td>
+              </tr>
+              <tr>
+                <td><span class="sev-bar warn"></span></td>
+                <td><strong>Slow PDF render &gt; 8s</strong><br/><span style="color:var(--muted);font-size:12px">/api/invoices/render · puppeteer cold start</span></td>
+                <td>invoice-render<br/><span style="color:var(--muted);font-size:11px">api v1.18</span></td>
+                <td>4 cos</td>
+                <td class="right num">63</td>
+                <td class="right num">9</td>
+                <td>3 days ago</td>
+                <td>22m ago</td>
+                <td><span class="badge muted">SNOOZED</span></td>
+              </tr>
+              <tr>
+                <td><span class="sev-bar warn"></span></td>
+                <td><strong>GIS tile load timeout (Mapbox 429)</strong><br/><span style="color:var(--muted);font-size:12px">site-maps.tsx · rate limit on free tier</span></td>
+                <td>site-maps.tsx<br/><span style="color:var(--muted);font-size:11px">v2.4.1</span></td>
+                <td>2 cos</td>
+                <td class="right num">41</td>
+                <td class="right num">7</td>
+                <td>Last week</td>
+                <td>31m ago</td>
+                <td><span class="badge muted">MUTED · known</span></td>
+              </tr>
+              <tr>
+                <td><span class="sev-bar info"></span></td>
+                <td><strong>ChunkLoadError: failed to fetch /assets/index-*.js</strong></td>
+                <td>vite chunk<br/><span style="color:var(--muted);font-size:11px">v2.4.1</span></td>
+                <td>6 cos</td>
+                <td class="right num">22</td>
+                <td class="right num">14</td>
+                <td>11:08 AM</td>
+                <td>45m ago</td>
+                <td><span class="badge info">POST-DEPLOY</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ COMPANIES PANEL ============ -->
+      <div class="panel" id="panel-companies">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Per-company health</h3>
+              <div class="sub">Health score blends error rate, sync lag, photo upload success, active session %</div>
+            </div>
+            <div class="actions">
+              <input class="search" placeholder="Search companies…" style="min-width:240px"/>
+              <select class="select"><option>All plans</option><option>Pro</option><option>Basic</option></select>
+              <select class="select"><option>Sort: health ↑</option><option>Errors</option><option>Last activity</option></select>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Plan</th>
+                <th>Health</th>
+                <th class="right">Active now</th>
+                <th class="right">Users</th>
+                <th class="right">Errors 24h</th>
+                <th class="right">Sync queue</th>
+                <th class="right">Photo upload</th>
+                <th class="right">Storage</th>
+                <th>App version</th>
+                <th>Last activity</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr onclick="openDrawer('company')">
+                <td><strong>Green Valley Irrigation</strong><br/><span style="color:var(--muted);font-size:11px">CO · 8 techs</span></td>
+                <td><span class="badge muted">Pro</span></td>
+                <td><div class="score"><div class="score-bar bad"><span style="width:42%"></span></div><span class="score-num">42</span></div></td>
+                <td class="right num">6</td>
+                <td class="right num">22</td>
+                <td class="right num" style="color:var(--bad);font-weight:600">412</td>
+                <td class="right num" style="color:var(--bad);font-weight:600">38 ▲</td>
+                <td class="right num">71%</td>
+                <td class="right num">8.4 GB</td>
+                <td>v2.4.1</td>
+                <td>2 min ago</td>
+              </tr>
+              <tr>
+                <td><strong>Blue Sky Landscaping</strong><br/><span style="color:var(--muted);font-size:11px">AZ · 14 techs</span></td>
+                <td><span class="badge muted">Pro</span></td>
+                <td><div class="score"><div class="score-bar warn"><span style="width:68%"></span></div><span class="score-num">68</span></div></td>
+                <td class="right num">11</td>
+                <td class="right num">28</td>
+                <td class="right num">47</td>
+                <td class="right num">12</td>
+                <td class="right num">94%</td>
+                <td class="right num">14.1 GB</td>
+                <td>v2.4.1</td>
+                <td>just now</td>
+              </tr>
+              <tr>
+                <td><strong>Desert Bloom Services</strong><br/><span style="color:var(--muted);font-size:11px">NV · 6 techs</span></td>
+                <td><span class="badge muted">Basic</span></td>
+                <td><div class="score"><div class="score-bar warn"><span style="width:71%"></span></div><span class="score-num">71</span></div></td>
+                <td class="right num">3</td>
+                <td class="right num">12</td>
+                <td class="right num">18</td>
+                <td class="right num">4</td>
+                <td class="right num">98%</td>
+                <td class="right num">3.2 GB</td>
+                <td>v2.4.0</td>
+                <td>14 min ago</td>
+              </tr>
+              <tr>
+                <td><strong>Pacific Greens Co.</strong><br/><span style="color:var(--muted);font-size:11px">CA · 32 techs</span></td>
+                <td><span class="badge muted">Pro</span></td>
+                <td><div class="score"><div class="score-bar"><span style="width:88%"></span></div><span class="score-num">88</span></div></td>
+                <td class="right num">28</td>
+                <td class="right num">58</td>
+                <td class="right num">14</td>
+                <td class="right num">2</td>
+                <td class="right num">99.6%</td>
+                <td class="right num">42.7 GB</td>
+                <td>v2.4.1</td>
+                <td>just now</td>
+              </tr>
+              <tr>
+                <td><strong>Sunbelt Sprinklers</strong><br/><span style="color:var(--muted);font-size:11px">TX · 19 techs</span></td>
+                <td><span class="badge muted">Pro</span></td>
+                <td><div class="score"><div class="score-bar"><span style="width:92%"></span></div><span class="score-num">92</span></div></td>
+                <td class="right num">17</td>
+                <td class="right num">41</td>
+                <td class="right num">8</td>
+                <td class="right num">1</td>
+                <td class="right num">99.8%</td>
+                <td class="right num">21.3 GB</td>
+                <td>v2.4.1</td>
+                <td>1 min ago</td>
+              </tr>
+              <tr>
+                <td><strong>Heritage Irrigation Group</strong><br/><span style="color:var(--muted);font-size:11px">FL · 9 techs</span></td>
+                <td><span class="badge muted">Basic</span></td>
+                <td><div class="score"><div class="score-bar"><span style="width:95%"></span></div><span class="score-num">95</span></div></td>
+                <td class="right num">4</td>
+                <td class="right num">15</td>
+                <td class="right num">2</td>
+                <td class="right num">0</td>
+                <td class="right num">100%</td>
+                <td class="right num">5.8 GB</td>
+                <td>v2.4.1</td>
+                <td>8 min ago</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ USERS PANEL ============ -->
+      <div class="panel" id="panel-users">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Per-user health</h3>
+              <div class="sub">Surfaces the people most likely to call support before they do</div>
+            </div>
+            <div class="actions">
+              <input class="search" placeholder="Search users…" style="min-width:240px"/>
+              <select class="select"><option>All companies</option></select>
+              <select class="select"><option>All roles</option><option>Field tech</option><option>Manager</option><option>Admin</option></select>
+              <select class="select"><option>Sort: errors ↓</option></select>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Company</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Device / OS</th>
+                <th>App version</th>
+                <th class="right">Errors 24h</th>
+                <th class="right">Sync conflicts</th>
+                <th class="right">Failed uploads</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Mike Reyes</strong><br/><span style="color:var(--muted);font-size:11px">mike.r@greenvalley.co</span></td>
+                <td>Green Valley</td>
+                <td>Field tech</td>
+                <td><span class="badge dot bad">offline · stuck</span></td>
+                <td>iPhone 13 · iOS 17.4</td>
+                <td>v2.4.0 <span class="badge warn">behind</span></td>
+                <td class="right num" style="color:var(--bad);font-weight:600">88</td>
+                <td class="right num">14</td>
+                <td class="right num">9</td>
+                <td>22 min ago</td>
+              </tr>
+              <tr>
+                <td><strong>Brittany Cole</strong><br/><span style="color:var(--muted);font-size:11px">b.cole@bluesky.com</span></td>
+                <td>Blue Sky</td>
+                <td>Admin</td>
+                <td><span class="badge dot warn">locked (auth)</span></td>
+                <td>Chrome 124 · macOS</td>
+                <td>v2.4.1</td>
+                <td class="right num">14</td>
+                <td class="right num">0</td>
+                <td class="right num">0</td>
+                <td>10 min ago</td>
+              </tr>
+              <tr>
+                <td><strong>Tom Nguyen</strong><br/><span style="color:var(--muted);font-size:11px">tom@desertbloom.us</span></td>
+                <td>Desert Bloom</td>
+                <td>Manager</td>
+                <td><span class="badge dot ok">active</span></td>
+                <td>Chrome 124 · Win 11</td>
+                <td>v2.4.1</td>
+                <td class="right num">6</td>
+                <td class="right num">2</td>
+                <td class="right num">0</td>
+                <td>just now</td>
+              </tr>
+              <tr>
+                <td><strong>Janelle Ortiz</strong><br/><span style="color:var(--muted);font-size:11px">janelle.o@pacificgreens.com</span></td>
+                <td>Pacific Greens</td>
+                <td>Field tech</td>
+                <td><span class="badge dot info">offline · syncing</span></td>
+                <td>Android · Pixel 7</td>
+                <td>v2.4.1</td>
+                <td class="right num">3</td>
+                <td class="right num">1</td>
+                <td class="right num">2</td>
+                <td>3 min ago</td>
+              </tr>
+              <tr>
+                <td><strong>Derrick James</strong><br/><span style="color:var(--muted);font-size:11px">derrick@sunbelt.tx</span></td>
+                <td>Sunbelt Sprinklers</td>
+                <td>Field tech</td>
+                <td><span class="badge dot ok">active</span></td>
+                <td>iPad · iPadOS 17</td>
+                <td>v2.4.1</td>
+                <td class="right num">1</td>
+                <td class="right num">0</td>
+                <td class="right num">0</td>
+                <td>1 min ago</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ SYNC PANEL ============ -->
+      <div class="panel" id="panel-sync">
+        <div class="grid-12">
+          <div class="card span-6">
+            <h3>Offline sync queue</h3>
+            <div class="sub">Records waiting to upload from field devices</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;">
+              <div><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Queued</div><div style="font-size:20px;font-weight:700">73</div></div>
+              <div><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Stuck &gt; 1h</div><div style="font-size:20px;font-weight:700;color:var(--bad)">14</div></div>
+              <div><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Conflicts</div><div style="font-size:20px;font-weight:700">17</div></div>
+              <div><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Avg age</div><div style="font-size:20px;font-weight:700">23m</div></div>
+            </div>
+            <table>
+              <thead><tr><th>Type</th><th>User</th><th>Age</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr><td>Wet check #4129</td><td>Mike Reyes</td><td>2h 14m</td><td><span class="badge bad">stuck · conflict</span></td></tr>
+                <tr><td>Work order #8821 photos (6)</td><td>Mike Reyes</td><td>1h 38m</td><td><span class="badge bad">photo upload fail</span></td></tr>
+                <tr><td>Wet check #4131</td><td>Janelle Ortiz</td><td>3m</td><td><span class="badge info">in progress</span></td></tr>
+                <tr><td>Billing sheet #221</td><td>Derrick James</td><td>1m</td><td><span class="badge ok">queued</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card span-6">
+            <h3>Photo upload pipeline</h3>
+            <div class="sub">S3 health and per-step success rates (last hour)</div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:8px;">
+              <div>
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Captured → device DB</div>
+                <div style="font-size:20px;font-weight:700">99.9%</div>
+              </div>
+              <div>
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Device DB → S3</div>
+                <div style="font-size:20px;font-weight:700;color:var(--bad)">81.4%</div>
+              </div>
+              <div>
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">S3 → CDN warm</div>
+                <div style="font-size:20px;font-weight:700">99.7%</div>
+              </div>
+              <div>
+                <div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">EXIF parse</div>
+                <div style="font-size:20px;font-weight:700">99.2%</div>
+              </div>
+            </div>
+            <div class="incident" style="margin-top:16px">
+              <div class="ico">!</div>
+              <div>
+                <div><strong>S3 returning 503 Slow Down</strong> — multipart uploads from Green Valley region are throttling. Suggest: enable adaptive retry on uploader.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ INTEGRATIONS PANEL ============ -->
+      <div class="panel" id="panel-integrations">
+        <div class="card">
+          <div class="card-head">
+            <h3>Third-party integrations</h3>
+            <a class="link">View status history →</a>
+          </div>
+          <table>
+            <thead><tr><th>Service</th><th>Purpose</th><th>Status</th><th class="right">Success 24h</th><th class="right">p95</th><th>Last failure</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Stripe</strong></td><td>Subscriptions &amp; invoices</td><td><span class="badge ok dot">operational</span></td><td class="right num">99.98%</td><td class="right num">320ms</td><td>1h ago (auto-recovered)</td></tr>
+              <tr><td><strong>Mapbox</strong></td><td>GIS / site maps</td><td><span class="badge warn dot">degraded</span></td><td class="right num">96.1%</td><td class="right num">1.4s</td><td>31m ago · 429s</td></tr>
+              <tr><td><strong>AWS S3</strong></td><td>Photo / file storage</td><td><span class="badge bad dot">degraded</span></td><td class="right num">81.4%</td><td class="right num">2.8s</td><td>2m ago · 503</td></tr>
+              <tr><td><strong>SendGrid</strong></td><td>Email (invoices, alerts)</td><td><span class="badge ok dot">operational</span></td><td class="right num">100%</td><td class="right num">410ms</td><td>—</td></tr>
+              <tr><td><strong>Twilio</strong></td><td>Tech SMS alerts</td><td><span class="badge ok dot">operational</span></td><td class="right num">99.7%</td><td class="right num">240ms</td><td>4h ago</td></tr>
+              <tr><td><strong>Postgres (primary)</strong></td><td>App database</td><td><span class="badge ok dot">operational</span></td><td class="right num">100%</td><td class="right num">18ms</td><td>—</td></tr>
+              <tr><td><strong>Redis</strong></td><td>Queue / cache</td><td><span class="badge ok dot">operational</span></td><td class="right num">100%</td><td class="right num">3ms</td><td>—</td></tr>
+              <tr><td><strong>Puppeteer worker</strong></td><td>PDF invoices &amp; estimates</td><td><span class="badge warn dot">slow</span></td><td class="right num">98.4%</td><td class="right num">5.8s</td><td>22m ago</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ AUDIT PANEL ============ -->
+      <div class="panel" id="panel-audit">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Audit log</h3>
+              <div class="sub">Security &amp; compliance-relevant events across all tenants</div>
+            </div>
+            <div class="actions">
+              <input class="search" placeholder="Filter (user, action, IP…)" style="min-width:260px"/>
+              <select class="select"><option>All severities</option></select>
+              <select class="select"><option>All actions</option></select>
+            </div>
+          </div>
+          <table>
+            <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Company</th><th>IP</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>11:42 AM</td><td>system</td><td>incident.open</td><td>photo_upload_failure_rate</td><td>—</td><td>—</td><td><span class="badge bad">P2</span></td></tr>
+              <tr><td>11:31 AM</td><td>Mike Reyes</td><td>wet_check.zone_leak.toggle</td><td>WC #4129</td><td>Green Valley</td><td>72.x.x.14</td><td><span class="badge bad">error</span></td></tr>
+              <tr><td>11:18 AM</td><td>system</td><td>sync.queue.threshold</td><td>tenant=greenvalley</td><td>Green Valley</td><td>—</td><td><span class="badge warn">warn</span></td></tr>
+              <tr><td>11:02 AM</td><td>Randy Mangel</td><td>deploy.production</td><td>web@2.4.1</td><td>—</td><td>104.x.x.91</td><td><span class="badge ok">ok</span></td></tr>
+              <tr><td>10:12 AM</td><td>Brittany Cole</td><td>auth.login.failed (×14)</td><td>account</td><td>Blue Sky</td><td>198.x.x.7</td><td><span class="badge bad">locked</span></td></tr>
+              <tr><td>9:48 AM</td><td>Randy Mangel</td><td>company.subscription.update</td><td>Sunbelt → Pro</td><td>Sunbelt</td><td>104.x.x.91</td><td><span class="badge ok">ok</span></td></tr>
+              <tr><td>9:14 AM</td><td>system</td><td>integration.s3.error</td><td>multipart_upload</td><td>—</td><td>—</td><td><span class="badge bad">503</span></td></tr>
+              <tr><td>8:51 AM</td><td>Tom Nguyen</td><td>parts.price.update</td><td>SKU RB-5004</td><td>Desert Bloom</td><td>71.x.x.42</td><td><span class="badge ok">ok</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- ===== Drawer: Crash detail ===== -->
+<div class="drawer-overlay" id="overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer-crash">
+  <div class="drawer-head">
+    <h2>TypeError: Cannot read 'zoneId' of undefined</h2>
+    <button class="btn" onclick="closeDrawer()">Close</button>
+  </div>
+  <div class="drawer-body">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span class="badge crit">NEW · REGRESSION</span>
+      <span class="badge muted">v2.4.1</span>
+      <span class="badge muted">wet-checks.tsx</span>
+      <span class="badge muted">3 companies · 31 users</span>
+    </div>
+    <div class="stat-row">
+      <div class="card"><div class="label">Events</div><div class="value">847</div></div>
+      <div class="card"><div class="label">Users</div><div class="value">31</div></div>
+      <div class="card"><div class="label">First seen</div><div class="value">11:31 AM</div></div>
+      <div class="card"><div class="label">Last seen</div><div class="value">2m ago</div></div>
+    </div>
+
+    <h3 style="margin-top:0">Stack trace</h3>
+    <div class="stack">
+<span class="red">TypeError: Cannot read properties of undefined (reading 'zoneId')</span>
+    at <span class="blue">WetChecksPage.handleZoneLeak</span> (wet-checks.tsx:184:21)
+    at <span class="blue">onClick</span> (wet-checks.tsx:312:9)
+    at <span class="blue">HTMLButtonElement.invokeGuardedCallback</span> (react-dom.js:4053:18)
+    at <span class="dim">[…6 more frames]</span>
+    </div>
+
+    <h3 style="margin-top:18px">Recent breadcrumbs (1 of 31 sessions)</h3>
+    <div class="feed">
+      <div class="feed-item"><div class="feed-icon info">i</div><div class="feed-body"><div class="title">navigation → /wet-checks</div><div class="meta">2:14:02 PM · Mike Reyes · Green Valley</div></div></div>
+      <div class="feed-item"><div class="feed-icon info">i</div><div class="feed-body"><div class="title">api GET /api/wet-checks/4129 · 200</div><div class="meta">2:14:03 PM · 184ms</div></div></div>
+      <div class="feed-item"><div class="feed-icon warn">⚠</div><div class="feed-body"><div class="title">zones[] response missing zoneId on item 2</div><div class="meta">2:14:03 PM · client warning</div></div></div>
+      <div class="feed-item"><div class="feed-icon bad">×</div><div class="feed-body"><div class="title">click → "Mark zone leak" → exception</div><div class="meta">2:14:11 PM</div></div></div>
+    </div>
+
+    <h3 style="margin-top:18px">Suggested fix</h3>
+    <div class="card" style="background:#f0f9ff;border-color:#bae6fd">
+      <div style="font-size:13px"><strong>Likely cause:</strong> v2.4.1 added a new <code>zones</code> response shape but <code>handleZoneLeak</code> still indexes by old position. Add a null-safe guard at <code>wet-checks.tsx:184</code> or filter <code>zones.filter(z =&gt; z?.zoneId)</code> before render.</div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn">Mute</button>
+      <button class="btn">Assign to me</button>
+      <button class="btn">Create ticket</button>
+      <button class="btn primary">Resolve</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Drawer: Company detail ===== -->
+<div class="drawer" id="drawer-company">
+  <div class="drawer-head">
+    <h2>Green Valley Irrigation</h2>
+    <button class="btn" onclick="closeDrawer()">Close</button>
+  </div>
+  <div class="drawer-body">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span class="badge crit">CRITICAL · health 42</span>
+      <span class="badge muted">Pro plan</span>
+      <span class="badge muted">CO · 8 techs</span>
+      <span class="badge muted">since Jan 2025</span>
+    </div>
+    <div class="stat-row">
+      <div class="card"><div class="label">Active now</div><div class="value">6</div></div>
+      <div class="card"><div class="label">Errors 24h</div><div class="value" style="color:var(--bad)">412</div></div>
+      <div class="card"><div class="label">Sync queue</div><div class="value" style="color:var(--bad)">38</div></div>
+      <div class="card"><div class="label">Photo OK%</div><div class="value">71%</div></div>
+    </div>
+
+    <h3>Top issues for this company</h3>
+    <div class="feed">
+      <div class="feed-item"><div class="feed-icon crit">×</div><div class="feed-body"><div class="title">zoneId TypeError on Wet Checks</div><div class="meta">412 events · 8 users · since 11:31 AM</div></div></div>
+      <div class="feed-item"><div class="feed-icon bad">×</div><div class="feed-body"><div class="title">Photo uploads failing (S3 503)</div><div class="meta">86 events · 6 users</div></div></div>
+      <div class="feed-item"><div class="feed-icon warn">⚠</div><div class="feed-body"><div class="title">Sync queue stuck for 14 records &gt; 1h</div><div class="meta">3 users affected</div></div></div>
+    </div>
+
+    <h3 style="margin-top:18px">Users in this company</h3>
+    <table>
+      <thead><tr><th>User</th><th>Status</th><th>Version</th><th class="right">Errors</th><th>Last seen</th></tr></thead>
+      <tbody>
+        <tr><td>Mike Reyes</td><td><span class="badge bad">stuck</span></td><td>v2.4.0</td><td class="right num">88</td><td>22m ago</td></tr>
+        <tr><td>Carla Tran</td><td><span class="badge ok">active</span></td><td>v2.4.1</td><td class="right num">14</td><td>1m ago</td></tr>
+        <tr><td>Sam Whitlock</td><td><span class="badge ok">active</span></td><td>v2.4.1</td><td class="right num">11</td><td>just now</td></tr>
+        <tr><td>Ana López</td><td><span class="badge info">offline · syncing</span></td><td>v2.4.1</td><td class="right num">9</td><td>6m ago</td></tr>
+        <tr><td>Pete Hahn</td><td><span class="badge muted">offline</span></td><td>v2.4.0</td><td class="right num">3</td><td>2h ago</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="margin-top:18px">Resource usage</h3>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      <div class="card"><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Storage</div><div style="font-size:18px;font-weight:700">8.4 GB / 25 GB</div></div>
+      <div class="card"><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">API calls (24h)</div><div style="font-size:18px;font-weight:700">42,118</div></div>
+      <div class="card"><div class="label" style="font-size:11px;color:var(--muted);text-transform:uppercase">Last invoice</div><div style="font-size:18px;font-weight:700">$249 · paid</div></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn">Email admin</button>
+      <button class="btn">Open as company admin</button>
+      <button class="btn">Throttle API</button>
+      <button class="btn primary">Force version upgrade</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Tabs
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+    });
+  });
+
+  // Bars (fake spike toward right)
+  const bars = document.getElementById('bars1');
+  const pattern = [12,14,11,9,8,10,15,18,20,24,28,30,34,30,28,26,32,40,52,68,85,72,60, 95];
+  const errs    = [ 1, 1, 0, 1, 1, 0, 1, 2, 2, 3, 4, 4, 3, 5, 4, 5, 7, 9,14,18,28,22,18, 34];
+  pattern.forEach((h, i) => {
+    const b = document.createElement('div');
+    b.style.height = (h * 1.6) + 'px';
+    bars.appendChild(b);
+    const e = document.createElement('div');
+    e.className = 'err';
+    e.style.height = (errs[i] * 4) + 'px';
+    e.style.position = 'absolute';
+    e.style.bottom = '24px';
+    e.style.width = '8px';
+    e.style.left = `calc(${(i / pattern.length) * 100}% + 4px)`;
+    document.querySelector('.chart-area').appendChild(e);
+  });
+
+  // Drawer
+  function openDrawer(which) {
+    document.getElementById('overlay').classList.add('open');
+    if (which === 'crash') document.getElementById('drawer-crash').classList.add('open');
+    if (which === 'company') document.getElementById('drawer-company').classList.add('open');
+  }
+  function closeDrawer() {
+    document.getElementById('overlay').classList.remove('open');
+    document.getElementById('drawer-crash').classList.remove('open');
+    document.getElementById('drawer-company').classList.remove('open');
+  }
+</script>
+
+</body>
+</html>
