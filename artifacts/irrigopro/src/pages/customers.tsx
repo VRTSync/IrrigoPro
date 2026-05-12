@@ -16,6 +16,7 @@ import { CustomerForm } from "@/components/customer-form";
 import { CustomerProfile } from "@/components/customers/customer-profile";
 import { CustomerSiteMaps } from "@/components/customers/customer-site-maps";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
+import { displayCustomerAddress } from "@/lib/customer-address";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -254,12 +255,15 @@ export default function Customers() {
                         </div>
                         <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
                       </div>
-                      {customer.address && (
-                        <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-sm text-slate-500">
-                          <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate">{customer.address}</span>
-                        </div>
-                      )}
+                      {(() => {
+                        const addr = displayCustomerAddress(customer);
+                        return addr ? (
+                          <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-sm text-slate-500">
+                            <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{addr}</span>
+                          </div>
+                        ) : null;
+                      })()}
                     </Card>
                   ))}
                 </div>
@@ -327,7 +331,7 @@ export default function Customers() {
                                   </td>
                                 )}
                                 <td className="px-6 py-4 whitespace-nowrap">
-                                  <div className="text-sm text-gray-900">{customer.address}</div>
+                                  <div className="text-sm text-gray-900">{displayCustomerAddress(customer)}</div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                   <div className="flex items-center space-x-2 justify-end">

@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { insertCustomerSchema } from "@workspace/db/schema";
 import type { Customer, User } from "@workspace/db/schema";
+import { composeStructuredAddress } from "@/lib/customer-address";
 
 const customerFormSchema = insertCustomerSchema.extend({
   companyId: z.number().min(1, "Company ID is required"),
@@ -31,9 +32,29 @@ const customerFormSchema = insertCustomerSchema.extend({
   contractEndDate: z.string().optional(),
   notes: z.string().optional(),
   branches: z.array(z.string()).optional(),
+  street: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
+  country: z.string().optional(),
 });
 
 type CustomerFormData = z.infer<typeof customerFormSchema>;
+
+function AddressPreview({ form }: { form: ReturnType<typeof useForm<CustomerFormData>> }) {
+  const street = form.watch("street");
+  const city = form.watch("city");
+  const state = form.watch("state");
+  const zip = form.watch("zip");
+  const country = form.watch("country");
+  const preview = composeStructuredAddress({ street, city, state, zip, country });
+  return (
+    <div className="rounded-md bg-white border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-600">
+      <span className="font-semibold text-gray-700">Preview:</span>{" "}
+      {preview ? <span data-testid="customer-address-preview">{preview}</span> : <span className="italic text-gray-400">Address parts will preview here.</span>}
+    </div>
+  );
+}
 
 const CONTRACT_TYPES = ["standard", "premium", "commercial", "residential"] as const;
 type ContractType = typeof CONTRACT_TYPES[number];
@@ -60,6 +81,11 @@ function customerToFormValues(customer: Customer): CustomerFormData {
     email: customer.email,
     phone: customer.phone || "",
     address: customer.address || "",
+    street: customer.street || "",
+    city: customer.city || "",
+    state: customer.state || "",
+    zip: customer.zip || "",
+    country: customer.country || "",
     companyId: customer.companyId,
     totalControllers: customer.totalControllers || 1,
     contractType: toContractType(customer.contractType),
@@ -115,6 +141,11 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
       email: "",
       phone: "",
       address: "",
+      street: "",
+      city: "",
+      state: "",
+      zip: "",
+      country: "",
       companyId: companyId || currentUser?.companyId || 3,
       totalControllers: 1,
       contractType: "standard",
@@ -163,9 +194,16 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
     mutationFn: async (data: CustomerFormData) => {
       const endpoint = customer ? `/api/customers/${customer.id}` : "/api/customers";
       const method = customer ? "PUT" : "POST";
-      
+
+      // Task #347 — when the user has filled in any structured address part,
+      // also keep the legacy single-line `address` in sync so older code
+      // paths (PDFs, QuickBooks sync, list rows) keep working.
+      const structured = composeStructuredAddress(data);
+      const addressForServer = structured || (data.address || "");
+
       return apiRequest(endpoint, method, {
         ...data,
+        address: addressForServer,
         contractStartDate: data.contractStartDate ? new Date(data.contractStartDate).toISOString() : null,
         contractEndDate: data.contractEndDate ? new Date(data.contractEndDate).toISOString() : null,
       });
@@ -310,19 +348,86 @@ export function CustomerForm({ customer, trigger }: CustomerFormProps) {
                       </FormItem>
                     )}
                   />
+                </div>
+
+                {/* Structured address (Task #347) — better geocoding + search.
+                    The legacy single-line `address` is hidden but still
+                    populated from these parts on submit for back-compat. */}
+                <div className="rounded-lg border bg-gray-50 p-4 space-y-4">
+                  <div className="text-sm font-medium text-gray-700">Address</div>
                   <FormField
                     control={form.control}
-                    name="address"
+                    name="street"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Address</FormLabel>
+                        <FormLabel className="text-xs">Street</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter address" {...field} value={field.value || ""} />
+                          <Input placeholder="123 Main St" {...field} value={field.value || ""} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="city"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">City</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Springfield" {...field} value={field.value || ""} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="state"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">State</FormLabel>
+                            <FormControl>
+                              <Input placeholder="IL" maxLength={32} {...field} value={field.value || ""} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="zip"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">ZIP / Postal</FormLabel>
+                            <FormControl>
+                              <Input placeholder="62704" {...field} value={field.value || ""} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name="country"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs">Country</FormLabel>
+                        <FormControl>
+                          <Input placeholder="USA" {...field} value={field.value || ""} />
+                        </FormControl>
+                        <FormDescription className="text-xs">
+                          Optional — defaults to USA when geocoding the address.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <AddressPreview form={form} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField

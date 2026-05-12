@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import type { Customer } from "@workspace/db/schema";
 import { CustomerForm } from "@/components/customer-form";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
+import { displayCustomerAddress } from "@/lib/customer-address";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -267,7 +268,7 @@ export default function AdminCustomers() {
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">{customer.address}</div>
+                            <div className="text-sm text-gray-900">{displayCustomerAddress(customer)}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-center">
                             <div className="flex items-center justify-center gap-2">

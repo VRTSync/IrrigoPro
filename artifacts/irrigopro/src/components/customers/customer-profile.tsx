@@ -31,6 +31,7 @@ import { PropertyNotes } from "./property-notes";
 import { PropertyBoundarySection } from "./property-boundary";
 import { BillingNotes } from "./billing-notes";
 import { CustomerSiteMaps } from "./customer-site-maps";
+import { displayCustomerAddress } from "@/lib/customer-address";
 
 interface CustomerProfileProps {
   customer: Customer;
@@ -171,14 +172,17 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                         <span className="font-medium text-sm sm:text-base">{customer.phone}</span>
                       </div>
                     )}
-                    {customer.address && (
-                      <div className="flex items-start gap-2 sm:gap-3 text-gray-700">
-                        <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
-                          <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600" />
+                    {(() => {
+                      const addr = displayCustomerAddress(customer);
+                      return addr ? (
+                        <div className="flex items-start gap-2 sm:gap-3 text-gray-700">
+                          <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                            <MapPin className="w-3 h-3 sm:w-4 sm:h-4 text-purple-600" />
+                          </div>
+                          <span className="font-medium text-sm sm:text-base break-words">{addr}</span>
                         </div>
-                        <span className="font-medium text-sm sm:text-base break-words">{customer.address}</span>
-                      </div>
-                    )}
+                      ) : null;
+                    })()}
                     {/* Site Maps Button - only for roles with site map access */}
                     {(userRole === 'company_admin' || userRole === 'irrigation_manager' || userRole === 'field_tech') && (
                       <div className="mt-3">

@@ -56,6 +56,16 @@ export const customers = pgTable("customers", {
   email: text("email").notNull(),
   phone: text("phone"),
   address: text("address"),
+  // Structured address parts (Task #347). Optional/back-compat: legacy
+  // customers may only have the single-line `address` above. New /
+  // edited records populate these so geocoding and search can rely on
+  // a consistent shape. `street` is the street line (e.g. "123 Main St,
+  // Apt 4"); `country` defaults to "US" but stored only when provided.
+  street: text("street"),
+  city: text("city"),
+  state: text("state"),
+  zip: text("zip"),
+  country: text("country"),
   // Irrigation system details
   totalControllers: integer("total_controllers").default(1), // Number of controllers (1-26)
   // Contract-based billing rates
