@@ -125,7 +125,10 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
           status: "open",
           trigger: "auto",
           summary: result.summary,
-          runbookUrl: rule.runbookUrl,
+          // Per-instance runbook (e.g. service-specific for
+          // integration_down) takes precedence over the rule-level
+          // fallback so the banner's "Runbook" link is meaningful.
+          runbookUrl: result.runbookUrl ?? rule.runbookUrl,
           startedAt: now,
           lastFiringAt: now,
           affectedCompanies: result.affectedCompanies ?? [],
@@ -152,6 +155,7 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
         .set({
           status: "open",
           summary: result.summary,
+          runbookUrl: result.runbookUrl ?? live.runbookUrl ?? rule.runbookUrl,
           lastFiringAt: now,
           cleanSinceAt: null,
           mitigatedAt: null,
@@ -177,6 +181,7 @@ async function evaluateRule(rule: Rule, now: Date): Promise<void> {
         .update(incidents)
         .set({
           summary: result.summary,
+          runbookUrl: result.runbookUrl ?? live.runbookUrl ?? rule.runbookUrl,
           lastFiringAt: now,
           cleanSinceAt: null,
           fireCount: (live.fireCount ?? 1) + 1,

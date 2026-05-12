@@ -369,6 +369,24 @@ import { registerCustomerRoutes } from "./customer-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
 import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
 import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
+import {
+  companyThrottleMiddleware,
+  loadCompanyThrottles,
+  setCompanyThrottle,
+  clearCompanyThrottle,
+  listActiveThrottles,
+  checkAuthenticatedThrottle,
+} from "../lib/company-throttle";
+import {
+  mintImpersonationToken,
+  verifyImpersonationToken,
+  revokeImpersonationToken,
+} from "../lib/impersonation-token";
+import {
+  INTEGRATION_CATALOG,
+  INTEGRATION_CATALOG_BY_SERVICE,
+  getIntegrationMeta,
+} from "../lib/integration-catalog";
 import { logger } from "../lib/logger";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
@@ -745,6 +763,42 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     let userRole: any;
     let userCompanyId: any;
 
+    // Task #554 — server-bound impersonation. The frontend obtains a
+    // signed token from `/impersonate/start` and sends it via the
+    // `x-impersonation-token` header. We verify the HMAC, then swap the
+    // effective identity to the target user while remembering the
+    // super-admin actor on the request so audit emitters can record
+    // the bracket.
+    const impHeader = req.headers['x-impersonation-token'];
+    const impToken = typeof impHeader === 'string' ? impHeader : Array.isArray(impHeader) ? impHeader[0] : undefined;
+    if (impToken) {
+      const claims = verifyImpersonationToken(impToken);
+      if (!claims) {
+        res.status(401).json({ message: "Impersonation session expired — please return to super admin and start over." });
+        return;
+      }
+      const actor = await storage.getUser(claims.actorUserId);
+      if (!actor || actor.role !== 'super_admin' || !actor.isActive) {
+        res.status(401).json({ message: "Impersonation actor no longer authorized." });
+        return;
+      }
+      const target = await storage.getUser(claims.targetUserId);
+      if (!target || !target.isActive || target.role === 'super_admin') {
+        res.status(401).json({ message: "Impersonation target unavailable." });
+        return;
+      }
+      req.authenticatedUserId = target.id;
+      req.authenticatedUserRole = target.role;
+      req.authenticatedUserCompanyId = target.companyId ?? null;
+      req.impersonatorUserId = actor.id;
+      req.impersonationToken = impToken;
+      // Throttle still applies to impersonated traffic so a stuck
+      // automation can't bypass the cap by impersonating.
+      if (!checkAuthenticatedThrottle(req, res)) return;
+      next();
+      return;
+    }
+
     // Step 1 — bearer-token path (mobile clients). Checked FIRST so an
     // attacker cannot strip the bearer header and fall through to the
     // legacy header bypass. If a bearer header IS present but invalid
@@ -772,6 +826,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       req.authenticatedUserId = user.id;
       req.authenticatedUserRole = user.role;
       req.authenticatedUserCompanyId = user.companyId ?? null;
+      if (!checkAuthenticatedThrottle(req, res)) return;
       next();
       return;
     }
@@ -847,7 +902,8 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     req.authenticatedUserId = parsedUserId;
     req.authenticatedUserRole = userRole;
     req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId.toString()) : null;
-    
+
+    if (!checkAuthenticatedThrottle(req, res)) return;
     next();
   } catch (error) {
     console.error('Authentication error:', {
@@ -958,6 +1014,14 @@ import {
 import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  // Task #554 — the per-tenant emergency throttle is now enforced from
+  // inside `requireAuthentication` so the company id is the
+  // server-verified `req.authenticatedUserCompanyId` (bearer / session /
+  // opt-in header path), never the raw `x-user-company-id` header. The
+  // legacy global mount is intentionally a no-op shim — see
+  // `companyThrottleMiddleware` in `lib/company-throttle.ts`.
+  void companyThrottleMiddleware;
 
   // Task #552 — capture http.5xx and http.slow as app_events. Mounted
   // first so it wraps every /api/* route registered below; the
@@ -1078,10 +1142,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ip = evt.ip ?? (req ? (req.ip || (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() || null) : null);
       const userAgent = evt.userAgent ?? (req ? ((req.headers["user-agent"] as string | undefined) ?? null) : null);
+      // Task #554 — when the request is running under impersonation,
+      // attribute the action to the target user (so business data
+      // stays consistent) but keep the super-admin actor in details
+      // so the audit trail shows "performed by X impersonating Y".
+      const impersonatorId = (req as any)?.impersonatorUserId ?? null;
+      let details = evt.details ?? null;
+      if (impersonatorId) {
+        details = { ...(details ?? {}), impersonatorUserId: impersonatorId };
+      }
       await db.insert(auditLog).values({
         occurredAt: evt.occurredAt ?? new Date(),
         actorUserId: evt.actorUserId ?? null,
-        actorLabel: evt.actorLabel ?? null,
+        actorLabel: evt.actorLabel ?? (impersonatorId ? `impersonated by user ${impersonatorId}` : null),
         actorRole: evt.actorRole ?? null,
         actorCompanyId: evt.actorCompanyId ?? null,
         actionType: evt.actionType ?? "other",
@@ -1090,7 +1163,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetType: evt.targetType ?? null,
         targetId: evt.targetId ?? null,
         summary: evt.summary ?? null,
-        details: evt.details ?? null,
+        details,
         ip: ip ? String(ip).slice(0, 64) : null,
         userAgent: userAgent ? String(userAgent).slice(0, 512) : null,
         sessionId: evt.sessionId ?? null,
@@ -2880,6 +2953,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // by a pg_try_advisory_lock so only one replica drives the loop.
   startIncidentRunner();
 
+  // Task #554 — prime the per-company throttle cache. The middleware
+  // itself was mounted at the top of the file (before route handlers)
+  // so it gates every /api/* request once auth has populated
+  // req.authenticatedUserCompanyId.
+  void loadCompanyThrottles();
+
   // Customer-name scrubber refresh — Task #552 PII spec. Loads the
   // current set of customer names from the DB into an in-memory regex
   // used by `scrubString()` so any event payload that quotes a real
@@ -3550,6 +3629,645 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "appHealthUserDetail",
         ctx: {},
         fallbackMessage: "Couldn't load user detail — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #554 (Phase 5) — Integrations tab, impersonation, throttle,
+  // force-upgrade, user drawer actions. ─────────────────────────────────
+
+  // Catalog of monitored external integrations. Single source of
+  // truth lives in `lib/integration-catalog.ts` so the
+  // `integrationDownRule` (per-incident runbook URL) and this tab
+  // stay in lock-step.
+  const CATALOG_BY_SERVICE = INTEGRATION_CATALOG_BY_SERVICE;
+
+  // Status logic mirrors `integrationDownRule` (>5 failures of any
+  // single event name in the last 10 minutes ⇒ down). The rule groups
+  // by full event `name` (e.g. `qb.token.failed`); we replicate that
+  // by tracking `maxNameFail10m` per service. If any single name
+  // breaches the rule's threshold the service is marked down here too,
+  // so the tab and the active-incidents banner can never disagree.
+  const INTEGRATION_FAIL_THRESHOLD = 5;
+  const INTEGRATION_WINDOW_MIN = 10;
+  function deriveIntegrationStatus(maxNameFail10m: number, fail10m: number, fail1h: number): "healthy" | "degraded" | "down" {
+    if (maxNameFail10m > INTEGRATION_FAIL_THRESHOLD) return "down";
+    if (fail10m >= 1 || fail1h >= 5) return "degraded";
+    return "healthy";
+  }
+
+  app.get("/api/admin/app-health/integrations", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      // Aggregate per service over 10m / 1h / 24h windows. Failure
+      // criteria mirror `integrationDownRule` exactly: severity error/
+      // fatal OR a `*.failed` event name. p95 latency comes from
+      // `context->>'duration_ms'`.
+      const r = await db.execute<{
+        service: string;
+        ok10m: number; fail10m: number;
+        ok1h: number; fail1h: number;
+        ok24h: number; fail24h: number;
+        lastEventAt: string | null;
+        lastFailureAt: string | null;
+        lastFailureMessage: string | null;
+        p95Ms: number | null;
+      }>(sql`
+        SELECT
+          split_part(component, '.', 1) AS service,
+          COUNT(*) FILTER (
+            WHERE occurred_at >= now() - interval '10 minutes'
+              AND NOT (severity IN ('error','fatal') OR name LIKE '%.failed')
+          )::int AS "ok10m",
+          COUNT(*) FILTER (
+            WHERE occurred_at >= now() - interval '10 minutes'
+              AND (severity IN ('error','fatal') OR name LIKE '%.failed')
+          )::int AS "fail10m",
+          COUNT(*) FILTER (
+            WHERE occurred_at >= now() - interval '1 hour'
+              AND NOT (severity IN ('error','fatal') OR name LIKE '%.failed')
+          )::int AS "ok1h",
+          COUNT(*) FILTER (
+            WHERE occurred_at >= now() - interval '1 hour'
+              AND (severity IN ('error','fatal') OR name LIKE '%.failed')
+          )::int AS "fail1h",
+          COUNT(*) FILTER (
+            WHERE occurred_at >= now() - interval '24 hours'
+              AND NOT (severity IN ('error','fatal') OR name LIKE '%.failed')
+          )::int AS "ok24h",
+          COUNT(*) FILTER (
+            WHERE occurred_at >= now() - interval '24 hours'
+              AND (severity IN ('error','fatal') OR name LIKE '%.failed')
+          )::int AS "fail24h",
+          MAX(occurred_at)::text AS "lastEventAt",
+          MAX(occurred_at) FILTER (
+            WHERE severity IN ('error','fatal') OR name LIKE '%.failed'
+          )::text AS "lastFailureAt",
+          (
+            SELECT message FROM client_errors c2
+            WHERE c2.source = 'integration'
+              AND split_part(c2.component, '.', 1) = split_part(client_errors.component, '.', 1)
+              AND (c2.severity IN ('error','fatal') OR c2.name LIKE '%.failed')
+              AND c2.occurred_at >= now() - interval '24 hours'
+            ORDER BY c2.occurred_at DESC
+            LIMIT 1
+          ) AS "lastFailureMessage",
+          (
+            percentile_cont(0.95) WITHIN GROUP (
+              ORDER BY ((context->>'duration_ms')::int)
+            ) FILTER (
+              WHERE occurred_at >= now() - interval '1 hour'
+                AND context ? 'duration_ms'
+            )
+          )::int AS "p95Ms"
+        FROM client_errors
+        WHERE source = 'integration'
+          AND component IS NOT NULL
+          AND occurred_at >= now() - interval '24 hours'
+        GROUP BY split_part(component, '.', 1)
+      `);
+      const byService = new Map<string, typeof r.rows[number]>();
+      for (const row of r.rows ?? []) {
+        if (row.service) byService.set(row.service, row);
+      }
+
+      // Per-service: maximum failure count across any single event
+      // `name` over the last 10 minutes — this is the exact quantity
+      // `integrationDownRule` thresholds against, so reusing it here
+      // guarantees rule/tab parity.
+      const maxNameRows = await db.execute<{ service: string; maxC: number }>(sql`
+        SELECT split_part(component, '.', 1) AS service,
+               MAX(c)::int AS "maxC"
+        FROM (
+          SELECT component, name, COUNT(*)::int AS c
+          FROM client_errors
+          WHERE source = 'integration'
+            AND component IS NOT NULL
+            AND occurred_at >= now() - interval '${sql.raw(String(INTEGRATION_WINDOW_MIN))} minutes'
+            AND (severity IN ('error','fatal') OR name LIKE '%.failed')
+          GROUP BY component, name
+        ) sub
+        GROUP BY split_part(component, '.', 1)
+      `);
+      const maxByService = new Map<string, number>();
+      for (const row of maxNameRows.rows ?? []) {
+        if (row.service) maxByService.set(row.service, row.maxC ?? 0);
+      }
+
+      type IntegrationOut = {
+        service: string;
+        label: string;
+        purpose: string;
+        runbookUrl: string;
+        status: "healthy" | "degraded" | "down";
+        ok10m: number; fail10m: number;
+        ok1h: number; fail1h: number;
+        ok24h: number; fail24h: number;
+        successRate24h: number | null;
+        p95Ms: number | null;
+        lastEventAt: string | null;
+        lastFailureAt: string | null;
+        lastFailureMessage: string | null;
+      };
+
+      function build(svc: string, meta: { label: string; purpose: string; runbookUrl: string }): IntegrationOut {
+        const row = byService.get(svc);
+        const fail10m = row?.fail10m ?? 0;
+        const fail1h = row?.fail1h ?? 0;
+        const ok24h = row?.ok24h ?? 0;
+        const fail24h = row?.fail24h ?? 0;
+        const total24h = ok24h + fail24h;
+        const maxNameFail10m = maxByService.get(svc) ?? 0;
+        return {
+          service: svc,
+          label: meta.label,
+          purpose: meta.purpose,
+          runbookUrl: meta.runbookUrl,
+          status: deriveIntegrationStatus(maxNameFail10m, fail10m, fail1h),
+          ok10m: row?.ok10m ?? 0,
+          fail10m,
+          ok1h: row?.ok1h ?? 0,
+          fail1h,
+          ok24h,
+          fail24h,
+          successRate24h: total24h === 0 ? null : Math.round((ok24h / total24h) * 1000) / 10,
+          p95Ms: row?.p95Ms ?? null,
+          lastEventAt: row?.lastEventAt ?? null,
+          lastFailureAt: row?.lastFailureAt ?? null,
+          lastFailureMessage: row?.lastFailureMessage ?? null,
+        };
+      }
+
+      const services: IntegrationOut[] = INTEGRATION_CATALOG.map((c) => build(c.service, c));
+      // Surface unknown services we've never enumerated above so the
+      // tab stays useful as new integrations come online.
+      for (const [svc] of byService) {
+        if (CATALOG_BY_SERVICE.has(svc)) continue;
+        services.push(build(svc, getIntegrationMeta(svc)));
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        services,
+        statusRule: {
+          ruleId: "integration_down",
+          windowMin: INTEGRATION_WINDOW_MIN,
+          failThreshold: INTEGRATION_FAIL_THRESHOLD,
+          summary: `>${INTEGRATION_FAIL_THRESHOLD} failures of any single integration event name in ${INTEGRATION_WINDOW_MIN}m`,
+        },
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIntegrations",
+        ctx: {},
+        fallbackMessage: "Couldn't load integrations — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.get("/api/admin/app-health/integrations/:service/recent-failures", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const svc = String(req.params.service).slice(0, 64).replace(/[^a-z0-9_-]/gi, "");
+      if (!svc) { res.status(400).json({ message: "Invalid service" }); return; }
+      const r = await db.execute<{
+        id: number; name: string; message: string; component: string | null;
+        statusCode: number | null; durationMs: number | null; occurredAt: string;
+      }>(sql`
+        SELECT id, name, message, component,
+               (context->>'status_code')::int AS "statusCode",
+               (context->>'duration_ms')::int AS "durationMs",
+               occurred_at::text AS "occurredAt"
+        FROM client_errors
+        WHERE source = 'integration'
+          AND (severity IN ('error','fatal') OR name LIKE '%.failed')
+          AND split_part(component, '.', 1) = ${svc}
+          AND occurred_at >= now() - interval '24 hours'
+        ORDER BY occurred_at DESC
+        LIMIT 50
+      `);
+      const meta = getIntegrationMeta(svc);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        service: svc,
+        label: meta.label,
+        purpose: meta.purpose,
+        runbookUrl: meta.runbookUrl,
+        failures: r.rows ?? [],
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthIntegrationFailures",
+        ctx: { service: req.params.service },
+        fallbackMessage: "Couldn't load recent failures — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Throttle a tenant's API rate (per company, time-bound) ────────────
+  app.post("/api/admin/app-health/companies/:id/throttle", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid company id" }); return;
+      }
+      const body = (req.body ?? {}) as { rateLimit?: unknown; durationMinutes?: unknown; clear?: unknown };
+      if (body.clear === true) {
+        await clearCompanyThrottle(id);
+        await recordAuditEvent(req, {
+          actorUserId: req.authenticatedUserId ?? null,
+          actorRole: req.authenticatedUserRole ?? null,
+          actionType: "admin",
+          action: "tenant.throttle.clear",
+          severity: "warning",
+          targetType: "company",
+          targetId: String(id),
+          summary: `Cleared API throttle for company ${id}`,
+        });
+        res.json({ ok: true, throttle: null });
+        return;
+      }
+      const rateLimit = Number(body.rateLimit);
+      const durationMinutes = Number(body.durationMinutes);
+      if (!Number.isInteger(rateLimit) || rateLimit < 1 || rateLimit > 100000) {
+        res.status(400).json({ message: "rateLimit must be 1-100000 requests/minute" }); return;
+      }
+      if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 24 * 60) {
+        res.status(400).json({ message: "durationMinutes must be 1-1440" }); return;
+      }
+      const cfg = await setCompanyThrottle(id, rateLimit, Math.floor(durationMinutes), req.authenticatedUserId ?? null);
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "admin",
+        action: "tenant.throttle.set",
+        severity: "warning",
+        targetType: "company",
+        targetId: String(id),
+        summary: `Throttled company ${id} to ${rateLimit} req/min for ${Math.floor(durationMinutes)}m`,
+        details: { rateLimit, durationMinutes: Math.floor(durationMinutes), expiresAt: new Date(cfg.expiresAt).toISOString() },
+      });
+      res.json({ ok: true, throttle: { ...cfg, expiresAt: new Date(cfg.expiresAt).toISOString() } });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthSetThrottle",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't update throttle — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.get("/api/admin/app-health/throttles", requireAuthentication, (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    const items = listActiveThrottles().map((t) => ({
+      ...t,
+      expiresAt: new Date(t.expiresAt).toISOString(),
+      setAt: new Date(t.setAt).toISOString(),
+    }));
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ throttles: items });
+  });
+
+  // ── Force minimum app version (frontend hard-reloads to drop stale clients)
+  //
+  // Two routes intentionally mount the same handler so the API
+  // contract is unambiguous:
+  //   POST /api/admin/app-health/companies/:id/force-upgrade  → company scope
+  //   POST /api/admin/app-health/force-upgrade                → global scope
+  // The body's `scope` field is still respected for back-compat, but
+  // callers (and tests) should prefer the matching URL.
+  const forceUpgradeHandler = async (req: any, res: any) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const isGlobalRoute = !req.params.id;
+      const id = isGlobalRoute ? 0 : Number(req.params.id);
+      if (!isGlobalRoute && (!Number.isInteger(id) || id <= 0)) {
+        res.status(400).json({ message: "Invalid company id" }); return;
+      }
+      const body = (req.body ?? {}) as { minAppVersion?: unknown; scope?: unknown };
+      const minAppVersion = typeof body.minAppVersion === "string" ? body.minAppVersion.slice(0, 200) : "";
+      // The route URL is authoritative — `/companies/:id/force-upgrade`
+      // is always company scope, the dedicated `/force-upgrade` route
+      // is always global. Body `scope` is honored only as a legacy
+      // back-compat (matching the previous "scope: 'global'" shape).
+      const scope = isGlobalRoute || body.scope === "global" ? "global" : "company";
+      if (!minAppVersion) { res.status(400).json({ message: "minAppVersion required" }); return; }
+      const setAt = new Date().toISOString();
+      const value = JSON.stringify({ minAppVersion, scope, companyId: scope === "company" ? id : null, setAt, setBy: req.authenticatedUserId ?? null });
+      const key = scope === "global" ? "minAppVersion:global" : `minAppVersion:company:${id}`;
+      await db.execute(sql`
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (${key}, ${value}, now())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+      `);
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "deploy",
+        action: "deploy.force_upgrade",
+        severity: "warning",
+        targetType: scope === "company" ? "company" : "global",
+        targetId: scope === "company" ? String(id) : null,
+        summary: `Forced upgrade to ${minAppVersion.slice(0, 12)} (${scope})`,
+        details: { minAppVersion, scope, companyId: scope === "company" ? id : null },
+      });
+      res.json({ ok: true, minAppVersion, scope, setAt });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthForceUpgrade",
+        ctx: { id: req.params.id ?? "global" },
+        fallbackMessage: "Couldn't force upgrade — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  };
+  app.post("/api/admin/app-health/companies/:id/force-upgrade", requireAuthentication, forceUpgradeHandler);
+  app.post("/api/admin/app-health/force-upgrade", requireAuthentication, forceUpgradeHandler);
+
+  // Public, unauthenticated — every browser session polls this every 5
+  // minutes (see main.tsx) to learn the current minimum. Returns the
+  // global pin or, when the caller passes ?company_id=N, the more
+  // specific company pin if one exists.
+  app.get("/api/config/min-app-version", async (req, res) => {
+    try {
+      const cidRaw = typeof req.query.company_id === "string" ? Number(req.query.company_id) : NaN;
+      const keys: string[] = ["minAppVersion:global"];
+      if (Number.isInteger(cidRaw) && cidRaw > 0) keys.unshift(`minAppVersion:company:${cidRaw}`);
+      const r = await db.execute<{ key: string; value: string }>(sql`
+        SELECT key, value FROM app_settings WHERE key = ANY(${keys})
+      `);
+      let chosen: { minAppVersion: string; scope: string; setAt: string } | null = null;
+      // Prefer the company-specific pin when present, then global.
+      const ordered = [...(r.rows ?? [])].sort((a, b) => keys.indexOf(a.key) - keys.indexOf(b.key));
+      for (const row of ordered) {
+        try {
+          const parsed = JSON.parse(row.value) as { minAppVersion?: string; scope?: string; setAt?: string };
+          if (parsed?.minAppVersion) {
+            chosen = {
+              minAppVersion: parsed.minAppVersion,
+              scope: parsed.scope ?? "global",
+              setAt: parsed.setAt ?? new Date().toISOString(),
+            };
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.json(chosen ?? { minAppVersion: null, scope: null, setAt: null });
+    } catch {
+      res.json({ minAppVersion: null, scope: null, setAt: null });
+    }
+  });
+
+  // ── Impersonation lifecycle. The frontend swaps `localStorage.user`
+  // to the target on start and restores the original on end; the server
+  // contributes the audit trail and the lookup. The impersonation
+  // banner reads this same payload to decorate every screen.
+  app.post("/api/admin/app-health/impersonate/start", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const body = (req.body ?? {}) as { userId?: unknown; reason?: unknown };
+      const userId = Number(body.userId);
+      const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : "";
+      if (!Number.isInteger(userId) || userId <= 0) {
+        res.status(400).json({ message: "Invalid userId" }); return;
+      }
+      const r = await db.execute<{
+        id: number; name: string; username: string; email: string | null; role: string;
+        companyId: number | null; companyName: string | null; isActive: boolean;
+      }>(sql`
+        SELECT u.id, u.name, u.username, u.email, u.role,
+               u.company_id AS "companyId",
+               c.name AS "companyName",
+               u.is_active AS "isActive"
+        FROM users u
+        LEFT JOIN companies c ON c.id = u.company_id
+        WHERE u.id = ${userId} AND u.is_deleted = false
+      `);
+      const target = r.rows?.[0];
+      if (!target) { res.status(404).json({ message: "User not found" }); return; }
+      if (target.role === "super_admin") {
+        res.status(403).json({ message: "Cannot impersonate another super admin" }); return;
+      }
+      // Mint a server-signed impersonation token bound to the
+      // super-admin actor + chosen target. The frontend stores it and
+      // sends it via `x-impersonation-token`; `requireAuthentication`
+      // verifies the signature on every request and swaps the
+      // effective identity to the target while remembering the actor.
+      const { token, claims } = mintImpersonationToken(req.authenticatedUserId ?? 0, target.id);
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "impersonation",
+        action: "auth.impersonation.start",
+        severity: "warning",
+        targetType: "user",
+        targetId: String(target.id),
+        summary: `Started impersonating ${target.username} (${target.role})`,
+        details: {
+          targetUserId: target.id,
+          targetUsername: target.username,
+          targetCompanyId: target.companyId,
+          reason: reason || null,
+          jti: claims.jti,
+          tokenExpiresAt: new Date(claims.exp).toISOString(),
+        },
+      });
+      res.json({
+        ok: true,
+        target,
+        impersonationToken: token,
+        expiresAt: new Date(claims.exp).toISOString(),
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthImpersonateStart",
+        ctx: {},
+        fallbackMessage: "Couldn't start impersonation — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Called after the client has dropped the impersonation token locally
+  // and restored the super-admin headers. Body carries the previously
+  // impersonated user id and the token to revoke for the audit trail.
+  app.post("/api/admin/app-health/impersonate/end", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const body = (req.body ?? {}) as { previousUserId?: unknown; impersonationToken?: unknown };
+      const prev = Number(body.previousUserId);
+      const tok = typeof body.impersonationToken === "string" ? body.impersonationToken : null;
+      if (tok) {
+        try { revokeImpersonationToken(tok); } catch { /* best-effort */ }
+      }
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "impersonation",
+        action: "auth.impersonation.end",
+        severity: "info",
+        targetType: Number.isInteger(prev) && prev > 0 ? "user" : null,
+        targetId: Number.isInteger(prev) && prev > 0 ? String(prev) : null,
+        summary: Number.isInteger(prev) && prev > 0 ? `Ended impersonation of user ${prev}` : "Ended impersonation",
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthImpersonateEnd",
+        ctx: {},
+        fallbackMessage: "Couldn't end impersonation — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Resolve a company's primary admin (for "Open as company admin"
+  //    impersonation flow) and the admin email list (for "Email admin").
+  app.get("/api/admin/app-health/companies/:id/admins", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid company id" }); return;
+      }
+      const r = await db.execute<{
+        id: number; name: string; username: string; email: string | null;
+        role: string; lastSeenAt: string | null;
+      }>(sql`
+        SELECT u.id, u.name, u.username, u.email, u.role,
+               MAX(s.last_seen_at)::text AS "lastSeenAt"
+        FROM users u
+        LEFT JOIN field_work_sessions s ON s.user_id = u.id
+        WHERE u.company_id = ${id}
+          AND u.is_deleted = false
+          AND u.is_active = true
+          AND u.role IN ('company_admin', 'manager')
+        GROUP BY u.id, u.name, u.username, u.email, u.role
+        ORDER BY (u.role = 'company_admin') DESC, MAX(s.last_seen_at) DESC NULLS LAST
+        LIMIT 20
+      `);
+      const admins = r.rows ?? [];
+      // Primary = first company_admin, else first manager.
+      const primary = admins[0] ?? null;
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ admins, primary });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthCompanyAdmins",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't load company admins — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Audit emit for the Email-admin click — the actual mailto: opens
+  // client-side, but we record the intent here so the audit trail
+  // shows the super-admin reached out.
+  app.post("/api/admin/app-health/companies/:id/email-admin", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid company id" }); return;
+      }
+      const body = (req.body ?? {}) as { recipientUserId?: unknown; subject?: unknown };
+      const recipientUserId = Number(body.recipientUserId);
+      const subject = typeof body.subject === "string" ? body.subject.slice(0, 200) : "";
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "admin",
+        action: "tenant.email_admin",
+        severity: "info",
+        targetType: "company",
+        targetId: String(id),
+        summary: `Opened email composer to company ${id}` + (subject ? ` re: ${subject}` : ""),
+        details: { recipientUserId: Number.isInteger(recipientUserId) ? recipientUserId : null, subject: subject || null },
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthEmailAdmin",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't record email-admin event — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── User-drawer actions: Reset MFA, Unlock account ────────────────────
+  app.post("/api/admin/app-health/users/:id/reset-mfa", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ message: "Invalid user id" }); return; }
+      const r = await db.execute<{ id: number; username: string; mfaEnabled: boolean }>(sql`
+        UPDATE users SET
+          mfa_enabled = false,
+          mfa_secret = NULL,
+          mfa_backup_codes = NULL,
+          mfa_last_used = NULL,
+          updated_at = now()
+        WHERE id = ${id} AND is_deleted = false
+        RETURNING id, username, mfa_enabled AS "mfaEnabled"
+      `);
+      const u = r.rows?.[0];
+      if (!u) { res.status(404).json({ message: "User not found" }); return; }
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "user",
+        action: "user.mfa.reset",
+        severity: "warning",
+        targetType: "user",
+        targetId: String(id),
+        summary: `Reset MFA for ${u.username}`,
+      });
+      res.json({ ok: true, user: u });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthResetMfa",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't reset MFA — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  app.post("/api/admin/app-health/users/:id/unlock", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ message: "Invalid user id" }); return; }
+      const r = await db.execute<{ id: number; username: string; isActive: boolean }>(sql`
+        UPDATE users SET is_active = true, updated_at = now()
+        WHERE id = ${id} AND is_deleted = false
+        RETURNING id, username, is_active AS "isActive"
+      `);
+      const u = r.rows?.[0];
+      if (!u) { res.status(404).json({ message: "User not found" }); return; }
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actionType: "user",
+        action: "user.unlock",
+        severity: "info",
+        targetType: "user",
+        targetId: String(id),
+        summary: `Unlocked / reactivated ${u.username}`,
+      });
+      res.json({ ok: true, user: u });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthUnlockUser",
+        ctx: { id: req.params.id },
+        fallbackMessage: "Couldn't unlock user — please retry",
       });
       res.status(status).json({ message });
     }

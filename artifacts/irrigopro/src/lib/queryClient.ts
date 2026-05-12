@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { safeGet } from "@/utils/safeStorage";
+import { getImpersonationToken } from "@/lib/impersonation";
 
 // Task #556 — global "read-auth lost" signal.
 //
@@ -100,6 +101,16 @@ export async function apiRequest(
     headers["x-user-company-id"] = user.companyId?.toString() || "";
   }
 
+  // Task #554 — propagate the server-issued impersonation token on
+  // every authed request so `requireAuthentication` can swap the
+  // effective identity to the target user. Without this, a super
+  // admin who clicked "Open as company admin" and was hard-reloaded
+  // to "/" would still resolve as themselves on every non-App-Health
+  // page (especially under session-auth in production), defeating
+  // the whole point of server-bound impersonation.
+  const impToken = getImpersonationToken();
+  if (impToken) headers["x-impersonation-token"] = impToken;
+
   let res: Response;
   try {
     res = await fetch(url, {
@@ -163,6 +174,13 @@ export const getQueryFn: <T>(options: {
       headers["x-user-name"] = user.name || "";
       headers["x-user-company-id"] = user.companyId?.toString() || "";
     }
+
+    // Task #554 — same impersonation-token propagation as
+    // `apiRequest` so default-loaded React Query reads (work orders
+    // list, customers list, etc.) also resolve as the target user
+    // on the server during an active impersonation session.
+    const impToken = getImpersonationToken();
+    if (impToken) headers["x-impersonation-token"] = impToken;
 
     const res = await fetch(queryKey.join("/") as string, {
       credentials: "include",

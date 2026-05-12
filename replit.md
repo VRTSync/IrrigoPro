@@ -231,6 +231,86 @@ tab; the other six tabs render a "coming in Phase N" placeholder.
   These are explicitly approximations until persistent telemetry
   lands in Phase 3.
 
+## App Health Phase 5 (Task #554) deploy notes
+
+Phase 5 lights up the **Integrations** tab plus three super-admin
+"break glass" actions. No DB migration is required — both the
+per-tenant throttle and the force-upgrade pin live in the existing
+`app_settings(key, value)` table under reserved key prefixes:
+
+- `throttle:company:<id>` — `{rateLimit, expiresAt, setBy, setAt}`
+- `minAppVersion:global` / `minAppVersion:company:<id>` —
+  `{minAppVersion, scope, companyId, setAt, setBy}`
+
+What's wired up:
+
+- **Integrations tab** — `pages/super-admin-app-health.tsx` lazy-loads
+  `IntegrationsTab` (kept off the default chunk so the page TTI
+  stays under 1.5s). Backend aggregates per service over 10m / 1h /
+  24h windows from `client_errors` where `source='integration'`,
+  bucketing by `split_part(component, '.', 1)`. Status thresholds
+  (>5 fails/10m ⇒ down, ≥1 ⇒ degraded) match the
+  `integration-down` rule so the tab agrees with the active-
+  incidents banner. Cards drill into a 50-row recent-failures
+  drawer at
+  `GET /api/admin/app-health/integrations/:service/recent-failures`.
+- **Per-tenant throttle** — `lib/company-throttle.ts` keeps an
+  in-memory map of `companyId → { rateLimit, expiresAt }`,
+  hydrated from `app_settings` on registerRoutes startup and
+  refreshed every 30s. `companyThrottleMiddleware` is mounted at
+  the very top of `registerRoutes` (before the /api/* business
+  routes) and reads the company id from `x-user-company-id`
+  (header-auth) so it doesn't depend on per-route
+  `requireAuthentication`. Returns `429` with `retryAfterMs` once
+  the rolling-60s counter exceeds the cap. App-health, /health,
+  /client-errors, and /config/min-app-version are exempt so the
+  super-admin can always observe the throttled tenant. In-process
+  state — best-effort across replicas, sufficient for the
+  emergency-cap use case.
+- **Force minimum app version** — `POST /…/companies/:id/force-upgrade`
+  with `{minAppVersion, scope: 'company'|'global'}` writes the pin.
+  Public endpoint `GET /api/config/min-app-version[?company_id=…]`
+  is polled every 5 minutes by every browser
+  (`lib/force-upgrade.ts`, started from `main.tsx` deferred boot).
+  When the pin's `setAt` is newer than `localStorage.
+  irrigopro:lastForceUpgrade` AND the running `VITE_BUILD_HASH`
+  doesn't match, the client unregisters service workers, clears
+  caches, stores the new `setAt` (so we don't loop), and
+  `location.replace()` to pick up the deployed bundle.
+- **Impersonation** — `POST /…/impersonate/start` validates the
+  super-admin caller, looks up the target user (rejects
+  super_admin targets), audits `auth.impersonation.start`, and
+  returns the target user. Frontend `lib/impersonation.ts` tucks
+  the original super-admin into `localStorage.
+  irrigopro:impersonator` and swaps `localStorage.user` to the
+  target. `ImpersonationBanner` (mounted in `desktop-shell` above
+  `TopStrip`) stays pinned to every screen and exposes "Return to
+  …" — restores the super-admin headers BEFORE POSTing
+  `/…/impersonate/end` (so the super-admin guard passes for the
+  end-of-impersonation audit row), then hard-reloads to
+  `/super-admin/app-health`.
+- **User drawer actions** — `Impersonate`, `Reset MFA`, and
+  `Unlock` each open an `AlertDialog` confirm and write an
+  `audit_log` row (`auth.impersonation.start`, `user.mfa.reset`,
+  `user.unlock`). "Unlock" sets `users.is_active=true` (we don't
+  have separate `lockedAt` columns yet, so unlock == reactivate).
+  Reset MFA clears `mfa_enabled / mfa_secret / mfa_backup_codes /
+  mfa_last_used`.
+
+Caveats / known limits:
+
+- Throttle counters are per-process. Multi-replica deployments
+  will let each replica accept up to `rateLimit` rps; the cap is
+  intentionally a coarse safety valve, not a precise budget.
+- Impersonation is client-anchored (the super-admin guard sees the
+  swapped headers as the target). Actions taken under
+  impersonation are attributed to the target user in business
+  data; the surrounding `auth.impersonation.start/.end` audit rows
+  are the bracket. A future pass should propagate the
+  impersonator id to every audit emitter.
+- Force-upgrade relies on an existing `VITE_BUILD_HASH` build-time
+  env var; environments that don't set it will silently no-op.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

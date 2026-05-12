@@ -56,6 +56,7 @@ import { safeGet, safeSet, safeRemove } from "@/utils/safeStorage";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
+import { ImpersonationBanner } from "@/components/app-health/impersonation-banner";
 import type {
   NavConfig,
   NavItem,
@@ -209,6 +210,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
           <div className="lg:hidden">
             <Navigation />
           </div>
+          <ImpersonationBanner />
           <TopStrip
             navConfig={navConfig}
             user={user}

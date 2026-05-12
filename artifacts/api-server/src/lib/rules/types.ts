@@ -18,6 +18,13 @@ export type RuleEvalResult = {
   affectedUsers?: number[];
   /** Free-form details (counts, thresholds, sample values). */
   details?: Record<string, unknown>;
+  /**
+   * Optional per-instance runbook URL. When set, the runner
+   * persists this onto the incident row instead of `Rule.runbookUrl`
+   * so the active-incidents banner can link to a service-specific
+   * playbook (e.g. integration_down → stripe runbook).
+   */
+  runbookUrl?: string;
 };
 
 export interface Rule {

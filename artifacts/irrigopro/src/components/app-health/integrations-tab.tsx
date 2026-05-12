@@ -8,14 +8,294 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Send, Plug, Slack, Bell } from "lucide-react";
+import {
+  Loader2,
+  Send,
+  Plug,
+  Slack,
+  Bell,
+  RefreshCw,
+  ExternalLink,
+  BookOpen,
+} from "lucide-react";
+import { buildAuthHeaders, formatRelative } from "./shared";
 
-// Task #569 — App Health > Integrations tab.
-// Lets a super admin store the PagerDuty Events API v2 routing key
-// and/or a Slack incoming-webhook URL so a P1 / P2 incident actually
-// pages on-call. The credential is never returned over the wire — the
-// API masks it on GET so a session hijack of this page can't lift it.
+// Task #554 — Phase 5 monitoring dashboard for the integrations we
+// depend on (QuickBooks, Twilio, SendGrid, object storage, …) plus
+// Task #569 — alert-routing config (PagerDuty / Slack) so a P1/P2
+// incident actually pages on-call. Both halves live in the same tab
+// so a super admin has a single screen for "is it broken?" and "do
+// we get told when it breaks?".
+
+type IntegrationRow = {
+  service: string;
+  label: string;
+  purpose: string;
+  runbookUrl: string;
+  status: "healthy" | "degraded" | "down";
+  ok10m: number;
+  fail10m: number;
+  ok1h: number;
+  fail1h: number;
+  ok24h: number;
+  fail24h: number;
+  successRate24h: number | null;
+  p95Ms: number | null;
+  lastEventAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureMessage: string | null;
+};
+
+type IntegrationsResponse = {
+  services: IntegrationRow[];
+  statusRule: { ruleId: string; windowMin: number; failThreshold: number; summary: string };
+};
+
+type FailureRow = {
+  id: number;
+  name: string;
+  message: string;
+  component: string | null;
+  statusCode: number | null;
+  durationMs: number | null;
+  occurredAt: string;
+};
+
+function statusBadge(s: IntegrationRow["status"]) {
+  if (s === "down") return <Badge variant="destructive" data-testid={`integration-status-${s}`}>Down</Badge>;
+  if (s === "degraded") return <Badge data-testid={`integration-status-${s}`} className="bg-amber-500 hover:bg-amber-500 text-white">Degraded</Badge>;
+  return <Badge data-testid={`integration-status-${s}`} className="bg-emerald-600 hover:bg-emerald-600">Healthy</Badge>;
+}
+
+export function IntegrationsTab() {
+  return (
+    <div className="space-y-8" data-testid="integrations-tab">
+      <MonitoringPanel />
+      <ConfigPanel />
+    </div>
+  );
+}
+
+function MonitoringPanel() {
+  const [openService, setOpenService] = useState<string | null>(null);
+  const { data, isLoading, isError, refetch, isFetching } = useQuery<IntegrationsResponse>({
+    queryKey: ["/api/admin/app-health/integrations/health"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/app-health/integrations/health", {
+        credentials: "include",
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+
+  const services = data?.services ?? [];
+  const rule = data?.statusRule;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Plug className="h-4 w-4" />
+            <span>
+              External services we depend on. Status rule:{" "}
+              <code className="text-[11px] bg-gray-100 px-1 rounded">
+                {rule?.summary ?? "loading…"}
+              </code>{" "}
+              <span className="text-gray-400">
+                (matches the <code className="text-[11px]">{rule?.ruleId ?? "integration_down"}</code> active-incident rule).
+              </span>
+            </span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} data-testid="integrations-reload">
+            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+          </Button>
+        </CardContent>
+      </Card>
+
+      {isLoading ? (
+        <div className="py-16 flex items-center justify-center text-gray-400">
+          <Loader2 className="h-5 w-5 animate-spin" />
+        </div>
+      ) : isError ? (
+        <Card><CardContent className="py-12 text-center text-sm text-red-600">Couldn't load integrations.</CardContent></Card>
+      ) : services.length === 0 ? (
+        <Card>
+          <CardContent className="py-16 text-center text-sm text-gray-500">
+            No integration telemetry in the last 24 hours.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+          <table className="w-full text-sm" data-testid="integrations-table">
+            <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="text-left px-3 py-2">Service</th>
+                <th className="text-left px-3 py-2">Purpose</th>
+                <th className="text-left px-3 py-2">Status</th>
+                <th className="text-right px-3 py-2">Success 24h</th>
+                <th className="text-right px-3 py-2">p95 (1h)</th>
+                <th className="text-left px-3 py-2">Last failure</th>
+                <th className="text-right px-3 py-2">Runbook</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {services.map((s) => (
+                <tr
+                  key={s.service}
+                  data-testid={`integration-row-${s.service}`}
+                  className="hover:bg-blue-50/30 cursor-pointer"
+                  onClick={() => setOpenService(s.service)}
+                >
+                  <td className="px-3 py-2">
+                    <div className="font-semibold text-gray-900">{s.label}</div>
+                    <div className="text-[11px] text-gray-500 font-mono">{s.service}</div>
+                  </td>
+                  <td className="px-3 py-2 text-gray-700 max-w-[260px]">{s.purpose}</td>
+                  <td className="px-3 py-2">{statusBadge(s.status)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {s.successRate24h == null ? <span className="text-gray-400">—</span> : `${s.successRate24h.toFixed(1)}%`}
+                    <div className="text-[10px] text-gray-400">{s.ok24h + s.fail24h} events</div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {s.p95Ms == null ? <span className="text-gray-400">—</span> : `${s.p95Ms} ms`}
+                  </td>
+                  <td className="px-3 py-2 max-w-[280px]">
+                    {s.lastFailureAt ? (
+                      <>
+                        <div className="text-[11px] text-gray-700 truncate" title={s.lastFailureMessage ?? ""}>
+                          {s.lastFailureMessage ?? <span className="text-gray-400 italic">no message</span>}
+                        </div>
+                        <div className="text-[10px] text-gray-500">{formatRelative(s.lastFailureAt)}</div>
+                      </>
+                    ) : (
+                      <span className="text-gray-400 italic text-[11px]">no failures in 24h</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <a
+                      href={s.runbookUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-[11px] text-blue-700 hover:text-blue-900"
+                      data-testid={`integration-runbook-${s.service}`}
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      Runbook
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <RecentFailuresDrawer service={openService} onClose={() => setOpenService(null)} />
+    </div>
+  );
+}
+
+function RecentFailuresDrawer({
+  service,
+  onClose,
+}: {
+  service: string | null;
+  onClose: () => void;
+}) {
+  const open = service != null;
+  const { data, isLoading, isError } = useQuery<{
+    service: string;
+    label: string;
+    purpose: string | null;
+    runbookUrl: string;
+    failures: FailureRow[];
+  }>({
+    queryKey: ["/api/admin/app-health/integrations", service, "recent-failures"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/app-health/integrations/${service}/recent-failures`, {
+        credentials: "include",
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    enabled: open,
+    staleTime: 15_000,
+  });
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto" data-testid="integration-failures-drawer">
+        <SheetHeader>
+          <SheetTitle className="text-base">
+            Recent failures · {data?.label ?? service}
+          </SheetTitle>
+          {data?.purpose ? (
+            <div className="text-[11px] text-gray-500">{data.purpose}</div>
+          ) : null}
+        </SheetHeader>
+        {data?.runbookUrl ? (
+          <a
+            href={data.runbookUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900"
+            data-testid="integration-drawer-runbook"
+          >
+            <BookOpen className="h-3 w-3" />
+            Open runbook
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        ) : null}
+        {isLoading ? (
+          <div className="py-16 flex items-center justify-center text-gray-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : isError ? (
+          <div className="py-12 text-center text-sm text-red-600">Couldn't load failures.</div>
+        ) : (data?.failures ?? []).length === 0 ? (
+          <div className="py-16 text-center text-sm text-gray-500">No failures in the last 24h.</div>
+        ) : (
+          <ul className="divide-y rounded-md border mt-4">
+            {(data?.failures ?? []).map((f) => (
+              <li key={f.id} className="px-3 py-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium truncate" title={f.name}>{f.name}</div>
+                  <div className="flex items-center gap-2 shrink-0 text-[11px] text-gray-500 tabular-nums">
+                    {f.statusCode != null ? <Badge variant="destructive" className="text-[10px]">{f.statusCode}</Badge> : null}
+                    {f.durationMs != null ? <span>{f.durationMs}ms</span> : null}
+                  </div>
+                </div>
+                <div className="text-[11px] text-gray-500 mt-0.5 break-words">{f.message}</div>
+                <div className="text-[10px] text-gray-400 mt-0.5">
+                  {formatRelative(f.occurredAt)} · {f.component ?? "—"}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Task #569 — On-call paging config (PagerDuty / Slack)
+// ---------------------------------------------------------------------------
 
 type Severity = "P1" | "P2" | "P3" | "P4";
 
@@ -32,7 +312,7 @@ type IntegrationsConfig = {
 
 const ALL_SEVERITIES: Severity[] = ["P1", "P2", "P3", "P4"];
 
-export function IntegrationsTab() {
+function ConfigPanel() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -46,10 +326,6 @@ export function IntegrationsTab() {
     staleTime: 30_000,
   });
 
-  // Local form state — initialised from server config; the routing
-  // key / webhook URL inputs are blank by default so the user has to
-  // re-enter them to change. Submitting blank values keeps the
-  // existing credential.
   const [pdEnabled, setPdEnabled] = useState(false);
   const [pdKey, setPdKey] = useState("");
   const [slackEnabled, setSlackEnabled] = useState(false);
@@ -71,8 +347,6 @@ export function IntegrationsTab() {
         slackEnabled,
         pageSeverities: severities,
       };
-      // Only send credentials when the user typed something — submitting
-      // an empty string would otherwise overwrite an existing key.
       if (pdKey.trim()) body.pagerDutyRoutingKey = pdKey.trim();
       if (slackUrl.trim()) body.slackWebhookUrl = slackUrl.trim();
       return apiRequest("/api/admin/app-health/integrations", "POST", body);

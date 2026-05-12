@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safeGet } from "@/utils/safeStorage";
 import { apiRequest } from "@/lib/queryClient";
@@ -41,7 +41,13 @@ import { AuditTab } from "@/components/app-health/audit-tab";
 import { SyncTab } from "@/components/app-health/sync-tab";
 import { UsersTab } from "@/components/app-health/users-tab";
 import { ActiveIncidents, AcknowledgeAllButton } from "@/components/app-health/active-incidents";
-import { IntegrationsTab } from "@/components/app-health/integrations-tab";
+
+// Task #554 — Phase 5 tabs are lazy-loaded so the App Health TTI stays
+// under 1.5s. The default-loaded tab is "crashes"; everything else is
+// hydrated on demand.
+const IntegrationsTab = lazy(() =>
+  import("@/components/app-health/integrations-tab").then((m) => ({ default: m.IntegrationsTab })),
+);
 
 // Task #550 — Super Admin App Health page (Phase 1).
 // Phase 1 ships the page chrome and the working Crashes tab. The other
@@ -306,7 +312,13 @@ export default function SuperAdminAppHealthPage() {
           onOpenAudit={(uid) => { setAuditActor(String(uid)); setActiveTab("audit"); }}
         />
       ) : activeTab === "integrations" ? (
-        <IntegrationsTab />
+        <Suspense fallback={
+          <div className="py-16 flex items-center justify-center text-gray-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        }>
+          <IntegrationsTab />
+        </Suspense>
       ) : (
         <ComingSoonTab tabKey={activeTab} />
       )}

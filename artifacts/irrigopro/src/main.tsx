@@ -61,6 +61,18 @@ function deferredBoot() {
       console.warn("[boot] notification service init failed:", err);
     }
   })();
+
+  // Task #554 — force-upgrade poll. Asks the server every 5 minutes
+  // whether the running build hash is below the minimum pinned version
+  // and hard-reloads if so.
+  void (async () => {
+    try {
+      const { startForceUpgradePoll } = await import("./lib/force-upgrade");
+      startForceUpgradePoll();
+    } catch (err) {
+      console.warn("[boot] force-upgrade poll failed to start:", err);
+    }
+  })();
 }
 
 if (typeof window !== "undefined") {

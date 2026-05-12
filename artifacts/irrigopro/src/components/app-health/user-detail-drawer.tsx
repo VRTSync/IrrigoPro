@@ -1,8 +1,22 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Smartphone, AlertTriangle, Activity, History } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { Loader2, Smartphone, AlertTriangle, Activity, History, UserCog, KeyRound, Unlock } from "lucide-react";
 import { buildAuthHeaders, formatRelative } from "./shared";
+import { beginImpersonation } from "@/lib/impersonation";
 
 type Device = {
   id: number;
@@ -49,6 +63,8 @@ type UserDetailResponse = {
   recentActions: RecentAction[];
 };
 
+type Confirm = "impersonate" | "reset-mfa" | "unlock" | null;
+
 export function UserDetailDrawer({
   userId,
   onClose,
@@ -61,6 +77,10 @@ export function UserDetailDrawer({
   onOpenAudit?: (actorUserId: number) => void;
 }) {
   const open = userId != null;
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [confirm, setConfirm] = useState<Confirm>(null);
+
   const { data, isLoading, isError } = useQuery<UserDetailResponse>({
     queryKey: ["/api/admin/app-health/users", userId],
     queryFn: async () => {
@@ -75,6 +95,83 @@ export function UserDetailDrawer({
     staleTime: 10_000,
     refetchInterval: open ? 15_000 : false,
   });
+
+  const resetMfa = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/app-health/users/${userId}/reset-mfa`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...buildAuthHeaders() },
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "MFA reset", description: "User will be prompted to re-enroll on next sign-in." });
+      qc.invalidateQueries({ queryKey: ["/api/admin/app-health/users", userId] });
+    },
+    onError: (e) => toast({ title: "Couldn't reset MFA", description: e instanceof Error ? e.message : "Try again", variant: "destructive" }),
+  });
+
+  const unlock = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/app-health/users/${userId}/unlock`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...buildAuthHeaders() },
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "User reactivated", description: "The account is unlocked." });
+      qc.invalidateQueries({ queryKey: ["/api/admin/app-health/users", userId] });
+    },
+    onError: (e) => toast({ title: "Couldn't unlock", description: e instanceof Error ? e.message : "Try again", variant: "destructive" }),
+  });
+
+  const impersonate = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/app-health/impersonate/start`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...buildAuthHeaders() },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json() as Promise<{
+        ok: boolean;
+        target: { id: number; username: string; name: string; role: string; email: string | null; companyId: number | null };
+        impersonationToken: string;
+        expiresAt: string;
+      }>;
+    },
+    onSuccess: (resp) => {
+      try {
+        if (!resp.impersonationToken) throw new Error("Server did not issue an impersonation token");
+        beginImpersonation(
+          {
+            id: resp.target.id,
+            username: resp.target.username,
+            name: resp.target.name,
+            role: resp.target.role,
+            companyId: resp.target.companyId,
+            email: resp.target.email,
+          },
+          resp.impersonationToken,
+          resp.expiresAt,
+        );
+        // Hard reload at "/" so role-routed dashboards mount with the
+        // target user's identity from a clean slate.
+        window.location.href = "/";
+      } catch (e) {
+        toast({ title: "Couldn't start impersonation", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+      }
+    },
+    onError: (e) => toast({ title: "Couldn't start impersonation", description: e instanceof Error ? e.message : "Try again", variant: "destructive" }),
+  });
+
+  const userIsSuperAdmin = data?.user?.role === "super_admin";
 
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
@@ -102,6 +199,40 @@ export function UserDetailDrawer({
           <div className="py-16 text-center text-sm text-red-600">Couldn't load user details.</div>
         ) : data ? (
           <div className="space-y-6 mt-4 pb-12">
+            <Section title="Admin actions" icon={<UserCog className="h-4 w-4 text-blue-500" />}>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirm("impersonate")}
+                  disabled={userIsSuperAdmin || impersonate.isPending}
+                  title={userIsSuperAdmin ? "Cannot impersonate another super admin" : "Sign in as this user"}
+                  data-testid="user-action-impersonate"
+                >
+                  <UserCog className="h-4 w-4 mr-2" /> Impersonate
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirm("reset-mfa")}
+                  disabled={resetMfa.isPending}
+                  data-testid="user-action-reset-mfa"
+                >
+                  <KeyRound className="h-4 w-4 mr-2" /> Reset MFA
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirm("unlock")}
+                  disabled={data.user.isActive || unlock.isPending}
+                  title={data.user.isActive ? "User is active" : "Reactivate user account"}
+                  data-testid="user-action-unlock"
+                >
+                  <Unlock className="h-4 w-4 mr-2" /> Unlock
+                </Button>
+              </div>
+            </Section>
+
             <Section title="Devices" icon={<Smartphone className="h-4 w-4 text-blue-500" />}>
               {data.devices.length === 0 ? (
                 <Empty text="No mobile devices linked." />
@@ -233,6 +364,44 @@ export function UserDetailDrawer({
             </Section>
           </div>
         ) : null}
+
+        <AlertDialog open={confirm !== null} onOpenChange={(v) => !v && setConfirm(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {confirm === "impersonate" && `Impersonate ${data?.user.username ?? "user"}?`}
+                {confirm === "reset-mfa" && `Reset MFA for ${data?.user.username ?? "user"}?`}
+                {confirm === "unlock" && `Unlock ${data?.user.username ?? "user"}?`}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirm === "impersonate" && (
+                  <>You'll see the app exactly as this user does. A banner will stay pinned to every screen, every action will be attributed to them in their data, and the start/end of the session is logged in the audit trail.</>
+                )}
+                {confirm === "reset-mfa" && (
+                  <>The user's authenticator app will be unlinked and they'll be required to re-enroll on next sign-in. This is logged in the audit trail.</>
+                )}
+                {confirm === "unlock" && (
+                  <>Reactivates the account so the user can sign in again. Logged in the audit trail.</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="confirm-cancel">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                data-testid="confirm-go"
+                onClick={() => {
+                  const c = confirm;
+                  setConfirm(null);
+                  if (c === "impersonate") impersonate.mutate();
+                  else if (c === "reset-mfa") resetMfa.mutate();
+                  else if (c === "unlock") unlock.mutate();
+                }}
+              >
+                Yes, continue
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SheetContent>
     </Sheet>
   );
