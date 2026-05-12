@@ -27,6 +27,16 @@ args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 [services.production.run.env]
 PORT = "8080"
 NODE_ENV = "production"
+# Task #555 — the deployed API has no express-session middleware wired up
+# (the package is installed but app.ts never mounts it) and /api/auth/login
+# never sets req.session.userId, so the session-based path in
+# requireAuthentication can never satisfy a web request. Mobile clients
+# carry a bearer token and are unaffected, but every web request from a
+# logged-in irrigation_manager / company_admin / super_admin would 401 in
+# production with this gate closed. Re-enable the legacy header-auth path
+# (the web client already sends x-user-* headers + credentials: include)
+# until the proper session-auth migration lands.
+ALLOW_HEADER_AUTH = "1"
 
 [services.production.health.startup]
 path = "/api/healthz"

@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient, parseApiError, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, queryClient, parseApiError, asArray } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,18 +76,55 @@ export default function AdminWetChecksPage() {
     [statusFilter],
   );
 
-  const { data, isLoading, isError, error } = useArrayQuery<AdminWetCheckRow>({
+  // Task #555 — mirror the global `getQueryFn({ on401: "returnNull" })`
+  // contract: a 401 collapses to `null` so this page no longer renders
+  // a raw "Authentication required" card in place of the list. The
+  // queryKey carries the status filter, so we can't lean on the global
+  // `queryKey.join("/")` queryFn — but the 401-returnNull behavior is
+  // identical, including the `x-user-*` headers + cookie credentials.
+  const { data, isLoading, isError, error } = useQuery<
+    AdminWetCheckRow[] | null
+  >({
     queryKey,
     queryFn: async () => {
       const url = statusFilter === "all"
         ? "/api/wet-checks/admin"
         : `/api/wet-checks/admin?status=${encodeURIComponent(statusFilter)}`;
-      return await apiRequest(url, "GET");
+      try {
+        return (await apiRequest(url, "GET")) as AdminWetCheckRow[];
+      } catch (e: unknown) {
+        // apiRequest throws `${status}: ${body}` on non-2xx. Treat 401
+        // exactly like the global getQueryFn returnNull path so the
+        // page degrades to the same re-login affordance the rest of
+        // the app uses, instead of surfacing the raw server message.
+        const message = e instanceof Error ? e.message : "";
+        if (/^401:/.test(message)) {
+          return null;
+        }
+        throw e;
+      }
     },
   });
 
+  // Route the user through the normal re-login flow on a session lapse,
+  // matching the pattern used by the navigation logout / field-portal
+  // (toast + window.location.href = "/login"). Guarded with a ref so a
+  // re-render before the navigation completes can't fire it twice.
+  const reloginNotifiedRef = useRef(false);
+  useEffect(() => {
+    if (data === null && !reloginNotifiedRef.current) {
+      reloginNotifiedRef.current = true;
+      toast({
+        title: "Please sign in again",
+        description: "Your session has expired.",
+        variant: "destructive",
+      });
+      window.location.href = "/login";
+    }
+  }, [data, toast]);
+
   const filtered = useMemo(() => {
-    const rows = data ?? [];
+    const rows = asArray<AdminWetCheckRow>(data);
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(r =>
