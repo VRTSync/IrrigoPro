@@ -967,6 +967,108 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
     f.partId == null &&
     !f.noPartNeeded,
   );
+  // Task #517 — Tap the amber banner to jump to the next finding that
+  // still needs a part / labor-only decision. Cycle through them in
+  // order so the tech can fix one, tap again, fix the next, etc.
+  const needsDecisionIds = completeNeedingDecision.map(f => f.id);
+  const needsDecisionKey = needsDecisionIds.join(",");
+  const [jumpIndex, setJumpIndex] = useState(0);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTargetRef = useRef<HTMLElement | null>(null);
+  // Reset cycle whenever the underlying list of offenders changes so a
+  // fixed finding doesn't leave a stale pointer past the end. Also
+  // clear any in-flight highlight + timer so a card that just left the
+  // offender set isn't stuck wearing the amber ring.
+  useEffect(() => {
+    setJumpIndex(0);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = null;
+    }
+    if (highlightTargetRef.current) {
+      highlightTargetRef.current.classList.remove(
+        "ring-2",
+        "ring-amber-400",
+        "ring-offset-2",
+        "bg-amber-50",
+        "transition",
+      );
+      highlightTargetRef.current = null;
+    }
+  }, [needsDecisionKey]);
+  // Cancel any pending highlight cleanup on unmount, and clear the
+  // class from any element it was applied to so we don't leave a
+  // stuck ring on a card that's no longer in the offender list.
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+      if (highlightTargetRef.current) {
+        highlightTargetRef.current.classList.remove(
+          "ring-2",
+          "ring-amber-400",
+          "ring-offset-2",
+          "bg-amber-50",
+          "transition",
+        );
+        highlightTargetRef.current = null;
+      }
+    };
+  }, []);
+  const jumpToNextNeedsDecision = () => {
+    if (needsDecisionIds.length === 0) return;
+    const idx = jumpIndex % needsDecisionIds.length;
+    const targetId = needsDecisionIds[idx];
+    // The offending findings are rendered above the banner inside the
+    // FindingsByResolution "Complete" group as
+    // `group-complete-row-${id}` rows. Those are the only per-finding
+    // anchors present on the wet check submit screen.
+    const el = document.querySelector<HTMLElement>(
+      `[data-testid="group-complete-row-${targetId}"]`,
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Clear any prior highlight first so a quick re-tap doesn't leave
+      // a stuck ring on a previous, unrelated card.
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+      if (highlightTargetRef.current && highlightTargetRef.current !== el) {
+        highlightTargetRef.current.classList.remove(
+          "ring-2",
+          "ring-amber-400",
+          "ring-offset-2",
+          "bg-amber-50",
+          "transition",
+        );
+      }
+      el.classList.add(
+        "ring-2",
+        "ring-amber-400",
+        "ring-offset-2",
+        "bg-amber-50",
+        "transition",
+      );
+      highlightTargetRef.current = el;
+      highlightTimerRef.current = setTimeout(() => {
+        el.classList.remove(
+          "ring-2",
+          "ring-amber-400",
+          "ring-offset-2",
+          "bg-amber-50",
+          "transition",
+        );
+        if (highlightTargetRef.current === el) {
+          highlightTargetRef.current = null;
+        }
+        highlightTimerRef.current = null;
+      }, 1500);
+    }
+    setJumpIndex(idx + 1);
+  };
   const naCount = wc.zoneRecords.filter(z => z.status === "not_applicable").length;
   // Task #428 — submit CTA copy + intent counts. Disposition is the tech's
   // self-reported intent and is decoupled from `resolution` (which carries
@@ -1095,14 +1197,21 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
       )}
 
       {!isReadOnly && completeNeedingDecision.length > 0 && (
-        <div
-          className="text-sm rounded border border-amber-300 bg-amber-50 p-3 text-amber-900"
+        <button
+          type="button"
+          onClick={jumpToNextNeedsDecision}
+          aria-label={
+            completeNeedingDecision.length === 1
+              ? "Jump to the finding marked complete without a part"
+              : `Jump to the next of ${completeNeedingDecision.length} findings marked complete without a part`
+          }
+          className="block w-full text-left text-sm rounded border border-amber-300 bg-amber-50 p-3 text-amber-900 cursor-pointer hover:bg-amber-100 active:bg-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 transition-colors"
           data-testid="submit-needs-part-or-no-part-hint"
         >
           {completeNeedingDecision.length} finding{completeNeedingDecision.length === 1 ? " is" : "s are"} marked complete without a part.
           Open {completeNeedingDecision.length === 1 ? "it" : "them"} and either pick a part or tick
           {" "}<span className="font-medium">No part needed (labor only)</span> before submitting.
-        </div>
+        </button>
       )}
 
       {!isReadOnly && (
