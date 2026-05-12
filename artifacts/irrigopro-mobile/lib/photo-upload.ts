@@ -53,6 +53,66 @@ function wetCheckPhotoDirectory(wetCheckId: number): Directory {
   return new Directory(Paths.document, "wet-check", String(wetCheckId));
 }
 
+function billingSheetPhotoDirectory(scopeKey: string): Directory {
+  return new Directory(Paths.document, "billing-sheet", scopeKey);
+}
+
+// Capture a photo for a billing sheet (Task #492 / M7). Same compress +
+// resize as the wet-check pipeline so the server-side `medium`/`thumb`
+// variants line up. `scopeKey` lets callers bucket photos for a not-
+// yet-saved sheet under a stable id (e.g. the work order id) and an
+// existing sheet under its numeric id, without pre-creating directories
+// for both.
+export async function captureBillingSheetPhoto(opts: {
+  scopeKey: string;
+}): Promise<{ clientId: string; localUri: string; takenAt: string } | null> {
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: "images",
+    quality: 1,
+    exif: false,
+    allowsEditing: false,
+  });
+  if (result.canceled || !result.assets || result.assets.length === 0) {
+    return null;
+  }
+  const asset = result.assets[0];
+  const w = asset.width ?? 0;
+  const h = asset.height ?? 0;
+  const needsResize = w > MAX_EDGE || h > MAX_EDGE;
+  const manipulated = await manipulateAsync(
+    asset.uri,
+    needsResize
+      ? [
+          {
+            resize: w >= h ? { width: MAX_EDGE } : { height: MAX_EDGE },
+          },
+        ]
+      : [],
+    { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
+  );
+  const clientId = generateClientId();
+  const dir = billingSheetPhotoDirectory(opts.scopeKey);
+  if (!dir.exists) dir.create({ intermediates: true });
+  const dest = new File(dir, `${clientId}.jpg`);
+  if (dest.exists) dest.delete();
+  const src = new File(manipulated.uri);
+  try {
+    src.move(dest);
+  } catch {
+    src.copy(dest);
+    try {
+      src.delete();
+    } catch {
+      /* best-effort */
+    }
+  }
+  return {
+    clientId,
+    localUri: dest.uri,
+    takenAt: new Date().toISOString(),
+  };
+}
+
 // Capture a photo via the native camera, compress + resize it, and copy
 // the resulting JPEG into the per-wet-check folder under the app's
 // documents directory. Returns null when the user cancels.

@@ -25,6 +25,7 @@ type WorkOrder = {
   workOrderNumber: string;
   customerId: number | null;
   customerName: string;
+  customerEmail: string | null;
   customerPhone: string | null;
   projectName: string;
   projectAddress: string | null;
@@ -237,6 +238,20 @@ export default function WorkOrderDetailScreen() {
     );
   }, [startMutation]);
 
+  const onAddBillingSheet = useCallback(
+    (billingSheetId?: number) => {
+      if (id == null) return;
+      router.push({
+        pathname: "/work-order/[id]/billing-sheet",
+        params:
+          billingSheetId != null
+            ? { id: String(id), billingSheetId: String(billingSheetId) }
+            : { id: String(id) },
+      });
+    },
+    [id, router],
+  );
+
   const onComplete = useCallback(() => {
     Alert.alert(
       "Mark complete?",
@@ -412,6 +427,7 @@ export default function WorkOrderDetailScreen() {
               wetChecksLoading={wetChecksQuery.isLoading}
               billingSheets={billingSheetsQuery.data ?? []}
               billingSheetsLoading={billingSheetsQuery.isLoading}
+              onOpenBillingSheet={(bsId) => onAddBillingSheet(bsId)}
               colors={colors}
             />
 
@@ -430,9 +446,13 @@ export default function WorkOrderDetailScreen() {
             onAddWetCheck={() =>
               showToast("Adding wet checks arrives in a later update")
             }
-            onAddBillingSheet={() =>
-              showToast("Billing sheets arrive in a later update")
-            }
+            onAddBillingSheet={() => {
+              // Open the existing sheet (first one) if any are already
+              // attached to this work order; otherwise start a new one.
+              // Mirrors the M7 spec: "load it; otherwise create-on-first-save".
+              const existing = billingSheetsQuery.data?.[0];
+              onAddBillingSheet(existing?.id);
+            }}
           />
         ) : null}
       </SafeAreaView>
@@ -594,12 +614,14 @@ function AttachedRecords({
   wetChecksLoading,
   billingSheets,
   billingSheetsLoading,
+  onOpenBillingSheet,
   colors,
 }: {
   wetChecks: WetCheck[];
   wetChecksLoading: boolean;
   billingSheets: BillingSheet[];
   billingSheetsLoading: boolean;
+  onOpenBillingSheet: (billingSheetId: number) => void;
   colors: ReturnType<typeof useColors>;
 }) {
   const router = useRouter();
@@ -664,9 +686,7 @@ function AttachedRecords({
           billingSheets.map((bs) => (
             <Pressable
               key={bs.id}
-              onPress={() => {
-                showToast("Billing sheet detail arrives in a later update");
-              }}
+              onPress={() => onOpenBillingSheet(bs.id)}
               style={({ pressed }) => [
                 styles.subRow,
                 { opacity: pressed ? 0.7 : 1 },
@@ -717,8 +737,16 @@ function PrimaryActions({
   const status = wo.status;
   const isStartable = status === "pending" || status === "assigned";
   const isInProgress = status === "in_progress";
+  // Billing sheets attach to completed work orders too — surface the
+  // entrypoint while the WO is awaiting review or already completed so
+  // the tech can backfill or amend a sheet without re-opening the WO.
+  const isCompleted =
+    status === "work_completed" ||
+    status === "completed" ||
+    status === "pending_review" ||
+    status === "pending_manager_review";
 
-  if (!isStartable && !isInProgress) {
+  if (!isStartable && !isInProgress && !isCompleted) {
     return null;
   }
 
@@ -734,11 +762,11 @@ function PrimaryActions({
           label={isStarting ? "Starting…" : "Start work"}
           icon="play"
           onPress={onStart}
-          disabled={isStarting}
           colors={colors}
           variant="primary"
+          disabled={isStarting}
         />
-      ) : (
+      ) : isInProgress ? (
         <>
           <View style={styles.secondaryRow}>
             <PrimaryButton
@@ -762,11 +790,19 @@ function PrimaryActions({
             label={isCompleting ? "Submitting…" : "Mark complete"}
             icon="check-circle"
             onPress={onComplete}
-            disabled={isCompleting}
             colors={colors}
             variant="primary"
+            disabled={isCompleting}
           />
         </>
+      ) : (
+        <PrimaryButton
+          label="Add billing sheet"
+          icon="file-text"
+          onPress={onAddBillingSheet}
+          colors={colors}
+          variant="primary"
+        />
       )}
     </View>
   );

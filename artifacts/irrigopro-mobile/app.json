@@ -17,7 +17,8 @@
       "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "IrrigoPro uses the camera to attach photos to wet check zones.",
-        "NSPhotoLibraryUsageDescription": "IrrigoPro accesses your photo library to attach existing photos to wet checks."
+        "NSPhotoLibraryUsageDescription": "IrrigoPro accesses your photo library to attach existing photos to wet checks.",
+        "NSLocationWhenInUseUsageDescription": "IrrigoPro records your location when you save a billing sheet so the office can verify the work site."
       }
     },
     "android": {},
@@ -39,6 +40,12 @@
         {
           "cameraPermission": "IrrigoPro uses the camera to attach photos to wet check zones.",
           "photosPermission": "IrrigoPro accesses your photo library to attach existing photos to wet checks."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "IrrigoPro records your location when you save a billing sheet so the office can verify the work site."
         }
       ]
     ],
