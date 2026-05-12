@@ -28,6 +28,7 @@ import { PropertyContextHeader } from "./PropertyContextHeader";
 import { PhotoCaptureButton } from "./PhotoCaptureButton";
 import { PhotoThumb } from "./PhotoThumb";
 import { FindingSheet, type FindingSheetState } from "./FindingSheet";
+import { LoosePhotosSection } from "./LoosePhotosSection";
 
 // ─── Zone screen (YES/NO/N-A + findings + photos) ────────────────────────────
 
@@ -662,11 +663,37 @@ export function ZoneScreen({
               )}
             </>
           )}
-          {photos.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-1" data-testid="zone-photos">
-              {photos.map(p => <PhotoThumb key={p.id} photo={p} canDelete={!readOnly} />)}
-            </div>
-          )}
+          {(() => {
+            // Task #246 — split zone-level photos by linkage. Photos with
+            // a `findingId` are also rendered under their finding card
+            // below; here we show only zone-only photos. When the zone
+            // has any findings, the unlinked ones are likely orphans
+            // from a failed FindingSheet save link, so we surface them
+            // as a labeled "loose photos" block with attach + delete
+            // actions instead of mixing them in with intentional
+            // zone-level evidence.
+            const zoneOnlyPhotos = photos.filter(p => p.findingId == null);
+            if (zoneOnlyPhotos.length === 0) return null;
+            if (findings.length > 0) {
+              const options = findings.map(f => ({
+                id: f.id,
+                label: [f.issueType.replace(/_/g, " "), f.partName ?? "no part"].join(" · "),
+              }));
+              return (
+                <LoosePhotosSection
+                  photos={zoneOnlyPhotos}
+                  findingOptions={options}
+                  wetCheckId={wetCheckId}
+                  readOnly={readOnly}
+                />
+              );
+            }
+            return (
+              <div className="flex flex-wrap gap-2 pt-1" data-testid="zone-photos">
+                {zoneOnlyPhotos.map(p => <PhotoThumb key={p.id} photo={p} canDelete={!readOnly} />)}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 

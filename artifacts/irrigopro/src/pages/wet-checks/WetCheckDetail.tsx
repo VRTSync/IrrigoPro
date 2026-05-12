@@ -29,6 +29,7 @@ import { PhotoThumb } from "./PhotoThumb";
 import { ControllerHeader } from "./ControllerHeader";
 import { ZoneScreen } from "./ZoneScreen";
 import { FindingsByResolution } from "./FindingsByResolution";
+import { LoosePhotosSection } from "./LoosePhotosSection";
 
 // ─── Detail page ──────────────────────────────────────────────────────────────
 
@@ -500,11 +501,37 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         <CardContent className="space-y-2 text-sm">
           <div>{wc.propertyAddress ?? "—"}</div>
           <div>Status: <Badge>{wc.status}</Badge></div>
-          {wetCheckLevelPhotos.length > 0 && (
+          {wetCheckLevelPhotos.length > 0 && allFindings.length === 0 && (
             <div className="flex flex-wrap gap-2 pt-2" data-testid="wc-photos">
               {wetCheckLevelPhotos.map(p => (
                 <PhotoThumb key={p.id} photo={p} canDelete={!isReadOnly} />
               ))}
+            </div>
+          )}
+          {wetCheckLevelPhotos.length > 0 && allFindings.length > 0 && (
+            <div className="pt-2" data-testid="wc-photos">
+              {(() => {
+                // Task #246 — Wet-check-level photos with no zone or
+                // finding link are surfaced as "loose" so the tech can
+                // attach them to any existing finding (across any zone)
+                // or delete them. Labels include the controller/zone so
+                // the picker is unambiguous when multiple zones have
+                // findings of the same issue type.
+                const options = wcZoneRecords.flatMap(zr =>
+                  asArray(zr.findings).map(f => ({
+                    id: f.id,
+                    label: `${zr.controllerLetter}${zr.zoneNumber} · ${f.issueType.replace(/_/g, " ")} · ${f.partName ?? "no part"}`,
+                  })),
+                );
+                return (
+                  <LoosePhotosSection
+                    photos={wetCheckLevelPhotos}
+                    findingOptions={options}
+                    wetCheckId={wc.id ?? id ?? 0}
+                    readOnly={isReadOnly}
+                  />
+                );
+              })()}
             </div>
           )}
         </CardContent>
