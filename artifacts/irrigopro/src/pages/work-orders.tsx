@@ -131,8 +131,8 @@ export default function WorkOrders() {
       ? ["/api/work-orders", "technician", currentUser?.id]
       : ["/api/work-orders"],
     queryFn: () => currentUser?.role === 'field_tech' 
-      ? fetch(`/api/work-orders?technician=${currentUser.id}`).then(res => res.json())
-      : fetch('/api/work-orders').then(res => res.json()),
+      ? apiRequest(`/api/work-orders?technician=${currentUser.id}`, "GET")
+      : apiRequest('/api/work-orders', "GET"),
     staleTime: 0,
     refetchOnMount: true,
     enabled: !!currentUser,
@@ -154,7 +154,7 @@ export default function WorkOrders() {
   // Fetch notifications for assignment dates (field techs only)
   const { data: notifications } = useQuery({
     queryKey: ["/api/notifications", currentUser?.id],
-    queryFn: () => fetch(`/api/notifications/${currentUser.id}`).then(res => res.json()),
+    queryFn: () => apiRequest(`/api/notifications/${currentUser.id}`, "GET"),
     enabled: !!currentUser && currentUser.role === 'field_tech',
   });
 

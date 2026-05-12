@@ -76,6 +76,7 @@ import { DesktopShell } from "@/components/layout/desktop-shell";
 import { billingManagerNav } from "@/components/layout/nav-config";
 import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
 import { ConflictToastBridge } from "@/components/offline/conflict-toast-bridge";
+import { SessionExpiredBanner } from "@/components/auth/session-expired-banner";
 
 
 function RedirectToCommandCenter() {
@@ -235,6 +236,7 @@ function Router() {
           <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
             <Navigation />
             <div className="px-4 flex-1">
+              <SessionExpiredBanner />
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
                   <Route path="/" component={FieldTechDashboard} />

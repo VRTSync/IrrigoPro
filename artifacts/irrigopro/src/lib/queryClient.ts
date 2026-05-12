@@ -5,7 +5,58 @@ import {
   type UseQueryOptions,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { useSyncExternalStore } from "react";
 import { safeGet } from "@/utils/safeStorage";
+
+// Task #556 — global "read-auth lost" signal.
+//
+// Background: `getQueryFn({ on401: "returnNull" })` collapses a 401
+// response to `null`, which `useArrayQuery` then collapses to `[]`.
+// That keeps list pages from crashing but makes a session loss look
+// indistinguishable from a genuinely-empty account: a field tech
+// whose session has expired sees "No wet checks yet." instead of a
+// signal to sign back in.
+//
+// We track "the last time a default-loaded read came back 401" in a
+// tiny module-local store, and expose `useUnauthenticatedReads()` so
+// the field-tech shell can render a single re-login banner and the
+// individual list pages can swap their empty state for a re-login
+// affordance. Multiple 401s in the same render burst collapse to one
+// signal — the listener set is fired only when the boolean changes.
+let _unauthenticatedAt = 0;
+const _unauthListeners = new Set<() => void>();
+const _emitUnauth = () => {
+  _unauthListeners.forEach((fn) => {
+    try { fn(); } catch { /* ignore */ }
+  });
+};
+
+export function markUnauthenticatedRead(): void {
+  if (_unauthenticatedAt > 0) return; // debounce: already flagged
+  _unauthenticatedAt = Date.now();
+  _emitUnauth();
+}
+
+export function clearUnauthenticatedRead(): void {
+  if (_unauthenticatedAt === 0) return;
+  _unauthenticatedAt = 0;
+  _emitUnauth();
+}
+
+function _isUnauthSnapshot(): boolean {
+  return _unauthenticatedAt > 0;
+}
+
+export function useUnauthenticatedReads(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      _unauthListeners.add(cb);
+      return () => { _unauthListeners.delete(cb); };
+    },
+    _isUnauthSnapshot,
+    () => false,
+  );
+}
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -70,6 +121,17 @@ export async function apiRequest(
     try { apiHeartbeat(res.status < 500); } catch {}
   }
 
+  // Task #556 — flag the global "session lost" signal whenever a
+  // logged-in user's read 401s through the imperative apiRequest
+  // path too. Custom queryFns built on apiRequest (field-tech
+  // dashboard, notification-system, navigation profile fetch) bypass
+  // the default getQueryFn, so we have to mark the signal here as
+  // well, otherwise the re-login banner never fires for those
+  // screens.
+  if (res.status === 401 && user?.id != null) {
+    markUnauthenticatedRead();
+  }
+
   await throwIfResNotOk(res);
   return await res.json();
 }
@@ -108,6 +170,13 @@ export const getQueryFn: <T>(options: {
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+      // Task #556 — flag the global "session lost" signal whenever a
+      // logged-in tech's default-loaded read 401s. We only mark the
+      // signal when there's actually a saved user (otherwise the
+      // login screen itself can briefly probe /api/auth and trip it).
+      if (user?.id != null) {
+        markUnauthenticatedRead();
+      }
       return null;
     }
 

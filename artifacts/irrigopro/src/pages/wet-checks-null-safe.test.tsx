@@ -44,13 +44,24 @@ vi.mock("@/lib/offline/api", () => ({
 }));
 vi.mock("@/lib/photo-prep", () => ({ preparePhotoForUpload: vi.fn() }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
-vi.mock("@/utils/safeStorage", () => ({ safeGet: () => null }));
+const safeStorageState: { user: string | null } = { user: null };
+vi.mock("@/utils/safeStorage", () => ({
+  safeGet: (k: string) => (k === "user" ? safeStorageState.user : null),
+  safeSet: () => {},
+  safeRemove: () => {},
+}));
 vi.mock("@/components/offline/sync-ui", () => ({
   OfflineStrip: () => null,
   OfflineSyncUI: () => null,
 }));
 
-import { asArray, useArrayQuery } from "@/lib/queryClient";
+import {
+  apiRequest,
+  asArray,
+  clearUnauthenticatedRead,
+  markUnauthenticatedRead,
+  useArrayQuery,
+} from "@/lib/queryClient";
 
 describe("Task #540 — null-safe array reads", () => {
   it("asArray() returns [] for null/undefined and the original array otherwise", () => {
@@ -191,6 +202,124 @@ describe("Task #540 — null-safe array reads", () => {
     // Smoke: anything from WetCheckDetail rendered (controller grid /
     // header / submit area). The proof is no throw on the null
     // `zoneRecords` traversal.
+  });
+
+  // Task #556 — `WetCheckList` must not silently render "No wet checks
+  // yet." when reads are coming back 401. The global re-login signal
+  // (markUnauthenticatedRead) flips the empty state into a "session
+  // expired — sign in" affordance instead.
+  it("WetCheckList shows the re-login affordance, not 'No wet checks yet.', when reads are 401-ing", async () => {
+    const mod: any = await import("./wet-checks");
+    const Page = mod.default;
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+          // Mirror the production 401 returnNull path.
+          queryFn: async () => null as unknown,
+        },
+      },
+    });
+    markUnauthenticatedRead();
+    try {
+      const { Router, Route, Switch } = await import("wouter");
+      const { memoryLocation } = await import("wouter/memory-location");
+      const { hook } = memoryLocation({ path: "/wet-checks" });
+      render(
+        <QueryClientProvider client={qc}>
+          <Router hook={hook}>
+            <Switch>
+              <Route path="/wet-checks" component={Page as any} />
+            </Switch>
+          </Router>
+        </QueryClientProvider>,
+      );
+      // Re-login affordance is shown…
+      const banner = await screen.findByTestId("session-expired-empty");
+      expect(banner).toBeTruthy();
+      // …and the misleading empty-state copy is NOT.
+      expect(screen.queryByText(/No wet checks yet\./i)).toBeNull();
+    } finally {
+      clearUnauthenticatedRead();
+    }
+  });
+
+  it("WetCheckList still shows 'No wet checks yet.' for a genuinely-empty (200 []) response", async () => {
+    const mod: any = await import("./wet-checks");
+    const Page = mod.default;
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+          queryFn: async () => [] as unknown[],
+        },
+      },
+    });
+    // Be defensive in case a previous test left it set.
+    clearUnauthenticatedRead();
+    const { Router, Route, Switch } = await import("wouter");
+    const { memoryLocation } = await import("wouter/memory-location");
+    const { hook } = memoryLocation({ path: "/wet-checks" });
+    render(
+      <QueryClientProvider client={qc}>
+        <Router hook={hook}>
+          <Switch>
+            <Route path="/wet-checks" component={Page as any} />
+          </Switch>
+        </Router>
+      </QueryClientProvider>,
+    );
+    const empty = await screen.findByText(/No wet checks yet\./i);
+    expect(empty).toBeTruthy();
+    expect(screen.queryByTestId("session-expired-empty")).toBeNull();
+  });
+
+  // Task #556 — apiRequest must trip the unauthenticated-reads signal
+  // on 401 too. Many field-tech screens (field-tech-dashboard,
+  // notification-system, navigation profile fetch) use custom
+  // queryFns built on apiRequest rather than the default getQueryFn,
+  // so the signal has to be marked at the apiRequest layer or the
+  // global re-login banner never fires for those screens.
+  it("apiRequest() flips the unauth signal on 401 when a user is logged in", async () => {
+    clearUnauthenticatedRead();
+    safeStorageState.user = JSON.stringify({ id: 7, role: "field_tech" });
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async () =>
+      new Response("Unauthorized", { status: 401 }),
+    ) as unknown as typeof fetch;
+    try {
+      const { useUnauthenticatedReads } = await import("@/lib/queryClient");
+      const { result } = renderHook(() => useUnauthenticatedReads());
+      expect(result.current).toBe(false);
+      await expect(apiRequest("/api/work-orders", "GET")).rejects.toBeTruthy();
+      await waitFor(() => expect(result.current).toBe(true));
+    } finally {
+      global.fetch = realFetch;
+      safeStorageState.user = null;
+      clearUnauthenticatedRead();
+    }
+  });
+
+  it("apiRequest() does NOT flip the unauth signal on 401 when no user is logged in", async () => {
+    clearUnauthenticatedRead();
+    safeStorageState.user = null;
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async () =>
+      new Response("Unauthorized", { status: 401 }),
+    ) as unknown as typeof fetch;
+    try {
+      const { useUnauthenticatedReads } = await import("@/lib/queryClient");
+      const { result } = renderHook(() => useUnauthenticatedReads());
+      await expect(apiRequest("/api/login", "POST", { u: "x" })).rejects.toBeTruthy();
+      // Give any microtasks a chance to flush.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(result.current).toBe(false);
+    } finally {
+      global.fetch = realFetch;
+      clearUnauthenticatedRead();
+    }
   });
 
   it("ZoneScreen renders cleanly with `zoneRecord.findings = null` (the production crash payload)", async () => {

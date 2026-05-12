@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, asArray, authedPhotoSrc, parseApiError, queryClient, useArrayQuery } from "@/lib/queryClient";
+import { apiRequest, asArray, authedPhotoSrc, parseApiError, queryClient, useArrayQuery, useUnauthenticatedReads } from "@/lib/queryClient";
+import { SessionExpiredEmptyState } from "@/components/auth/session-expired-banner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -531,6 +532,9 @@ function WetCheckList() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const me = useMemo(() => getCurrentUser(), []);
+  // Task #556 — when any default-loaded read 401s, we want the empty
+  // state copy to read "sign in again", not "No wet checks yet."
+  const unauthenticated = useUnauthenticatedReads();
 
   const { data: wetChecks = [], isLoading: loadingWcs } = useArrayQuery<WetCheck>({
     queryKey: ["/api/wet-checks"],
@@ -646,9 +650,15 @@ function WetCheckList() {
             <div data-testid="section-today">
               <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Today's Schedule</div>
               {todaysScheduled.length === 0 ? (
-                <div className="text-sm text-gray-500 py-3">
-                  No properties scheduled for you today. Search above to pick any customer.
-                </div>
+                unauthenticated ? (
+                  <SessionExpiredEmptyState
+                    message="Your session expired — sign in again to load today's schedule."
+                  />
+                ) : (
+                  <div className="text-sm text-gray-500 py-3">
+                    No properties scheduled for you today. Search above to pick any customer.
+                  </div>
+                )
               ) : (
                 <div className="space-y-1">
                   {todaysScheduled.map(p => (
@@ -675,9 +685,15 @@ function WetCheckList() {
         {loadingWcs ? (
           <div className="flex justify-center py-6"><Loader2 className="animate-spin" /></div>
         ) : wetChecks.length === 0 ? (
-          <Card><CardContent className="py-6 text-center text-gray-500 text-sm">
-            No wet checks yet.
-          </CardContent></Card>
+          unauthenticated ? (
+            <SessionExpiredEmptyState
+              message="Your session expired — sign in again to load your wet checks."
+            />
+          ) : (
+            <Card><CardContent className="py-6 text-center text-gray-500 text-sm">
+              No wet checks yet.
+            </CardContent></Card>
+          )
         ) : (
           <div className="space-y-2">
             {wetChecks.map(wc => (

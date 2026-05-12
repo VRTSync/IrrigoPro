@@ -210,7 +210,10 @@ export function SyncBadge({
       ? `Sync errors (${snap.failed})`
       : state === "syncing"
         ? `Syncing… ${inFlight}`
-        : "All synced";
+        // Task #556 — narrowed copy: this badge only reflects the offline
+        // write queue, not read auth. "All synced" was misleading when
+        // every read was silently 401-ing.
+        : "Uploads synced";
   const Icon =
     state === "errors" ? AlertTriangle : state === "syncing" ? Loader2 : CheckCircle2;
   const variant: "default" | "secondary" | "destructive" =
