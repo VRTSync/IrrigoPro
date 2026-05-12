@@ -39,6 +39,7 @@ import {
   readWetCheckByClientId,
   cachedApiRequest,
 } from "@/lib/offline/api";
+import { tintForControllerLetter } from "@/lib/lifecycle";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
 import { OfflineStrip, OfflineSyncUI } from "@/components/offline/sync-ui";
 import type {
@@ -1585,27 +1586,68 @@ function ZoneScreen({
       <Button variant="ghost" onClick={onBack}>
         <ChevronLeft className="w-4 h-4 mr-1" /> Back to Zone Grid
       </Button>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle>Controller {letter} · Zone {zoneNumber}</CardTitle>
-            {!readOnly && zoneRecord && (
-              <PhotoCaptureButton
-                wetCheckId={wetCheckId}
-                wetCheckClientId={wetCheckClientId}
-                zoneRecordId={zoneRecord.id}
-                zoneRecordClientId={zoneRecord.clientId ?? null}
-              />
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>Status: <Badge>{
+      <Card className="overflow-hidden">
+        {(() => {
+          const tint = tintForControllerLetter(letter);
+          const statusLabel =
             zoneRecord?.status === "checked_ok" ? "Ran OK" :
             zoneRecord?.status === "checked_with_issues" ? "Needs Work" :
             zoneRecord?.status === "not_applicable" ? "Skipped" :
-            "Not Checked"
-          }</Badge></div>
+            "Not Checked";
+          const statusPillCls =
+            zoneRecord?.status === "checked_ok" ? "bg-green-100 text-green-900 border-green-300" :
+            zoneRecord?.status === "checked_with_issues" ? "bg-red-100 text-red-900 border-red-300" :
+            zoneRecord?.status === "not_applicable" ? "bg-gray-100 text-gray-800 border-gray-300" :
+            "bg-white text-gray-700 border-gray-300";
+          return (
+            <div
+              className={`${tint.band} border-b-4 ${tint.border} px-4 py-3 sm:py-4`}
+              data-testid="zone-identity-band"
+              data-controller-letter={letter}
+              data-zone-number={zoneNumber}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`${tint.letterBg} ${tint.letterText} rounded-lg px-3 py-2 text-3xl sm:text-4xl font-extrabold leading-none shrink-0 shadow-sm`}
+                    aria-label={`Controller ${letter}`}
+                    data-testid="zone-identity-controller"
+                  >
+                    {letter}
+                  </div>
+                  <div className="min-w-0">
+                    <div className={`text-[11px] uppercase tracking-wider font-semibold ${tint.label}`}>
+                      Controller {letter} · Zone
+                    </div>
+                    <div
+                      className={`${tint.zoneText} text-4xl sm:text-5xl font-black leading-none tabular-nums`}
+                      data-testid="zone-identity-number"
+                    >
+                      {zoneNumber}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  <Badge
+                    className={`${statusPillCls} text-xs font-semibold border`}
+                    data-testid="zone-identity-status"
+                  >
+                    {statusLabel}
+                  </Badge>
+                  {!readOnly && zoneRecord && (
+                    <PhotoCaptureButton
+                      wetCheckId={wetCheckId}
+                      wetCheckClientId={wetCheckClientId}
+                      zoneRecordId={zoneRecord.id}
+                      zoneRecordClientId={zoneRecord.clientId ?? null}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        <CardContent className="space-y-4 pt-4">
           {!readOnly && (
             <>
               <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
