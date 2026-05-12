@@ -348,10 +348,8 @@ import {
   type InsertWetCheckFinding,
   type InsertWetCheckZoneRecord,
   insertIssueTypeConfigSchema,
-  clientErrors,
-  appEventGroups,
-  auditLog,
 } from "@workspace/db";
+import { clientErrors, appEventGroups, auditLog } from "@workspace/db/schema";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
 import { registerSiteMapRoutes } from "./site-map-routes";
@@ -359,6 +357,9 @@ import { registerPartRoutes } from "./parts-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { findingPatchBody, buildFindingPatchFromBody } from "./wet-check-finding-patch";
+import { scrubEvent, setScrubCustomerNames } from "../lib/scrubEvent";
+import { setTelemetrySink, withTelemetry, type TelemetryEvent } from "../lib/withTelemetry";
+import { logger } from "../lib/logger";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
 const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
@@ -948,6 +949,44 @@ import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL 
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
+  // Task #552 — capture http.5xx and http.slow as app_events. Mounted
+  // first so it wraps every /api/* route registered below; the
+  // `insertAppEvent` reference is hoisted within the enclosing
+  // function scope and resolves at res.finish time.
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api")) return next();
+    if (req.path.startsWith("/api/admin/app-health")) return next();
+    if (req.path === "/api/health") return next();
+    if (req.path === "/api/client-errors") return next();
+    const start = Date.now();
+    res.on("finish", () => {
+      try {
+        const dur = Date.now() - start;
+        const status = res.statusCode;
+        const isError = status >= 500;
+        const isSlow = !isError && dur > 2000;
+        if (!isError && !isSlow) return;
+        const cleanPath = req.path.replace(/\/\d+(?=\/|$)/g, "/:id");
+        const name = isError ? `http.${status}` : `http.slow`;
+        void insertAppEvent({
+          name,
+          message: `${req.method} ${cleanPath} → ${status} in ${dur}ms`,
+          source: "api",
+          type: "metric",
+          severity: isError ? (status >= 500 ? "error" : "warning") : "warning",
+          component: cleanPath,
+          context: {
+            method: req.method,
+            path: cleanPath,
+            status_code: status,
+            duration_ms: dur,
+          },
+        });
+      } catch { /* never block */ }
+    });
+    next();
+  });
+
   // ── Task #550 (Phase 2) — App Health access-log ring buffer ───────────
   // Lightweight in-memory ring of API request samples used to compute
   // p95 latency, request counts, and error rates for the App Health
@@ -1078,24 +1117,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const v = body[k];
         return typeof v === "string" ? v.slice(0, max) : "";
       };
-      const userIdRaw = body.userId;
-      const userIdNum =
-        typeof userIdRaw === "number" && Number.isInteger(userIdRaw) && userIdRaw > 0
-          ? userIdRaw
-          : null;
-      const companyIdRaw = body.companyId;
-      const companyIdNum =
-        typeof companyIdRaw === "number" && Number.isInteger(companyIdRaw) && companyIdRaw > 0
-          ? companyIdRaw
-          : null;
+      // Trusted user attribution — Task #552 spec compliance.
+      // The client-supplied body.userId / body.companyId are NOT
+      // trusted (a malicious or buggy client could spoof them and
+      // poison per-user metrics, status derivation, and the top-user
+      // breakdown). Order of trust:
+      //   1. req.session.userId (server-side session — fully trusted),
+      //      with a single users-row lookup to derive companyId.
+      //   2. headerUserId / headerUserCompanyId (only when
+      //      ALLOW_HEADER_AUTH=1 / non-prod — gated by isHeaderAuthAllowed).
+      //   3. body.userId / body.companyId (only when nothing else is
+      //      available — typically a logged-out crash from the login
+      //      page; treated as a hint, not authoritative).
+      let userIdNum: number | null = null;
+      let companyIdNum: number | null = null;
+      const sessionUserId = req.session?.userId;
+      if (sessionUserId != null) {
+        const n = Number(sessionUserId);
+        if (Number.isInteger(n) && n > 0) {
+          userIdNum = n;
+          try {
+            const r = await db.execute<{ companyId: number | null }>(sql`
+              SELECT company_id AS "companyId" FROM users WHERE id = ${n} LIMIT 1
+            `);
+            const cid = r.rows?.[0]?.companyId;
+            if (typeof cid === "number" && cid > 0) companyIdNum = cid;
+          } catch { /* swallow — best-effort */ }
+        }
+      }
+      if (userIdNum == null) {
+        const hUid = headerUserId(req);
+        const hCid = headerUserCompanyId(req);
+        const nu = hUid != null ? Number(hUid) : NaN;
+        const nc = hCid != null ? Number(hCid) : NaN;
+        if (Number.isInteger(nu) && nu > 0) userIdNum = nu;
+        if (Number.isInteger(nc) && nc > 0) companyIdNum = nc;
+      }
+      if (userIdNum == null) {
+        const bu = body.userId;
+        if (typeof bu === "number" && Number.isInteger(bu) && bu > 0) userIdNum = bu;
+      }
+      if (companyIdNum == null) {
+        const bc = body.companyId;
+        if (typeof bc === "number" && Number.isInteger(bc) && bc > 0) companyIdNum = bc;
+      }
       const SEVERITY_VALUES = new Set(["info", "warning", "error", "fatal"]);
-      const TYPE_VALUES = new Set(["error", "unhandled_rejection", "log"]);
-      const SOURCE_VALUES = new Set(["web", "mobile", "api", "worker", "integration"]);
+      const TYPE_VALUES = new Set(["error", "unhandled_rejection", "log", "metric"]);
+      const SOURCE_VALUES = new Set(["web", "mobile", "api", "worker", "sw", "integration"]);
       const sevRaw = pick("severity", 32);
       const typeRaw = pick("type", 32);
       const sourceRaw = pick("source", 32);
       const severity = SEVERITY_VALUES.has(sevRaw) ? sevRaw : "error";
-      const type = TYPE_VALUES.has(typeRaw) ? typeRaw : "error";
+      // Default unknown types to "log" rather than "error" so a stray
+      // payload can't pollute the Crashes view (which filters by
+      // type IN (error, unhandled_rejection)).
+      const type = TYPE_VALUES.has(typeRaw) ? typeRaw : "log";
       const source = SOURCE_VALUES.has(sourceRaw) ? sourceRaw : "web";
       const buildHash = pick("buildHash");
       const appVersion = pick("appVersion") || buildHash || null;
@@ -1118,20 +1194,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : "";
       const fingerprintInput = `${name}|${topFrame}|${component ?? ""}`;
       const fingerprint = crypto.createHash("sha1").update(fingerprintInput).digest("hex").slice(0, 40);
-      const breadcrumbsRaw = body.breadcrumbs;
-      const contextRaw = body.context;
-      const breadcrumbs = Array.isArray(breadcrumbsRaw) ? breadcrumbsRaw.slice(-50) : null;
-      const context =
-        contextRaw && typeof contextRaw === "object" && !Array.isArray(contextRaw)
-          ? (contextRaw as Record<string, unknown>)
-          : null;
-
-      const payload: typeof clientErrors.$inferInsert = {
-        name,
+      // Task #552 — scrub PII (emails, phones, addresses, SSNs) and
+      // restrict the free-form `context` object to a small allowlist
+      // before the event is persisted. Best-effort: a scrubber failure
+      // must never block the report.
+      const scrubbed = scrubEvent({
         message: pick("message"),
         stack,
         componentStack: pick("componentStack") || null,
         url: pick("url") || null,
+        breadcrumbs: body.breadcrumbs,
+        context: body.context,
+      });
+
+      const payload: typeof clientErrors.$inferInsert = {
+        name,
+        message: scrubbed.message ?? "",
+        stack: scrubbed.stack ?? null,
+        componentStack: scrubbed.componentStack ?? null,
+        url: scrubbed.url ?? null,
         userAgent: pick("userAgent") || (typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"]!.slice(0, 4000) : null),
         buildHash,
         userId: userIdNum,
@@ -1144,8 +1225,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         component,
         appVersion,
         fingerprint,
-        breadcrumbs,
-        context,
+        breadcrumbs: (scrubbed.breadcrumbs as unknown[] | null) ?? null,
+        context: (scrubbed.context as Record<string, unknown> | null) ?? null,
       };
       req.log.error({ clientError: payload }, "client error boundary report");
       try {
@@ -1705,6 +1786,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  // Same as getSyncQueueDepth but scoped to one company. Sessions
+  // don't carry company_id so we resolve through the users table on
+  // the same `clock_number ↔ username|id` rule used elsewhere.
+  async function getSyncQueueDepthForCompany(cid: number): Promise<{ depth: number; stuck: number }> {
+    try {
+      const r = await db.execute<{ depth: number; stuck: number }>(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE s.status = 'in-progress')::int AS depth,
+          COUNT(*) FILTER (WHERE s.status = 'in-progress' AND s.start_time < now() - interval '1 hour')::int AS stuck
+        FROM field_work_sessions s
+        WHERE s.clock_number IN (
+          SELECT username FROM users WHERE company_id = ${cid}
+          UNION ALL
+          SELECT CAST(id AS text) FROM users WHERE company_id = ${cid}
+        )
+      `);
+      const row = r.rows?.[0];
+      return { depth: row?.depth ?? 0, stuck: row?.stuck ?? 0 };
+    } catch {
+      return { depth: 0, stuck: 0 };
+    }
+  }
+
   // Rolling snapshots for delta computation on metrics that don't have
   // a natural "previous window" query (active users right now, current
   // sync queue depth). Keyed by window so 24h ≠ 7d.
@@ -2160,7 +2264,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const like = `%${q}%`;
         filters.push(sql`(action ILIKE ${like} OR summary ILIKE ${like} OR actor_label ILIKE ${like})`);
       }
-      if (actor) filters.push(sql`actor_label ILIKE ${`%${actor}%`}`);
+      if (actor) {
+        // Drill-throughs from the Users tab pass a numeric user id;
+        // free-text searches pass a label. Match on actor_user_id when
+        // the value parses as a positive integer, else fall back to
+        // the label ILIKE search.
+        const asInt = /^\d+$/.test(actor.trim()) ? Number(actor.trim()) : NaN;
+        if (Number.isInteger(asInt) && asInt > 0) {
+          filters.push(sql`actor_user_id = ${asInt}`);
+        } else {
+          filters.push(sql`actor_label ILIKE ${`%${actor}%`}`);
+        }
+      }
       if (action) filters.push(sql`action = ${action}`);
       if (actionType) filters.push(sql`action_type = ${actionType}`);
       if (severity) {
@@ -2203,6 +2318,850 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "appHealthAudit",
         ctx: {},
         fallbackMessage: "Couldn't load audit log — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #552 (Phase 3) — Internal app-event sink + telemetry ─────────
+  // `client_errors` is the underlying app_events firehose for everything
+  // the UI shows on App Health. Phase 3 adds two new producers in
+  // addition to the client-side error boundary:
+  //
+  //  - The Express request pipeline emits a `metric` row for every 5xx
+  //    response and a `metric` row tagged `slow` for any successful
+  //    response that took > 2 s. These are the signal behind the API
+  //    p95 / 5xx rate columns on the Sync & Uploads tab.
+  //  - Backend operations (photo finalize, integration calls, PDF
+  //    renders) wrapped in `withTelemetry()` emit a `metric` row with
+  //    duration + outcome.
+  //
+  // Both producers funnel through `insertAppEvent()`; events land in
+  // `client_errors` with `source` ∈ {api, integration, worker} and
+  // `type` = "metric" so the existing Crashes view filters them out
+  // (it filters by type=error/unhandled_rejection in the UI).
+  function fingerprintFor(input: string): string {
+    return crypto.createHash("sha1").update(input).digest("hex").slice(0, 40);
+  }
+  type InternalEventInput = {
+    name: string;
+    message?: string | null;
+    source: "web" | "mobile" | "api" | "worker" | "sw" | "integration";
+    type: "error" | "unhandled_rejection" | "log" | "metric";
+    severity: "info" | "warning" | "error" | "fatal";
+    component?: string | null;
+    appVersion?: string | null;
+    userId?: number | null;
+    companyId?: number | null;
+    sessionId?: string | null;
+    stack?: string | null;
+    url?: string | null;
+    context?: Record<string, unknown> | null;
+  };
+  async function insertAppEvent(evt: InternalEventInput): Promise<void> {
+    try {
+      const fingerprint = fingerprintFor(`${evt.name}|${evt.component ?? ""}|${evt.source}|${evt.type}`);
+      const scrubbed = scrubEvent({
+        message: evt.message ?? "",
+        stack: evt.stack ?? null,
+        componentStack: null,
+        url: evt.url ?? null,
+        breadcrumbs: null,
+        context: evt.context ?? null,
+      });
+      const row: typeof clientErrors.$inferInsert = {
+        name: evt.name,
+        message: scrubbed.message ?? "",
+        stack: scrubbed.stack ?? null,
+        componentStack: null,
+        url: scrubbed.url ?? null,
+        userAgent: null,
+        buildHash: evt.appVersion ?? "",
+        userId: evt.userId ?? null,
+        role: null,
+        companyId: evt.companyId ?? null,
+        sessionId: evt.sessionId ?? null,
+        type: evt.type,
+        severity: evt.severity,
+        source: evt.source,
+        component: evt.component ?? null,
+        appVersion: evt.appVersion ?? null,
+        fingerprint,
+        breadcrumbs: null,
+        context: (scrubbed.context as Record<string, unknown> | null) ?? null,
+      };
+      await db.insert(clientErrors).values(row);
+      // Upsert into the rollup table so the Crashes view's group
+      // counters stay accurate for non-error metric events too. We
+      // keep it cheap by skipping the per-event distinct subqueries
+      // — the periodic 60 s rollup re-derives those from scratch.
+      await db.execute(sql`
+        INSERT INTO app_event_groups (
+          fingerprint, name, sample_message, severity, type, source, component, app_version,
+          first_seen_at, last_seen_at, event_count, user_count, company_count, status
+        ) VALUES (
+          ${fingerprint}, ${evt.name}, ${row.message || null}, ${evt.severity}, ${evt.type}, ${evt.source},
+          ${evt.component ?? null}, ${evt.appVersion ?? null}, now(), now(), 1,
+          ${evt.userId ? 1 : 0}, ${evt.companyId ? 1 : 0}, 'open'
+        )
+        ON CONFLICT (fingerprint) DO UPDATE SET
+          event_count = app_event_groups.event_count + 1,
+          last_seen_at = now(),
+          severity = EXCLUDED.severity,
+          updated_at = now()
+      `);
+    } catch (err) {
+      try { logger.warn({ err }, "insertAppEvent failed"); } catch { /* swallow */ }
+    }
+  }
+
+  // Bridge `withTelemetry()` callers (anywhere in the codebase that
+  // imports the helper) into the same sink.
+  setTelemetrySink((evt: TelemetryEvent) => {
+    void insertAppEvent({
+      name: evt.ok ? `${evt.component}.ok` : (evt.errorName ?? `${evt.component}.error`),
+      message: evt.errorMessage ?? null,
+      source: evt.source,
+      type: evt.type,
+      severity: evt.severity,
+      component: evt.component,
+      context: {
+        duration_ms: evt.durationMs,
+        ok: evt.ok,
+        ...(evt.statusCode != null ? { status_code: evt.statusCode } : {}),
+        ...(evt.context ?? {}),
+      },
+    });
+  });
+
+  // (http.5xx / http.slow telemetry middleware mounted earlier — see
+  //  the top of registerRoutes — so it wraps every route handler.)
+
+  // 60 s background rollup — recomputes user_count / company_count for
+  // the most-recently-active groups so the Crashes table converges on
+  // accurate distinct counts even when many concurrent inserts race
+  // through the per-event upsert. We constrain the work to groups
+  // updated in the last hour so the job stays cheap regardless of
+  // table size.
+  //
+  // Leader election: we wrap the body in `pg_try_advisory_lock` keyed
+  // off a stable 64-bit constant (the sha1 prefix of the literal
+  // "app_event_groups_rollup"). Only the replica that grabs the lock
+  // executes the UPDATE; the others no-op until it's released. The
+  // lock is released at the end of the same query block via
+  // `pg_advisory_unlock`. This makes the timer safe to run in cluster
+  // / pm2 / multi-replica deployments.
+  const ROLLUP_LOCK_KEY = 0x4170705f456d4831n; // "App_EmH1" — arbitrary stable bigint
+  const rollupTimer = setInterval(() => {
+    void (async () => {
+      try {
+        const got = await db.execute<{ ok: boolean }>(sql`
+          SELECT pg_try_advisory_lock(${ROLLUP_LOCK_KEY}) AS ok
+        `);
+        if (!got.rows?.[0]?.ok) return; // another replica is the leader
+        try {
+          await db.execute(sql`
+            UPDATE app_event_groups g SET
+            user_count = COALESCE(sub.uc, 0),
+            company_count = COALESCE(sub.cc, 0),
+            event_count = COALESCE(sub.ec, g.event_count),
+            updated_at = now()
+          FROM (
+            SELECT fingerprint,
+                   COUNT(*)::int AS ec,
+                   COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL)::int AS uc,
+                   COUNT(DISTINCT company_id) FILTER (WHERE company_id IS NOT NULL)::int AS cc
+            FROM client_errors
+            WHERE fingerprint IS NOT NULL
+              AND occurred_at >= now() - interval '24 hours'
+            GROUP BY fingerprint
+            ) sub
+            WHERE g.fingerprint = sub.fingerprint
+              AND g.last_seen_at >= now() - interval '1 hour'
+          `);
+        } finally {
+          try {
+            await db.execute(sql`SELECT pg_advisory_unlock(${ROLLUP_LOCK_KEY})`);
+          } catch { /* lock auto-releases on session close */ }
+        }
+      } catch (err) {
+        try { logger.warn({ err }, "app_event_groups rollup job failed"); } catch { /* ignore */ }
+      }
+    })();
+  }, 60_000);
+  // Don't keep the process alive for the rollup timer alone.
+  if (typeof rollupTimer.unref === "function") rollupTimer.unref();
+
+  // Customer-name scrubber refresh — Task #552 PII spec. Loads the
+  // current set of customer names from the DB into an in-memory regex
+  // used by `scrubString()` so any event payload that quotes a real
+  // customer name is rewritten to "[customer]" before insert. Refreshed
+  // every 5 minutes; first run kicks off immediately.
+  async function refreshCustomerNamesScrubber(): Promise<void> {
+    try {
+      const r = await db.execute<{ name: string | null }>(sql`
+        SELECT DISTINCT name FROM customers
+        WHERE name IS NOT NULL AND length(name) >= 4
+        LIMIT 5000
+      `);
+      setScrubCustomerNames((r.rows ?? []).map((row) => row.name ?? ""));
+    } catch (err) {
+      try { logger.warn({ err }, "refreshCustomerNamesScrubber failed"); } catch { /* ignore */ }
+    }
+  }
+  void refreshCustomerNamesScrubber();
+  const customerScrubTimer = setInterval(() => {
+    void refreshCustomerNamesScrubber();
+  }, 5 * 60_000);
+  if (typeof customerScrubTimer.unref === "function") customerScrubTimer.unref();
+
+  // ── Task #552 (Phase 3) — Sync & Uploads tab endpoints ────────────────
+  // Sync queue depth + hourly buckets. Backed by `field_work_sessions`
+  // (the longest-lived offline-queue proxy we have on the server) plus
+  // the new `sync.stuck` events the offline engine posts to
+  // `/api/client-errors` when a queued mutation crosses the
+  // attempt > 3 / age > 1h threshold.
+  app.get("/api/admin/app-health/sync/queue", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const { ms, key } = resolveWindow(req, "24h");
+      const since = new Date(Date.now() - ms);
+      // Optional company_id filter — Task #552 spec. When supplied,
+      // every metric in the response is scoped to users / sessions /
+      // events whose company is `cid`. Field-work-sessions don't
+      // carry company_id directly so we resolve through users.
+      const cidRaw = req.query.company_id ?? req.query.companyId;
+      const cid = typeof cidRaw === "string" && /^\d+$/.test(cidRaw) ? Number(cidRaw) : null;
+      const eventCompanyFilter = cid
+        ? sql`AND ce.user_id IN (SELECT id FROM users WHERE company_id = ${cid})`
+        : sql``;
+      const sessionCompanyFilter = cid
+        ? sql`AND s.clock_number IN (
+            SELECT username FROM users WHERE company_id = ${cid}
+            UNION ALL
+            SELECT CAST(id AS text) FROM users WHERE company_id = ${cid}
+          )`
+        : sql``;
+      const depth = cid ? await getSyncQueueDepthForCompany(cid) : await getSyncQueueDepth();
+      const stuckEventsRes = await db.execute<{ c: number }>(sql`
+        SELECT COUNT(*)::int AS c FROM client_errors ce
+        WHERE ce.name = 'sync.stuck' AND ce.occurred_at >= ${since}
+        ${eventCompanyFilter}
+      `);
+      const stuckEvents = stuckEventsRes.rows?.[0]?.c ?? 0;
+      // Hourly buckets of stuck-sync events for the trend sparkline.
+      const bucketWidth = ms <= 24 * 60 * 60 * 1000 ? "1 hour" : "1 day";
+      const bucketsRes = await db.execute<{ ts: string; c: number }>(sql`
+        SELECT date_trunc(${bucketWidth}, ce.occurred_at)::text AS ts, COUNT(*)::int AS c
+        FROM client_errors ce
+        WHERE ce.name = 'sync.stuck' AND ce.occurred_at >= ${since}
+        ${eventCompanyFilter}
+        GROUP BY 1 ORDER BY 1 ASC
+      `);
+      // Top stuck users — joined to users for label.
+      const topUsersRes = await db.execute<{
+        userId: number; name: string | null; companyId: number | null; companyName: string | null; events: number;
+      }>(sql`
+        SELECT ce.user_id AS "userId", u.name AS name,
+               u.company_id AS "companyId", c.name AS "companyName",
+               COUNT(*)::int AS events
+        FROM client_errors ce
+        LEFT JOIN users u ON u.id = ce.user_id
+        LEFT JOIN companies c ON c.id = u.company_id
+        WHERE ce.name = 'sync.stuck'
+          AND ce.occurred_at >= ${since}
+          AND ce.user_id IS NOT NULL
+          ${eventCompanyFilter}
+        GROUP BY ce.user_id, u.name, u.company_id, c.name
+        ORDER BY events DESC
+        LIMIT 20
+      `);
+      // Conflict count — engine emits sync.conflict telemetry whenever a
+      // mutation comes back 409. Counted from app_events in the same
+      // window as the rest of the card.
+      const conflictsRes = await db.execute<{ c: number }>(sql`
+        SELECT COUNT(*)::int AS c FROM client_errors ce
+        WHERE ce.name = 'sync.conflict' AND ce.occurred_at >= ${since}
+        ${eventCompanyFilter}
+      `);
+      const conflicts = conflictsRes.rows?.[0]?.c ?? 0;
+      // Average queue-age (minutes) — derived from in-progress
+      // field_work_sessions; skipped silently on error.
+      let avgAgeMinutes: number | null = null;
+      try {
+        const ageRes = await db.execute<{ m: number | null }>(sql`
+          SELECT EXTRACT(EPOCH FROM AVG(now() - s.start_time))/60 AS m
+          FROM field_work_sessions s
+          WHERE s.status = 'in-progress'
+          ${sessionCompanyFilter}
+        `);
+        const m = ageRes.rows?.[0]?.m;
+        avgAgeMinutes = m == null ? null : Math.round(Number(m) * 10) / 10;
+      } catch { avgAgeMinutes = null; }
+      // Stuck-item table — in-progress sessions older than 1h, joined to
+      // user / company. The session's clockNumber maps to a tech.
+      const stuckItemsRes = await db.execute<{
+        kind: string; userId: number | null; userName: string | null; companyName: string | null;
+        ageMinutes: number; statusVal: string;
+      }>(sql`
+        SELECT 'wet_check.session' AS kind,
+               u.id AS "userId",
+               u.name AS "userName",
+               c.name AS "companyName",
+               GREATEST(0, EXTRACT(EPOCH FROM (now() - s.start_time))/60)::int AS "ageMinutes",
+               s.status AS "statusVal"
+        FROM field_work_sessions s
+        LEFT JOIN users u ON u.username = s.clock_number OR CAST(u.id AS text) = s.clock_number
+        LEFT JOIN companies c ON c.id = u.company_id
+        WHERE s.status = 'in-progress'
+          AND s.start_time < now() - interval '1 hour'
+          ${sessionCompanyFilter}
+        ORDER BY s.start_time ASC
+        LIMIT 50
+      `);
+      const stuckItems = (stuckItemsRes.rows ?? []).map((r) => ({
+        kind: r.kind,
+        userId: r.userId ?? null,
+        userName: r.userName ?? null,
+        companyName: r.companyName ?? null,
+        ageMinutes: r.ageMinutes,
+        status: r.statusVal,
+      }));
+      res.json({
+        window: key,
+        queueDepth: depth.depth,
+        queueStuck: depth.stuck,
+        conflicts,
+        avgAgeMinutes,
+        stuckEvents,
+        stuckItems,
+        buckets: bucketsRes.rows ?? [],
+        topUsers: topUsersRes.rows ?? [],
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthSyncQueue",
+        ctx: {},
+        fallbackMessage: "Couldn't load sync queue — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Photo upload pipeline summary — derived from photo.upload.<step>.*
+  // events emitted by the offline engine on the client. The pipeline
+  // steps are sign (DB), put (S3), finalize (CDN), metadata (DB write).
+  app.get("/api/admin/app-health/uploads/photos", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      // Spec: photo pipeline rates are always reported over the last
+      // hour, regardless of the global window selector. Anything older
+      // is too coarse to act on for a live ops view.
+      const ms = 60 * 60 * 1000;
+      const key = "1h";
+      const since = new Date(Date.now() - ms);
+      const stepNames = [
+        "photo.upload.sign.ok", "photo.upload.sign.failed",
+        "photo.upload.put.ok", "photo.upload.put.failed",
+        "photo.upload.finalize.ok", "photo.upload.finalize.failed",
+        "photo.upload.metadata.ok", "photo.upload.metadata.failed",
+        // Legacy single-event names for back-compat with installed clients
+        // that have not picked up the per-step engine yet.
+        "photo.upload.ok", "photo.upload.failed",
+      ];
+      const totals = await db.execute<{ name: string; c: number }>(sql`
+        SELECT name, COUNT(*)::int AS c FROM client_errors
+        WHERE name = ANY(${stepNames}::text[])
+          AND occurred_at >= ${since}
+        GROUP BY name
+      `);
+      const get = (n: string) => totals.rows?.find((r) => r.name === n)?.c ?? 0;
+      const stepRate = (ok: number, failed: number) => {
+        const total = ok + failed;
+        return {
+          ok, failed, total,
+          successRate: total > 0 ? Math.round((ok / total) * 1000) / 10 : null,
+        };
+      };
+      const sign = stepRate(get("photo.upload.sign.ok"), get("photo.upload.sign.failed"));
+      const put = stepRate(get("photo.upload.put.ok"), get("photo.upload.put.failed"));
+      const finalize = stepRate(get("photo.upload.finalize.ok"), get("photo.upload.finalize.failed"));
+      const metadata = stepRate(get("photo.upload.metadata.ok"), get("photo.upload.metadata.failed"));
+      // The engine emits BOTH per-step events and a rolled-up
+      // photo.upload.{ok,failed} for each upload, so summing them
+      // double-counts. Prefer step events when present in the window;
+      // only count the legacy rollup when there are no step signals
+      // at all (older clients without the per-step pipeline).
+      const stepSignal = sign.total + put.total + finalize.total + metadata.total;
+      const legacyOk = stepSignal > 0 ? 0 : get("photo.upload.ok");
+      const legacyFailed = stepSignal > 0 ? 0 : get("photo.upload.failed");
+      const overallOk = stepSignal > 0 ? metadata.ok : legacyOk;
+      const overallFailed = stepSignal > 0
+        ? sign.failed + put.failed + finalize.failed + metadata.failed
+        : legacyFailed;
+      const overallTotal = overallOk + overallFailed;
+      const successRate = overallTotal > 0
+        ? Math.round((overallOk / overallTotal) * 1000) / 10 : null;
+      // S3 degraded heuristic: <90% PUT success across at least 20 attempts
+      // in the window. Surfaces inline in the UI as a notice.
+      const s3Degraded = put.total >= 20 && (put.successRate ?? 100) < 90;
+      // Top failure reasons across all step `failed` events for the
+      // failures panel — useful for triage at a glance.
+      const reasons = await db.execute<{ message: string; c: number }>(sql`
+        SELECT COALESCE(NULLIF(message, ''), 'unknown')::text AS message,
+               COUNT(*)::int AS c
+        FROM client_errors
+        WHERE name LIKE 'photo.upload.%.failed'
+          AND occurred_at >= ${since}
+        GROUP BY 1 ORDER BY c DESC LIMIT 10
+      `);
+      res.json({
+        window: key,
+        totalAttempts: overallTotal,
+        ok: overallOk,
+        failed: overallFailed,
+        successRate,
+        steps: { sign, put, finalize, metadata },
+        s3Degraded,
+        topFailures: reasons.rows ?? [],
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthUploadsPhotos",
+        ctx: {},
+        fallbackMessage: "Couldn't load photo upload telemetry — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Operational tile values for the Overview tab strip.
+  app.get("/api/admin/app-health/ops", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const { ms } = resolveWindow(req, "24h");
+      const since = new Date(Date.now() - ms);
+      const counts = await db.execute<{ name: string; c: number }>(sql`
+        SELECT name, COUNT(*)::int AS c FROM client_errors
+        WHERE occurred_at >= ${since}
+          AND name IN (
+            'photo.upload.ok','photo.upload.failed',
+            'wet_check.sync.ok','wet_check.sync.failed',
+            'sync.stuck'
+          )
+        GROUP BY name
+      `);
+      const get = (n: string) => counts.rows?.find((r) => r.name === n)?.c ?? 0;
+      const photoOk = get("photo.upload.ok");
+      const photoFail = get("photo.upload.failed");
+      const photoTotal = photoOk + photoFail;
+      const wcOk = get("wet_check.sync.ok");
+      const wcFail = get("wet_check.sync.failed");
+      const wcTotal = wcOk + wcFail;
+      const stuck = get("sync.stuck");
+      // Offline session count — distinct sessionId firing sync.stuck
+      // events in the window. A session is the tech's tab/app session.
+      const offlineSessionsRes = await db.execute<{ c: number }>(sql`
+        SELECT COUNT(DISTINCT session_id)::int AS c FROM client_errors
+        WHERE occurred_at >= ${since}
+          AND session_id IS NOT NULL
+          AND name = 'sync.stuck'
+      `);
+      const offlineSessions = offlineSessionsRes.rows?.[0]?.c ?? 0;
+      // Operational tiles wired to real backend metrics (Task #552):
+      //  - PDF p95 render: percentile over http.slow events whose
+      //    request path mentions a PDF endpoint.
+      //  - Invoice failures: 5xx events on invoice / quickbooks paths.
+      //  - Map tile errors: explicit `map.tile.failed` events posted
+      //    by the leaflet viewer when a tile fetch errors out.
+      let pdfRenderP95Ms: number | null = null;
+      try {
+        const r = await db.execute<{ p95: number | null }>(sql`
+          SELECT percentile_disc(0.95) WITHIN GROUP (
+            ORDER BY (context->>'duration_ms')::int
+          )::int AS p95
+          FROM client_errors
+          WHERE name = 'http.slow'
+            AND occurred_at >= ${since}
+            AND (context->>'path' ILIKE '%pdf%' OR component ILIKE '%pdf%')
+            AND (context->>'duration_ms') ~ '^\\d+$'
+        `);
+        pdfRenderP95Ms = r.rows?.[0]?.p95 ?? null;
+      } catch { pdfRenderP95Ms = null; }
+      let invoiceFailures: number | null = null;
+      try {
+        const r = await db.execute<{ c: number }>(sql`
+          SELECT COUNT(*)::int AS c FROM client_errors
+          WHERE occurred_at >= ${since}
+            AND name LIKE 'http.5%'
+            AND (
+              context->>'path' ILIKE '%invoice%'
+              OR context->>'path' ILIKE '%quickbooks%'
+              OR component ILIKE '%invoice%'
+              OR component ILIKE '%quickbooks%'
+            )
+        `);
+        invoiceFailures = r.rows?.[0]?.c ?? 0;
+      } catch { invoiceFailures = null; }
+      let mapTileErrors: number | null = null;
+      try {
+        const r = await db.execute<{ c: number }>(sql`
+          SELECT COUNT(*)::int AS c FROM client_errors
+          WHERE occurred_at >= ${since}
+            AND name = 'map.tile.failed'
+        `);
+        mapTileErrors = r.rows?.[0]?.c ?? 0;
+      } catch { mapTileErrors = null; }
+      res.json({
+        photoUpload: {
+          successPct: photoTotal > 0 ? Math.round((photoOk / photoTotal) * 1000) / 10 : null,
+          attempts: photoTotal,
+          ok: photoOk,
+          failed: photoFail,
+        },
+        wetCheckSync: {
+          successPct: wcTotal > 0 ? Math.round((wcOk / wcTotal) * 1000) / 10 : null,
+          attempts: wcTotal,
+        },
+        stuckEvents: stuck,
+        offlineSessions,
+        pdfRenderP95Ms,
+        invoiceFailures,
+        mapTileErrors,
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthOps",
+        ctx: {},
+        fallbackMessage: "Couldn't load operational health — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #552 (Phase 3) — Users tab ───────────────────────────────────
+  // Cross-tenant user list with derived status. "Active" = a session
+  // touched in the last 30 min; "Stuck syncing" = sync.stuck event in
+  // the last hour; "Errored" = error event in the last 30 min;
+  // otherwise "Idle".
+  app.get("/api/admin/app-health/users", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? "100"), 10) || 100));
+      const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+      const q = (typeof req.query.q === "string" ? req.query.q : "").trim().slice(0, 100);
+      const companyIdRaw = typeof req.query.company_id === "string" ? req.query.company_id : "";
+      const companyId = /^\d+$/.test(companyIdRaw) ? parseInt(companyIdRaw, 10) : null;
+      const statusFilter = typeof req.query.status === "string" ? req.query.status : "";
+      // Phase 3 spec: status enum is active|offline|stuck|locked|syncing.
+      const validStatuses = new Set(["active", "offline", "stuck", "locked", "syncing", "all"]);
+      const status = validStatuses.has(statusFilter) ? statusFilter : "all";
+      const roleFilter = typeof req.query.role === "string" ? req.query.role : "";
+      const validRoles = new Set([
+        "super_admin", "company_admin", "manager", "field_tech", "billing_manager",
+      ]);
+      const role = validRoles.has(roleFilter) ? roleFilter : null;
+      // Modal app version across the last 24h — the version most
+      // installed users are actually running. We compare each user's
+      // own modal version to this so a one-off event from an outlier
+      // build doesn't drag the "behind" flag along with it.
+      const latestVerRes = await db.execute<{ v: string | null }>(sql`
+        SELECT app_version AS v FROM client_errors
+        WHERE app_version IS NOT NULL
+          AND occurred_at >= now() - interval '24 hours'
+        GROUP BY app_version
+        ORDER BY COUNT(*) DESC, MAX(occurred_at) DESC
+        LIMIT 1
+      `);
+      const latestVersion = latestVerRes.rows?.[0]?.v ?? null;
+
+      const filters: SQL[] = [eq(users.isDeleted, false)];
+      if (companyId != null) filters.push(eq(users.companyId, companyId));
+      if (q) {
+        const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+        filters.push(sql`(${users.name} ILIKE ${like} OR ${users.username} ILIKE ${like} OR ${users.email} ILIKE ${like})`);
+      }
+
+      // Status derivation pushed into SQL so filter + pagination + total
+      // are consistent. Priority: locked > stuck > syncing > active >
+      // offline. Spec adds device/os, conflicts24h, failedUploads24h,
+      // errors24h columns.
+      const baseFilters = sql`
+        u.is_deleted = false
+        ${companyId != null ? sql`AND u.company_id = ${companyId}` : sql``}
+        ${role != null ? sql`AND u.role = ${role}` : sql``}
+        ${q ? sql`AND (u.name ILIKE ${'%' + q + '%'} OR u.username ILIKE ${'%' + q + '%'} OR COALESCE(u.email,'') ILIKE ${'%' + q + '%'})` : sql``}
+      `;
+      // Status priority: locked > stuck > syncing > active > offline.
+      //   active   — field_work_session activity in last 5 min
+      //   syncing  — in-progress field_work_session (queue depth > 0)
+      //   stuck    — in-progress field_work_session > 1h old
+      //   locked   — audit_log auth.lockout / login.lockout in last 24h
+      //              (real lockout signal); admin-disabled accounts
+      //              (is_active=false) are NOT considered locked.
+      //   offline  — no session activity in last 30 min
+      // field_work_sessions has no user_id FK; resolve via
+      //   clock_number = users.username OR clock_number = text(id).
+      const baseSelect = sql`
+        SELECT u.id, u.name, u.username, u.email, u.role,
+               u.company_id AS "companyId",
+               c.name AS "companyName",
+               u.is_active AS "isActive",
+               sess.last_activity_at::text AS "lastSeenMobile",
+               COALESCE(sess.active_5m, 0)::int AS "activeMobile",
+               COALESCE(err30.c, 0)::int AS "errorsLast30m",
+               COALESCE(err24.c, 0)::int AS "errors24h",
+               COALESCE(sess.stuck_1h, 0)::int AS "stuckLastHour",
+               COALESCE(sess.in_progress, 0)::int AS "syncingLast5m",
+               COALESCE(conflicts.c, 0)::int AS "conflicts24h",
+               COALESCE(uploads.c, 0)::int AS "failedUploads24h",
+               dev.device_name AS "deviceName",
+               dev.os AS "os",
+               ver.v AS "appVersion",
+               CASE
+                 WHEN COALESCE(lockout.c, 0) > 0 THEN 'locked'
+                 WHEN COALESCE(sess.stuck_1h, 0) > 0 THEN 'stuck'
+                 WHEN COALESCE(sess.in_progress, 0) > 0 THEN 'syncing'
+                 WHEN COALESCE(sess.active_5m, 0) > 0 THEN 'active'
+                 -- Spec: offline = no session activity in the last 30m
+                 -- (also covers users with no session activity ever).
+                 WHEN sess.last_activity_at IS NULL
+                   OR sess.last_activity_at < now() - interval '30 minutes'
+                   THEN 'offline'
+                 -- 5–30m band: not actively syncing, but recently
+                 -- present. The status enum has no "idle" bucket, so
+                 -- bucket as offline per spec precedence.
+                 ELSE 'offline'
+               END AS "status"
+        FROM users u
+        LEFT JOIN companies c ON c.id = u.company_id
+        LEFT JOIN LATERAL (
+          SELECT
+            MAX(COALESCE(s.end_time, s.start_time)) AS last_activity_at,
+            COUNT(*) FILTER (
+              WHERE COALESCE(s.end_time, s.start_time) >= now() - interval '5 minutes'
+            ) AS active_5m,
+            COUNT(*) FILTER (WHERE s.status = 'in-progress') AS in_progress,
+            COUNT(*) FILTER (
+              WHERE s.status = 'in-progress' AND s.start_time < now() - interval '1 hour'
+            ) AS stuck_1h
+          FROM field_work_sessions s
+          WHERE s.clock_number = u.username OR s.clock_number = CAST(u.id AS text)
+        ) sess ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) AS c FROM client_errors ce
+          WHERE ce.user_id = u.id
+            AND ce.occurred_at >= now() - interval '30 minutes'
+            AND ce.type IN ('error', 'unhandled_rejection')
+            AND ce.severity IN ('error', 'fatal')
+        ) err30 ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) AS c FROM client_errors ce
+          WHERE ce.user_id = u.id
+            AND ce.occurred_at >= now() - interval '24 hours'
+            AND ce.type IN ('error', 'unhandled_rejection')
+            AND ce.severity IN ('error', 'fatal')
+        ) err24 ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) AS c FROM client_errors ce
+          WHERE ce.user_id = u.id
+            AND ce.name = 'sync.conflict'
+            AND ce.occurred_at >= now() - interval '24 hours'
+        ) conflicts ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) AS c FROM client_errors ce
+          WHERE ce.user_id = u.id
+            AND ce.name LIKE 'photo.upload.%.failed'
+            AND ce.occurred_at >= now() - interval '24 hours'
+        ) uploads ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT mt.device_name,
+                 -- mobile_tokens has no explicit OS column; sniff it
+                 -- from device_name strings like "iPhone 14 Pro" /
+                 -- "Pixel 7 (Android 14)" so the Users table has
+                 -- something to show until a dedicated column lands.
+                 CASE
+                   WHEN mt.device_name ILIKE '%iphone%' OR mt.device_name ILIKE '%ipad%' OR mt.device_name ILIKE '%ios%' THEN 'iOS'
+                   WHEN mt.device_name ILIKE '%android%' OR mt.device_name ILIKE '%pixel%' OR mt.device_name ILIKE '%galaxy%' THEN 'Android'
+                   WHEN mt.device_name ILIKE '%mac%' THEN 'macOS'
+                   WHEN mt.device_name ILIKE '%windows%' THEN 'Windows'
+                   ELSE NULL
+                 END AS os
+          FROM mobile_tokens mt
+          WHERE mt.user_id = u.id AND mt.revoked_at IS NULL
+          ORDER BY COALESCE(mt.last_used_at, mt.created_at) DESC NULLS LAST
+          LIMIT 1
+        ) dev ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS c FROM audit_log al
+          WHERE al.actor_user_id = u.id
+            AND al.action IN ('auth.lockout', 'login.lockout', 'account.locked')
+            AND al.occurred_at >= now() - interval '24 hours'
+        ) lockout ON TRUE
+        LEFT JOIN LATERAL (
+          -- The user's own modal version in the window — robust against
+          -- a stray event from a different build on a shared machine.
+          SELECT app_version AS v FROM client_errors ce
+          WHERE ce.user_id = u.id AND ce.app_version IS NOT NULL
+            AND ce.occurred_at >= now() - interval '24 hours'
+          GROUP BY app_version
+          ORDER BY COUNT(*) DESC, MAX(ce.occurred_at) DESC
+          LIMIT 1
+        ) ver ON TRUE
+        WHERE ${baseFilters}
+      `;
+
+      const statusFilterSql = status === "all"
+        ? sql``
+        : sql`WHERE "status" = ${status}`;
+
+      const rowsRes = await db.execute<{
+        id: number; name: string; username: string; email: string | null; role: string;
+        companyId: number | null; companyName: string | null; isActive: boolean;
+        lastSeenMobile: string | null; activeMobile: number;
+        errorsLast30m: number; errors24h: number;
+        stuckLastHour: number; syncingLast5m: number;
+        conflicts24h: number; failedUploads24h: number;
+        deviceName: string | null; os: string | null;
+        appVersion: string | null; status: string;
+      }>(sql`
+        WITH base AS (${baseSelect})
+        SELECT * FROM base
+        ${statusFilterSql}
+        ORDER BY
+          (status = 'stuck') DESC,
+          (status = 'locked') DESC,
+          ("errorsLast30m" > 0) DESC,
+          "lastSeenMobile" DESC NULLS LAST,
+          id ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+
+      const totalRes = await db.execute<{ total: number }>(sql`
+        WITH base AS (${baseSelect})
+        SELECT COUNT(*)::int AS total FROM base
+        ${statusFilterSql}
+      `);
+      const total = totalRes.rows?.[0]?.total ?? 0;
+
+      const usersList = (rowsRes.rows ?? []).map((u) => ({
+        ...u,
+        status: u.status as "active" | "offline" | "stuck" | "locked" | "syncing",
+        versionLag: !!(latestVersion && u.appVersion && u.appVersion !== latestVersion),
+      }));
+
+      res.setHeader("X-Total-Count", String(total));
+      res.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+      res.json({ users: usersList, total });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthUsers",
+        ctx: {},
+        fallbackMessage: "Couldn't load users — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Per-user drawer payload — sessions, devices, recent errors.
+  app.get("/api/admin/app-health/users/:id", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid user id" });
+        return;
+      }
+      const userRes = await db.execute<{
+        id: number; name: string; username: string; email: string | null; role: string;
+        companyId: number | null; companyName: string | null; isActive: boolean; createdAt: string;
+      }>(sql`
+        SELECT u.id, u.name, u.username, u.email, u.role,
+               u.company_id AS "companyId",
+               c.name AS "companyName",
+               u.is_active AS "isActive",
+               u.created_at::text AS "createdAt"
+        FROM users u
+        LEFT JOIN companies c ON c.id = u.company_id
+        WHERE u.id = ${id} AND u.is_deleted = false
+      `);
+      const user = userRes.rows?.[0];
+      if (!user) {
+        res.status(404).json({ message: "User not found" });
+        return;
+      }
+      const devicesRes = await db.execute<{
+        id: number; deviceName: string | null; lastUsedAt: string | null; createdAt: string;
+        revokedAt: string | null; expiresAt: string | null;
+      }>(sql`
+        SELECT id, device_name AS "deviceName",
+               last_used_at::text AS "lastUsedAt",
+               created_at::text AS "createdAt",
+               revoked_at::text AS "revokedAt",
+               expires_at::text AS "expiresAt"
+        FROM mobile_tokens
+        WHERE user_id = ${id}
+        ORDER BY COALESCE(last_used_at, created_at) DESC
+        LIMIT 50
+      `);
+      const recentErrorsRes = await db.execute<{
+        id: number; name: string; message: string; severity: string; type: string;
+        component: string | null; occurredAt: string; fingerprint: string | null;
+      }>(sql`
+        SELECT id, name, message, severity, type, component,
+               occurred_at::text AS "occurredAt", fingerprint
+        FROM client_errors
+        WHERE user_id = ${id}
+          AND occurred_at >= now() - interval '7 days'
+        ORDER BY occurred_at DESC
+        LIMIT 50
+      `);
+      // Approximate session list — derived from distinct session_id
+      // values seen in client_errors over the last 7 days.
+      const sessionsRes = await db.execute<{
+        sessionId: string; firstSeen: string; lastSeen: string; events: number;
+      }>(sql`
+        SELECT session_id AS "sessionId",
+               MIN(occurred_at)::text AS "firstSeen",
+               MAX(occurred_at)::text AS "lastSeen",
+               COUNT(*)::int AS events
+        FROM client_errors
+        WHERE user_id = ${id}
+          AND session_id IS NOT NULL
+          AND occurred_at >= now() - interval '7 days'
+        GROUP BY session_id
+        ORDER BY MAX(occurred_at) DESC
+        LIMIT 25
+      `);
+      // Recent actions — Task #552 spec. Pulled from the audit_log
+      // stream so the drawer surfaces what this user *did* (logins,
+      // exports, role changes, …) alongside what crashed for them.
+      const recentActionsRes = await db.execute<{
+        id: number; occurredAt: string; action: string; actionType: string;
+        severity: string; summary: string | null; targetType: string | null; targetId: string | null;
+      }>(sql`
+        SELECT id,
+               occurred_at::text AS "occurredAt",
+               action, action_type AS "actionType", severity, summary,
+               target_type AS "targetType", target_id AS "targetId"
+        FROM audit_log
+        WHERE actor_user_id = ${id}
+          AND occurred_at >= now() - interval '30 days'
+        ORDER BY occurred_at DESC
+        LIMIT 50
+      `);
+      res.json({
+        user,
+        devices: devicesRes.rows ?? [],
+        sessions: sessionsRes.rows ?? [],
+        recentErrors: recentErrorsRes.rows ?? [],
+        recentActions: recentActionsRes.rows ?? [],
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthUserDetail",
+        ctx: {},
+        fallbackMessage: "Couldn't load user detail — please retry",
       });
       res.status(status).json({ message });
     }
@@ -4723,15 +5682,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log("Sending invoice to QuickBooks:", JSON.stringify(invoiceData, null, 2));
 
-        const invoiceResponse = await makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${integration.accessToken}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
+        const invoiceResponse = await withTelemetry(
+          {
+            source: "integration",
+            component: "qb.invoice.create",
+            context: { method: "POST", path: "/v3/company/:realmId/invoice" },
           },
-          body: JSON.stringify(invoiceData)
-        }, 'Monthly Invoice Creation', integration.realmId);
+          () => makeQuickBooksRequest(`${apiBase}/v3/company/${integration.realmId}/invoice`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${integration.accessToken}`,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(invoiceData)
+          }, 'Monthly Invoice Creation', integration.realmId),
+        );
 
         if (invoiceResponse.ok) {
           const invoiceResult = (await invoiceResponse.json()) as QbInvoiceCreateResponse;

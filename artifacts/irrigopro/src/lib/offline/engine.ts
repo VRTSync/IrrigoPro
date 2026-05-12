@@ -24,6 +24,7 @@ import {
   type OfflineDB,
 } from "./db";
 import { backoffMs, readySet, resolveBody, resolveTemplate } from "./sortQueue";
+import { postTelemetry } from "./telemetry";
 import type {
   EngineEvent,
   EngineListener,
@@ -123,6 +124,35 @@ export class SyncEngine {
   // exceed either configured cap. `nextAttemptCount` is the value we'd
   // write if we kept it pending. Returns a reason string if the mutation
   // should be flipped to `failed` instead, or `null` to keep retrying.
+  // Task #552 — emit a one-shot `sync.stuck` telemetry event the first
+  // time a queued mutation crosses either of the "stuck" thresholds:
+  // attempt > 3 OR age > 1h. We dedupe per mutation so a long-stuck
+  // item doesn't produce one event per retry tick.
+  private stuckEmitted = new Set<string>();
+  private maybeEmitStuck(m: QueuedMutation, nextAttempt: number, reason: string): void {
+    try {
+      if (this.stuckEmitted.has(m.id)) return;
+      const ageMs = this.now() - m.createdAt;
+      const overAttempts = nextAttempt > 3;
+      const overAge = ageMs > 60 * 60 * 1000;
+      if (!overAttempts && !overAge) return;
+      this.stuckEmitted.add(m.id);
+      postTelemetry({
+        name: "sync.stuck",
+        message: `${m.kind} stuck after ${nextAttempt} attempts (${Math.round(ageMs / 60000)}m)`,
+        severity: "warning",
+        source: "sw",
+        component: "offline.engine",
+        context: {
+          kind: m.kind,
+          attempt: nextAttempt,
+          age_ms: ageMs,
+          reason,
+        },
+      });
+    } catch { /* never throw */ }
+  }
+
   private capExceededReason(
     m: QueuedMutation,
     nextAttemptCount: number,
@@ -495,6 +525,24 @@ export class SyncEngine {
         if (m.kind === "photo.upload") {
           try { await deletePhotoBlob(db, m.clientId); } catch {}
         }
+        // Task #552 — telemetry: photo upload + wet check sync success.
+        if (m.kind === "photo.upload") {
+          postTelemetry({
+            name: "photo.upload.ok",
+            severity: "info",
+            source: "sw",
+            component: "offline.engine",
+            context: { attempt: m.attemptCount + 1 },
+          });
+        } else if (m.kind.startsWith("wet_check.")) {
+          postTelemetry({
+            name: "wet_check.sync.ok",
+            severity: "info",
+            source: "sw",
+            component: "offline.engine",
+            context: { kind: m.kind, attempt: m.attemptCount + 1 },
+          });
+        }
         await this.broadcastState();
       } else if (res.status === 409) {
         // Conflict — server wins.
@@ -508,6 +556,17 @@ export class SyncEngine {
         if (wetCheckId) {
           await this.refreshMirrorFromServer(db, wetCheckId);
         }
+        // Task #552 — telemetry: count conflicts so the Sync card can
+        // light up the "Conflicts" tile.
+        postTelemetry({
+          name: "sync.conflict",
+          type: "metric",
+          severity: "warning",
+          source: "sw",
+          component: "offline.engine",
+          message: message.slice(0, 200),
+          context: { kind: m.kind, status_code: 409 },
+        });
         this.emit({
           type: "conflict",
           mutationId: m.id,
@@ -581,6 +640,27 @@ export class SyncEngine {
         // future tries. Heartbeat will recover us.
         if (res.status >= 500) this.setOnline(false);
         const nextAttempt = m.attemptCount + 1;
+        // Task #552 — telemetry: photo upload + wet check sync 5xx failure.
+        if (m.kind === "photo.upload") {
+          postTelemetry({
+            name: "photo.upload.failed",
+            message: message.slice(0, 200),
+            severity: "warning",
+            source: "sw",
+            component: "offline.engine",
+            context: { reason: `http_${res.status}`, attempt: nextAttempt },
+          });
+        } else if (m.kind.startsWith("wet_check.")) {
+          postTelemetry({
+            name: "wet_check.sync.failed",
+            message: message.slice(0, 200),
+            severity: "warning",
+            source: "sw",
+            component: "offline.engine",
+            context: { kind: m.kind, reason: `http_${res.status}`, attempt: nextAttempt },
+          });
+        }
+        this.maybeEmitStuck(m, nextAttempt, `http_${res.status}`);
         const giveUp = this.capExceededReason(m, nextAttempt);
         if (giveUp) {
           await updateMutation(db, m.id, {
@@ -612,6 +692,27 @@ export class SyncEngine {
       this.setOnline(false);
       const errMessage = err?.message ?? String(err);
       const nextAttempt = m.attemptCount + 1;
+      // Task #552 — telemetry: photo upload failed (network err).
+      if (m.kind === "photo.upload") {
+        postTelemetry({
+          name: "photo.upload.failed",
+          message: errMessage,
+          severity: "warning",
+          source: "sw",
+          component: "offline.engine",
+          context: { reason: "network", attempt: nextAttempt },
+        });
+      } else if (m.kind.startsWith("wet_check.")) {
+        postTelemetry({
+          name: "wet_check.sync.failed",
+          message: errMessage,
+          severity: "warning",
+          source: "sw",
+          component: "offline.engine",
+          context: { kind: m.kind, reason: "network", attempt: nextAttempt },
+        });
+      }
+      this.maybeEmitStuck(m, nextAttempt, "network");
       const giveUp = this.capExceededReason(m, nextAttempt);
       if (giveUp) {
         await updateMutation(db, m.id, {
@@ -667,44 +768,87 @@ export class SyncEngine {
       );
     }
     const auth = this.authHeaders();
-    // 1) Sign
+    const retryCount = m.attemptCount;
+    // Per-step telemetry — Task #552. Each pipeline step emits an
+    // `ok` or `failed` metric so the Sync & Uploads tab can light up
+    // per-step success rates (Captured → DB → S3 → CDN → metadata).
+    const emitStep = (step: "sign" | "put" | "finalize" | "metadata", ok: boolean, statusCode: number | null, message?: string) => {
+      postTelemetry({
+        name: `photo.upload.${step}.${ok ? "ok" : "failed"}`,
+        type: "metric",
+        severity: ok ? "info" : "warning",
+        source: "sw",
+        component: "offline.engine",
+        message: ok ? "" : (message ?? "").slice(0, 200),
+        context: {
+          step,
+          status_code: statusCode ?? undefined,
+          retry_count: retryCount,
+        },
+      });
+    };
+    // 1) Sign — first hop, hits our own API → DB row reservation.
+    const t1 = Date.now();
     const signRes = await this.fetchImpl(
       `/api/upload/photo?originalName=${encodeURIComponent(blobRow.name)}`,
       { method: "POST", headers: auth, credentials: "include" },
     );
-    if (!signRes.ok) return signRes;
+    if (!signRes.ok) {
+      let body = "";
+      try { body = (await signRes.clone().text()).slice(0, 200); } catch {}
+      emitStep("sign", false, signRes.status, body || `sign_${signRes.status}`);
+      return signRes;
+    }
+    emitStep("sign", true, signRes.status);
     const signed = await signRes.json();
     await updateMutation(db, m.id, { progress: 25 });
-    // 2) PUT bytes to signed URL.
+    // 2) PUT bytes to signed URL — this is the S3 hop.
     const putRes = await this.fetchImpl(signed.signedUrl, {
       method: "PUT",
       body: blobRow.blob,
       headers: { "Content-Type": blobRow.contentType },
     });
     if (!putRes.ok) {
+      emitStep("put", false, putRes.status, `s3_${putRes.status}`);
       // Surface as a 5xx so the outer loop schedules a retry — signed
       // URLs commonly fail with transient 503s on weak LTE.
       return new Response("PUT failed", { status: 502 });
     }
+    emitStep("put", true, putRes.status);
     await updateMutation(db, m.id, { progress: 60 });
-    // 3) Finalize
+    // 3) Finalize — server-side CDN handoff / EXIF strip.
     const finRes = await this.fetchImpl("/api/upload/photo/finalize", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...auth },
       credentials: "include",
       body: JSON.stringify({ photoId: signed.url }),
     });
-    if (!finRes.ok) return finRes;
+    if (!finRes.ok) {
+      let body = "";
+      try { body = (await finRes.clone().text()).slice(0, 200); } catch {}
+      emitStep("finalize", false, finRes.status, body || `finalize_${finRes.status}`);
+      return finRes;
+    }
+    emitStep("finalize", true, finRes.status);
     await updateMutation(db, m.id, { progress: 80 });
     // 4) POST metadata to /api/wet-checks/:id/photos. The placeholder-
     // resolved body from the queue is merged with the dynamic url field.
     const finalBody = { ...(metadataBody as object | null ?? {}), url: signed.url };
-    return await this.fetchImpl(metadataUrl, {
+    const metaRes = await this.fetchImpl(metadataUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...auth },
       credentials: "include",
       body: JSON.stringify(finalBody),
     });
+    if (metaRes.ok) {
+      emitStep("metadata", true, metaRes.status);
+    } else {
+      let body = "";
+      try { body = (await metaRes.clone().text()).slice(0, 200); } catch {}
+      emitStep("metadata", false, metaRes.status, body || `metadata_${metaRes.status}`);
+    }
+    void t1; // keep — duration captured by outer success path
+    return metaRes;
   }
 
   private async applyServerIdToMirror(db: OfflineDB, m: QueuedMutation, id: number | null) {

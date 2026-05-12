@@ -60,6 +60,20 @@ export async function initServiceWorker(options: InitOptions = {}): Promise<void
       },
       onRegisterError(err) {
         console.warn("[sw] registration failed:", err);
+        // Task #552 — surface SW lifecycle failures into App Health so
+        // the Sync tab can flag service-worker breakage.
+        try {
+          void import("./offline/telemetry").then(({ postTelemetry }) =>
+            postTelemetry({
+              name: "sw.register.failed",
+              type: "metric",
+              severity: "error",
+              source: "sw",
+              component: "sw.register",
+              message: String(err instanceof Error ? err.message : err ?? "register failed"),
+            }),
+          );
+        } catch { /* swallow */ }
       },
     });
   } catch (err) {

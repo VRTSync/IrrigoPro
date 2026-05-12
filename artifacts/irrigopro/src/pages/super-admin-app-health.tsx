@@ -38,6 +38,8 @@ import { StatusHero } from "@/components/app-health/status-hero";
 import { OverviewTab } from "@/components/app-health/overview-tab";
 import { CompaniesTab } from "@/components/app-health/companies-tab";
 import { AuditTab } from "@/components/app-health/audit-tab";
+import { SyncTab } from "@/components/app-health/sync-tab";
+import { UsersTab } from "@/components/app-health/users-tab";
 
 // Task #550 — Super Admin App Health page (Phase 1).
 // Phase 1 ships the page chrome and the working Crashes tab. The other
@@ -186,6 +188,7 @@ export default function SuperAdminAppHealthPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("crashes");
   const [windowKey, setWindowKey] = useState<WindowKey>("7d");
   const [drawerFingerprint, setDrawerFingerprint] = useState<string | null>(null);
+  const [auditActor, setAuditActor] = useState<string | null>(null);
 
   if (!allowed) {
     return (
@@ -286,7 +289,14 @@ export default function SuperAdminAppHealthPage() {
           }}
         />
       ) : activeTab === "audit" ? (
-        <AuditTab windowKey={windowKey} />
+        <AuditTab windowKey={windowKey} initialActor={auditActor} />
+      ) : activeTab === "sync" ? (
+        <SyncTab windowKey={windowKey} />
+      ) : activeTab === "users" ? (
+        <UsersTab
+          onOpenCrash={(fp) => { setActiveTab("crashes"); setDrawerFingerprint(fp); }}
+          onOpenAudit={(uid) => { setAuditActor(String(uid)); setActiveTab("audit"); }}
+        />
       ) : (
         <ComingSoonTab tabKey={activeTab} />
       )}

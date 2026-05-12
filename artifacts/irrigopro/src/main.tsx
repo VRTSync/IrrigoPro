@@ -192,6 +192,25 @@ if (typeof window !== "undefined") {
     window.addEventListener("unhandledrejection", (ev) => {
       reportError(ev.reason ?? new Error("Unhandled rejection"), "unhandled_rejection");
     });
+    // Task #552 — online/offline transition telemetry. Posted with
+    // source=worker so the App Health Sync tab can correlate offline
+    // windows with stuck-sync events.
+    const postOnlineEvent = (kind: "up" | "down") => {
+      try {
+        void import("./lib/offline/telemetry").then(({ postTelemetry }) =>
+          postTelemetry({
+            name: kind === "up" ? "app.online" : "app.offline",
+            type: "metric",
+            severity: "info",
+            source: "sw",
+            component: "navigator.connectivity",
+            message: kind === "up" ? "online" : "offline",
+          }),
+        );
+      } catch { /* swallow */ }
+    };
+    window.addEventListener("online", () => postOnlineEvent("up"));
+    window.addEventListener("offline", () => postOnlineEvent("down"));
   } catch (err) {
     console.warn("[boot] global error reporter init failed:", err);
   }

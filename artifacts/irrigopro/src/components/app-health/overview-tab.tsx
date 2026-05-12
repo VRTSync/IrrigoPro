@@ -312,18 +312,11 @@ export function OverviewTab({
           <CardTitle className="text-sm">IrrigoPro operational health</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            <OpsTile icon={ImageIcon} label="Photo upload" value="—" tone="muted" hint="Phase 3" />
-            <OpsTile icon={Cloud} label="Wet checks synced" value="—" tone="muted" hint="Phase 3" />
-            <OpsTile icon={FileText} label="PDF render p95" value="—" tone="muted" hint="Phase 4" />
-            <OpsTile icon={Receipt} label="Invoice gen failures" value="—" tone="muted" hint="Phase 4" />
-            <OpsTile icon={WifiOff} label="Offline sessions" value="—" tone="muted" hint="Phase 3" />
-            <OpsTile icon={MapPin} label="Map tile errors" value="—" tone="muted" hint="Phase 4" />
-          </div>
+          <OpsTilesRow />
+
           <div className="text-[10px] text-gray-500 mt-2 italic">
-            Domain tiles marked "—" are wired in later phases. Uptime
-            and request-rate KPIs in this view are process-local
-            approximations until persistent telemetry lands in Phase 3.
+            Uptime and request-rate KPIs above are process-local
+            approximations until persistent telemetry ships.
           </div>
         </CardContent>
       </Card>
@@ -367,6 +360,104 @@ export function OverviewTab({
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+type OpsResponse = {
+  photoUpload: { successPct: number | null; attempts: number; ok: number; failed: number };
+  wetCheckSync: { successPct: number | null; attempts: number };
+  stuckEvents: number;
+  offlineSessions: number;
+  pdfRenderP95Ms: number | null;
+  invoiceFailures: number | null;
+  mapTileErrors: number | null;
+};
+
+function OpsTilesRow() {
+  const { data } = useQuery<OpsResponse>({
+    queryKey: ["/api/admin/app-health/ops", "24h"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/app-health/ops?window=24h", {
+        credentials: "include",
+        headers: buildAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+  const photoTone: "ok" | "warn" | "bad" | "muted" =
+    data?.photoUpload?.successPct == null
+      ? "muted"
+      : data.photoUpload.successPct >= 95 ? "ok"
+      : data.photoUpload.successPct >= 85 ? "warn"
+      : "bad";
+  const photoVal = data?.photoUpload?.successPct != null
+    ? `${data.photoUpload.successPct}%` : "—";
+  const photoHint = data?.photoUpload?.attempts != null
+    ? `${data.photoUpload.ok}/${data.photoUpload.attempts} ok` : "no data";
+
+  const wcTone: "ok" | "warn" | "bad" | "muted" =
+    data?.wetCheckSync?.successPct == null
+      ? "muted"
+      : data.wetCheckSync.successPct >= 95 ? "ok"
+      : data.wetCheckSync.successPct >= 85 ? "warn"
+      : "bad";
+  const wcVal = data?.wetCheckSync?.successPct != null
+    ? `${data.wetCheckSync.successPct}%` : "—";
+  const wcHint = data?.wetCheckSync?.attempts != null
+    ? `${data.wetCheckSync.attempts} attempts` : "no data";
+
+  const offlineTone: "ok" | "warn" | "bad" | "muted" =
+    !data ? "muted"
+    : data.offlineSessions === 0 ? "ok"
+    : data.offlineSessions < 5 ? "warn"
+    : "bad";
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <OpsTile icon={ImageIcon} label="Photo upload" value={photoVal} tone={photoTone} hint={photoHint} />
+      <OpsTile icon={Cloud} label="Wet checks synced" value={wcVal} tone={wcTone} hint={wcHint} />
+      <OpsTile
+        icon={FileText}
+        label="PDF render p95"
+        value={data?.pdfRenderP95Ms != null ? `${data.pdfRenderP95Ms.toLocaleString()}ms` : "—"}
+        tone={
+          data?.pdfRenderP95Ms == null ? "muted"
+          : data.pdfRenderP95Ms < 3000 ? "ok"
+          : data.pdfRenderP95Ms < 8000 ? "warn"
+          : "bad"
+        }
+        hint={data?.pdfRenderP95Ms == null ? "no data" : "24h"}
+      />
+      <OpsTile
+        icon={Receipt}
+        label="Invoice gen failures"
+        value={data?.invoiceFailures != null ? data.invoiceFailures.toLocaleString() : "—"}
+        tone={
+          data?.invoiceFailures == null ? "muted"
+          : data.invoiceFailures === 0 ? "ok"
+          : data.invoiceFailures < 5 ? "warn"
+          : "bad"
+        }
+        hint={data?.invoiceFailures == null ? "no data" : "24h"}
+      />
+      <OpsTile icon={WifiOff} label="Offline sessions" value={data?.offlineSessions?.toLocaleString() ?? "—"} tone={offlineTone} hint={data ? `${data.stuckEvents} stuck` : "no data"} />
+      <OpsTile
+        icon={MapPin}
+        label="Map tile errors"
+        value={data?.mapTileErrors != null ? data.mapTileErrors.toLocaleString() : "—"}
+        tone={
+          data?.mapTileErrors == null ? "muted"
+          : data.mapTileErrors === 0 ? "ok"
+          : data.mapTileErrors < 50 ? "warn"
+          : "bad"
+        }
+        hint={data?.mapTileErrors == null ? "no data" : "24h"}
+      />
     </div>
   );
 }

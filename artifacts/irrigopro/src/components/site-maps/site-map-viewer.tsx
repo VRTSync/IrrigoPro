@@ -45,10 +45,26 @@ export function SiteMapViewer({ kmlData, onControllerClick, onZoneClick }: SiteM
       15
     );
 
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Add OpenStreetMap tiles (with Task #552 tile-error telemetry).
+    const osmTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+    });
+    osmTiles.on('tileerror', (ev: any) => {
+      try {
+        void import('@/lib/offline/telemetry').then(({ postTelemetry }) =>
+          postTelemetry({
+            name: 'map.tile.failed',
+            type: 'metric',
+            severity: 'warning',
+            source: 'sw',
+            component: 'site-maps.viewer',
+            message: 'tile fetch failed',
+            context: { provider: 'osm', src: ev?.tile?.src ?? null },
+          }),
+        );
+      } catch { /* swallow */ }
+    });
+    osmTiles.addTo(map);
 
     mapRef.current = map;
 

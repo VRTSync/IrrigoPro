@@ -93,11 +93,27 @@ export function CompactMapViewer({
     
     mapInstanceRef.current = map;
 
-    // Add tile layer
-    L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+    // Add tile layer (with Task #552 telemetry on fetch errors).
+    const compactTiles = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
       attribution: '&copy; Google',
       maxZoom: 25,
-    }).addTo(map);
+    });
+    compactTiles.on('tileerror', (ev: any) => {
+      try {
+        void import('@/lib/offline/telemetry').then(({ postTelemetry }) =>
+          postTelemetry({
+            name: 'map.tile.failed',
+            type: 'metric',
+            severity: 'warning',
+            source: 'sw',
+            component: 'site-maps.compact',
+            message: 'tile fetch failed',
+            context: { provider: 'google', src: ev?.tile?.src ?? null },
+          }),
+        );
+      } catch { /* swallow */ }
+    });
+    compactTiles.addTo(map);
 
     return () => {
       if (mapInstanceRef.current) {

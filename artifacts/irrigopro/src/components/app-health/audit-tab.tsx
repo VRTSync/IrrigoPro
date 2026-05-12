@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,14 +32,28 @@ type ListResponse = { events: AuditEvent[]; total: number };
 const ACTION_TYPES = ["", "auth", "admin", "data", "deploy", "integration", "impersonation", "export", "role_change", "other"];
 const SEVERITIES = ["", "info", "warning", "error", "critical"];
 
-export function AuditTab({ windowKey }: { windowKey: string }) {
+export function AuditTab({
+  windowKey,
+  initialActor,
+}: {
+  windowKey: string;
+  initialActor?: string | null;
+}) {
   const [q, setQ] = useState("");
-  const [actor, setActor] = useState("");
+  const [actor, setActor] = useState(initialActor ?? "");
   const [actionType, setActionType] = useState("");
   const [severity, setSeverity] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(0);
+  // Drill-through from the Users drawer pushes a new initialActor;
+  // adopt it so the table re-filters in place.
+  useEffect(() => {
+    if (initialActor != null) {
+      setActor(initialActor);
+      setPage(0);
+    }
+  }, [initialActor]);
   const limit = 50;
 
   const params = useMemo(() => {
