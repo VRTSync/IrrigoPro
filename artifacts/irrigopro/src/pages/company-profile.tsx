@@ -61,10 +61,8 @@ export default function CompanyProfile() {
     queryClient.invalidateQueries({ queryKey: [`/api/company/${companyId}/profile`] });
   };
 
-  // If setup is required, show setup component
-  if (requiresSetup) {
-    return <CompanySetup companyId={companyId} onComplete={handleSetupComplete} />;
-  }
+  // Hooks must stay above the `if (requiresSetup)` early return below
+  // (Rules of Hooks).
 
   // Set up form with current company data
   const form = useForm<CompanyProfileFormData>({
@@ -116,6 +114,11 @@ export default function CompanyProfile() {
       });
     },
   });
+
+  // If setup is required, show setup component
+  if (requiresSetup) {
+    return <CompanySetup companyId={companyId} onComplete={handleSetupComplete} />;
+  }
 
   const handleSubmit = (data: CompanyProfileFormData) => {
     updateCompanyMutation.mutate(data);

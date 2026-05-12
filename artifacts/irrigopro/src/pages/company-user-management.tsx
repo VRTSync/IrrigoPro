@@ -92,6 +92,37 @@ export default function CompanyUserManagement() {
   // Check if company setup is required
   const requiresSetup = error && (error as any).message?.includes('423');
 
+  // Hooks must stay above the `if (requiresSetup)` early return below
+  // (Rules of Hooks).
+  const createForm = useForm<UserFormData>({
+    resolver: zodResolver(userFormSchema),
+    defaultValues: {
+      phone: "",
+      password: "",
+      name: "",
+      email: "",
+      role: "field_tech",
+    },
+  });
+
+  const editForm = useForm<EditUserFormData>({
+    resolver: zodResolver(editUserFormSchema),
+    defaultValues: {
+      phone: "",
+      name: "",
+      email: "",
+      role: "field_tech",
+    },
+  });
+
+  const passwordForm = useForm<ChangePasswordData>({
+    resolver: zodResolver(changePasswordSchema),
+    defaultValues: {
+      newPassword: "",
+      confirmPassword: "",
+    },
+  });
+
   // If setup is required, show message to complete setup first
   if (requiresSetup) {
     return (
@@ -127,35 +158,6 @@ export default function CompanyUserManagement() {
       </div>
     );
   }
-
-  const createForm = useForm<UserFormData>({
-    resolver: zodResolver(userFormSchema),
-    defaultValues: {
-      phone: "",
-      password: "",
-      name: "",
-      email: "",
-      role: "field_tech",
-    },
-  });
-
-  const editForm = useForm<EditUserFormData>({
-    resolver: zodResolver(editUserFormSchema),
-    defaultValues: {
-      phone: "",
-      name: "",
-      email: "",
-      role: "field_tech",
-    },
-  });
-
-  const passwordForm = useForm<ChangePasswordData>({
-    resolver: zodResolver(changePasswordSchema),
-    defaultValues: {
-      newPassword: "",
-      confirmPassword: "",
-    },
-  });
 
   const onCreateSubmit = async (data: UserFormData) => {
     try {
