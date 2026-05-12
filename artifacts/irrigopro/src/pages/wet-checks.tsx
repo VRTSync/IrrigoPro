@@ -38,6 +38,7 @@ import {
   readWetCheckFromMirror,
   readWetCheckByClientId,
   cachedApiRequest,
+  hasPendingMutationsForWetCheck,
 } from "@/lib/offline/api";
 import { tintForControllerLetter } from "@/lib/lifecycle";
 import { isOfflineQueueEnabled } from "@/lib/offline/engine";
@@ -627,10 +628,20 @@ function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; clientId
         const cached = await readWetCheckFromMirror(id!);
         if (cached) {
           if (!isProbablyOffline()) {
-            void apiRequest(`/api/wet-checks/${id}`)
-              .then((fresh) => warmWetCheckMirror(null, id!, fresh).then(() => {
-                queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
-              }))
+            // Task #512 — skip the background refresh while local edits
+            // for this wet check are still queued. Otherwise a stale
+            // server snapshot (e.g. zone still `checked_with_issues`)
+            // can clobber an optimistic Needs Work → Ran OK flip the
+            // tech just made, leaving the controller-grid tile red even
+            // though the local mirror + queue already say `checked_ok`.
+            void hasPendingMutationsForWetCheck(cached?.clientId ?? "")
+              .then((pending) => {
+                if (pending) return;
+                return apiRequest(`/api/wet-checks/${id}`)
+                  .then((fresh) => warmWetCheckMirror(null, id!, fresh).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", id] });
+                  }));
+              })
               .catch(() => { /* ignore — heartbeat will recover */ });
           }
           return cached as WetCheckWithDetails;
@@ -1290,6 +1301,66 @@ function ZoneScreen({
   });
   const autoBillEnabled = autoBillCfg?.enabled ?? true;
 
+  // Task #512 — every revert path (setStatus + performRevert cascade) has
+  // to update the same query rows the controller grid subscribes to, so a
+  // Needs Work → Ran OK flip flips the tile color immediately and isn't
+  // overwritten by a stale background refetch. The detail query lives
+  // under TWO possible keys depending on whether the page was opened by
+  // server id or by client id (`/c/:clientId` route), so both must be
+  // invalidated and patched.
+  const detailQueryKeys: ReadonlyArray<readonly unknown[]> = [
+    ...(wetCheckId ? [["/api/wet-checks", wetCheckId] as const] : []),
+    ...(wetCheckClientId ? [["/api/wet-checks", "c", wetCheckClientId] as const] : []),
+  ];
+  function applyOptimisticZoneStatus(
+    nextStatus: "checked_ok" | "checked_with_issues" | "not_applicable",
+  ): Array<{ key: readonly unknown[]; previous: WetCheckWithDetails | undefined }> {
+    const snapshots: Array<{ key: readonly unknown[]; previous: WetCheckWithDetails | undefined }> = [];
+    for (const key of detailQueryKeys) {
+      const previous = queryClient.getQueryData<WetCheckWithDetails>(key);
+      snapshots.push({ key, previous });
+      if (!previous) continue;
+      const matches = (zr: WetCheckZoneRecord) =>
+        zr.controllerLetter === letter && zr.zoneNumber === zoneNumber;
+      queryClient.setQueryData<WetCheckWithDetails>(key, {
+        ...previous,
+        zoneRecords: previous.zoneRecords.map((zr) =>
+          matches(zr)
+            ? {
+                ...zr,
+                status: nextStatus,
+                ranSuccessfully:
+                  nextStatus === "checked_ok"
+                    ? true
+                    : nextStatus === "checked_with_issues"
+                    ? false
+                    : null,
+                // Mirror the server's force-clear rule so a tile that was
+                // both red AND green-checked (Needs Work + Mark Complete)
+                // never carries the overlay over to a reverted Ran OK /
+                // Skip tile.
+                markedCompleteAt: nextStatus === "checked_with_issues" ? zr.markedCompleteAt : null,
+              }
+            : zr,
+        ),
+      });
+    }
+    return snapshots;
+  }
+  function rollbackOptimisticZoneStatus(
+    snapshots: ReadonlyArray<{ key: readonly unknown[]; previous: WetCheckWithDetails | undefined }>,
+  ) {
+    for (const { key, previous } of snapshots) {
+      if (previous) queryClient.setQueryData(key, previous);
+    }
+  }
+  function invalidateDetailQueries() {
+    for (const key of detailQueryKeys) {
+      queryClient.invalidateQueries({ queryKey: key });
+    }
+    queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+  }
+
   const setStatus = useMutation({
     mutationFn: (status: "checked_ok" | "checked_with_issues" | "not_applicable") => {
       const clientId = zoneRecord?.clientId ?? newClientId();
@@ -1319,14 +1390,31 @@ function ZoneScreen({
         clientId,
       });
     },
+    onMutate: async (status) => {
+      // Task #512 — optimistically flip the zone in the cached detail
+      // payload BEFORE any await. The controller-grid tile reads
+      // `wc.zoneRecords[i].status` from this same query, so this makes
+      // a Needs Work → Ran OK / Skip flip turn the tile green/gray
+      // immediately and survive the offline mirror writeback.
+      await Promise.all(
+        detailQueryKeys.map((k) => queryClient.cancelQueries({ queryKey: k })),
+      );
+      const snapshots = applyOptimisticZoneStatus(status);
+      return { snapshots };
+    },
+    onError: (e: any, _status, ctx) => {
+      if (ctx?.snapshots) rollbackOptimisticZoneStatus(ctx.snapshots);
+      toast({ title: "Failed", description: e?.message, variant: "destructive" });
+    },
     onSuccess: (_data, status) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
       // Auto-advance to the next zone unless the tech needs to add findings.
       if (status === "checked_ok" || status === "not_applicable") {
         setTimeout(() => onAdvance(), 250);
       }
     },
-    onError: (e: any) => toast({ title: "Failed", description: e?.message, variant: "destructive" }),
+    onSettled: () => {
+      invalidateDetailQueries();
+    },
   });
 
   const { data: issueTypes = [] } = useQuery<IssueTypeConfig[]>({
@@ -1368,6 +1456,17 @@ function ZoneScreen({
   // replay.
   async function performRevert(target: "checked_ok" | "not_applicable") {
     setReverting(true);
+    // Task #512 — flip the cached zone status before kicking off the
+    // cascade so the controller grid re-renders the new color (green /
+    // gray) immediately, even while the photo-delete / finding-delete /
+    // status-flip mutations are still draining in the background. The
+    // offline mirror is updated transitively by `enqueueZoneRevertCascade`
+    // (the synchronous `putZoneRecordMirror` near the end of the cascade);
+    // optimistic snapshots cover the online cascade path too.
+    await Promise.all(
+      detailQueryKeys.map((k) => queryClient.cancelQueries({ queryKey: k })),
+    );
+    const optimisticSnapshots = applyOptimisticZoneStatus(target);
     try {
       if (isOfflineQueueEnabled() && wetCheckClientId && zoneRecord?.clientId) {
         // Bucket photos by finding server id (works for both
@@ -1415,10 +1514,18 @@ function ZoneScreen({
       }
       setPendingRevert(null);
     } catch (e: any) {
+      // Roll back the optimistic green/gray flip so the tile returns to
+      // its prior red state instead of misleading the tech that the
+      // revert succeeded.
+      rollbackOptimisticZoneStatus(optimisticSnapshots);
       toast({ title: "Couldn't reset zone", description: e?.message, variant: "destructive" });
     } finally {
       setReverting(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/wet-checks"] });
+      // Invalidate the specific detail keys (server id + clientId) so the
+      // grid re-reads the just-updated mirror / server snapshot. On
+      // failure we still invalidate so any partially-applied state is
+      // pulled fresh from the server.
+      invalidateDetailQueries();
     }
   }
 

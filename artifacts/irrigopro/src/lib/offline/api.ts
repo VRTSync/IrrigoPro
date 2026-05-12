@@ -325,11 +325,21 @@ export async function upsertZoneRecord(input: UpsertZoneRecordInput): Promise<{ 
     });
   }
   const db = await openOfflineDB();
+  // Preserve the server id (and any not-yet-promoted findings array on the
+  // existing data payload) when reusing the same clientId — putZoneRecordMirror
+  // is a full row replace, so otherwise a Needs Work → Ran OK flip would
+  // strip the id and any cached server-shape we still want to surface.
+  const existingZr = await db.get("wetCheckZoneRecords", clientId);
+  const existingId =
+    existingZr?.id ?? (typeof existingZr?.data?.id === "number" ? existingZr.data.id : undefined);
   await putZoneRecordMirror(db, {
     clientId,
+    id: existingId,
     wetCheckClientId: input.wetCheckClientId,
     wetCheckId: input.wetCheckId,
     data: {
+      ...(existingZr?.data ?? {}),
+      id: existingId,
       clientId,
       controllerLetter: input.controllerLetter,
       zoneNumber: input.zoneNumber,
@@ -791,11 +801,21 @@ export async function enqueueZoneRevertCascade(input: ZoneRevertCascadeInput): P
   // Step 4 — zone status flip. Waits on every finding delete (which in
   // turn wait on every patch + every photo delete), so this cannot
   // dispatch until the whole cascade is durably completed server-side.
+  // Preserve the existing row's server id so the cascade's status flip
+  // doesn't strip it from the mirror — `assembleFromMirror` reads `zr.id`
+  // / `zr.data?.id`, and downstream readers (e.g. `wc.photos.filter` by
+  // `zoneRecordId`) need the id to remain stable across the revert.
+  const existingZr = await db.get("wetCheckZoneRecords", input.zoneRecordClientId);
+  const existingId =
+    existingZr?.id ?? (typeof existingZr?.data?.id === "number" ? existingZr.data.id : input.zoneRecordId);
   await putZoneRecordMirror(db, {
     clientId: input.zoneRecordClientId,
+    id: existingId,
     wetCheckClientId: input.wetCheckClientId,
     wetCheckId: input.wetCheckId,
     data: {
+      ...(existingZr?.data ?? {}),
+      id: existingId,
       clientId: input.zoneRecordClientId,
       controllerLetter: input.controllerLetter,
       zoneNumber: input.zoneNumber,
@@ -803,6 +823,11 @@ export async function enqueueZoneRevertCascade(input: ZoneRevertCascadeInput): P
       ranSuccessfully: input.targetStatus === "checked_ok" ? true : null,
       notes: null,
       checkedAt,
+      // Force-clear the Mark-Complete badge — server force-clears it on
+      // any non-Needs-Work status, and we mirror that locally so the
+      // controller grid never keeps the green-check overlay on a tile
+      // that is no longer red.
+      markedCompleteAt: null,
     },
     updatedAt: Date.now(),
   });
@@ -868,6 +893,39 @@ export async function warmWetCheckMirror(db: OfflineDB | null, wetCheckId: numbe
       });
     }
   }
+}
+
+// True iff there is at least one not-yet-completed mutation in the queue
+// whose clientId belongs to the given wet check (the wet check itself,
+// any of its zone records, or any of their findings) — including any
+// queued submit / cascade entries gated on those clientIds. Used by the
+// detail query to skip the background server refetch while local edits
+// are still draining, so a stale server snapshot can't clobber an
+// optimistic Needs Work → Ran OK flip in the controller grid.
+export async function hasPendingMutationsForWetCheck(wetCheckClientId: string): Promise<boolean> {
+  if (!isOfflineQueueEnabled() || !wetCheckClientId) return false;
+  const db = await openOfflineDB();
+  const all = await listAllMutations(db);
+  const zoneRecords = await listZoneRecordsForWetCheck(db, wetCheckClientId);
+  const ownedCids = new Set<string>();
+  ownedCids.add(wetCheckClientId);
+  for (const z of zoneRecords) {
+    ownedCids.add(z.clientId);
+    const fs = await listFindingsForZoneRecord(db, z.clientId);
+    for (const f of fs) ownedCids.add(f.clientId);
+  }
+  for (const m of all) {
+    if (m.status === "completed") continue;
+    if (ownedCids.has(m.clientId)) return true;
+    if (m.parentClientId && ownedCids.has(m.parentClientId)) return true;
+    for (const c of m.parentClientIds ?? []) {
+      if (ownedCids.has(c)) return true;
+    }
+    for (const c of Object.values(m.placeholders ?? {})) {
+      if (ownedCids.has(c)) return true;
+    }
+  }
+  return false;
 }
 
 export async function readWetCheckFromMirror(wetCheckId: number): Promise<any | null> {
