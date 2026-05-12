@@ -34,10 +34,15 @@ export interface EstimatePayloadOutput {
   items: InsertEstimateItem[];
 }
 
-// Convention: `laborHours` on an estimate item is the per-line total
-// (already multiplied by quantity). The /api/estimates handler, the email
-// renderer, the Wet Check conversion engine, and the storage recompute all
-// share this convention.
+// Convention: `laborHours` on an `EstimateLineInput` is **per-unit** hours
+// (what the user enters in the form: "0.5 hours per part"). This function
+// is the single boundary where per-unit input is converted to the per-line
+// total stored on the estimate item (`laborHours * quantity`). All
+// downstream readers — storage recompute, email renderer, wet-check append,
+// detail modal — assume the stored value is the per-line total. Task #228:
+// previously this multiplication was missing, so any line with quantity > 1
+// undercounted labor by a factor of `quantity` whenever a non-wizard caller
+// (e.g. the wet-check conversion engine) submitted per-unit hours.
 export function processEstimatePayload(input: EstimatePayloadInput): EstimatePayloadOutput {
   // Task #396 — Labor mode. 'flat' is the new default; per-line laborHours are
   // forced to 0 and the estimate's totalLaborHours field is the source of
@@ -49,9 +54,11 @@ export function processEstimatePayload(input: EstimatePayloadInput): EstimatePay
   const items: InsertEstimateItem[] = input.items.map((item, idx) => {
     const quantity = item.quantity ?? 1;
     const partPrice = parseFloat(String(item.partPrice ?? 0));
-    const rawLaborHours = parseFloat(String(item.laborHours ?? 0)) || 0;
+    const perUnitLaborHours = parseFloat(String(item.laborHours ?? 0)) || 0;
     // Flat mode normalizes per-line labor to 0 — totals come from totalLaborHours.
-    const laborHours = laborMode === "flat" ? 0 : rawLaborHours;
+    // Per-part mode stores the per-line total (per-unit × quantity) so the
+    // sum of stored item.laborHours is the quantity-aware total in hours.
+    const laborHours = laborMode === "flat" ? 0 : perUnitLaborHours * quantity;
     const totalPrice = item.totalPrice !== undefined && item.totalPrice !== null
       ? parseFloat(String(item.totalPrice))
       : partPrice * quantity;

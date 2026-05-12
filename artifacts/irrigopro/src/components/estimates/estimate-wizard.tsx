@@ -636,8 +636,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       // Task #396 — In flat mode, per-line labor hours are zeroed at the
       // payload boundary so the estimate's totalLaborHours is the single
       // source of truth on the wire as well as on disk.
+      // Task #228 — In per-part mode, the API expects per-unit hours and
+      // multiplies by quantity itself (see processEstimatePayload). Sending
+      // the pre-multiplied value here would double-count by a factor of qty.
       laborHours:
-        laborMode === "flat" ? "0.00" : (it.laborHours * it.quantity).toFixed(2),
+        laborMode === "flat" ? "0.00" : it.laborHours.toFixed(2),
       totalPrice: (it.partPrice * it.quantity).toFixed(2),
       description: it.description,
       sortOrder: index,
