@@ -165,6 +165,57 @@ with `findings: null`, and (c) a `useArrayQuery` test that mocks the
 queryFn to return `null` (the 401 `returnNull` path) and confirms
 the consumer sees `[]` instead of crashing.
 
+## App Health (Task #550, Phase 1)
+
+Super Admin "App Health" page at `/super-admin/app-health` — one
+pane of glass for crashes, system status, sync, and audit signals.
+Phase 1 ships the page chrome plus a working **Crashes & Errors**
+tab; the other six tabs render a "coming in Phase N" placeholder.
+
+- **Storage**: `client_errors` (legacy table name kept for back-compat)
+  extended to the spec's `app_events` shape — added `occurred_at`,
+  `company_id`, `session_id`, `type`, `severity`, `source`,
+  `component`, `app_version`, `fingerprint`, `breadcrumbs` (jsonb),
+  `context` (jsonb), `resolved_at`, `resolved_by`, plus indexes on
+  `(fingerprint, created_at desc)`, `company_id`, `severity`,
+  `app_version`.
+- **Rollups**: new `app_event_groups` table (one row per
+  `fingerprint`) tracks status (`open`/`muted`/`resolved`/
+  `snoozed`), `event_count`, distinct `user_count`/`company_count`,
+  `is_regression`, `first_seen_at`/`last_seen_at`, assignee,
+  resolver. Maintained by an `INSERT … ON CONFLICT DO UPDATE` from
+  the ingestion endpoint.
+- **Ingestion**: `POST /api/client-errors` derives a sha1
+  fingerprint from `name|topframe|component`, validates
+  enum fields, persists the event row, then upserts the group.
+  Re-occurrence of a `resolved` group flips it back to `open`
+  with `is_regression=true`. Existing `error-boundary.tsx` payload
+  extended with `appVersion`, `sessionId`, `component` (route),
+  `breadcrumbs`, `context`. `main.tsx` now also installs global
+  `error` / `unhandledrejection` listeners so non-React crashes
+  reach the same pipeline, with a tiny in-memory breadcrumb ring
+  capturing route changes (`window.__irrigoBreadcrumbs`).
+- **Admin API** (super_admin only):
+  - `GET  /api/admin/app-health/crashes` — filters
+    `status`/`severity`/`company_id`/`version`/`q`/`window` plus
+    `limit`/`offset`; sets `X-Total-Count`.
+  - `GET  /api/admin/app-health/crashes/:fingerprint` — group +
+    latest 50 events + breadcrumbs from the most recent event.
+  - `POST /api/admin/app-health/crashes/:fingerprint/status` —
+    mute/snooze/resolve/reopen one group.
+  - `POST /api/admin/app-health/crashes/bulk-status` — same for
+    a multi-select array of fingerprints.
+- **Frontend**: `pages/super-admin-app-health.tsx` — header
+  (title + 24h/7d/30d/90d window selector + Export stub), Phase 2
+  status-hero placeholder, 7-tab nav, Crashes table with severity
+  bar, regression badge, multi-select bulk Mute/Resolve, and a
+  right-side `Sheet` drawer with stack trace, component stack,
+  breadcrumbs, stats, and Mute/Snooze/Resolve actions. Polled
+  every 15s via React Query.
+- **Compatibility**: existing `/admin/client-errors` viewer
+  (`pages/admin-client-errors.tsx` + `GET /api/admin/client-errors`)
+  is untouched and keeps working.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

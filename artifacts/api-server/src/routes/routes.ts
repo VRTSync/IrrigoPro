@@ -349,6 +349,7 @@ import {
   type InsertWetCheckZoneRecord,
   insertIssueTypeConfigSchema,
   clientErrors,
+  appEventGroups,
 } from "@workspace/db";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
@@ -942,7 +943,7 @@ import {
   companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, propertyZones, invoicePdfs,
   wetCheckPhotos, wetChecks, wetCheckFindings,
 } from "@workspace/db";
-import { eq, desc, and, or, gte, lte, like, isNull, asc, sql } from "drizzle-orm";
+import { eq, desc, and, or, gte, lte, like, isNull, asc, sql, inArray, type SQL } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
@@ -978,25 +979,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/client-errors", express.json({ limit: "64kb" }), async (req, res) => {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const pick = (k: string): string => {
+      const pick = (k: string, max = 4000): string => {
         const v = body[k];
-        return typeof v === "string" ? v.slice(0, 4000) : "";
+        return typeof v === "string" ? v.slice(0, max) : "";
       };
       const userIdRaw = body.userId;
       const userIdNum =
         typeof userIdRaw === "number" && Number.isInteger(userIdRaw) && userIdRaw > 0
           ? userIdRaw
           : null;
-      const payload = {
-        name: pick("name") || "Error",
+      const companyIdRaw = body.companyId;
+      const companyIdNum =
+        typeof companyIdRaw === "number" && Number.isInteger(companyIdRaw) && companyIdRaw > 0
+          ? companyIdRaw
+          : null;
+      const SEVERITY_VALUES = new Set(["info", "warning", "error", "fatal"]);
+      const TYPE_VALUES = new Set(["error", "unhandled_rejection", "log"]);
+      const SOURCE_VALUES = new Set(["web", "mobile", "api", "worker", "integration"]);
+      const sevRaw = pick("severity", 32);
+      const typeRaw = pick("type", 32);
+      const sourceRaw = pick("source", 32);
+      const severity = SEVERITY_VALUES.has(sevRaw) ? sevRaw : "error";
+      const type = TYPE_VALUES.has(typeRaw) ? typeRaw : "error";
+      const source = SOURCE_VALUES.has(sourceRaw) ? sourceRaw : "web";
+      const buildHash = pick("buildHash");
+      const appVersion = pick("appVersion") || buildHash || null;
+      const component = pick("component", 256) || null;
+      const sessionId = pick("sessionId", 128) || null;
+      const stack = pick("stack") || null;
+      const name = pick("name") || "Error";
+      // Task #550 — derive a stable fingerprint from name + first non-noise
+      // stack frame + component. Hash with sha1; truncated to keep the
+      // index narrow. Keep deterministic so the same JS stack from a
+      // different user collapses into the same group.
+      const topFrame = stack
+        ? stack
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l && !l.startsWith(name) && !l.includes(pick("message")))
+            ?.replace(/:\d+:\d+\)?$/, "")
+            ?.replace(/https?:\/\/[^/]+/g, "")
+            ?.slice(0, 400) ?? ""
+        : "";
+      const fingerprintInput = `${name}|${topFrame}|${component ?? ""}`;
+      const fingerprint = crypto.createHash("sha1").update(fingerprintInput).digest("hex").slice(0, 40);
+      const breadcrumbsRaw = body.breadcrumbs;
+      const contextRaw = body.context;
+      const breadcrumbs = Array.isArray(breadcrumbsRaw) ? breadcrumbsRaw.slice(-50) : null;
+      const context =
+        contextRaw && typeof contextRaw === "object" && !Array.isArray(contextRaw)
+          ? (contextRaw as Record<string, unknown>)
+          : null;
+
+      const payload: typeof clientErrors.$inferInsert = {
+        name,
         message: pick("message"),
-        stack: pick("stack") || null,
+        stack,
         componentStack: pick("componentStack") || null,
         url: pick("url") || null,
         userAgent: pick("userAgent") || (typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"]!.slice(0, 4000) : null),
-        buildHash: pick("buildHash"),
+        buildHash,
         userId: userIdNum,
         role: pick("role") || null,
+        companyId: companyIdNum,
+        sessionId,
+        type,
+        severity,
+        source,
+        component,
+        appVersion,
+        fingerprint,
+        breadcrumbs,
+        context,
       };
       req.log.error({ clientError: payload }, "client error boundary report");
       try {
@@ -1004,6 +1058,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (dbErr) {
         try { req.log.warn({ err: dbErr }, "client error persist failed"); } catch { /* ignore */ }
       }
+
+      // Task #550 — group rollup. Insert-or-update the group row keyed
+      // by fingerprint. On conflict we bump event_count, refresh
+      // last_seen_at, recompute user_count / company_count via subquery,
+      // and flip a previously-resolved group back to open with
+      // is_regression=true.
+      try {
+        await db.execute(sql`
+          INSERT INTO app_event_groups (
+            fingerprint, name, sample_message, severity, type, source, component, app_version,
+            first_seen_at, last_seen_at, event_count, user_count, company_count, status
+          ) VALUES (
+            ${fingerprint}, ${name}, ${payload.message || null}, ${severity}, ${type}, ${source},
+            ${component}, ${appVersion}, now(), now(), 1,
+            ${userIdNum ? 1 : 0}, ${companyIdNum ? 1 : 0}, 'open'
+          )
+          ON CONFLICT (fingerprint) DO UPDATE SET
+            event_count = app_event_groups.event_count + 1,
+            last_seen_at = now(),
+            sample_message = EXCLUDED.sample_message,
+            severity = EXCLUDED.severity,
+            app_version = EXCLUDED.app_version,
+            user_count = (
+              SELECT COUNT(DISTINCT user_id)::int FROM client_errors
+              WHERE fingerprint = ${fingerprint} AND user_id IS NOT NULL
+            ),
+            company_count = (
+              SELECT COUNT(DISTINCT company_id)::int FROM client_errors
+              WHERE fingerprint = ${fingerprint} AND company_id IS NOT NULL
+            ),
+            status = CASE WHEN app_event_groups.status = 'resolved' THEN 'open' ELSE app_event_groups.status END,
+            is_regression = CASE WHEN app_event_groups.status = 'resolved' THEN true ELSE app_event_groups.is_regression END,
+            resolved_at = CASE WHEN app_event_groups.status = 'resolved' THEN NULL ELSE app_event_groups.resolved_at END,
+            resolved_by = CASE WHEN app_event_groups.status = 'resolved' THEN NULL ELSE app_event_groups.resolved_by END,
+            updated_at = now()
+        `);
+      } catch (groupErr) {
+        try { req.log.warn({ err: groupErr }, "client error group rollup failed"); } catch { /* ignore */ }
+      }
+
       // Best-effort retention sweep: keep ~30 days. Sampled to avoid
       // hammering the table on every report.
       if (Math.random() < 0.02) {
@@ -1079,6 +1173,285 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "listClientErrors",
         ctx: {},
         fallbackMessage: "Couldn't load crash reports — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // ── Task #550 — Super Admin App Health: Crashes tab ─────────────────────
+  // All routes guarded to super_admin only. Backed by `app_event_groups`
+  // joined with the latest `client_errors` (app_events) row for preview /
+  // drawer.
+  type AppHealthCrashGroupRow = {
+    id: number;
+    fingerprint: string;
+    name: string;
+    sampleMessage: string | null;
+    severity: string;
+    type: string;
+    source: string;
+    component: string | null;
+    appVersion: string | null;
+    firstSeenAt: string;
+    lastSeenAt: string;
+    eventCount: number;
+    userCount: number;
+    companyCount: number;
+    status: string;
+    isRegression: boolean;
+    assigneeId: number | null;
+    snoozedUntil: string | null;
+    resolvedAt: string | null;
+    resolvedBy: number | null;
+    latestUrl?: string | null;
+  };
+  type AppHealthEventRow = {
+    id: number;
+    name: string;
+    message: string;
+    stack: string | null;
+    componentStack: string | null;
+    url: string | null;
+    userAgent: string | null;
+    buildHash: string | null;
+    appVersion: string | null;
+    userId: number | null;
+    role: string | null;
+    companyId: number | null;
+    sessionId: string | null;
+    severity: string;
+    type: string;
+    source: string;
+    component: string | null;
+    breadcrumbs: unknown;
+    context: unknown;
+    occurredAt: string;
+    createdAt: string;
+  };
+  const requireSuperAdminGuard = (req: Request, res: Response): boolean => {
+    if (req.authenticatedUserRole !== "super_admin") {
+      res.status(403).json({ message: "Super admin access required" });
+      return false;
+    }
+    return true;
+  };
+
+  const VALID_GROUP_STATUSES = new Set(["open", "muted", "resolved", "snoozed"]);
+  const VALID_SEVERITIES = new Set(["info", "warning", "error", "fatal"]);
+  const APP_HEALTH_WINDOWS: Record<string, string> = {
+    "24h": "24 hours",
+    "7d": "7 days",
+    "30d": "30 days",
+    "90d": "90 days",
+  };
+
+  // List crash groups with filters and pagination. Sets X-Total-Count.
+  app.get("/api/admin/app-health/crashes", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const status = typeof req.query.status === "string" && VALID_GROUP_STATUSES.has(req.query.status)
+        ? (req.query.status as string)
+        : "open";
+      const severity = typeof req.query.severity === "string" && VALID_SEVERITIES.has(req.query.severity)
+        ? (req.query.severity as string)
+        : null;
+      const companyIdRaw = typeof req.query.company_id === "string" ? Number(req.query.company_id) : NaN;
+      const companyId = Number.isInteger(companyIdRaw) && companyIdRaw > 0 ? companyIdRaw : null;
+      const version = typeof req.query.version === "string" && req.query.version ? (req.query.version as string).slice(0, 200) : null;
+      const q = typeof req.query.q === "string" && req.query.q ? (req.query.q as string).slice(0, 200) : null;
+      const windowKey = typeof req.query.window === "string" && APP_HEALTH_WINDOWS[req.query.window] ? (req.query.window as string) : "30d";
+      const windowInterval = APP_HEALTH_WINDOWS[windowKey];
+      const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 50;
+      const offsetRaw = typeof req.query.offset === "string" ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.trunc(limitRaw))) : 50;
+      const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.trunc(offsetRaw)) : 0;
+
+      const filters: SQL[] = [
+        sql`g.status = ${status}`,
+        sql`g.last_seen_at >= now() - (${windowInterval})::interval`,
+      ];
+      if (severity) filters.push(sql`g.severity = ${severity}`);
+      if (version) filters.push(sql`g.app_version = ${version}`);
+      if (companyId) {
+        filters.push(sql`EXISTS (SELECT 1 FROM client_errors ce WHERE ce.fingerprint = g.fingerprint AND ce.company_id = ${companyId})`);
+      }
+      if (q) {
+        const qLike = `%${q}%`;
+        filters.push(sql`(g.name ILIKE ${qLike} OR g.sample_message ILIKE ${qLike} OR g.component ILIKE ${qLike})`);
+      }
+      const where = filters.reduce<SQL>((acc, frag, i) => (i === 0 ? frag : sql`${acc} AND ${frag}`), sql``);
+
+      const rowsResult = await db.execute<AppHealthCrashGroupRow>(sql`
+        SELECT
+          g.id,
+          g.fingerprint,
+          g.name,
+          g.sample_message AS "sampleMessage",
+          g.severity,
+          g.type,
+          g.source,
+          g.component,
+          g.app_version AS "appVersion",
+          g.first_seen_at AS "firstSeenAt",
+          g.last_seen_at AS "lastSeenAt",
+          g.event_count AS "eventCount",
+          g.user_count AS "userCount",
+          g.company_count AS "companyCount",
+          g.status,
+          g.is_regression AS "isRegression",
+          g.assignee_id AS "assigneeId",
+          g.snoozed_until AS "snoozedUntil",
+          g.resolved_at AS "resolvedAt",
+          (SELECT url FROM client_errors ce WHERE ce.fingerprint = g.fingerprint ORDER BY ce.created_at DESC LIMIT 1) AS "latestUrl"
+        FROM app_event_groups g
+        WHERE ${where}
+        ORDER BY g.last_seen_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+      const totalResult = await db.execute<{ total: number }>(sql`
+        SELECT COUNT(*)::int AS "total" FROM app_event_groups g WHERE ${where}
+      `);
+      const total = totalResult.rows?.[0]?.total ?? 0;
+      res.setHeader("X-Total-Count", String(total));
+      res.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+      const groupsOut: AppHealthCrashGroupRow[] = rowsResult.rows ?? [];
+      res.json({ groups: groupsOut, total, window: windowKey });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthListCrashes",
+        ctx: {},
+        fallbackMessage: "Couldn't load crashes — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Group detail: latest 50 events plus breadcrumbs from the most recent.
+  app.get("/api/admin/app-health/crashes/:fingerprint", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const fingerprint = String(req.params.fingerprint).slice(0, 64);
+      const groupResult = await db.execute<AppHealthCrashGroupRow>(sql`
+        SELECT
+          id, fingerprint, name, sample_message AS "sampleMessage", severity, type, source,
+          component, app_version AS "appVersion",
+          first_seen_at AS "firstSeenAt", last_seen_at AS "lastSeenAt",
+          event_count AS "eventCount", user_count AS "userCount", company_count AS "companyCount",
+          status, is_regression AS "isRegression", assignee_id AS "assigneeId",
+          snoozed_until AS "snoozedUntil", resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"
+        FROM app_event_groups WHERE fingerprint = ${fingerprint} LIMIT 1
+      `);
+      const group = groupResult.rows?.[0] ?? null;
+      if (!group) {
+        res.status(404).json({ message: "Crash group not found" });
+        return;
+      }
+      const eventsResult = await db.execute<AppHealthEventRow>(sql`
+        SELECT
+          id, name, message, stack, component_stack AS "componentStack", url, user_agent AS "userAgent",
+          build_hash AS "buildHash", app_version AS "appVersion", user_id AS "userId", role,
+          company_id AS "companyId", session_id AS "sessionId", severity, type, source, component,
+          breadcrumbs, context, occurred_at AS "occurredAt", created_at AS "createdAt"
+        FROM client_errors
+        WHERE fingerprint = ${fingerprint}
+        ORDER BY created_at DESC
+        LIMIT 50
+      `);
+      const events: AppHealthEventRow[] = eventsResult.rows ?? [];
+      const latest = events[0] ?? null;
+      res.json({
+        group,
+        events,
+        breadcrumbs: latest?.breadcrumbs ?? null,
+        latestEvent: latest,
+      });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthCrashDetail",
+        ctx: {},
+        fallbackMessage: "Couldn't load crash detail — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Update a single group's status (open/muted/resolved/snoozed).
+  app.post("/api/admin/app-health/crashes/:fingerprint/status", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const fingerprint = String(req.params.fingerprint).slice(0, 64);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const status = typeof body.status === "string" && VALID_GROUP_STATUSES.has(body.status) ? body.status : null;
+      if (!status) {
+        res.status(400).json({ message: "Invalid status" });
+        return;
+      }
+      const assigneeIdRaw = body.assignee_id ?? body.assigneeId;
+      const assigneeId = typeof assigneeIdRaw === "number" && Number.isInteger(assigneeIdRaw) && assigneeIdRaw > 0 ? assigneeIdRaw : null;
+      const userId = req.authenticatedUserId ?? null;
+      const result = await db.execute<{ fingerprint: string; status: string }>(sql`
+        UPDATE app_event_groups SET
+          status = ${status},
+          assignee_id = COALESCE(${assigneeId}, assignee_id),
+          resolved_at = CASE WHEN ${status} = 'resolved' THEN now() ELSE NULL END,
+          resolved_by = CASE WHEN ${status} = 'resolved' THEN ${userId} ELSE NULL END,
+          is_regression = CASE WHEN ${status} = 'resolved' THEN false ELSE is_regression END,
+          updated_at = now()
+        WHERE fingerprint = ${fingerprint}
+        RETURNING fingerprint, status
+      `);
+      const updated = result.rows?.[0] ?? null;
+      if (!updated) {
+        res.status(404).json({ message: "Crash group not found" });
+        return;
+      }
+      res.json({ ok: true, fingerprint: updated.fingerprint, status: updated.status });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthSetCrashStatus",
+        ctx: {},
+        fallbackMessage: "Couldn't update crash status — please retry",
+      });
+      res.status(status).json({ message });
+    }
+  });
+
+  // Bulk status change for the table multi-select action.
+  app.post("/api/admin/app-health/crashes/bulk-status", requireAuthentication, async (req, res) => {
+    if (!requireSuperAdminGuard(req, res)) return;
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const status = typeof body.status === "string" && VALID_GROUP_STATUSES.has(body.status) ? body.status : null;
+      const fpsRaw = body.fingerprints;
+      const fingerprints = Array.isArray(fpsRaw)
+        ? fpsRaw.filter((v): v is string => typeof v === "string" && v.length > 0).slice(0, 500).map((v) => v.slice(0, 64))
+        : [];
+      if (!status || fingerprints.length === 0) {
+        res.status(400).json({ message: "Missing status or fingerprints" });
+        return;
+      }
+      const userId = req.authenticatedUserId ?? null;
+      const isResolved = status === "resolved";
+      // Fully parameterized — drizzle binds `fingerprints` as a single
+      // text[] parameter via `inArray`, so request input never reaches
+      // the SQL string itself.
+      const updated = await db
+        .update(appEventGroups)
+        .set({
+          status,
+          resolvedAt: isResolved ? new Date() : null,
+          resolvedBy: isResolved ? userId : null,
+          isRegression: isResolved ? false : undefined,
+          updatedAt: new Date(),
+        })
+        .where(inArray(appEventGroups.fingerprint, fingerprints))
+        .returning({ fingerprint: appEventGroups.fingerprint });
+      res.json({ ok: true, updated: updated.map((r) => r.fingerprint) });
+    } catch (e) {
+      const { status, message } = classifyAndLog(req, e, {
+        op: "appHealthBulkSetCrashStatus",
+        ctx: {},
+        fallbackMessage: "Couldn't update crashes — please retry",
       });
       res.status(status).json({ message });
     }

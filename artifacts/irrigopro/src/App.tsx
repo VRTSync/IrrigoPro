@@ -39,6 +39,7 @@ const WorkOrdersMissingPhotosReport = lazyPage(() => import("@/pages/work-orders
 const BillingZeroPriceAuditPage = lazyPage(() => import("@/pages/billing-zero-price-audit"));
 const AdminIssueTypesPage = lazyPage(() => import("@/pages/admin-issue-types"));
 const AdminClientErrorsPage = lazyPage(() => import("@/pages/admin-client-errors"));
+const SuperAdminAppHealthPage = lazyPage(() => import("@/pages/super-admin-app-health"));
 const LaborRateAuditPage = lazyPage(() => import("@/pages/labor-rate-audit"));
 const CustomerBilling = lazyPage(() => import("@/pages/customer-billing"));
 const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
@@ -112,6 +113,7 @@ interface User {
 function Router() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentPath] = useLocation();
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +197,30 @@ function Router() {
               <Route component={Login} />
             </Switch>
           </Suspense>
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+  }
+
+  // Task #550 — App Health is reachable from any authenticated role at the
+  // same URL. The page's own super-admin guard renders the canonical
+  // "Super admin access required" UI when the role is wrong, instead of
+  // letting non-super-admin roles fall through to NotFound from their
+  // role-scoped Switch.
+  if (currentPath === "/super-admin/app-health") {
+    return (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <div className="min-h-screen bg-gray-50 pb-20 lg:pb-0 flex flex-col">
+            <Navigation />
+            <div className="px-4 flex-1">
+              <Suspense fallback={<RouteSuspenseFallback />}>
+                <SuperAdminAppHealthPage />
+              </Suspense>
+            </div>
+            <PoweredByFooter />
+          </div>
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>
@@ -377,6 +403,7 @@ function Router() {
                   <Route path="/system-users" component={SystemUserManagement} />
                   <Route path="/admin/controllers" component={AdminControllers} />
                   <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
+                  <Route path="/super-admin/app-health" component={SuperAdminAppHealthPage} />
                   <Route path="/user-manager" component={UserManager} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />

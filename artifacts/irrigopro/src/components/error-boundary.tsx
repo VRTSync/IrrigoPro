@@ -36,14 +36,18 @@ function isChunkLoadError(err: Error | null): boolean {
 
 const CHUNK_RETRY_FLAG = "irrigopro:chunkRetry";
 
-function readUserContext(): { userId: number | null; role: string } {
+function readUserContext(): { userId: number | null; role: string; companyId: number | null } {
   try {
     const raw = safeGet("user");
-    if (!raw) return { userId: null, role: "" };
-    const u = JSON.parse(raw) as { id?: number; role?: string };
-    return { userId: typeof u?.id === "number" ? u.id : null, role: u?.role ?? "" };
+    if (!raw) return { userId: null, role: "", companyId: null };
+    const u = JSON.parse(raw) as { id?: number; role?: string; companyId?: number | null };
+    return {
+      userId: typeof u?.id === "number" ? u.id : null,
+      role: u?.role ?? "",
+      companyId: typeof u?.companyId === "number" ? u.companyId : null,
+    };
   } catch {
-    return { userId: null, role: "" };
+    return { userId: null, role: "", companyId: null };
   }
 }
 
@@ -72,7 +76,28 @@ export class AppErrorBoundary extends Component<Props, State> {
     // failure is swallowed so we never compound the boundary error.
     try {
       const buildHash = import.meta.env.VITE_BUILD_HASH ?? "";
-      const { userId, role } = readUserContext();
+      const { userId, role, companyId } = readUserContext();
+      // Task #550 — include richer fields used by the App Health
+      // Crashes tab: app_version, source, severity, sessionId, the
+      // current route as `component`, and a small breadcrumb ring.
+      let sessionId: string | null = null;
+      try {
+        sessionId = sessionStorage.getItem("irrigopro:sessionId");
+        if (!sessionId) {
+          sessionId = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+          sessionStorage.setItem("irrigopro:sessionId", sessionId);
+        }
+      } catch { /* ignore */ }
+      const route = typeof window !== "undefined" ? window.location.pathname : "";
+      const breadcrumbs = (() => {
+        try {
+          const w = window as any;
+          const buf = w.__irrigoBreadcrumbs;
+          return Array.isArray(buf) ? buf.slice(-30) : [];
+        } catch {
+          return [];
+        }
+      })();
       const payload = {
         name: error?.name ?? "Error",
         message: error?.message ?? "",
@@ -81,8 +106,17 @@ export class AppErrorBoundary extends Component<Props, State> {
         url: typeof window !== "undefined" ? window.location.href : "",
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
         buildHash,
+        appVersion: buildHash,
         userId,
         role,
+        companyId,
+        sessionId,
+        component: route,
+        source: "web",
+        type: "error",
+        severity: "error",
+        breadcrumbs,
+        context: { route },
       };
       const body = JSON.stringify(payload);
       const url = "/api/client-errors";

@@ -71,4 +71,128 @@ if (typeof window !== "undefined") {
       once: true,
     });
   }
+
+  // Task #550 — global error / promise reporter that mirrors what the
+  // React error boundary already posts. Catches errors that escape React
+  // (event handlers, async work, third-party scripts) so the App Health
+  // Crashes tab sees them too. Lightweight breadcrumb ring captures the
+  // last few route changes so the drawer has a bit of context to show.
+  try {
+    const w = window as any;
+    if (!w.__irrigoBreadcrumbs) {
+      w.__irrigoBreadcrumbs = [];
+      const push = (entry: Record<string, unknown>) => {
+        try {
+          w.__irrigoBreadcrumbs.push({ t: Date.now(), ...entry });
+          if (w.__irrigoBreadcrumbs.length > 50) w.__irrigoBreadcrumbs.shift();
+        } catch { /* ignore */ }
+      };
+      push({ kind: "navigation", url: window.location.pathname });
+      const wrapNav = (key: "pushState" | "replaceState") => {
+        const orig = history[key];
+        history[key] = function (this: History, ...args: any[]) {
+          const ret = orig.apply(this, args as any);
+          push({ kind: "navigation", url: window.location.pathname });
+          return ret;
+        };
+      };
+      wrapNav("pushState");
+      wrapNav("replaceState");
+      window.addEventListener("popstate", () =>
+        push({ kind: "navigation", url: window.location.pathname })
+      );
+    }
+
+    const REPORTED = new WeakSet<object>();
+    const sendReport = (payload: Record<string, unknown>) => {
+      try {
+        const body = JSON.stringify(payload);
+        const url = "/api/client-errors";
+        let sent = false;
+        if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+          try {
+            sent = navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+          } catch { /* fall through */ }
+        }
+        if (!sent && typeof fetch === "function") {
+          void fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            keepalive: true,
+            credentials: "include",
+          }).catch(() => { /* ignore */ });
+        }
+      } catch { /* ignore */ }
+    };
+
+    const readUser = () => {
+      try {
+        const raw = localStorage.getItem("user");
+        if (!raw) return { userId: null, role: "", companyId: null };
+        const u = JSON.parse(raw) as { id?: number; role?: string; companyId?: number | null };
+        return {
+          userId: typeof u?.id === "number" ? u.id : null,
+          role: u?.role ?? "",
+          companyId: typeof u?.companyId === "number" ? u.companyId : null,
+        };
+      } catch {
+        return { userId: null, role: "", companyId: null };
+      }
+    };
+
+    const getSession = (): string | null => {
+      try {
+        let sid = sessionStorage.getItem("irrigopro:sessionId");
+        if (!sid) {
+          sid = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+          sessionStorage.setItem("irrigopro:sessionId", sid);
+        }
+        return sid;
+      } catch { return null; }
+    };
+
+    const buildHash = (import.meta.env.VITE_BUILD_HASH as string | undefined) ?? "";
+
+    const reportError = (err: unknown, type: "error" | "unhandled_rejection") => {
+      try {
+        const e = (err && typeof err === "object") ? (err as Error) : new Error(String(err));
+        if (typeof e === "object" && e) {
+          if (REPORTED.has(e as any)) return;
+          try { REPORTED.add(e as any); } catch { /* primitive errors */ }
+        }
+        const { userId, role, companyId } = readUser();
+        const breadcrumbs = Array.isArray(w.__irrigoBreadcrumbs) ? w.__irrigoBreadcrumbs.slice(-30) : [];
+        sendReport({
+          name: e.name ?? (type === "unhandled_rejection" ? "UnhandledRejection" : "Error"),
+          message: e.message ?? "",
+          stack: e.stack ?? "",
+          componentStack: "",
+          url: window.location.href,
+          userAgent: navigator.userAgent,
+          buildHash,
+          appVersion: buildHash,
+          userId,
+          role,
+          companyId,
+          sessionId: getSession(),
+          component: window.location.pathname,
+          source: "web",
+          type,
+          severity: "error",
+          breadcrumbs,
+          context: { route: window.location.pathname },
+        });
+      } catch { /* never throw from a global handler */ }
+    };
+
+    window.addEventListener("error", (ev) => {
+      reportError(ev.error ?? new Error(ev.message ?? "Error"), "error");
+    });
+    window.addEventListener("unhandledrejection", (ev) => {
+      reportError(ev.reason ?? new Error("Unhandled rejection"), "unhandled_rejection");
+    });
+  } catch (err) {
+    console.warn("[boot] global error reporter init failed:", err);
+  }
 }
