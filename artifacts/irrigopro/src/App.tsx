@@ -73,7 +73,7 @@ import { NotificationPermissionBanner } from "@/components/notifications/notific
 import CompanyAdminApp from "@/components/company-admin-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
-import { billingManagerNav } from "@/components/layout/nav-config";
+import { billingManagerNav, superAdminNav } from "@/components/layout/nav-config";
 import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
 import { ConflictToastBridge } from "@/components/offline/conflict-toast-bridge";
 import { SessionExpiredBanner } from "@/components/auth/session-expired-banner";
@@ -208,8 +208,9 @@ function Router() {
   // same URL. The page's own super-admin guard renders the canonical
   // "Super admin access required" UI when the role is wrong, instead of
   // letting non-super-admin roles fall through to NotFound from their
-  // role-scoped Switch.
-  if (currentPath === "/super-admin/app-health") {
+  // role-scoped Switch. Super admins are excluded from this short-circuit
+  // so the route renders inside their DesktopShell (Task #592).
+  if (currentPath === "/super-admin/app-health" && user.role !== "super_admin") {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
@@ -377,14 +378,13 @@ function Router() {
     );
   }
 
-  // Super Admin gets system-wide access
+  // Super Admin gets system-wide access (Task #592 — wrapped in DesktopShell)
   if (user.role === "super_admin") {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <div className="min-h-screen pb-20 lg:pb-0 flex flex-col">
-            <Navigation />
-            <div className="px-4 bg-gray-50 flex-1">
+          <DesktopShell navConfig={superAdminNav}>
+            <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
                   <Route path="/" component={SuperAdminDashboard} />
@@ -416,8 +416,7 @@ function Router() {
                 </Switch>
               </Suspense>
             </div>
-            <PoweredByFooter />
-          </div>
+          </DesktopShell>
           <Toaster />
         </QueryClientProvider>
       </TooltipProvider>

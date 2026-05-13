@@ -15,6 +15,10 @@ import {
   Calculator,
   Cpu,
   Building2,
+  Activity,
+  AlertTriangle,
+  UserCog,
+  Repeat,
   type LucideIcon,
 } from "lucide-react";
 
@@ -141,6 +145,42 @@ export const billingManagerNav: NavConfig = {
       items: [
         { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
         { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
+      ],
+    },
+  ],
+};
+
+export const superAdminNav: NavConfig = {
+  items: [
+    { type: "leaf", label: "Dashboard", path: "/", icon: Home },
+    { type: "leaf", label: "Companies", path: "/super-admin", icon: Building2 },
+    {
+      type: "group",
+      label: "Users",
+      icon: Users,
+      defaultOpen: true,
+      items: [
+        { type: "leaf", label: "All Users", path: "/system-users", icon: Users },
+        { type: "leaf", label: "User Manager", path: "/user-manager", icon: UserCog },
+        { type: "leaf", label: "Switch User", path: "/switch-user", icon: Repeat },
+      ],
+    },
+    {
+      type: "group",
+      label: "Operations",
+      icon: Briefcase,
+      items: [
+        { type: "leaf", label: "Wet Checks", path: "/wet-checks", icon: Droplets },
+        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
+      ],
+    },
+    {
+      type: "group",
+      label: "System",
+      icon: Settings,
+      items: [
+        { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
+        { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
       ],
     },
   ],
