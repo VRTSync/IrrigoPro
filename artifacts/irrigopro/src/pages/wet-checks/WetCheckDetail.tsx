@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle } from "lucide-react";
+import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera } from "lucide-react";
+import { countZonePhotos } from "@/lib/wet-check-photos";
 import { apiRequest, asArray, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -323,6 +324,13 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
             // = reviewed-and-confirmed).
             const isMarkedComplete =
               r?.status === "checked_with_issues" && r?.markedCompleteAt != null;
+            const zonePhotoCount = countZonePhotos(wc, r);
+            const aria = [
+              isMarkedComplete ? `Zone ${n} — Needs Work, marked complete` : `Zone ${n}`,
+              zonePhotoCount > 0
+                ? `, ${zonePhotoCount} photo${zonePhotoCount === 1 ? "" : "s"}`
+                : "",
+            ].join("");
             return (
               <button
                 key={n}
@@ -330,7 +338,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                 className={`relative aspect-square min-h-[44px] text-sm sm:text-xs font-medium rounded active:scale-95 transition-transform ${cls}`}
                 data-testid={`zone-${activeLetter}-${n}`}
                 data-marked-complete={isMarkedComplete ? "true" : undefined}
-                aria-label={isMarkedComplete ? `Zone ${n} — Needs Work, marked complete` : `Zone ${n}`}
+                aria-label={aria}
               >
                 {n}
                 {isMarkedComplete && (
@@ -339,6 +347,15 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                     data-testid={`zone-${activeLetter}-${n}-marked-complete`}
                   >
                     <CheckCircle2 className="w-3 h-3" strokeWidth={3} />
+                  </span>
+                )}
+                {zonePhotoCount > 0 && (
+                  <span
+                    className="absolute -bottom-1 -right-1 inline-flex items-center justify-center min-w-[14px] h-3.5 px-0.5 rounded-full bg-white text-[9px] font-bold text-gray-800 shadow ring-1 ring-gray-400"
+                    data-testid={`zone-${activeLetter}-${n}-photo-count`}
+                  >
+                    <Camera className="w-2 h-2 mr-px" aria-hidden />
+                    {zonePhotoCount}
                   </span>
                 )}
               </button>
@@ -500,7 +517,17 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <div>{wc.propertyAddress ?? "—"}</div>
-          <div>Status: <Badge>{wc.status}</Badge></div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Status: <Badge>{wc.status}</Badge></span>
+            <span
+              className="inline-flex items-center gap-1 text-xs text-gray-700"
+              data-testid="wc-photo-total"
+              aria-label={`${wcPhotos.length} photo${wcPhotos.length === 1 ? "" : "s"} attached to this wet check`}
+            >
+              <Camera className="w-3.5 h-3.5" aria-hidden />
+              {wcPhotos.length} photo{wcPhotos.length === 1 ? "" : "s"}
+            </span>
+          </div>
           {wetCheckLevelPhotos.length > 0 && allFindings.length === 0 && (
             <div className="flex flex-wrap gap-2 pt-2" data-testid="wc-photos">
               {wetCheckLevelPhotos.map(p => (
@@ -544,6 +571,10 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
           const ok = recs.filter(r => r.status === "checked_ok").length;
           const issues = recs.filter(r => r.status === "checked_with_issues").length;
           const na = recs.filter(r => r.status === "not_applicable").length;
+          const photoCount = recs.reduce(
+            (n, r) => n + countZonePhotos(wc, r),
+            0,
+          );
           return (
             <Card
               key={c.controllerLetter}
@@ -557,10 +588,20 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                   <span className="hidden sm:inline">Controller {c.controllerLetter}</span>
                 </div>
                 <div className="text-xs text-gray-600">{c.zoneCount} zones</div>
-                <div className="mt-2 text-xs flex gap-2 sm:gap-3 flex-wrap">
+                <div className="mt-2 text-xs flex gap-2 sm:gap-3 flex-wrap items-center">
                   <span className="text-green-700">✓ {ok}</span>
                   <span className="text-red-700">! {issues}</span>
                   <span className="text-gray-500">N/A {na}</span>
+                  {photoCount > 0 && (
+                    <span
+                      className="inline-flex items-center gap-0.5 text-gray-700"
+                      data-testid={`controller-${c.controllerLetter}-photo-count`}
+                      aria-label={`${photoCount} photo${photoCount === 1 ? "" : "s"} on this controller`}
+                    >
+                      <Camera className="w-3 h-3" aria-hidden />
+                      {photoCount}
+                    </span>
+                  )}
                 </div>
               </CardContent>
             </Card>

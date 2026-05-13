@@ -301,6 +301,24 @@ export default function WetCheckDetailScreen() {
     }));
   }, [wcd]);
 
+  const photoCountByZoneId = useMemo(() => {
+    const map = new Map<number, number>();
+    if (!wcd) return map;
+    const zones = wcd.zoneRecords ?? [];
+    const findingToZone = new Map<number, number>();
+    for (const z of zones) {
+      map.set(z.id, 0);
+      for (const f of z.findings ?? []) findingToZone.set(f.id, z.id);
+    }
+    for (const p of wcd.photos ?? []) {
+      let zid: number | null = null;
+      if (p.zoneRecordId != null) zid = p.zoneRecordId;
+      else if (p.findingId != null) zid = findingToZone.get(p.findingId) ?? null;
+      if (zid != null) map.set(zid, (map.get(zid) ?? 0) + 1);
+    }
+    return map;
+  }, [wcd]);
+
   const counts = useMemo(() => {
     if (!wcd) return { ok: 0, issues: 0, na: 0, notChecked: 0 };
     let ok = 0;
@@ -468,20 +486,51 @@ export default function WetCheckDetailScreen() {
                 >
                   WC #{wcd.id}
                 </Text>
-                <View
-                  style={[
-                    styles.statusPill,
-                    { backgroundColor: colors.secondary, borderRadius: 999 },
-                  ]}
-                >
-                  <Text
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  {(() => {
+                    const total = (wcd.photos ?? []).length;
+                    if (total === 0) return null;
+                    return (
+                      <View
+                        style={[
+                          styles.statusPill,
+                          {
+                            backgroundColor: colors.muted,
+                            borderRadius: 999,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 4,
+                          },
+                        ]}
+                        accessibilityLabel={`${total} photo${total === 1 ? "" : "s"} on this wet check`}
+                      >
+                        <Feather name="camera" size={11} color={colors.foreground} />
+                        <Text
+                          style={[
+                            styles.statusText,
+                            { color: colors.foreground },
+                          ]}
+                        >
+                          {total}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                  <View
                     style={[
-                      styles.statusText,
-                      { color: colors.secondaryForeground },
+                      styles.statusPill,
+                      { backgroundColor: colors.secondary, borderRadius: 999 },
                     ]}
                   >
-                    {STATUS_LABELS[wcd.status] ?? wcd.status}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.statusText,
+                        { color: colors.secondaryForeground },
+                      ]}
+                    >
+                      {STATUS_LABELS[wcd.status] ?? wcd.status}
+                    </Text>
+                  </View>
                 </View>
               </View>
               <Text style={[styles.headerCustomer, { color: colors.foreground }]}>
@@ -564,6 +613,7 @@ export default function WetCheckDetailScreen() {
                   key={letter}
                   letter={letter}
                   zones={zones}
+                  photoCountByZoneId={photoCountByZoneId}
                   colors={colors}
                   onZonePress={(zone) => {
                     prefetchZone();
@@ -736,11 +786,13 @@ function Chip({ label, bg, fg }: { label: string; bg: string; fg: string }) {
 function ControllerSection({
   letter,
   zones,
+  photoCountByZoneId,
   colors,
   onZonePress,
 }: {
   letter: string;
   zones: WetCheckZoneRecord[];
+  photoCountByZoneId: Map<number, number>;
   colors: ReturnType<typeof useColors>;
   onZonePress: (zone: WetCheckZoneRecord) => void;
 }) {
@@ -791,6 +843,17 @@ function ControllerSection({
                     {markedComplete ? (
                       <View style={styles.markedCompleteDot}>
                         <Feather name="check" size={10} color="#16a34a" />
+                      </View>
+                    ) : null}
+                    {(photoCountByZoneId.get(z.id) ?? 0) > 0 ? (
+                      <View
+                        style={styles.photoCountDot}
+                        accessibilityLabel={`${photoCountByZoneId.get(z.id)} photo${(photoCountByZoneId.get(z.id) ?? 0) === 1 ? "" : "s"}`}
+                      >
+                        <Feather name="camera" size={8} color="#1f2937" />
+                        <Text style={styles.photoCountDotText}>
+                          {photoCountByZoneId.get(z.id)}
+                        </Text>
                       </View>
                     ) : null}
                   </Pressable>
@@ -927,6 +990,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#16a34a",
+  },
+  photoCountDot: {
+    position: "absolute",
+    bottom: -4,
+    right: -4,
+    minWidth: 18,
+    height: 14,
+    borderRadius: 999,
+    paddingHorizontal: 3,
+    backgroundColor: "#ffffff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 1,
+    borderWidth: 1,
+    borderColor: "#9ca3af",
+  },
+  photoCountDotText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#1f2937",
   },
   emptyCard: {
     borderWidth: StyleSheet.hairlineWidth,

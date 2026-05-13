@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, ChevronLeft, CheckCircle2, Wrench, MinusCircle, Trash2, Pencil } from "lucide-react";
+import { Loader2, ChevronLeft, CheckCircle2, Wrench, MinusCircle, Trash2, Pencil, Camera } from "lucide-react";
+import { countFindingPhotos } from "@/lib/wet-check-photos";
 import { apiRequest, asArray, parseApiError, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -583,6 +584,16 @@ export function ZoneScreen({
                   >
                     {statusLabel}
                   </Badge>
+                  {photos.length > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1 text-xs font-medium text-gray-800 bg-white/80 border border-gray-300 rounded-full px-2 py-0.5"
+                      data-testid="zone-photo-total"
+                      aria-label={`${photos.length} photo${photos.length === 1 ? "" : "s"} on this zone`}
+                    >
+                      <Camera className="w-3 h-3" aria-hidden />
+                      {photos.length}
+                    </span>
+                  )}
                   {!readOnly && zoneRecord && (
                     <PhotoCaptureButton
                       wetCheckId={wetCheckId}
@@ -740,7 +751,22 @@ export function ZoneScreen({
               <div key={f.id} className="border rounded p-2" data-testid={`finding-${f.id}`}>
                 <div className="flex items-start justify-between">
                   <div className="text-sm">
-                    <div className="font-medium">{f.issueType.replace(/_/g, " ")}</div>
+                    <div className="font-medium flex items-center gap-2">
+                      <span>{f.issueType.replace(/_/g, " ")}</span>
+                      {(() => {
+                        const fc = countFindingPhotos({ photos }, f);
+                        return fc > 0 ? (
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-gray-700 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-0.5"
+                            data-testid={`finding-photo-count-${f.id}`}
+                            aria-label={`${fc} photo${fc === 1 ? "" : "s"} on this finding`}
+                          >
+                            <Camera className="w-3 h-3" aria-hidden />
+                            {fc}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
                     <div className="text-xs text-gray-500">
                       {f.partName ?? "no part"} · qty {f.quantity} · {f.laborHours}h
                       {f.partPrice ? ` · $${f.partPrice}` : ""}

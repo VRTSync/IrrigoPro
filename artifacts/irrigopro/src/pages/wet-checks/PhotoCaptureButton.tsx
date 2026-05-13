@@ -110,7 +110,7 @@ export function PhotoCaptureButton({
         } as unknown as WetCheckPhoto;
         onUploaded?.(optimistic);
         toast({
-          title: isProbablyOffline() ? "Photo queued offline" : "Photo queued",
+          title: isProbablyOffline() ? "Photo queued offline" : "Photo attached",
           description: isProbablyOffline() ? "Will upload when you're back online." : undefined,
         });
       } catch (err: any) {
@@ -141,7 +141,7 @@ export function PhotoCaptureButton({
         queryClient.invalidateQueries({ queryKey: ["/api/wet-checks", wetCheckId] });
       }
       onUploaded?.(created);
-      toast({ title: "Photo added" });
+      toast({ title: "Photo attached" });
     } catch (err: any) {
       toast({ title: "Photo upload failed", description: err?.message ?? "Try again", variant: "destructive" });
     } finally {

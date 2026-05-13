@@ -754,7 +754,7 @@ export default function ZoneDetailScreen() {
               />
             ) : null}
 
-            <ZoneStatusCard zone={zone} colors={colors} />
+            <ZoneStatusCard zone={zone} colors={colors} photoCount={zonePhotos.length} />
 
             <Section title="Zone status" colors={colors}>
               {statusError ? (
@@ -858,9 +858,34 @@ export default function ZoneDetailScreen() {
                     ]}
                   >
                     <View style={styles.findingTopRow}>
-                      <Text style={[styles.findingTitle, { color: colors.foreground }]}>
-                        {prettyIssueType(f.issueType)}
-                      </Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 }}>
+                        <Text style={[styles.findingTitle, { color: colors.foreground }]}>
+                          {prettyIssueType(f.issueType)}
+                        </Text>
+                        {(() => {
+                          const fc = zonePhotos.filter((p) => p.findingId === f.id).length;
+                          if (fc === 0) return null;
+                          return (
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 3,
+                                paddingHorizontal: 6,
+                                paddingVertical: 2,
+                                borderRadius: 999,
+                                backgroundColor: colors.muted,
+                              }}
+                              accessibilityLabel={`${fc} photo${fc === 1 ? "" : "s"} on this finding`}
+                            >
+                              <Feather name="camera" size={10} color={colors.foreground} />
+                              <Text style={{ fontSize: 11, fontWeight: "700", color: colors.foreground }}>
+                                {fc}
+                              </Text>
+                            </View>
+                          );
+                        })()}
+                      </View>
                       <View
                         style={[
                           styles.resolutionPill,
@@ -1130,9 +1155,11 @@ export default function ZoneDetailScreen() {
 function ZoneStatusCard({
   zone,
   colors,
+  photoCount,
 }: {
   zone: WetCheckZoneRecord;
   colors: ReturnType<typeof useColors>;
+  photoCount: number;
 }) {
   const tone = zoneStatusColor(zone.status, colors);
   return (
@@ -1153,15 +1180,37 @@ function ZoneStatusCard({
         >
           Controller {zone.controllerLetter} · Zone {zone.zoneNumber}
         </Text>
-        <View
-          style={[
-            styles.statusPill,
-            { backgroundColor: tone.bg, borderRadius: 999 },
-          ]}
-        >
-          <Text style={[styles.statusText, { color: tone.fg }]}>
-            {ZONE_STATUS_LABELS[zone.status] ?? zone.status}
-          </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {photoCount > 0 ? (
+            <View
+              style={[
+                styles.statusPill,
+                {
+                  backgroundColor: colors.muted,
+                  borderRadius: 999,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                },
+              ]}
+              accessibilityLabel={`${photoCount} photo${photoCount === 1 ? "" : "s"} on this zone`}
+            >
+              <Feather name="camera" size={11} color={colors.foreground} />
+              <Text style={[styles.statusText, { color: colors.foreground }]}>
+                {photoCount}
+              </Text>
+            </View>
+          ) : null}
+          <View
+            style={[
+              styles.statusPill,
+              { backgroundColor: tone.bg, borderRadius: 999 },
+            ]}
+          >
+            <Text style={[styles.statusText, { color: tone.fg }]}>
+              {ZONE_STATUS_LABELS[zone.status] ?? zone.status}
+            </Text>
+          </View>
         </View>
       </View>
 

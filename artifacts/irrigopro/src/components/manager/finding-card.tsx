@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { authedPhotoSrc } from "@/lib/queryClient";
-import { Wrench, MapPin, StickyNote, Pencil, Search, type LucideIcon } from "lucide-react";
+import { Wrench, MapPin, StickyNote, Pencil, Search, Camera, type LucideIcon } from "lucide-react";
 import type {
   Part, WetCheckFinding, WetCheckPhoto, WetCheckZoneRecord, IssueTypeConfig,
 } from "@workspace/db/schema";
@@ -85,8 +85,18 @@ export function FindingCard({
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs uppercase tracking-wide text-gray-500">Pending finding</div>
-            <h2 className="text-lg font-semibold text-gray-900 truncate" data-testid={`wizard-finding-${finding.id}-title`}>
-              {displayLabel(finding, issueConfig)}
+            <h2 className="text-lg font-semibold text-gray-900 truncate flex items-center gap-2" data-testid={`wizard-finding-${finding.id}-title`}>
+              <span className="truncate">{displayLabel(finding, issueConfig)}</span>
+              {photos.length > 0 && (
+                <span
+                  className="inline-flex items-center gap-0.5 text-xs font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-0.5 shrink-0"
+                  data-testid={`wizard-finding-${finding.id}-photo-count`}
+                  aria-label={`${photos.length} photo${photos.length === 1 ? "" : "s"} attached`}
+                >
+                  <Camera className="w-3 h-3" aria-hidden />
+                  {photos.length}
+                </span>
+              )}
             </h2>
             {finding.techDisposition && (
               <Badge
