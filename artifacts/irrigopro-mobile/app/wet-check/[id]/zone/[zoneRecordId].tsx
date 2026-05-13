@@ -1022,6 +1022,7 @@ export default function ZoneDetailScreen() {
                         {p.status === "uploading" ? (
                           <View style={styles.photoOverlayCenter} pointerEvents="none">
                             <ActivityIndicator color="#ffffff" />
+                            <Text style={styles.photoOverlayCaption}>Uploading…</Text>
                           </View>
                         ) : p.status === "queued" ? (
                           <View
@@ -1030,6 +1031,7 @@ export default function ZoneDetailScreen() {
                             accessibilityLabel="Queued — will upload when back online"
                           >
                             <Feather name="cloud-off" size={18} color="#ffffff" />
+                            <Text style={styles.photoOverlayCaption}>Queued</Text>
                           </View>
                         ) : (
                           <View style={styles.photoErrorOverlay}>
@@ -2051,6 +2053,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.35)",
+    gap: 4,
+  },
+  photoOverlayCaption: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowRadius: 2,
   },
   photoErrorOverlay: {
     width: "100%",

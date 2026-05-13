@@ -528,22 +528,17 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
               {wcPhotos.length} photo{wcPhotos.length === 1 ? "" : "s"}
             </span>
           </div>
-          {wetCheckLevelPhotos.length > 0 && allFindings.length === 0 && (
-            <div className="flex flex-wrap gap-2 pt-2" data-testid="wc-photos">
-              {wetCheckLevelPhotos.map(p => (
-                <PhotoThumb key={p.id} photo={p} canDelete={!isReadOnly} />
-              ))}
-            </div>
-          )}
-          {wetCheckLevelPhotos.length > 0 && allFindings.length > 0 && (
+          {wetCheckLevelPhotos.length > 0 && (
             <div className="pt-2" data-testid="wc-photos">
               {(() => {
-                // Task #246 — Wet-check-level photos with no zone or
-                // finding link are surfaced as "loose" so the tech can
-                // attach them to any existing finding (across any zone)
-                // or delete them. Labels include the controller/zone so
-                // the picker is unambiguous when multiple zones have
-                // findings of the same issue type.
+                // Task #246 / #597 — Wet-check-level photos with no zone or
+                // finding link are surfaced as a single "loose" amber
+                // banner regardless of whether findings exist yet. Without
+                // findings the picker collapses to "Add a work item first"
+                // (LoosePhotosSection handles that branch). With findings
+                // the labels include the controller/zone so the picker is
+                // unambiguous when multiple zones have findings of the
+                // same issue type.
                 const options = wcZoneRecords.flatMap(zr =>
                   asArray(zr.findings).map(f => ({
                     id: f.id,

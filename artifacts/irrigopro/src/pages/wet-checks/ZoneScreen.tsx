@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, ChevronLeft, CheckCircle2, Wrench, MinusCircle, Trash2, Pencil, Camera } from "lucide-react";
 import { countFindingPhotos } from "@/lib/wet-check-photos";
@@ -68,6 +68,46 @@ export function ZoneScreen({
 }) {
   const { toast } = useToast();
   const [findingSheet, setFindingSheet] = useState<FindingSheetState>({ open: false });
+  // Task #597 — keep optimistic photos rendered until the server row with
+  // the same `clientId` shows up in `photos`. Without this, the optimistic
+  // thumbnail flashes out for ~one render cycle before the cache refetch
+  // returns the real row, which on slow LTE looks like the photo failed.
+  const [optimisticPhotos, setOptimisticPhotos] = useState<WetCheckPhoto[]>([]);
+  useEffect(() => {
+    if (optimisticPhotos.length === 0) return;
+    const serverClientIds = new Set(
+      asArray(photos)
+        .map((p) => (p as { clientId?: string | null }).clientId ?? null)
+        .filter((c): c is string => !!c),
+    );
+    const remaining = optimisticPhotos.filter(
+      (o) => !serverClientIds.has((o as { clientId?: string | null }).clientId ?? ""),
+    );
+    if (remaining.length !== optimisticPhotos.length) {
+      setOptimisticPhotos(remaining);
+    }
+  }, [photos, optimisticPhotos]);
+  const mergedPhotos = useMemo(() => {
+    if (optimisticPhotos.length === 0) return photos;
+    const serverClientIds = new Set(
+      asArray(photos)
+        .map((p) => (p as { clientId?: string | null }).clientId ?? null)
+        .filter((c): c is string => !!c),
+    );
+    const fresh = optimisticPhotos.filter(
+      (o) => !serverClientIds.has((o as { clientId?: string | null }).clientId ?? ""),
+    );
+    return fresh.length === 0 ? photos : [...photos, ...fresh];
+  }, [photos, optimisticPhotos]);
+  const onOptimisticPhoto = useCallback((p: WetCheckPhoto) => {
+    setOptimisticPhotos((prev) => {
+      const cid = (p as { clientId?: string | null }).clientId ?? null;
+      if (cid && prev.some((x) => (x as { clientId?: string | null }).clientId === cid)) {
+        return prev;
+      }
+      return [...prev, p];
+    });
+  }, []);
   // Task #455 — revert from "Needs Work" back to "Ran OK" / "Skip" requires
   // an explicit confirm + cascade of finding + finding-photo deletes when
   // the zone has work attached. Tracks the pending target status until the
@@ -584,14 +624,14 @@ export function ZoneScreen({
                   >
                     {statusLabel}
                   </Badge>
-                  {photos.length > 0 && (
+                  {mergedPhotos.length > 0 && (
                     <span
                       className="inline-flex items-center gap-1 text-xs font-medium text-gray-800 bg-white/80 border border-gray-300 rounded-full px-2 py-0.5"
                       data-testid="zone-photo-total"
-                      aria-label={`${photos.length} photo${photos.length === 1 ? "" : "s"} on this zone`}
+                      aria-label={`${mergedPhotos.length} photo${mergedPhotos.length === 1 ? "" : "s"} on this zone`}
                     >
                       <Camera className="w-3 h-3" aria-hidden />
-                      {photos.length}
+                      {mergedPhotos.length}
                     </span>
                   )}
                   {!readOnly && zoneRecord && (
@@ -600,6 +640,7 @@ export function ZoneScreen({
                       wetCheckClientId={wetCheckClientId}
                       zoneRecordId={zoneRecord.id}
                       zoneRecordClientId={zoneRecord.clientId ?? null}
+                      onUploaded={onOptimisticPhoto}
                     />
                   )}
                 </div>
@@ -683,7 +724,7 @@ export function ZoneScreen({
             // as a labeled "loose photos" block with attach + delete
             // actions instead of mixing them in with intentional
             // zone-level evidence.
-            const zoneOnlyPhotos = photos.filter(p => p.findingId == null);
+            const zoneOnlyPhotos = mergedPhotos.filter(p => p.findingId == null);
             if (zoneOnlyPhotos.length === 0) return null;
             if (findings.length > 0) {
               const options = findings.map(f => ({
@@ -754,7 +795,7 @@ export function ZoneScreen({
                     <div className="font-medium flex items-center gap-2">
                       <span>{f.issueType.replace(/_/g, " ")}</span>
                       {(() => {
-                        const fc = countFindingPhotos({ photos }, f);
+                        const fc = countFindingPhotos({ photos: mergedPhotos }, f);
                         return fc > 0 ? (
                           <span
                             className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-gray-700 bg-gray-100 border border-gray-300 rounded-full px-1.5 py-0.5"
@@ -861,6 +902,7 @@ export function ZoneScreen({
                         zoneRecordClientId={zoneRecord.clientId ?? null}
                         findingId={f.id}
                         findingClientId={f.clientId ?? null}
+                        onUploaded={onOptimisticPhoto}
                       />
                       <Button
                         variant="ghost"
@@ -875,7 +917,7 @@ export function ZoneScreen({
                   )}
                 </div>
                 {(() => {
-                  const fp = photos.filter(p => p.findingId === f.id);
+                  const fp = mergedPhotos.filter(p => p.findingId === f.id);
                   if (fp.length === 0) return null;
                   return (
                     <div className="flex flex-wrap gap-2 pt-2" data-testid={`finding-photos-${f.id}`}>
