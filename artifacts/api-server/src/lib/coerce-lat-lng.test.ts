@@ -61,17 +61,16 @@ describe("coerceLatLngStrings + insertWorkOrderSchema", () => {
     assert.equal(parsed.workLocationLng, null);
   });
 
-  it("scrubs non-finite numbers to null instead of persisting NaN/Infinity", () => {
+  it("leaves non-finite numbers in place so the schema rejects them with 400", () => {
     const body: Record<string, unknown> = {
       ...baseBody,
       workLocationLat: Number.NaN,
       workLocationLng: Number.POSITIVE_INFINITY,
     };
     coerceLatLngStrings(body);
-    assert.equal(body.workLocationLat, null);
-    assert.equal(body.workLocationLng, null);
-    const parsed = insertWorkOrderSchema.parse(body);
-    assert.equal(parsed.workLocationLat, null);
+    assert.equal(body.workLocationLat, Number.NaN);
+    assert.equal(body.workLocationLng, Number.POSITIVE_INFINITY);
+    assert.throws(() => insertWorkOrderSchema.parse(body));
   });
 
   it("works on a partial PATCH body that only carries coordinates", () => {

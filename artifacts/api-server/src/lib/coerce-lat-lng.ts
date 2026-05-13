@@ -9,8 +9,9 @@
 // so a future caller can't reintroduce the same regression.
 //
 // `null` / `undefined` pass through untouched. Strings are left as-is.
-// Non-finite numbers are stripped to `null` so we don't persist
-// `"NaN"` / `"Infinity"` into a decimal column.
+// Non-finite numbers (NaN / ±Infinity) are intentionally left in place so
+// that downstream `insertWorkOrderSchema` validation rejects them with a
+// 400 instead of us silently persisting a bogus coordinate.
 
 const KEYS = ["workLocationLat", "workLocationLng"] as const;
 
@@ -21,10 +22,8 @@ export function coerceLatLngStrings<T extends Record<string, unknown>>(
   for (const k of KEYS) {
     if (!(k in body)) continue;
     const v = (body as Record<string, unknown>)[k];
-    if (typeof v === "number") {
-      (body as Record<string, unknown>)[k] = Number.isFinite(v)
-        ? String(v)
-        : null;
+    if (typeof v === "number" && Number.isFinite(v)) {
+      (body as Record<string, unknown>)[k] = String(v);
     }
   }
   return body;
