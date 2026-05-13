@@ -300,8 +300,14 @@ export function WorkOrderWizard({ open, onClose, onCreated, workOrderId }: WorkO
         projectAddress: locationStep.projectAddress.trim(),
         locationNotes: locationStep.locationNotes.trim() || "",
         accessInstructions: locationStep.accessInstructions.trim() || "",
-        workLocationLat: locationStep.workLocation?.lat ?? null,
-        workLocationLng: locationStep.workLocation?.lng ?? null,
+        workLocationLat:
+          locationStep.workLocation?.lat != null
+            ? String(locationStep.workLocation.lat)
+            : null,
+        workLocationLng:
+          locationStep.workLocation?.lng != null
+            ? String(locationStep.workLocation.lng)
+            : null,
         workLocationAddress: locationStep.workLocation?.address ?? null,
         controllerLetter: locationStep.controllerLetter,
         zoneNumber: locationStep.zoneNumber,

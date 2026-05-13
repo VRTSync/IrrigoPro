@@ -388,6 +388,7 @@ import {
   getIntegrationMeta,
 } from "../lib/integration-catalog";
 import { logger } from "../lib/logger";
+import { coerceLatLngStrings } from "../lib/coerce-lat-lng";
 
 // Production-ready middleware to check if user has company admin permissions for site map operations
 const requireCompanyAdminAccess = async (req: any, res: any, next: any) => {
@@ -11903,6 +11904,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         workOrderBody.status = 'pending';
       }
 
+      // Task #596 — defensively coerce numeric workLocationLat/Lng to strings
+      // before drizzle-zod validation so older / mobile clients that send raw
+      // JS numbers don't 400 against the decimal-typed columns.
+      coerceLatLngStrings(workOrderBody);
       const workOrderData = insertWorkOrderSchema.parse(workOrderBody);
 
       // Branch enforcement: if the customer has branches configured, branchName is required
@@ -12114,6 +12119,8 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           `from=${existingForLockCheck.laborMode ?? 'per_part'} to=${mutableWorkOrderBody.laborMode}`
         );
       }
+      // Task #596 — same numeric->string coercion on the PATCH path.
+      coerceLatLngStrings(mutableWorkOrderBody);
       const workOrderData = insertWorkOrderSchema.partial().parse(mutableWorkOrderBody);
       let workOrder;
       if (Object.keys(workOrderData).length > 0) {
