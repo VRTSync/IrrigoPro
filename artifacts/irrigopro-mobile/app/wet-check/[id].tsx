@@ -592,6 +592,34 @@ export default function WetCheckDetailScreen() {
               </View>
             ) : null}
 
+            {(() => {
+              // Task #597 — loose-photos amber banner. Photos with no
+              // zoneRecordId AND no findingId are unattached and easy
+              // to miss; surface them on the overview so a tech can
+              // route them to the right zone before submitting.
+              const loose = (wcd.photos ?? []).filter(
+                (p) => p.zoneRecordId == null && p.findingId == null,
+              );
+              if (loose.length === 0) return null;
+              return (
+                <View
+                  style={[styles.loosePhotosBanner, { borderRadius: colors.radius }]}
+                  testID="loose-photos-banner"
+                  accessibilityLabel={`${loose.length} loose photo${loose.length === 1 ? "" : "s"} not attached to a zone`}
+                >
+                  <Feather name="alert-triangle" size={16} color="#92400e" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.loosePhotosTitle}>
+                      {loose.length} loose photo{loose.length === 1 ? "" : "s"}
+                    </Text>
+                    <Text style={styles.loosePhotosBody}>
+                      Open a zone to attach {loose.length === 1 ? "it" : "them"} so the office can find {loose.length === 1 ? "it" : "them"}.
+                    </Text>
+                  </View>
+                </View>
+              );
+            })()}
+
             {grouped.length === 0 ? (
               <View
                 style={[
@@ -1047,4 +1075,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#b45309",
   },
   conflictRefreshText: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
+  loosePhotosBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: "#fef3c7",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#f59e0b",
+  },
+  loosePhotosTitle: { fontSize: 13, fontWeight: "700", color: "#92400e" },
+  loosePhotosBody: { fontSize: 12, marginTop: 2, color: "#92400e" },
 });
