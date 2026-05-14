@@ -368,6 +368,21 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
               </Card>
             )}
 
+            {/* Scope of Work (Task #603) — display the saved scope so
+                managers/admins can read it without exporting the PDF. */}
+            {estimate.workDescription && estimate.workDescription.trim() && (
+              <Card data-testid="estimate-detail-scope-of-work">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Scope of Work</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-900 whitespace-pre-wrap">
+                    {estimate.workDescription}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Project Details */}
             <Card>
               <CardHeader className="pb-3">

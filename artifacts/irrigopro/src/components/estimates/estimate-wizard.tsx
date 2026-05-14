@@ -238,7 +238,11 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [step, setStep] = useState<Step>(isEdit ? 2 : 1);
+  // Task #603 — both new and edit flows land on Step 1 (Customer & Project /
+  // Scope of Work). Previously edit jumped to Step 2, which hid the scope-
+  // of-work field on existing estimates because there was no obvious way to
+  // navigate back to Step 1.
+  const [step, setStep] = useState<Step>(1);
   const [customerStep, setCustomerStep] = useState<CustomerStepValue>({
     customer: null,
     customerEmail: "",
@@ -271,7 +275,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   // Reset state whenever the wizard opens.
   useEffect(() => {
     if (open) {
-      setStep(isEdit ? 2 : 1);
+      setStep(1);
       hydratedRef.current = false;
       restorePromptedRef.current = false;
       draftReadyRef.current = false;
