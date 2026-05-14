@@ -13440,7 +13440,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     // (DB rows store the canonical `photos/<uuid>` key, but a caller may
     // request a variant suffix or a leading slash).
     const stripped = photoId.replace(/^\/+/, "").replace(/__(thumb|medium)\.jpg$/i, "");
-    const candidates = Array.from(new Set([photoId, stripped]));
+    // Task #600 — collapse a legacy double `photos/photos/<uuid>` prefix to
+    // the canonical `photos/<uuid>` so the lookup actually matches the stored
+    // row instead of bubbling a DB error up as a 500. Production logs show
+    // GET /api/photos/photos%2F<uuid> reaches here with `photoId` already
+    // double-prefixed; without this normalization the candidate list misses
+    // every wet_check_photos / work_orders / billing_sheets / estimates row
+    // and the route crashes on the first failed query.
+    const deDoubled = stripped.replace(/^photos\/photos\//, "photos/");
+    const candidates = Array.from(new Set([photoId, stripped, deDoubled]));
 
     // 1) wet_check_photos rows owned by this company (joined via wet_checks).
     const wcRows = await db
@@ -15315,6 +15323,13 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         fallbackMessage: "Couldn't submit wet check — please retry",
         recognized: [
           { test: (_e, raw) => /zero zones checked/.test(raw), status: 400, message: (_e, raw) => raw },
+          // Task #600 — auto-bill preconditions thrown from
+          // storage.submitWetCheck (missing part, non-positive qty,
+          // negative labor hours) are user-fixable, not server faults.
+          // Return 400 with the storage-authored instructional message
+          // verbatim so the tech sees "add a part / tick No part needed
+          // / leave Mark Complete unchecked" instead of a generic toast.
+          { test: (_e, raw) => /^Cannot auto-bill finding/.test(raw), status: 400, message: (_e, raw) => raw },
         ],
       });
       res.status(status).json({ message });

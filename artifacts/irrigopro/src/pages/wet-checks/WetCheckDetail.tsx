@@ -170,7 +170,22 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
       setConfirmOpen(false);
       navigate("/wet-checks");
     },
-    onError: (e: any) => toast({ title: "Failed to submit", description: e?.message, variant: "destructive" }),
+    onError: (e: any) => {
+      // Task #600 — `apiRequest` throws `Error("<status>: <body>")` where
+      // body is the raw response text. For our 4xx JSON responses that's
+      // `{"message":"…"}`, so unwrap it to the instructional message
+      // (e.g. "Cannot auto-bill finding 24: marked complete but has no
+      // part assigned…") instead of dumping the JSON in the toast.
+      const raw = typeof e?.message === "string" ? e.message : "";
+      const m = raw.match(/^\d{3}:\s*(.*)$/s);
+      const tail = m ? m[1] : raw;
+      let description = tail;
+      try {
+        const parsed = JSON.parse(tail);
+        if (parsed && typeof parsed.message === "string") description = parsed.message;
+      } catch { /* not JSON, use tail verbatim */ }
+      toast({ title: "Failed to submit", description, variant: "destructive" });
+    },
   });
 
   // Task #561 — Hoist the "jump to next needs-decision" hooks (Task
