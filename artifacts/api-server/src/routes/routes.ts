@@ -362,6 +362,7 @@ import {
 import { ALL_RULES as ALL_INCIDENT_RULES } from "../lib/rules";
 import { z } from "zod/v4";
 import { registerEstimateRoutes } from "./estimate-routes";
+import { registerLegacyEstimateGoneRoutes } from "./legacy-estimate-gone";
 import { registerSiteMapRoutes } from "./site-map-routes";
 import { registerPartRoutes } from "./parts-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
@@ -8982,84 +8983,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // Estimate approval workflow
-  app.post("/api/estimates/:id/approve", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      // Validate estimate ID is a valid number
-      if (isNaN(id) || id <= 0) {
-        res.status(400).json({ message: "Invalid estimate ID" });
-        return;
-      }
-      const existing = await storage.getEstimate(id);
-      if (!existing) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
-      }
-      if (!estimateOwnershipMatches(req, existing.companyId)) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
-      }
-      // Task #611 — conditional update; loses to a concurrent
-      // approve/reject without clobbering the winner.
-      if (existing.status !== "pending") {
-        res.status(409).json({ message: "Estimate is no longer pending" });
-        return;
-      }
-      const [updated] = await db.update(estimates)
-        .set({ status: "approved", approvedAt: new Date() })
-        .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
-        .returning();
-      if (!updated) {
-        res.status(409).json({ message: "Estimate is no longer pending" });
-        return;
-      }
-      res.json({ message: "Estimate approved successfully", estimate: updated });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to approve estimate" });
-    }
-  });
-
-  app.post("/api/estimates/:id/reject", requireAuthentication, requireEstimateApprovalAccess, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      
-      // Validate estimate ID is a valid number
-      if (isNaN(id) || id <= 0) {
-        res.status(400).json({ message: "Invalid estimate ID" });
-        return;
-      }
-      const existing = await storage.getEstimate(id);
-      if (!existing) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
-      }
-      if (!estimateOwnershipMatches(req, existing.companyId)) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
-      }
-      // Task #611 — conditional update; loses to a concurrent
-      // approve/reject without clobbering the winner.
-      if (existing.status !== "pending") {
-        res.status(409).json({ message: "Estimate is no longer pending" });
-        return;
-      }
-      const [updated] = await db.update(estimates)
-        .set({ status: "rejected", rejectedAt: new Date() })
-        .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
-        .returning();
-      if (!updated) {
-        res.status(409).json({ message: "Estimate is no longer pending" });
-        return;
-      }
-      res.json({ message: "Estimate rejected successfully", estimate: updated });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to reject estimate" });
-    }
-  });
+  // Task #639 — legacy POST /approve, POST /reject, and the
+  // multi-purpose POST /transition handlers all return 410 Gone with
+  // a redirect message pointing at the canonical replacement. The
+  // legacy POST approve/reject skipped the `status === 'pending'`
+  // precondition (and approve also skipped work-order creation),
+  // which let a rejected estimate be resurrected by a stale client
+  // (audit F-04). The transition handler is replaced by three
+  // dedicated single-purpose routes (`/submit-for-review`,
+  // `/send-approval-email`, `/resend`). Mounted from a small helper
+  // module so the gone-contract is testable without pulling in this
+  // entire registerRoutes(). The /transition entry is registered
+  // alongside the new /resend route below to keep both close to the
+  // canonical sendable-state endpoints.
 
   // Internal approval — flips the internal review track from
   // `pending_approval` to `approved_internal`. Does NOT touch the
@@ -9399,25 +9335,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
-  // Slice 10a — explicit lifecycle transition endpoint. One canonical
-  // entry point the upcoming Estimates Dashboard will use to move an
-  // estimate forward. Validates the transition server-side; returns the
-  // freshly-loaded estimate (with computed lifecycleStatus) on success
-  // or 400 with a human-readable message on an invalid transition.
-  app.post("/api/estimates/:id/transition", requireAuthentication, async (req: any, res) => {
+  // Task #639 — canonical resend endpoint. Replaces the legacy
+  // `POST /api/estimates/:id/transition` with `action=resend`. Only
+  // estimates in the computed `expired` lifecycle bucket may be
+  // resent; the underlying flow resets `estimateDate`, mints a new
+  // approval token, and sends the customer email through the shared
+  // `_sendEstimateApprovalEmailFlow` helper.
+  app.post("/api/estimates/:id/resend", requireAuthentication, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id <= 0) {
         res.status(400).json({ message: "Invalid estimate ID" });
         return;
       }
-      const action = (req.body?.action ?? "") as string;
-      const allowedActions = ["submit_for_review", "send_to_customer", "resend"];
-      if (!allowedActions.includes(action)) {
-        res.status(400).json({ message: `Unknown transition action: ${action}` });
-        return;
-      }
-
       const estimate = await storage.getEstimate(id);
       if (!estimate) {
         res.status(404).json({ message: "Estimate not found" });
@@ -9427,75 +9357,34 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
-
       const role = req.authenticatedUserRole;
-      const canSubmitForReview =
+      const canResend =
         role === 'irrigation_manager' || role === 'company_admin' || role === 'super_admin';
-      const canResend = canSubmitForReview;
-      const canSendToCustomer =
-        role === 'billing_manager' || role === 'company_admin' || role === 'super_admin';
-
-      if (action === "submit_for_review") {
-        if (!canSubmitForReview) {
-          res.status(403).json({ message: "Access denied. Submitting for review requires irrigation manager or admin role." });
-          return;
-        }
-        if (estimate.internalStatus !== "draft") {
-          res.status(400).json({ message: "Only draft estimates can be submitted for review" });
-          return;
-        }
-        const updates: Partial<InsertEstimate> & { updatedAt?: Date } = {
-          internalStatus: "pending_approval",
-          updatedAt: new Date(),
-        };
-        await storage.updateEstimate(id, updates);
-        const fresh = await storage.getEstimate(id);
-        res.json({ message: "Estimate submitted for review", estimate: fresh });
+      if (!canResend) {
+        res.status(403).json({ message: "Access denied. Resending requires irrigation manager or admin role." });
         return;
       }
-
-      if (action === "send_to_customer") {
-        if (!canSendToCustomer) {
-          res.status(403).json({ message: "Access denied. Sending to a customer requires billing manager or admin role." });
-          return;
-        }
-        if (estimate.internalStatus !== "pending_approval") {
-          res.status(400).json({ message: "Only estimates pending review can be sent to the customer" });
-          return;
-        }
-        await _sendEstimateApprovalEmailFlow(id, { req });
-        const fresh = await storage.getEstimate(id);
-        res.json({ message: "Estimate sent to customer", estimate: fresh });
+      if (estimate.lifecycleStatus !== "expired") {
+        res.status(400).json({ message: "Only expired estimates can be resent" });
         return;
       }
-
-      if (action === "resend") {
-        if (!canResend) {
-          res.status(403).json({ message: "Access denied. Resending requires irrigation manager or admin role." });
-          return;
-        }
-        if (estimate.lifecycleStatus !== "expired") {
-          res.status(400).json({ message: "Only expired estimates can be resent" });
-          return;
-        }
-        await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true, req });
-        const fresh = await storage.getEstimate(id);
-        res.json({ message: "Estimate resent to customer", estimate: fresh });
-        return;
-      }
-
-      // Unreachable due to allowedActions check.
-      res.status(400).json({ message: "Unknown transition action" });
-      return;
+      await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true, req });
+      const fresh = await storage.getEstimate(id);
+      res.json({ message: "Estimate resent to customer", estimate: fresh });
     } catch (error) {
       if (error instanceof EstimateSendConflictError) {
         res.status(409).json({ message: error.message });
         return;
       }
-      console.error('Estimate transition error:', error);
-      res.status(500).json({ message: "Failed to transition estimate" });
+      console.error('Estimate resend error:', error);
+      res.status(500).json({ message: "Failed to resend estimate" });
     }
   });
+
+  // Task #639 — legacy POST /approve, POST /reject, and the
+  // multi-purpose POST /transition all return 410 with a redirect
+  // message. See the helper module for the contract and tests.
+  registerLegacyEstimateGoneRoutes(app);
 
   // Approve estimate via token (customer clicks link)
   app.get("/api/estimates/approve-via-token/:token", async (req, res) => {

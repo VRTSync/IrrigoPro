@@ -102,7 +102,7 @@ axes can never appear to disagree.
                │                              │  order       │      │      │
                │                              └──────────────┘      │      │
                │                                                    │      │
-               └────────── POST /:id/transition?action=resend ──────┘      │
+               └────────── POST /:id/resend ─────────────────────────┘      │
                                   (resets estimateDate, mints new token)   │
                                                                            │
        reject is symmetric: PATCH /:id/reject (manager) or                 │
@@ -134,11 +134,12 @@ can actually be removed — see audit F-04 / F-15.
 | `DELETE` | `/api/estimates/:id`                                | `routes.ts:7486`                  | auth                                | ✓          | ⚠ no role/company scope — audit F-03.                                          |
 | `PATCH`  | `/api/estimates/:id/internal-approve`               | `routes.ts:8971`                  | auth + approval-access              | ✓          | pending_approval → approved_internal.                                          |
 | `POST`   | `/api/estimates/:id/send-approval-email`            | `routes.ts:9259`                  | auth + approval-access              | ✓          | Sends customer link, transitions to sent_to_customer, mints `approvalToken`.   |
-| `POST`   | `/api/estimates/:id/transition`                     | `routes.ts:9311`                  | auth + action-specific role         | legacy     | Multi-action handler (`action=submit_for_review` · `send_to_customer` · `resend`). Role gate is per-action: `submit_for_review`/`resend` require irrigation_manager+, `send_to_customer` requires billing_manager+. Prefer the dedicated single-purpose routes above for new code. |
+| `POST`   | `/api/estimates/:id/resend`                         | `routes.ts` (post-#639)           | auth + irrigation_manager+          | ✓          | Resend an estimate whose lifecycle bucket is `expired`. Resets `estimateDate`, mints a new approval token, sends a fresh customer email. Replaces the legacy `/transition` `action=resend`. |
 | `PATCH`  | `/api/estimates/:id/approve`                        | `routes.ts:9008`                  | auth + approval-access              | ✓          | Manager approve. Guards `status === pending`, creates work order.              |
 | `PATCH`  | `/api/estimates/:id/reject`                         | `routes.ts:9067`                  | auth + approval-access              | ✓          | Manager reject. Guards `status === pending`.                                   |
-| `POST`   | `/api/estimates/:id/approve`                        | `routes.ts:8890`                  | auth + approval-access              | legacy     | ⚠ Duplicate of PATCH /approve. Diverges (no work-order creation, no status guard) — audit F-04. |
-| `POST`   | `/api/estimates/:id/reject`                         | `routes.ts:8929`                  | auth + approval-access              | legacy     | ⚠ Duplicate of PATCH /reject — audit F-04.                                     |
+| `POST`   | `/api/estimates/:id/transition`                     | `legacy-estimate-gone.ts`         | none                                | **410 Gone** | Retired in Task #639. Returns 410 with a JSON body pointing at `/submit-for-review`, `/send-approval-email`, or `/resend`. |
+| `POST`   | `/api/estimates/:id/approve`                        | `legacy-estimate-gone.ts`         | none                                | **410 Gone** | Retired in Task #639. Returns 410 pointing at `PATCH /api/estimates/:id/approve`. The legacy POST flavor skipped the `status === 'pending'` precondition and the work-order creation side effect (audit F-04). |
+| `POST`   | `/api/estimates/:id/reject`                         | `legacy-estimate-gone.ts`         | none                                | **410 Gone** | Retired in Task #639. Returns 410 pointing at `PATCH /api/estimates/:id/reject`. |
 | `GET`    | `/api/estimates/approve-via-token/:token`           | `routes.ts:9405`                  | **token only**                      | ✓          | Customer approval click. ⚠ token never revoked, O(N) scan — audit F-06.        |
 | `GET`    | `/api/estimates/reject-via-token/:token`            | `routes.ts:9527`                  | **token only**                      | ✓          | Customer reject click. ⚠ no expiry check — audit F-06.                         |
 | `POST`   | `/api/estimates/:id/convert-to-work-order`          | `routes.ts:9619`                  | auth                                | ✓          | Creates a work order. ⚠ no role gate, races on duplicate — audit F-05.         |
@@ -197,21 +198,21 @@ differently. Always check which one you're calling.
   means "the customer has not yet responded". Use `lifecycleStatus`
   when you mean "where in the pipeline".
 - **`POST /api/estimates/:id/approve` vs `PATCH /api/estimates/:id/approve`** —
-  the POST flavor (`routes.ts:8890`) skips the `status === 'pending'`
-  precondition and skips work-order creation. **Always prefer the
-  PATCH variant.** The frontend already does
-  (`estimates-pending-approval.tsx`, `estimate-detail-modal.tsx`).
-  Same story for `/reject`.
-- **`POST /:id/submit-for-review` vs `POST /:id/transition` with `action=submit_for_review`** —
-  the first is the atomic content-update + transition the wizard uses
-  on "Save & submit". The second is the legacy two-call path the
-  wizard used before Task #606; it's still there for compatibility
-  with older clients. New code should not call `/transition`.
-- **`POST /:id/send-approval-email` vs `POST /:id/transition?action=send_to_customer`** —
-  both transition to `sent_to_customer` and mint a token. Only the
-  `transition?action=resend` path resets `estimateDate`; the other
-  two paths do not, which is why a "send again" 28 days after the
-  first send gives the customer a 2-day window — see audit F-16.
+  retired in Task #639. The POST flavor now returns **410 Gone** with
+  a body pointing at the PATCH route. The frontend already calls
+  PATCH everywhere (`estimates-pending-approval.tsx`,
+  `estimate-detail-modal.tsx`). Same story for `/reject`.
+- **`POST /:id/transition`** — retired in Task #639. Returns
+  **410 Gone**. Its three actions are now dedicated single-purpose
+  routes: `action=submit_for_review` → `POST /:id/submit-for-review`,
+  `action=send_to_customer` → `POST /:id/send-approval-email`,
+  `action=resend` → `POST /:id/resend`. New code (and the wizard's
+  "Save & submit" + the resend button) goes through those routes.
+- **`POST /:id/send-approval-email` vs `POST /:id/resend`** —
+  both transition to `sent_to_customer` and mint a token. Only
+  `/resend` resets `estimateDate`; `/send-approval-email` does not,
+  which is why a "send again" 28 days after the first send gives the
+  customer a 2-day window — see audit F-16.
 - **`estimateDate` vs `createdAt` vs `tokenExpiresAt`** — `createdAt`
   is the row birthday and never moves. `estimateDate` is "when this
   was last sent to the customer" and is what the 30-day expiry is

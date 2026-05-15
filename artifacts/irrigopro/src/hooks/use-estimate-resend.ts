@@ -14,9 +14,10 @@ export function useEstimateResend() {
 
   const mutation = useMutation({
     mutationFn: async ({ id }: ResendArgs) => {
-      return apiRequest(`/api/estimates/${id}/transition`, "POST", {
-        action: "resend",
-      });
+      // Task #639 — was `POST /:id/transition` with `action: "resend"`;
+      // the multi-purpose transition endpoint is retired in favor of
+      // the dedicated `POST /:id/resend` route.
+      return apiRequest(`/api/estimates/${id}/resend`, "POST", {});
     },
     onSuccess: (_data, variables) => {
       toast({
