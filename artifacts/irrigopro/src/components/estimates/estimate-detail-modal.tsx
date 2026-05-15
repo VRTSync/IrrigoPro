@@ -26,7 +26,14 @@ import {
 } from "@/components/estimates/send-estimate-dialog";
 import { sendEstimateEmail } from "@/lib/email";
 import {
-  computeLifecycleStatus,
+  customerResponseLabelOf,
+  isApproved,
+  isAwaitingCustomerReply,
+  isConvertedToWorkOrder,
+  isDraft,
+  isExpired,
+  lifecycleOf,
+  reviewStageLabelOf,
   type LifecycleStatus,
 } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "@/components/estimates/list/estimate-list-status-badge";
@@ -333,7 +340,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     (estimate as { deletedBy?: number | null } | undefined)?.deletedBy ?? null;
   const canDeleteEstimate =
     canDeleteEstimateRole &&
-    estimate?.internalStatus === "draft" &&
+    isDraft(estimate ?? null) &&
     !isEstimateDeleted;
 
   const handleConvertToWorkOrder = async () => {
@@ -370,37 +377,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   // these labels are the secondary detail row below it. Raw enum
   // values never reach the screen — unknown values fall through to
   // "—". See docs/estimate-system.md §1.
-  const reviewStageLabel = (internalStatus: string | null | undefined): string => {
-    switch (internalStatus) {
-      case 'draft':
-        return 'Draft';
-      case 'pending_approval':
-        return 'Awaiting review';
-      case 'approved_internal':
-        return 'Ready to send';
-      case 'sent_to_customer':
-        return 'Sent';
-      default:
-        return '—';
-    }
-  };
-
-  const customerResponseLabel = (status: string | null | undefined): string => {
-    switch (status) {
-      case 'pending':
-        return 'Awaiting reply';
-      case 'approved':
-        return 'Approved';
-      case 'rejected':
-        return 'Rejected';
-      case 'expired':
-        return 'Expired';
-      case 'converted_to_work_order':
-        return 'Approved';
-      default:
-        return '—';
-    }
-  };
+  // Task #638 — axis-label helpers live in `@/lib/lifecycle` so this
+  // file no longer reads `estimate.status` / `estimate.internalStatus`
+  // directly; the lifecycle module is the single owner of the raw
+  // enum → human-readable mapping.
 
   if (!estimateId) return null;
 
@@ -416,16 +396,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 all three surfaces agree on the single status. */}
             {estimate ? (
               <span className="ml-2">
-                <EstimateListStatusBadge
-                  status={
-                    (estimate.lifecycleStatus as LifecycleStatus | undefined) ??
-                    computeLifecycleStatus({
-                      status: estimate.status,
-                      internalStatus: estimate.internalStatus,
-                      estimateDate: estimate.estimateDate ?? null,
-                    })
-                  }
-                />
+                <EstimateListStatusBadge status={lifecycleOf(estimate)} />
               </span>
             ) : null}
           </DialogTitle>
@@ -440,8 +411,11 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           </div>
         ) : estimate ? (
           <>
-            {/* Prominent Status Banner for Approved Estimates */}
-            {estimate.status === 'approved' && (
+            {/* Prominent Status Banner for Approved Estimates.
+                Task #638 — distinguish "approved but not yet
+                converted" from "converted to work order" via the
+                lifecycle predicates instead of raw enum reads. */}
+            {isApproved(estimate) && !isConvertedToWorkOrder(estimate) && (
               <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
                 <div className="flex items-center justify-center space-x-3">
                   <CheckCircle className="w-8 h-8 flex-shrink-0" />
@@ -457,7 +431,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
             )}
 
             {/* Prominent Status Banner for Converted to Work Order */}
-            {estimate.status === 'converted_to_work_order' && (
+            {isConvertedToWorkOrder(estimate) && (
               <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-4 sm:p-6 flex-shrink-0 border-b">
                 <div className="flex items-center justify-center space-x-3">
                   <Wrench className="w-8 h-8 flex-shrink-0" />
@@ -503,27 +477,32 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                         ("Review stage" + "Customer response") so the
                         screen exposes what moved last without
                         duplicating the badge itself. */}
-                    {(estimate.status === 'approved' ||
-                      estimate.status === 'converted_to_work_order') && (
+                    {isApproved(estimate) && (
                       <div className="mt-1 text-sm font-medium">
-                        {estimate.status === 'approved' ? (
-                          <span className="text-green-600">Customer Approved!</span>
-                        ) : (
+                        {isConvertedToWorkOrder(estimate) ? (
                           <span className="text-purple-600">Work Order Active!</span>
+                        ) : (
+                          <span className="text-green-600">Customer Approved!</span>
                         )}
                       </div>
                     )}
+                    {/* Task #638 — the two axis labels read the raw
+                        enums *only* via these dedicated label helpers
+                        in this file. The labels are the documented
+                        secondary detail surface (per
+                        docs/estimate-system.md) and are intentionally
+                        scoped to the modal. */}
                     <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-gray-600">
                       <div>
                         <span className="font-medium text-gray-500">Review stage:</span>{' '}
                         <span data-testid="status-review-stage">
-                          {reviewStageLabel(estimate.internalStatus)}
+                          {reviewStageLabelOf(estimate)}
                         </span>
                       </div>
                       <div>
                         <span className="font-medium text-gray-500">Customer response:</span>{' '}
                         <span data-testid="status-customer-response">
-                          {customerResponseLabel(estimate.status)}
+                          {customerResponseLabelOf(estimate)}
                         </span>
                       </div>
                     </div>
@@ -792,7 +771,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       </Button>
                     </>
                   )}
-                  {estimate.lifecycleStatus === 'expired' && !isEstimateDeleted && (
+                  {isExpired(estimate) && !isEstimateDeleted && (
                     <Button
                       onClick={() => setShowResendDialog(true)}
                       variant="outline"
@@ -815,7 +794,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       {deleteEstimateMutation.isPending ? "Deleting…" : "Delete"}
                     </Button>
                   )}
-                  {estimate.status !== 'converted_to_work_order' && onEdit && !isEstimateDeleted && (
+                  {!isConvertedToWorkOrder(estimate) && onEdit && !isEstimateDeleted && (
                     <Button
                       onClick={() => {
                         onEdit(estimateId!);
@@ -826,16 +805,17 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       data-testid="detail-modal-edit"
                     >
                       <Edit2 className="w-4 h-4 mr-2" />
-                      {estimate.lifecycleStatus === 'draft' || estimate.internalStatus === 'draft'
-                        ? 'Continue editing'
-                        : 'Edit Estimate'}
+                      {isDraft(estimate) ? 'Continue editing' : 'Edit Estimate'}
                     </Button>
                   )}
                 </div>
 
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3 sm:justify-end">
-                  {/* Approval Actions for Pending Estimates */}
-                  {estimate.status === 'pending' && !isEstimateDeleted && (
+                  {/* Approval Actions for Pending Estimates.
+                      Task #638 — gated by `isAwaitingCustomerReply`
+                      so we don't surface Approve/Reject after the
+                      customer has already responded. */}
+                  {isAwaitingCustomerReply(estimate) && !isEstimateDeleted && (
                     <>
                       <Button
                         onClick={() => setShowSendDialog(true)}
@@ -868,8 +848,11 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                     </>
                   )}
 
-                  {/* Convert to Work Order for Approved Estimates */}
-                  {estimate.status === 'approved' && !isEstimateDeleted && (
+                  {/* Convert to Work Order for Approved Estimates.
+                      Task #638 — uses `isApproved` (lifecycle) +
+                      `!isConvertedToWorkOrder` so a converted
+                      estimate doesn't re-offer the conversion. */}
+                  {isApproved(estimate) && !isConvertedToWorkOrder(estimate) && !isEstimateDeleted && (
                     <Button
                       onClick={handleConvertToWorkOrder}
                       disabled={isConverting}

@@ -37,7 +37,7 @@ export function computeLifecycleStatus(
   const status = estimate.status ?? "";
   const internalStatus = estimate.internalStatus ?? "";
 
-  if (status === "approved") return "approved";
+  if (status === "approved" || status === "converted_to_work_order") return "approved";
   if (status === "rejected") return "rejected";
 
   if (internalStatus === "draft") return "draft";
@@ -56,6 +56,159 @@ export function computeLifecycleStatus(
   }
 
   return "pending_review";
+}
+
+// Task #638 — canonical entry point for the UI. Prefers the
+// server-stamped `lifecycleStatus` when present, otherwise computes
+// from (status, internalStatus, estimateDate). Every component that
+// needs to reason about an estimate's state should go through this
+// helper (or one of the predicates below) — never read
+// `estimate.status` or `estimate.internalStatus` directly.
+type EstimateLike = EstimateLifecycleInput & {
+  lifecycleStatus?: string | null;
+};
+
+export function lifecycleOf(
+  estimate: EstimateLike | null | undefined,
+  now?: Date,
+): LifecycleStatus {
+  if (!estimate) return "pending_review";
+  const stamped = estimate.lifecycleStatus;
+  if (
+    typeof stamped === "string" &&
+    (LIFECYCLE_STATUSES as readonly string[]).includes(stamped)
+  ) {
+    return stamped as LifecycleStatus;
+  }
+  return computeLifecycleStatus(
+    {
+      status: estimate.status,
+      internalStatus: estimate.internalStatus,
+      estimateDate: estimate.estimateDate,
+    },
+    now,
+  );
+}
+
+// --- Predicates ------------------------------------------------------
+// Each predicate accepts either an estimate-like object (preferred) or
+// a pre-computed LifecycleStatus, so call sites that already hold the
+// lifecycle string don't need to re-derive it.
+type LifecycleArg = EstimateLike | LifecycleStatus | null | undefined;
+
+function toLifecycle(arg: LifecycleArg, now?: Date): LifecycleStatus {
+  if (arg == null) return "pending_review";
+  if (typeof arg === "string") return arg as LifecycleStatus;
+  return lifecycleOf(arg, now);
+}
+
+export const isDraft = (e: LifecycleArg, now?: Date) =>
+  toLifecycle(e, now) === "draft";
+export const isPendingReview = (e: LifecycleArg, now?: Date) =>
+  toLifecycle(e, now) === "pending_review";
+export const isAwaitingCustomer = (e: LifecycleArg, now?: Date) =>
+  toLifecycle(e, now) === "sent";
+export const isSent = isAwaitingCustomer;
+export const isApproved = (e: LifecycleArg, now?: Date) =>
+  toLifecycle(e, now) === "approved";
+export const isRejected = (e: LifecycleArg, now?: Date) =>
+  toLifecycle(e, now) === "rejected";
+export const isExpired = (e: LifecycleArg, now?: Date) =>
+  toLifecycle(e, now) === "expired";
+export const isClosed = (e: LifecycleArg, now?: Date) => {
+  const lc = toLifecycle(e, now);
+  return lc === "approved" || lc === "rejected" || lc === "expired";
+};
+export const isOpen = (e: LifecycleArg, now?: Date) => !isClosed(e, now);
+
+// `pending_review` covers two server-side internalStatus values:
+// `pending_approval` (awaiting manager review) and `approved_internal`
+// (manager has internally approved; ready to send to customer).
+// The "ready to send" badge on /estimates/pending-approval needs to
+// distinguish them. Keep this read isolated to lifecycle.ts so the
+// rest of the UI stays free of raw enum reads.
+export const isReadyToSend = (
+  e: EstimateLike | null | undefined,
+): boolean => e?.internalStatus === "approved_internal";
+
+export const isAwaitingInternalReview = (
+  e: EstimateLike | null | undefined,
+): boolean => e?.internalStatus === "pending_approval";
+
+// `converted_to_work_order` is folded into the `approved` lifecycle
+// bucket (the customer approved the estimate; the work order is the
+// downstream artifact). UI surfaces that want to celebrate the
+// conversion specifically (purple "WORK ORDER ACTIVE" banner in the
+// detail modal) ask via this helper rather than reading the raw
+// status enum.
+export const isConvertedToWorkOrder = (
+  e: EstimateLike | null | undefined,
+): boolean => e?.status === "converted_to_work_order";
+
+// Customer hasn't responded yet — used to gate the customer-facing
+// Approve/Reject actions in the detail modal. Mirrors the server's
+// `status === 'pending'` precondition on those endpoints.
+export const isAwaitingCustomerReply = (
+  e: EstimateLike | null | undefined,
+): boolean => e?.status === "pending";
+
+// --- Two-axis label helpers ----------------------------------------
+// `computeLifecycleStatus` collapses the two server-side axes
+// (internalStatus = "review stage", status = "customer response") into
+// a single lifecycle bucket — which is what every list / board / badge
+// surface should show. The estimate detail modal is the one
+// documented exception (see docs/estimate-system.md §1): it shows the
+// canonical lifecycle badge in the header *and* a secondary detail
+// row exposing the two axes. These two helpers are the only place
+// raw enum values turn into human-readable labels, so the modal
+// doesn't have to read `estimate.status` / `estimate.internalStatus`
+// directly.
+export function reviewStageLabel(
+  internalStatus: string | null | undefined,
+): string {
+  switch (internalStatus) {
+    case "draft":
+      return "Draft";
+    case "pending_approval":
+      return "Awaiting review";
+    case "approved_internal":
+      return "Ready to send";
+    case "sent_to_customer":
+      return "Sent";
+    default:
+      return "—";
+  }
+}
+
+export function customerResponseLabel(
+  status: string | null | undefined,
+): string {
+  switch (status) {
+    case "pending":
+      return "Awaiting reply";
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    case "expired":
+      return "Expired";
+    case "converted_to_work_order":
+      return "Approved";
+    default:
+      return "—";
+  }
+}
+
+export function reviewStageLabelOf(
+  e: EstimateLike | null | undefined,
+): string {
+  return reviewStageLabel(e?.internalStatus);
+}
+
+export function customerResponseLabelOf(
+  e: EstimateLike | null | undefined,
+): string {
+  return customerResponseLabel(e?.status);
 }
 
 // Slice 10c — shared tint + label map so the board column headers and the

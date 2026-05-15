@@ -21,7 +21,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, authedPdfUrl } from "@/lib/queryClient";
 import type { Estimate } from "@workspace/db/schema";
-import type { LifecycleStatus } from "@/lib/lifecycle";
+import { isDraft, type LifecycleStatus } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -91,16 +91,17 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
       }`
     : undefined;
 
-  // Task #634 — Delete is only available for draft estimates and only to
-  // roles the server will accept. We treat `internalStatus === 'draft'`
-  // as the canonical "still a draft" signal (the field rules /transition
-  // endpoint already drives forward). Soft-deleted rows shouldn't reach
-  // this list at all, but we still guard on deletedAt for safety.
+  // Task #634 / #638 — Delete is only available for draft estimates and
+  // only to roles the server will accept. The `isDraft` lifecycle
+  // predicate is the canonical "still a draft" signal — never read
+  // `estimate.internalStatus` directly. Soft-deleted rows shouldn't
+  // reach this list at all, but we still guard on deletedAt for
+  // safety.
   const currentRole = readCurrentUserRole();
   const canDelete =
     currentRole != null &&
     DELETE_ROLES.has(currentRole) &&
-    estimate.internalStatus === "draft" &&
+    isDraft(estimate) &&
     !isDeleted;
 
   const deleteMutation = useMutation({

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { BilledIndicator, BilledBadge } from "@/components/ui/billed-indicator";
 import type { Customer, Estimate, WorkOrder, BillingSheetWithItems } from "@workspace/db/schema";
+import { lifecycleOf } from "@/lib/lifecycle";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
 import { WorkOrderDetails } from "@/components/work-orders/work-order-details";
 import { PropertyNotes } from "./property-notes";
@@ -386,7 +387,7 @@ export function CustomerProfile({ customer, onBack, userRole = "company_admin" }
                                 <p className="text-gray-600 font-medium text-sm">{estimate.projectName}</p>
                               </div>
                               <div className="flex-shrink-0">
-                                {getStatusBadge(estimate.status, 'estimate')}
+                                {getStatusBadge(lifecycleOf(estimate), 'estimate')}
                               </div>
                             </div>
                             

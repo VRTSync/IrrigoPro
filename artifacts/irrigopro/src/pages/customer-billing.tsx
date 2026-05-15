@@ -40,6 +40,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, parseApiError, useArrayQuery } from "@/lib/queryClient";
 import type { Customer, WorkOrder, BillingSheet, Estimate } from "@workspace/db/schema";
+import { LIFECYCLE_TINTS, lifecycleOf } from "@/lib/lifecycle";
 import { QuickBooksIntegration } from "@/components/quickbooks/quickbooks-integration";
 import { InvoiceList } from "@/components/billing/invoice-list";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
@@ -1279,7 +1280,7 @@ export default function CustomerBilling() {
                               <CardContent className="p-3">
                                 <div className="flex items-center justify-between mb-2">
                                   <div className="text-sm font-medium">#{estimate.id}</div>
-                                  <Badge>{getStatusBadge(estimate.status)}</Badge>
+                                  <Badge>{getStatusBadge(lifecycleOf(estimate))}</Badge>
                                 </div>
                                 <div className="text-xs text-gray-600 mb-2">{estimate.description}</div>
                                 <div className="flex justify-between text-sm">
@@ -2248,7 +2249,7 @@ export default function CustomerBilling() {
                                 <div className="flex items-center gap-2 mb-1">
                                   <DollarSign className="w-4 h-4 text-gray-400" />
                                   <span className="font-medium text-sm">EST #{estimate.id}</span>
-                                  {getStatusBadge(estimate.status)}
+                                  {getStatusBadge(lifecycleOf(estimate))}
                                 </div>
                                 <div className="text-xs text-gray-600 mb-2">
                                   {estimate.description}
@@ -2280,7 +2281,7 @@ export default function CustomerBilling() {
                                       <DialogTitle className="flex items-center gap-2">
                                         <DollarSign className="w-4 h-4" />
                                         Estimate #{estimate.id}
-                                        {getStatusBadge(estimate.status)}
+                                        {getStatusBadge(lifecycleOf(estimate))}
                                       </DialogTitle>
                                     </DialogHeader>
                                     <div className="space-y-4">
@@ -2295,7 +2296,7 @@ export default function CustomerBilling() {
                                         </div>
                                         <div>
                                           <h4 className="font-medium mb-1">Status</h4>
-                                          <p className="text-sm text-gray-600">{estimate.status.replace('_', ' ')}</p>
+                                          <p className="text-sm text-gray-600">{LIFECYCLE_TINTS[lifecycleOf(estimate)].label}</p>
                                         </div>
                                       </div>
                                       <div className="grid grid-cols-2 gap-4">

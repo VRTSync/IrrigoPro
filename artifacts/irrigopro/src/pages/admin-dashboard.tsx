@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
 import { safeGet } from "@/utils/safeStorage";
+import { isOpen, lifecycleOf } from "@/lib/lifecycle";
 
 import { HeaderStrip, type Health } from "@/components/admin-dashboard/header-strip";
 import { QuickActions } from "@/components/admin-dashboard/quick-actions";
@@ -190,9 +191,11 @@ export default function AdminDashboard() {
     const ests = estimatesQ.data ?? [];
     const invs = invoicesQ.data ?? [];
 
-    const estimatesOpen = ests.filter(
-      (e) => e.status === "pending" || e.status === "sent" || e.status === "draft"
-    ).length;
+    // Task #638 — "open" = anything not yet in a terminal lifecycle
+    // bucket (approved / rejected / expired). Reading the lifecycle
+    // here instead of raw `status` keeps the pipeline count in
+    // lockstep with the board and list views.
+    const estimatesOpen = ests.filter((e) => isOpen(e)).length;
 
     const woOpen = wos.filter((w) => w.status === "pending" || w.status === "assigned").length;
     const woInProgress = wos.filter((w) => w.status === "in_progress").length;
@@ -390,12 +393,13 @@ export default function AdminDashboard() {
       }
     }
     for (const est of estimatesQ.data ?? []) {
-      if (est.status === "approved" || est.status === "rejected") {
+      const lc = lifecycleOf(est);
+      if (lc === "approved" || lc === "rejected") {
         const d = est.updatedAt ?? est.createdAt;
         if (!d) continue;
         items.push({
           key: `est-${est.id}`,
-          label: `Estimate #${est.id} ${est.status}`,
+          label: `Estimate #${est.id} ${lc}`,
           detail: est.customerName ?? undefined,
           href: "/operations",
           date: new Date(d),

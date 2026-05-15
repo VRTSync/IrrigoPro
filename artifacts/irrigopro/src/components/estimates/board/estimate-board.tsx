@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useArrayQuery } from "@/lib/queryClient";
 import type { Estimate, Customer } from "@workspace/db/schema";
 import type { LifecycleStatus } from "@/lib/lifecycle";
-import { computeLifecycleStatus } from "@/lib/lifecycle";
+import { lifecycleOf } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import {
   Accordion,
@@ -32,12 +32,10 @@ interface EstimateBoardProps {
 }
 
 function getLifecycle(est: Estimate): LifecycleStatus {
-  if (est.lifecycleStatus) return est.lifecycleStatus;
-  return computeLifecycleStatus({
-    status: est.status,
-    internalStatus: est.internalStatus,
-    estimateDate: est.estimateDate,
-  });
+  // Task #638 — `lifecycleOf` already prefers the server-stamped
+  // `lifecycleStatus` and falls back to (status, internalStatus,
+  // estimateDate) computation otherwise.
+  return lifecycleOf(est);
 }
 
 function sortByDateDesc(a: Estimate, b: Estimate) {

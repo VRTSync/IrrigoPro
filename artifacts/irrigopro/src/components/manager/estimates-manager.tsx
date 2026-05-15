@@ -8,6 +8,13 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, useArrayQuery } from "@/lib/queryClient";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
 import type { Estimate } from "@workspace/db/schema";
+import {
+  LIFECYCLE_TINTS,
+  isApproved,
+  isConvertedToWorkOrder,
+  lifecycleOf,
+  type LifecycleStatus,
+} from "@/lib/lifecycle";
 
 interface EstimatesManagerProps {
   onBack: () => void;
@@ -44,19 +51,12 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
     },
   });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'approved':
-        return 'bg-green-100 text-green-800';
-      case 'rejected':
-        return 'bg-red-100 text-red-800';
-      case 'converted_to_work_order':
-        return 'bg-purple-100 text-purple-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
+  // Task #638 — color + label both derive from the canonical lifecycle
+  // bucket so this card stays in lockstep with the board / list / detail
+  // modal. Raw status enum values never reach the screen.
+  const getStatusColor = (lc: LifecycleStatus): string => {
+    const tint = LIFECYCLE_TINTS[lc];
+    return `${tint.bg} ${tint.text}`;
   };
 
   const formatCurrency = (amount: number) => {
@@ -102,15 +102,17 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
             </CardContent>
           </Card>
         ) : (
-          estimates?.map((estimate) => (
+          estimates?.map((estimate) => {
+            const lc = lifecycleOf(estimate);
+            return (
             <Card key={estimate.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="text-lg font-semibold">Estimate #{estimate.id}</h3>
-                      <Badge className={getStatusColor(estimate.status)}>
-                        {estimate.status}
+                      <Badge className={getStatusColor(lc)}>
+                        {LIFECYCLE_TINTS[lc].label}
                       </Badge>
                     </div>
                     <p className="text-gray-600 mb-1">Customer: {estimate.customerName}</p>
@@ -134,7 +136,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                         View
                       </Button>
                       
-                      {estimate.status === 'approved' && (
+                      {isApproved(lc) && !isConvertedToWorkOrder(estimate) && (
                         <Button 
                           size="sm"
                           onClick={() => convertToWorkOrder.mutate(estimate.id)}
@@ -145,7 +147,7 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                           Convert to Work Order
                         </Button>
                       )}
-                      {estimate.status === 'converted_to_work_order' && (
+                      {isConvertedToWorkOrder(estimate) && (
                         <span className="text-sm text-gray-500 italic">Converted to Work Order</span>
                       )}
                     </div>
@@ -153,7 +155,8 @@ export function EstimatesManager({ onBack }: EstimatesManagerProps) {
                 </div>
               </CardContent>
             </Card>
-          ))
+            );
+          })
         )}
       </div>
 

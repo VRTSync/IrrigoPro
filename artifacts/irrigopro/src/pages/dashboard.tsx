@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
+import { lifecycleOf } from "@/lib/lifecycle";
 
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -261,7 +262,7 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="text-right">
-                        {getStatusBadge(estimate.status)}
+                        {getStatusBadge(lifecycleOf(estimate))}
                       </div>
                     </div>
                   ))

@@ -15,6 +15,7 @@ import {
 } from "@/components/estimates/send-estimate-dialog";
 import { sendEstimateEmail } from "@/lib/email";
 import type { Estimate } from "@workspace/db/schema";
+import { isReadyToSend } from "@/lib/lifecycle";
 
 function formatCurrency(amount: string | number) {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;
@@ -179,7 +180,7 @@ export default function EstimatesPendingApproval() {
                             <Eye className="w-3.5 h-3.5 mr-1" />
                             View
                           </Button>
-                          {est.internalStatus === "approved_internal" ? (
+                          {isReadyToSend(est) ? (
                             <Badge className="bg-green-100 text-green-800 border-green-200">
                               Ready to send
                             </Badge>

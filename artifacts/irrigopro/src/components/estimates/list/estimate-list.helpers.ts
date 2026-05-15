@@ -1,11 +1,14 @@
-import { LIFECYCLE_ORDER, type LifecycleStatus } from "@/lib/lifecycle";
+import { LIFECYCLE_ORDER, lifecycleOf as canonicalLifecycleOf, type LifecycleStatus } from "@/lib/lifecycle";
 import type { Estimate } from "@workspace/db/schema";
 
 export type SortField = "customer" | "amount" | "status" | "date";
 export type SortDir = "asc" | "desc";
 
+// Task #638 — re-exported from the canonical lifecycle helper so list
+// code keeps its short import surface while staying in lockstep with
+// the rest of the UI.
 export function lifecycleOf(e: Estimate): LifecycleStatus {
-  return (e.lifecycleStatus ?? "pending_review") as LifecycleStatus;
+  return canonicalLifecycleOf(e);
 }
 
 export function sortEstimates(
