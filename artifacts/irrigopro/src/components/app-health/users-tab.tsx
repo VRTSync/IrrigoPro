@@ -51,7 +51,7 @@ const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: "all",             label: "All roles" },
   { value: "super_admin",     label: "Super admin" },
   { value: "company_admin",   label: "Company admin" },
-  { value: "manager",         label: "Manager" },
+  { value: "irrigation_manager", label: "Irrigation manager" },
   { value: "field_tech",      label: "Field tech" },
   { value: "billing_manager", label: "Billing manager" },
 ];

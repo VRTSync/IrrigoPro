@@ -13,6 +13,7 @@ import {
 import { classifyWetCheckPhotoError as _classifyWetCheckPhotoError, logPhotoErrorContext as _logPhotoErrorContext } from "./wet-check-photo-errors";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
+import { PRICING_FIELDS_TO_STRIP } from "@workspace/db";
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { EmailService } from "../email-service";
@@ -76,13 +77,12 @@ function headerUserCompanyId(req: Request): string | undefined {
 // Field technicians must NEVER see pricing/money values anywhere in the app
 // ============================================================================
 
-// Fields to strip from responses for field technicians
-const PRICING_FIELDS_TO_STRIP = new Set([
-  'laborRate', 'laborSubtotal', 'partsSubtotal', 'totalAmount', 'estimatedTotal',
-  'partPrice', 'totalPrice', 'unitPrice', 'price', 'cost',
-  'laborAmount', 'laborTotal', 'partsAmount', 'totalCost',
-  'laborCost', 'partsCost', 'totalUnbilledAmount', 'totalPartsCost'
-]);
+// Fields to strip from responses for field technicians. The set is
+// imported from `@workspace/db` (`PRICING_FIELDS_TO_STRIP`, derived
+// from the per-table `PRICING_FIELDS_BY_TABLE` inventory) so a new
+// pricing column added to the schema only needs to be appended to
+// that inventory — it then automatically flows through this strip.
+// See `lib/db/src/pricing-fields.ts` for the canonical list.
 
 // Task #532 — in-place strip of pricing fields. The previous version
 // rebuilt every object via `Object.entries` + spread, which doubled the
@@ -548,15 +548,15 @@ const requireEstimateApprovalAccess = (req: any, res: any, next: any) => {
 // Rendering or downloading the PDF is not a mutation (approve / reject /
 // send-to-customer), so the role list is wider than
 // requireEstimateApprovalAccess: managers (both `manager` and the
-// legacy `irrigation_manager` alias) are operationally responsible for
-// estimate review and need to see the document. field_tech is the only
-// role explicitly excluded — techs see a pricing-stripped view in the
-// app and should not be able to pull the full priced PDF.
+// canonical irrigation_manager role; the legacy `manager` alias was
+// retired in Task #643) are operationally responsible for estimate
+// review and need to see the document. field_tech is the only role
+// explicitly excluded — techs see a pricing-stripped view in the app
+// and should not be able to pull the full priced PDF.
 const ESTIMATE_PDF_READ_ROLES = new Set<string>([
   'super_admin',
   'company_admin',
   'billing_manager',
-  'manager',
   'irrigation_manager',
 ]);
 const requireEstimatePdfAccess = (req: any, res: any, next: any) => {
@@ -3354,7 +3354,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const status = validStatuses.has(statusFilter) ? statusFilter : "all";
       const roleFilter = typeof req.query.role === "string" ? req.query.role : "";
       const validRoles = new Set([
-        "super_admin", "company_admin", "manager", "field_tech", "billing_manager",
+        "super_admin", "company_admin", "irrigation_manager", "field_tech", "billing_manager",
       ]);
       const role = validRoles.has(roleFilter) ? roleFilter : null;
       // Modal app version across the last 24h — the version most
@@ -4175,7 +4175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE u.company_id = ${id}
           AND u.is_deleted = false
           AND u.is_active = true
-          AND u.role IN ('company_admin', 'manager')
+          AND u.role IN ('company_admin', 'irrigation_manager')
         GROUP BY u.id, u.name, u.username, u.email, u.role
         ORDER BY (u.role = 'company_admin') DESC, MAX(s.last_seen_at) DESC NULLS LAST
         LIMIT 20
@@ -7153,7 +7153,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const customerId = parseInt(req.params.id);
       const estimates = await storage.getEstimatesByCustomer(customerId);
-      res.json(estimates);
+      // Task #643 — strip pricing for field_tech.
+      res.json(applyPricingVisibility(req, estimates));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch customer estimates" });
@@ -7442,7 +7443,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const estimates = await storage.getEstimates({ includeDeleted });
       // Task #532 — opt-in pagination; full list returned when ?limit and
       // ?offset are both omitted to preserve existing client behavior.
-      res.json(paginate(req, res, estimates, { limit: 100, max: 500 }));
+      // Task #643 — pricing fields stripped for field_tech via
+      // applyPricingVisibility (defense-in-depth — techs typically don't
+      // hit this endpoint, but if they do, prices must not leak).
+      res.json(applyPricingVisibility(req, paginate(req, res, estimates, { limit: 100, max: 500 })));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch estimates" });
@@ -7468,7 +7472,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         scopeCompanyId = Number(userCompanyId);
       }
       const pending = await storage.getEstimatesPendingApproval(scopeCompanyId);
-      res.json(pending);
+      // Task #643 — defense-in-depth strip for field_tech.
+      res.json(applyPricingVisibility(req, pending));
     } catch (error) {
       console.error('Error fetching pending estimates:', error);
       res.status(500).json({ message: "Failed to fetch pending estimates" });
@@ -7483,7 +7488,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
-      res.json(estimate);
+      // Task #643 — strip pricing fields for field_tech.
+      res.json(applyPricingVisibility(req, estimate));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch estimate" });
@@ -7521,7 +7527,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ESTIMATE_DELETE_ROLES = new Set<string>([
         "super_admin",
         "company_admin",
-        "manager",
         "irrigation_manager",
         "billing_manager",
         "field_tech",
@@ -10222,7 +10227,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         invoices = invoices.slice(0, Math.max(1, Math.min(500, limit)));
       }
 
-      res.json(invoices);
+      res.json(applyPricingVisibility(req, invoices));
     } catch (error) {
       console.error('Error fetching invoices:', error);
       res.status(500).json({ message: "Failed to fetch invoices" });

@@ -31,7 +31,6 @@ import { useToast } from "@/hooks/use-toast";
 const DELETE_ROLES = new Set<string>([
   "super_admin",
   "company_admin",
-  "manager",
   "irrigation_manager",
   "billing_manager",
   "field_tech",

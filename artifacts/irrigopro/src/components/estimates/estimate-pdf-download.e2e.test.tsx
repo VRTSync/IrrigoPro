@@ -279,7 +279,7 @@ describe("Estimate PDF buttons — role gating (Task #630)", () => {
   });
 
   it("manager: View/Download PDF buttons render (task spec done-criterion)", async () => {
-    setRole("manager");
+    setRole("irrigation_manager");
     const client = makeQueryClient();
     renderModal(client);
 

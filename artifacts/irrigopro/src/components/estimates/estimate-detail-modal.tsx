@@ -55,7 +55,6 @@ const PDF_READ_ROLES = new Set<string>([
   "super_admin",
   "company_admin",
   "billing_manager",
-  "manager",
   "irrigation_manager",
 ]);
 
@@ -64,7 +63,6 @@ const PDF_READ_ROLES = new Set<string>([
 const DELETE_ROLES = new Set<string>([
   "super_admin",
   "company_admin",
-  "manager",
   "irrigation_manager",
   "billing_manager",
   "field_tech",

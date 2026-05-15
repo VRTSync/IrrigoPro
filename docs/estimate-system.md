@@ -150,11 +150,16 @@ can actually be removed — see audit F-04 / F-15.
 The `requireEstimateApprovalAccess` middleware allows
 `billing_manager | company_admin | super_admin`.
 
-> **Role naming note.** `replit.md` uses the shorthand "manager" in
-> its product blurb, but the actual database/role enum value used by
-> every estimate route is `irrigation_manager`. There is no separate
-> `manager` role in this codebase — treat the two as synonyms when
-> reading product copy, and use `irrigation_manager` in code.
+> **Role naming note (Task #643).** `irrigation_manager` is the
+> **canonical** role name. The legacy `manager` alias was retired in
+> Task #643 — every guard, every frontend role check, and every test
+> now uses `irrigation_manager`. The `users.role` column is plain
+> text; a one-shot migration
+> (`artifacts/api-server/src/scripts/rename-manager-role.ts`)
+> renames any historical rows with `role='manager'` to the canonical
+> value. `replit.md` may still use the shorthand "manager" in
+> non-code product copy — but **never** use the string `'manager'`
+> as a role literal in code.
 
 ---
 
@@ -163,13 +168,11 @@ The `requireEstimateApprovalAccess` middleware allows
 What the **server** enforces. Frontend buttons are gated separately
 (see Gotchas below).
 
-The `manager` column is the same DB role as `irrigation_manager`
-(the product blurb in `replit.md` calls it "manager" — see the
-naming note above). Both spellings hit the same enum value at
-runtime; the column is repeated here so readers searching for
-either name find the row they expect.
+The `irrigation_manager` column is the canonical name (see the role
+naming note above). Older docs and product copy may call this role
+"manager"; in code only `irrigation_manager` is accepted.
 
-| Action                                  | super_admin | company_admin | billing_manager | manager / irrigation_manager | field_tech    |
+| Action                                  | super_admin | company_admin | billing_manager | irrigation_manager           | field_tech    |
 | --------------------------------------- | :---------: | :-----------: | :-------------: | :--------------------------: | :-----------: |
 | Create estimate (`POST /api/estimates`) | ✓           | ✓             | ✓               | ✓                            | ✓             |
 | Read list / detail                      | ✓ *(public)*| ✓ *(public)*  | ✓ *(public)*    | ✓ *(public)*                 | ✓ *(public)*  |

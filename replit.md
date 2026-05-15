@@ -41,7 +41,7 @@ Production irrigation company management app: estimates → work orders → wet 
 
 ## Product
 
-- Multi-company irrigation management with role-based access (super_admin, company_admin, manager, field_tech, billing_manager)
+- Multi-company irrigation management with role-based access (super_admin, company_admin, irrigation_manager, field_tech, billing_manager). The legacy `manager` alias was retired in Task #643 — `irrigation_manager` is the canonical role name in code, schema, and every guard.
 - Full estimate lifecycle: draft → pending review → sent → approved/rejected/expired
 - Work orders with technician scheduling, field photos, wet check inspections
 - Billing sheets auto-generated from completed work orders; QuickBooks invoice export

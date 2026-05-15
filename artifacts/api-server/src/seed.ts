@@ -20,7 +20,7 @@ export async function seedDatabase() {
         isActive: true,
       },
       {
-        username: 'manager',
+        username: 'irrigation_manager',
         password: 'manager123',
         name: 'Manager User',
         email: 'manager@company.com',

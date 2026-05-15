@@ -27,7 +27,7 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
-  role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager
+  role: text("role").notNull().default("field_tech"), // super_admin, company_admin, irrigation_manager, field_tech, billing_manager (Task #643 retired the legacy `manager` alias — `irrigation_manager` is canonical)
   companyId: integer("company_id").references(() => companies.id), // null for super_admin
   isActive: boolean("is_active").notNull().default(true),
   isDeleted: boolean("is_deleted").notNull().default(false), // Soft delete flag
