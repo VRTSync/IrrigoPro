@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateWizard } from "@/components/estimates/estimate-wizard";
-import { lifecycleOf } from "@/lib/lifecycle";
+import { lifecycleOf, LIFECYCLE_TINTS } from "@/lib/lifecycle";
 
 import { Plus, Settings, Clock, CheckCircle, DollarSign, Package, FileText, TrendingUp, Wrench, Users, UserCheck, FolderOpen } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -74,17 +74,22 @@ export default function Dashboard() {
     }).format(amount);
   };
 
+  // Task #638 — `status` here is the canonical lifecycle bucket
+  // (callers pass `lifecycleOf(estimate)`). Render labels/colors
+  // from the shared `LIFECYCLE_TINTS` map so every lifecycle state
+  // (`draft`, `pending_review`, `sent`, `approved`, `rejected`,
+  // `expired`) gets a consistent badge rather than a generic
+  // fallback.
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return <Badge className="status-pending">Pending</Badge>;
-      case 'approved':
-        return <Badge className="status-approved">Approved</Badge>;
-      case 'rejected':
-        return <Badge className="status-rejected">Rejected</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+    const tint = LIFECYCLE_TINTS[status as keyof typeof LIFECYCLE_TINTS];
+    if (tint) {
+      return (
+        <Badge className={`${tint.bg} ${tint.text} ${tint.border}`}>
+          {tint.label}
+        </Badge>
+      );
     }
+    return <Badge variant="outline">{status}</Badge>;
   };
 
   const formatDate = (date: string | Date) => {

@@ -602,6 +602,23 @@ export default function CustomerBilling() {
   };
 
   const getStatusBadge = (status: string) => {
+    // Task #638 — when the caller passes a lifecycle bucket
+    // (`lifecycleOf(estimate)`), render the polished label/colors
+    // from the shared `LIFECYCLE_TINTS` map. Work-order and
+    // billing-sheet callers still pass raw enums, which fall
+    // through to the legacy color/label maps below.
+    const lifecycleTint =
+      LIFECYCLE_TINTS[status as keyof typeof LIFECYCLE_TINTS];
+    if (lifecycleTint) {
+      return (
+        <Badge
+          className={`${lifecycleTint.bg} ${lifecycleTint.text} ${lifecycleTint.border}`}
+        >
+          {lifecycleTint.label}
+        </Badge>
+      );
+    }
+
     const statusColors: Record<string, string> = {
       pending: "bg-yellow-100 text-yellow-800",
       assigned: "bg-blue-100 text-blue-800",
@@ -619,7 +636,7 @@ export default function CustomerBilling() {
       approved_passed_to_billing: "Approved / Ready to Bill",
       in_progress: "In Progress",
     };
-    
+
     return (
       <Badge className={statusColors[status] || "bg-gray-100 text-gray-800"}>
         {statusLabels[status] || status.replace(/_/g, ' ')}
