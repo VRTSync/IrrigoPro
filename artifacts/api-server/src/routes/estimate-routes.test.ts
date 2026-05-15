@@ -391,3 +391,109 @@ describe("PUT /api/estimates/:id — customer master labor rate semantics", () =
     assert.equal(stub.lastUpdate, undefined);
   });
 });
+
+// ─── Task #606 — Atomic submit-for-review ────────────────────────────────────
+describe("POST /api/estimates/:id/submit-for-review — atomic draft → pending_approval", () => {
+  let stub: StorageStub;
+  let baseUrl: string;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    stub = makeStorageStub();
+    ({ baseUrl, close } = await startServer(stub));
+  });
+  afterEach(async () => {
+    await close();
+  });
+
+  function makeDraft(id: number): EstimateWithItems {
+    return {
+      ...makeExistingEstimate({
+        id,
+        customerId: 42,
+        laborRate: "85.00",
+        appliedLaborRate: "85.00",
+      }),
+      internalStatus: "draft",
+    } as unknown as EstimateWithItems;
+  }
+
+  it("flips internalStatus to pending_approval and persists the wizard payload in a single call", async () => {
+    stub.estimates.set(200, makeDraft(200));
+    const res = await fetch(`${baseUrl}/api/estimates/200/submit-for-review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildBody({ customerId: 42, tamperedLaborRate: 5 })),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+
+    // Status flipped …
+    assert.equal(body.internalStatus, "pending_approval");
+    // … alongside the content update (totals recomputed from the
+    // stamped rate, not the tampered one).
+    assert.equal(body.laborRate, "85.00");
+    assert.equal(body.laborSubtotal, "340.00");
+    assert.equal(body.totalAmount, "540.00");
+
+    // What was actually handed to storage — single write carrying both
+    // the content and the status pin.
+    assert.equal(stub.lastUpdate!.id, 200);
+    assert.equal(
+      (stub.lastUpdate!.estimate as { internalStatus?: string }).internalStatus,
+      "pending_approval",
+    );
+    assert.equal(stub.lastUpdate!.items.length, 2);
+  });
+
+  it("rolls back atomically when the storage write fails — no status flip, no content change", async () => {
+    stub.estimates.set(201, makeDraft(201));
+    const originalUpdate = stub.updateEstimateWithItems.bind(stub);
+    stub.updateEstimateWithItems = async () => {
+      // Simulates the DB transaction throwing (e.g. constraint
+      // violation, connection drop): the route handler must NOT have
+      // applied any partial state and must surface a 5xx to the
+      // wizard so the user sees a retryable error.
+      throw new Error("simulated DB failure");
+    };
+
+    const res = await fetch(`${baseUrl}/api/estimates/201/submit-for-review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildBody({ customerId: 42, tamperedLaborRate: 5 })),
+    });
+    assert.equal(res.status, 500);
+    // The seeded estimate is still a draft — no out-of-band status
+    // mutation happened on the way to the failed storage write.
+    assert.equal(stub.estimates.get(201)!.internalStatus, "draft");
+
+    // Restore the original implementation so afterEach close() works.
+    stub.updateEstimateWithItems = originalUpdate;
+  });
+
+  it("rejects a non-draft estimate with 409 so the wizard can re-fetch instead of double-flipping", async () => {
+    const already = {
+      ...makeDraft(202),
+      internalStatus: "pending_approval",
+    } as unknown as EstimateWithItems;
+    stub.estimates.set(202, already);
+    const res = await fetch(`${baseUrl}/api/estimates/202/submit-for-review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildBody({ customerId: 42, tamperedLaborRate: 5 })),
+    });
+    assert.equal(res.status, 409);
+    // No write attempted.
+    assert.equal(stub.lastUpdate, undefined);
+  });
+
+  it("returns 404 when the estimate does not exist", async () => {
+    const res = await fetch(`${baseUrl}/api/estimates/9999/submit-for-review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildBody({ customerId: 42, tamperedLaborRate: 5 })),
+    });
+    assert.equal(res.status, 404);
+    assert.equal(stub.lastUpdate, undefined);
+  });
+});

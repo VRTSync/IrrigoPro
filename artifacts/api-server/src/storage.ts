@@ -1823,14 +1823,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Manager review queue. Mirrors getEstimates per-row recompute, but
-  // filters to estimates whose internal review track is still
-  // `pending_approval`. When `companyId` is non-null (the normal case for
-  // billing_manager / company_admin), restricts to that company. `null`
-  // is reserved for super_admin global access.
+  // filters to estimates whose internal review track is awaiting admin
+  // action — either still `pending_approval` OR `approved_internal`
+  // (admin has internally approved but has not yet sent to the
+  // customer). Both bucket into the manager's "Pending review"
+  // lifecycle bucket on the client, so the admin Pending Approval list
+  // must include the same set for the two views to agree (Task #606).
+  // When `companyId` is non-null (the normal case for billing_manager /
+  // company_admin), restricts to that company. `null` is reserved for
+  // super_admin global access.
   async getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]> {
+    const statusClause = or(
+      eq(estimates.internalStatus, "pending_approval"),
+      eq(estimates.internalStatus, "approved_internal"),
+    );
     const whereClause = companyId === null
-      ? eq(estimates.internalStatus, "pending_approval")
-      : and(eq(estimates.internalStatus, "pending_approval"), eq(estimates.companyId, companyId));
+      ? statusClause
+      : and(statusClause, eq(estimates.companyId, companyId));
     const estimatesList = await db
       .select()
       .from(estimates)

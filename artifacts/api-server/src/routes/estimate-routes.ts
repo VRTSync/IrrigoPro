@@ -179,12 +179,24 @@ export function registerEstimateRoutes(
     }
   });
 
-  app.put("/api/estimates/:id", requireAuthentication, async (req, res) => {
+  // Shared update path used by both PUT /api/estimates/:id and the
+  // atomic submit-for-review endpoint below. Returns the updated
+  // estimate (with items) or sends an error response and returns null.
+  // `opts.submitForReview === true` forces internalStatus to
+  // `pending_approval` inside the same transaction so the wizard's
+  // submit either fully lands or fully rolls back (Task #606). Callers
+  // must NOT have already sent a response when this returns null —
+  // this helper owns the response on the error path.
+  async function handleEstimateUpdate(
+    req: any,
+    res: any,
+    opts: { submitForReview: boolean },
+  ): Promise<EstimateWithItems | null> {
     try {
       const estimateId = parseInt(String(req.params.id));
       if (isNaN(estimateId)) {
         res.status(400).json({ message: "Invalid estimate ID" });
-        return;
+        return null;
       }
       const parsed = createEstimateWithItemsSchema.parse(req.body);
       // Strip ownership/audit fields from the update payload — these are
@@ -209,7 +221,19 @@ export function registerEstimateRoutes(
       const existing = await storage.getEstimate(estimateId);
       if (!existing) {
         res.status(404).json({ message: "Estimate not found" });
-        return;
+        return null;
+      }
+      // Submit-for-review only makes sense for a draft. Bouncing any
+      // other internal status with a 409 keeps the manager/admin lists
+      // honest: we never re-flip an already-reviewed estimate back to
+      // pending_approval from the wizard. The wizard's regular PUT path
+      // (opts.submitForReview === false) is unaffected.
+      if (opts.submitForReview && existing.internalStatus !== "draft") {
+        res.status(409).json({
+          message: "Estimate is not a draft",
+          internalStatus: existing.internalStatus,
+        });
+        return null;
       }
       const newCustomerId = (parsed.estimate as { customerId?: number | null }).customerId ?? null;
       const customerChanged = newCustomerId != null && newCustomerId !== existing.customerId;
@@ -218,7 +242,7 @@ export function registerEstimateRoutes(
         const customer = await storage.getCustomer(newCustomerId!);
         if (!customer) {
           res.status(400).json({ message: `Customer ${newCustomerId} not found` });
-          return;
+          return null;
         }
         resolvedRate = resolvePutLaborRate({
           customerChanged: true,
@@ -255,9 +279,16 @@ export function registerEstimateRoutes(
             : "flat";
         (parsed.estimate as { laborMode?: "flat" | "per_part" | null }).laborMode = persistedMode;
       }
+      // Task #606 — submit-for-review pins internalStatus inside the
+      // same payload that drives updateEstimateWithItems, so the
+      // content write and the status transition share a single
+      // transaction. If updateEstimateWithItems throws, neither lands.
+      if (opts.submitForReview) {
+        (parsed.estimate as { internalStatus?: string }).internalStatus = "pending_approval";
+      }
       const { estimate, items } = processEstimatePayload(parsed);
       const updatedEstimate = await storage.updateEstimateWithItems(estimateId, estimate, items);
-      res.json(updatedEstimate);
+      return updatedEstimate;
     } catch (error) {
       console.error("Estimate update error:", error);
       if (error instanceof z.ZodError) {
@@ -265,9 +296,28 @@ export function registerEstimateRoutes(
           message: "Invalid estimate data",
           errors: error.issues,
         });
-        return;
+        return null;
       }
       res.status(500).json({ message: "Failed to update estimate" });
+      return null;
     }
+  }
+
+  app.put("/api/estimates/:id", requireAuthentication, async (req, res) => {
+    const updated = await handleEstimateUpdate(req, res, { submitForReview: false });
+    if (updated) res.json(updated);
+  });
+
+  // Atomic submit-for-review (Task #606). Replaces the wizard's old
+  // two-step PUT-then-/transition flow which could leave a draft with
+  // saved content but the wrong status if the second call failed. The
+  // payload shape is identical to PUT; this handler additionally pins
+  // internalStatus to `pending_approval` inside the same DB
+  // transaction. Only drafts may be submitted — other statuses return
+  // 409 so the wizard surfaces a retryable error instead of silently
+  // double-flipping.
+  app.post("/api/estimates/:id/submit-for-review", requireAuthentication, async (req, res) => {
+    const updated = await handleEstimateUpdate(req, res, { submitForReview: true });
+    if (updated) res.json(updated);
   });
 }

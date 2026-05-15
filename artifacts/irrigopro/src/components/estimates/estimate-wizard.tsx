@@ -542,7 +542,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
   const isDraftEdit = isEdit && existing?.internalStatus === "draft";
 
   const saveMutation = useMutation<
-    { mode: SubmitMode; id: number | null; transitionFailed?: boolean },
+    { mode: SubmitMode; id: number | null },
     Error,
     { payload: EstimateApiPayload; mode: SubmitMode }
   >({
@@ -555,20 +555,12 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       ),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/estimates/pending-approval"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       if (isEdit && estimateId) {
         queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       }
       clearDraft(estimateId ?? null);
-      if (result.transitionFailed) {
-        toast({
-          title: "Saved as draft, but couldn't submit for review",
-          description: "Your changes were saved. Try submitting again from the draft.",
-          variant: "destructive",
-        });
-        onOpenChange(false);
-        return;
-      }
       if (result.mode === "draft") {
         toast({ title: isDraftEdit ? "Draft saved" : "Saved to drafts" });
       } else if (isDraftEdit) {
@@ -578,10 +570,25 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       }
       onOpenChange(false);
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      // Task #606 — submit is now a single atomic call. On failure we
+      // keep the wizard open so the user can retry without re-entering
+      // anything; the draft autosave already preserved their work to
+      // localStorage. No "Saved as draft" half-step toast — the server
+      // either fully accepted the submit or rolled the whole thing
+      // back. We derive the wording from the mutation's `mode` so a
+      // "Save as draft" failure on an existing draft doesn't get
+      // misreported as a failed submit.
+      const submitting = variables.mode === "submit" && isDraftEdit;
       toast({
-        title: isEdit ? "Failed to update estimate" : "Failed to create estimate",
-        description: err.message,
+        title: submitting
+          ? "Couldn't submit for review"
+          : isEdit
+            ? "Failed to update estimate"
+            : "Failed to create estimate",
+        description: submitting
+          ? `${err.message} — your changes are still here, try again.`
+          : err.message,
         variant: "destructive",
       });
     },
