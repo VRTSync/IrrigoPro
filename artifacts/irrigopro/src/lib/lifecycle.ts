@@ -211,6 +211,20 @@ export function customerResponseLabelOf(
   return customerResponseLabel(e?.status);
 }
 
+// Task #638 — wizard payload round-trip helper. The estimate wizard
+// needs to forward the existing review track (and the customer's
+// previous response) verbatim when saving an edit, but it must not
+// read the raw enums itself. This helper is the one isolated point
+// where those reads are allowed.
+export function estimateSubmitStatusFields(
+  e: EstimateLike | null | undefined,
+): { nextStatus: string; nextInternalStatus: string | null } {
+  return {
+    nextStatus: e?.status ?? "pending",
+    nextInternalStatus: e?.internalStatus ?? null,
+  };
+}
+
 // Slice 10c — shared tint + label map so the board column headers and the
 // list status badges stay visually in sync. Tailwind class strings only;
 // the consumers compose them as needed.

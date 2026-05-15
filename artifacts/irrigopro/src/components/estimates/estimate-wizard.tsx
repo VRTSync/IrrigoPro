@@ -33,6 +33,7 @@ import type { LaborMode } from "@/components/wizard-shared/labor-mode-toggle";
 import { nextFlatTotalHoursForModeSwitch } from "@/components/wizard-shared/labor-mode-switch";
 import { EstimateWizardReviewStep } from "./wizard/estimate-wizard-review-step";
 import { submitEstimate, type SubmitMode } from "./estimate-wizard-submit";
+import { isDraft, estimateSubmitStatusFields } from "@/lib/lifecycle";
 
 interface EstimateApiPayloadEstimate {
   customerId: number;
@@ -539,7 +540,9 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
     draftReadyRef.current = true;
   };
 
-  const isDraftEdit = isEdit && existing?.internalStatus === "draft";
+  // Task #638 — never read `existing.internalStatus` directly; the
+  // `isDraft` lifecycle predicate is the canonical signal.
+  const isDraftEdit = isEdit && isDraft(existing ?? null);
 
   const saveMutation = useMutation<
     { mode: SubmitMode; id: number | null },
@@ -616,14 +619,17 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
       locationNotes: customerStep.locationNotes.trim() || "",
       accessInstructions: customerStep.accessInstructions.trim() || "",
       workDescription: customerStep.workDescription.trim() || "",
-      status: existing?.status ?? "pending",
-      // Slice 10c — Save as draft sets internalStatus="draft". For
-      // edit/submit we round-trip the existing review status; for new
-      // submits we let the server default to "pending_approval".
+      // Task #638 — round-trip the existing customer-response and
+      // review-track enums via the lifecycle helper so the wizard
+      // doesn't read raw enum fields. Slice 10c — Save as draft sets
+      // internalStatus="draft". For edit/submit we round-trip the
+      // existing review status; for new submits we let the server
+      // default to "pending_approval".
+      status: estimateSubmitStatusFields(existing).nextStatus,
       ...(mode === "draft"
         ? { internalStatus: "draft" }
-        : isEdit && existing?.internalStatus
-          ? { internalStatus: existing.internalStatus }
+        : isEdit && estimateSubmitStatusFields(existing).nextInternalStatus
+          ? { internalStatus: estimateSubmitStatusFields(existing).nextInternalStatus! }
           : {}),
       partsSubtotal: totals.partsSubtotal.toFixed(2),
       laborSubtotal: totals.laborSubtotal.toFixed(2),

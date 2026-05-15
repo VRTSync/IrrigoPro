@@ -39,10 +39,21 @@ const ALLOWLIST = new Set<string>([
 // possible alias variable name — those bypasses are documented in
 // the test comment and the AST-rewrite follow-up.
 const FORBIDDEN_PATTERNS: RegExp[] = [
-  // Member access on `estimate` / `est`.
-  /\b(?:estimate|est)\.(?:status|internalStatus)\b/,
-  // Destructuring: `{ …status… } = estimate` / `= est` / `= est as …`.
-  /\{[^{}\n]*\b(?:status|internalStatus)\b[^{}\n]*\}\s*=\s*(?:estimate|est)\b/,
+  // ANY `.internalStatus` read — this field exists only on the
+  // estimates table in `lib/db/src/schema/schema.ts`, so reads via
+  // alias names (`existing?.internalStatus`, `e.internalStatus`,
+  // `row.internalStatus`, …) are unambiguously estimate reads and
+  // must go through lifecycle.ts. Optional-chaining and bracket
+  // access both match.
+  /[\w$\])]\??\.\binternalStatus\b/,
+  // Estimate-named member access for the more generic `.status`
+  // field (other entities like work orders also have `.status`, so
+  // we can't be type-blind here).
+  /\b(?:estimate|est)\??\.(?:status|internalStatus)\b/,
+  // Destructuring `internalStatus` from anything is forbidden;
+  // destructuring `status` only when the source is an estimate.
+  /\{[^{}\n]*\binternalStatus\b[^{}\n]*\}\s*=/,
+  /\{[^{}\n]*\bstatus\b[^{}\n]*\}\s*=\s*(?:estimate|est)\b/,
 ];
 
 function isForbidden(text: string): boolean {
@@ -144,6 +155,18 @@ describe("estimate direct-read guard (Task #638)", () => {
     expect(isForbidden(stripCommentsAndStrings(sample))).toBe(true);
     const sampleEst = "const { status } = est;";
     expect(isForbidden(stripCommentsAndStrings(sampleEst))).toBe(true);
+  });
+
+  it("scanner catches alias reads via `.internalStatus` (estimate-exclusive field)", () => {
+    expect(
+      isForbidden(stripCommentsAndStrings("const x = existing?.internalStatus;")),
+    ).toBe(true);
+    expect(
+      isForbidden(stripCommentsAndStrings("if (row.internalStatus === 'draft') {}")),
+    ).toBe(true);
+    expect(
+      isForbidden(stripCommentsAndStrings("const { internalStatus } = something;")),
+    ).toBe(true);
   });
 
   it("scanner ignores comments, single-quoted, and double-quoted strings", () => {
