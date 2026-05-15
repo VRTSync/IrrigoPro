@@ -326,6 +326,40 @@ export function EstimateWizardCustomerStep({
         </CardContent>
       </Card>
 
+      {/* Scope of Work — rendered directly under Customer so it's the
+          first thing a manager fills in on Step 1. Previously this card
+          sat below Project Details, which made managers think there was
+          no place to enter the scope of work. */}
+      {value.customer && (
+        <Card>
+          <CardContent className="p-4 sm:p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-50 p-2 rounded-md">
+                <ClipboardList className="w-4 h-4 text-blue-600" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">Scope of Work</h2>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wizard-work-description" className="sr-only">
+                Scope of Work
+              </Label>
+              <Textarea
+                id="wizard-work-description"
+                value={value.workDescription}
+                onChange={(e) => onChange({ ...value, workDescription: e.target.value })}
+                placeholder="Describe the work to be performed — what's being installed, repaired, or serviced. This appears on the estimate sent to the customer."
+                rows={8}
+                className="min-h-[160px] focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                data-testid="wizard-work-description"
+              />
+              <p className="text-xs text-gray-500">
+                This is the description the customer will see on their estimate.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Project Details card — gated until a customer is chosen so it's
           obvious that customer selection is the first step. */}
       {value.customer && (
@@ -373,39 +407,6 @@ export function EstimateWizardCustomerStep({
           </Form>
         </CardContent>
       </Card>
-      )}
-
-      {/* Scope of Work — promoted out of Project Details so the field is
-          the visible scope-of-work entry point on Step 1 instead of a
-          footnote next to access notes. */}
-      {value.customer && (
-        <Card>
-          <CardContent className="p-4 sm:p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="bg-blue-50 p-2 rounded-md">
-                <ClipboardList className="w-4 h-4 text-blue-600" />
-              </div>
-              <h2 className="text-base font-semibold text-gray-900">Scope of Work</h2>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="wizard-work-description" className="sr-only">
-                Scope of Work
-              </Label>
-              <Textarea
-                id="wizard-work-description"
-                value={value.workDescription}
-                onChange={(e) => onChange({ ...value, workDescription: e.target.value })}
-                placeholder="Describe the work to be performed — what's being installed, repaired, or serviced. This appears on the estimate sent to the customer."
-                rows={8}
-                className="min-h-[160px] focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                data-testid="wizard-work-description"
-              />
-              <p className="text-xs text-gray-500">
-                Optional but recommended — this is the scope of work shown on the customer-facing estimate and PDF.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       )}
 
       {/* Work Location (map) card */}
