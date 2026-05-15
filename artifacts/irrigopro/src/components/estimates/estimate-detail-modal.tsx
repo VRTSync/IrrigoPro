@@ -11,6 +11,11 @@ import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
 import { useEstimateResend } from "@/hooks/use-estimate-resend";
+import {
+  SendEstimateDialog,
+  type SendEstimatePayload,
+} from "@/components/estimates/send-estimate-dialog";
+import { sendEstimateEmail } from "@/lib/email";
 
 interface EstimateDetailModalProps {
   open: boolean;
@@ -26,6 +31,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const { resendEstimate, isResending } = useEstimateResend();
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isViewingPdf, setIsViewingPdf] = useState(false);
+  const [showSendDialog, setShowSendDialog] = useState(false);
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
@@ -126,21 +132,23 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   });
 
   const sendApprovalEmailMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest(`/api/estimates/${estimateId}/send-approval-email`, 'POST');
+    mutationFn: async (payload: SendEstimatePayload) => {
+      if (!estimateId) throw new Error("Missing estimate id");
+      return sendEstimateEmail(estimateId, payload);
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       toast({
-        title: "Success",
-        description: "Approval email sent to customer",
+        title: "Estimate sent",
+        description: `Sent to ${vars.to}${vars.cc.length ? `, cc ${vars.cc.join(", ")}` : ""}`,
       });
+      setShowSendDialog(false);
       queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
       queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast({
-        title: "Error", 
-        description: "Failed to send approval email",
+        title: "Couldn't send estimate",
+        description: error?.message || "Please try again.",
         variant: "destructive",
       });
     },
@@ -591,10 +599,11 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                 {/* Approval Actions for Pending Estimates */}
                 {estimate.status === 'pending' && (
                   <>
-                    <Button 
-                      onClick={() => sendApprovalEmailMutation.mutate()}
+                    <Button
+                      onClick={() => setShowSendDialog(true)}
                       disabled={sendApprovalEmailMutation?.isPending}
                       className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                      data-testid="detail-modal-send-email"
                     >
                       <Mail className="w-4 h-4 mr-2" />
                       {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
@@ -645,6 +654,15 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
         onOpenChange={setShowResendDialog}
         onConfirm={handleConfirmResend}
         isResending={isResending}
+      />
+      <SendEstimateDialog
+        open={showSendDialog}
+        onOpenChange={setShowSendDialog}
+        estimateNumber={estimate?.estimateNumber ?? null}
+        customerName={estimate?.customerName ?? null}
+        customerEmail={estimate?.customerEmail ?? null}
+        isSending={sendApprovalEmailMutation.isPending}
+        onSend={(payload) => sendApprovalEmailMutation.mutate(payload)}
       />
     </Dialog>
   );

@@ -9,6 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle, ClipboardList, Eye, Mail, ShieldCheck } from "lucide-react";
 import { EstimateDetailModal } from "@/components/estimates/estimate-detail-modal";
+import {
+  SendEstimateDialog,
+  type SendEstimatePayload,
+} from "@/components/estimates/send-estimate-dialog";
+import { sendEstimateEmail } from "@/lib/email";
 import type { Estimate } from "@workspace/db/schema";
 
 function formatCurrency(amount: string | number) {
@@ -26,6 +31,7 @@ export default function EstimatesPendingApproval() {
   const { toast } = useToast();
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [sendDialogEstimate, setSendDialogEstimate] = useState<Estimate | null>(null);
 
   const { data: pending = [], isLoading } = useArrayQuery<Estimate>({
     queryKey: ["/api/estimates/pending-approval"],
@@ -52,9 +58,16 @@ export default function EstimatesPendingApproval() {
   });
 
   const sendToCustomer = useMutation({
-    mutationFn: (id: number) => apiRequest(`/api/estimates/${id}/send-approval-email`, "POST", {}),
-    onSuccess: () => {
-      toast({ title: "Sent to customer", description: "Approval email is on its way." });
+    mutationFn: ({ id, payload }: { id: number; payload: SendEstimatePayload }) =>
+      sendEstimateEmail(id, payload),
+    onSuccess: (_data, vars) => {
+      toast({
+        title: "Sent to customer",
+        description: `Approval email sent to ${vars.payload.to}${
+          vars.payload.cc.length ? `, cc ${vars.payload.cc.join(", ")}` : ""
+        }`,
+      });
+      setSendDialogEstimate(null);
       invalidate();
     },
     onError: (err: any) =>
@@ -186,7 +199,8 @@ export default function EstimatesPendingApproval() {
                             size="sm"
                             className="bg-green-600 hover:bg-green-700 text-white"
                             disabled={sendToCustomer.isPending}
-                            onClick={() => sendToCustomer.mutate(est.id)}
+                            onClick={() => setSendDialogEstimate(est)}
+                            data-testid={`pending-approval-send-${est.id}`}
                           >
                             <Mail className="w-3.5 h-3.5 mr-1" />
                             Send
@@ -221,6 +235,21 @@ export default function EstimatesPendingApproval() {
         estimateId={detailId}
         onEdit={() => {
           setDetailOpen(false);
+        }}
+      />
+
+      <SendEstimateDialog
+        open={sendDialogEstimate !== null}
+        onOpenChange={(open) => {
+          if (!open) setSendDialogEstimate(null);
+        }}
+        estimateNumber={sendDialogEstimate?.estimateNumber ?? null}
+        customerName={sendDialogEstimate?.customerName ?? null}
+        customerEmail={sendDialogEstimate?.customerEmail ?? null}
+        isSending={sendToCustomer.isPending}
+        onSend={(payload) => {
+          if (!sendDialogEstimate) return;
+          sendToCustomer.mutate({ id: sendDialogEstimate.id, payload });
         }}
       />
     </div>

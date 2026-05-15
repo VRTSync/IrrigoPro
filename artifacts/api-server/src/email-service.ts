@@ -33,6 +33,14 @@ export interface EstimateEmailData {
     laborCost: number;
     lineTotal: number;
   }>;
+  // Task #616 — optional recipient overrides + manager note. When `to`
+  // is omitted the email goes to `customerEmail` on file. `cc`/`bcc`
+  // are forwarded straight to Postmark. `note` renders above the
+  // estimate summary in both HTML and text bodies (HTML-escaped).
+  to?: string;
+  cc?: string[];
+  bcc?: string[];
+  note?: string;
 }
 
 export class EmailService {
@@ -80,10 +88,16 @@ export class EmailService {
     const htmlContent = this.generateEstimateEmailHTML(data, approveUrl, rejectUrl, viewUrl, companyInfo);
     const textContent = this.generateEstimateEmailText(data, approveUrl, rejectUrl, companyInfo);
 
+    const toAddr = (data.to && data.to.trim()) || data.customerEmail;
+    const ccList = (data.cc ?? []).filter((s) => s && s.trim().length > 0);
+    const bccList = (data.bcc ?? []).filter((s) => s && s.trim().length > 0);
+
     try {
       await client.sendEmail({
         From: companyInfo.email,
-        To: data.customerEmail,
+        To: toAddr,
+        ...(ccList.length ? { Cc: ccList.join(', ') } : {}),
+        ...(bccList.length ? { Bcc: bccList.join(', ') } : {}),
         Subject: `Estimate Approval Required - ${data.estimateNumber}`,
         HtmlBody: htmlContent,
         TextBody: textContent,
@@ -95,7 +109,7 @@ export class EmailService {
         }
       });
 
-      console.log(`Estimate approval email sent to ${data.customerEmail}`);
+      console.log(`Estimate approval email sent to ${toAddr}${ccList.length ? ` (cc ${ccList.join(', ')})` : ''}${bccList.length ? ` (bcc ${bccList.join(', ')})` : ''}`);
     } catch (error) {
       console.error('Failed to send estimate approval email:', error);
       throw error;
@@ -192,7 +206,11 @@ export class EmailService {
     <p style="font-size: 16px; color: #4b5563;">
       We've prepared an estimate for your irrigation project. Please review the details below and let us know if you'd like to proceed.
     </p>
-    
+
+    ${data.note && data.note.trim() ? `
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px 20px; margin: 20px 0; color: #92400e; font-size: 14px; line-height: 1.5; white-space: pre-wrap;">${this.escapeHtml(data.note)}</div>
+    ` : ''}
+
     <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0;">
       <h3 style="margin: 0 0 16px 0; color: #374151;">Estimate Details</h3>
       <table style="width: 100%; border-collapse: collapse;">
@@ -310,7 +328,10 @@ IRRIGATION ESTIMATE - APPROVAL REQUIRED
 Hello ${data.customerName},
 
 We've prepared an estimate for your irrigation project. Please review the details below:
-
+${data.note && data.note.trim() ? `
+NOTE FROM ${companyInfo.name.toUpperCase()}:
+${data.note}
+` : ''}
 ESTIMATE DETAILS:
 - Estimate #: ${data.estimateNumber}
 - Project: ${data.projectName}

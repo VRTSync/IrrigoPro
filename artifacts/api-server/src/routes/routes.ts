@@ -7471,24 +7471,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Email estimate
-  app.post("/api/estimates/:id/email", requireAuthentication, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const estimate = await storage.getEstimate(id);
-      if (!estimate) {
-        res.status(404).json({ message: "Estimate not found" });
-        return;
+  // Task #616 — Email estimate (with optional recipient overrides + note).
+  // Previously a stub that returned success without sending. Now funnels
+  // through the same `_sendEstimateApprovalEmailFlow` helper as
+  // `/send-approval-email` and `/transition` so token generation,
+  // status transitions, and Postmark delivery all live in one place.
+  app.post(
+    "/api/estimates/:id/email",
+    requireAuthentication,
+    requireEstimateApprovalAccess,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) {
+          res.status(400).json({ message: "Invalid estimate ID" });
+          return;
+        }
+        const estimate = await storage.getEstimate(id);
+        if (!estimate) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+        if (!estimateOwnershipMatches(req, estimate.companyId)) {
+          res.status(404).json({ message: "Estimate not found" });
+          return;
+        }
+
+        // Lifecycle guardrails — mirror /send-approval-email so this
+        // endpoint can't be used to bypass send-state rules just
+        // because it accepts custom recipients.
+        if (estimate.status !== "pending") {
+          res.status(400).json({ message: "Only pending estimates can have approval emails sent" });
+          return;
+        }
+        if (estimate.internalStatus === "sent_to_customer") {
+          res.status(400).json({ message: "Estimate has already been sent to the customer" });
+          return;
+        }
+        if (
+          estimate.internalStatus !== "pending_approval" &&
+          estimate.internalStatus !== "approved_internal"
+        ) {
+          res.status(400).json({ message: "Estimate is not in a sendable internal state" });
+          return;
+        }
+
+        const emailStr = z.string().trim().email("Invalid email address");
+        const sendSchema = z
+          .object({
+            to: emailStr.optional(),
+            cc: z.array(emailStr).max(5, "At most 5 Cc addresses").optional(),
+            bcc: z.array(emailStr).max(5, "At most 5 Bcc addresses").optional(),
+            note: z.string().trim().max(2000, "Note is too long (max 2000 chars)").optional(),
+          })
+          .strict();
+        const parsed = sendSchema.safeParse(req.body ?? {});
+        if (!parsed.success) {
+          const first = parsed.error.issues[0];
+          res.status(400).json({
+            message: first?.message || "Invalid email payload",
+            errors: parsed.error.issues,
+          });
+          return;
+        }
+
+        await _sendEstimateApprovalEmailFlow(id, {
+          to: parsed.data.to,
+          cc: parsed.data.cc,
+          bcc: parsed.data.bcc,
+          note: parsed.data.note,
+          req,
+        });
+
+        res.json({ message: "Estimate email sent successfully", sentAt: new Date() });
+      } catch (error) {
+        req.log?.error?.({ err: error }, "Failed to send estimate email");
+        console.error("Error sending estimate email:", error);
+        res.status(500).json({ message: "Failed to send estimate email" });
       }
-      
-      // For now, just simulate sending email
-      // In a real implementation, you would integrate with an email service
-      res.json({ message: "Estimate email sent successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to send estimate email" });
-    }
-  });
+    },
+  );
 
   // Property Zones routes
   app.get("/api/property-zones", async (req, res) => {
@@ -9006,7 +9068,14 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // `estimateDate` (used by `resend` to clear the expired bucket).
   async function _sendEstimateApprovalEmailFlow(
     estimateId: number,
-    opts: { resetEstimateDate?: boolean } = {},
+    opts: {
+      resetEstimateDate?: boolean;
+      to?: string;
+      cc?: string[];
+      bcc?: string[];
+      note?: string;
+      req?: any;
+    } = {},
   ) {
     const crypto = await import('crypto');
     const approvalToken = crypto.randomBytes(32).toString('hex');
@@ -9027,6 +9096,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const items = estimateWithItems.items ?? [];
     const laborRate = parseFloat(estimateWithItems.laborRate);
 
+    const resolvedTo = (opts.to && opts.to.trim()) || estimateWithItems.customerEmail;
+    const resolvedCc = (opts.cc ?? []).filter((s) => s && s.trim().length > 0);
+    const resolvedBcc = (opts.bcc ?? []).filter((s) => s && s.trim().length > 0);
+
     const { EmailService } = await import('../email-service');
     await EmailService.sendEstimateApprovalEmail({
       estimateId: estimateWithItems.id,
@@ -9046,6 +9119,10 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       createdBy: estimateWithItems.createdBy,
       companyId: estimateWithItems.companyId!,
       workDescription: estimateWithItems.workDescription ?? null,
+      to: resolvedTo,
+      cc: resolvedCc,
+      bcc: resolvedBcc,
+      note: opts.note,
       items: items.map(item => ({
         description: item.description || item.partName,
         partName: item.partName,
@@ -9057,6 +9134,33 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
       })),
     });
+
+    // Task #616 — record a single audit row per send so managers can
+    // see in the estimate's history exactly who sent it, to which
+    // addresses, and when.
+    if (opts.req) {
+      const req = opts.req;
+      await recordAuditEvent(req, {
+        actorUserId: req.authenticatedUserId ?? null,
+        actorLabel: req.authenticatedUserName ?? null,
+        actorRole: req.authenticatedUserRole ?? null,
+        actorCompanyId: req.authenticatedUserCompanyId ?? null,
+        actionType: "data",
+        action: "estimate.email.sent",
+        severity: "info",
+        targetType: "estimate",
+        targetId: String(estimateId),
+        summary: `Estimate ${estimateWithItems.estimateNumber} sent to ${resolvedTo}`,
+        details: {
+          estimateId,
+          estimateNumber: estimateWithItems.estimateNumber,
+          to: resolvedTo,
+          cc: resolvedCc,
+          bcc: resolvedBcc,
+          hasNote: !!(opts.note && opts.note.trim()),
+        },
+      });
+    }
 
     return estimateWithItems;
   }
@@ -9092,7 +9196,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         return;
       }
 
-      await _sendEstimateApprovalEmailFlow(id);
+      await _sendEstimateApprovalEmailFlow(id, { req });
 
       res.json({
         message: "Approval email sent successfully",
@@ -9168,7 +9272,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           res.status(400).json({ message: "Only estimates pending review can be sent to the customer" });
           return;
         }
-        await _sendEstimateApprovalEmailFlow(id);
+        await _sendEstimateApprovalEmailFlow(id, { req });
         const fresh = await storage.getEstimate(id);
         res.json({ message: "Estimate sent to customer", estimate: fresh });
         return;
@@ -9183,7 +9287,7 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           res.status(400).json({ message: "Only expired estimates can be resent" });
           return;
         }
-        await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true });
+        await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true, req });
         const fresh = await storage.getEstimate(id);
         res.json({ message: "Estimate resent to customer", estimate: fresh });
         return;
