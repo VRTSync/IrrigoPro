@@ -110,8 +110,14 @@ async function startServer(
   const app: Express = express();
   app.use(express.json());
   const noopAuth: RequestHandler = (_req, _res, next) => next();
-  registerEstimateRoutes(app, stub, noopAuth, async (_req, estimateId, before, after) => {
-    auditCalls.push({ estimateId, before, after });
+  registerEstimateRoutes(app, stub, noopAuth, {
+    recordLifecycleAudit: async (_req, evt) => {
+      auditCalls.push({
+        estimateId: Number(evt.targetId),
+        before: (evt.before ?? null) as AuditCall["before"],
+        after: (evt.after ?? null) as unknown as EstimateWithItems,
+      });
+    },
   });
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
