@@ -415,9 +415,9 @@ export interface IStorage {
   syncPartsFromGoogleDocs(docUrl: string): Promise<void>;
 
   // Estimates
-  getEstimates(): Promise<Estimate[]>;
+  getEstimates(opts?: { includeDeleted?: boolean }): Promise<Estimate[]>;
   getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]>;
-  getEstimate(id: number): Promise<EstimateWithItems | undefined>;
+  getEstimate(id: number, opts?: { includeDeleted?: boolean }): Promise<EstimateWithItems | undefined>;
   createEstimate(estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined>;
   // Task #611 — conditional lifecycle transitions. Each one pins the
@@ -438,6 +438,9 @@ export interface IStorage {
   ): Promise<Estimate | undefined>;
   updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems>;
   deleteEstimate(id: number): Promise<boolean>;
+  // Task #634 — manager-facing soft delete for draft estimates.
+  // Returns true if a draft row was successfully marked deleted.
+  softDeleteEstimate(id: number, deletedByUserId: number): Promise<boolean>;
 
   // Estimate Items
   getEstimateItems(estimateId: number): Promise<EstimateItem[]>;
@@ -1807,8 +1810,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Estimates
-  async getEstimates(): Promise<Estimate[]> {
-    const estimatesList = await db.select().from(estimates).orderBy(desc(estimates.createdAt));
+  async getEstimates(opts?: { includeDeleted?: boolean }): Promise<Estimate[]> {
+    // Task #634 — exclude soft-deleted rows unless the caller (super_admin
+    // with `?includeDeleted=1`) explicitly opts in.
+    const baseQuery = db.select().from(estimates);
+    const filtered = opts?.includeDeleted
+      ? baseQuery
+      : baseQuery.where(isNull(estimates.deletedAt));
+    const estimatesList = await filtered.orderBy(desc(estimates.createdAt));
     
     // Recalculate totals for each estimate to ensure accuracy
     const estimatesWithCalculatedTotals = await Promise.all(
@@ -1865,9 +1874,11 @@ export class DatabaseStorage implements IStorage {
       eq(estimates.internalStatus, "pending_approval"),
       eq(estimates.internalStatus, "approved_internal"),
     );
+    // Task #634 — exclude soft-deleted drafts from the review queue.
+    const notDeleted = isNull(estimates.deletedAt);
     const whereClause = companyId === null
-      ? statusClause
-      : and(statusClause, eq(estimates.companyId, companyId));
+      ? and(statusClause, notDeleted)
+      : and(statusClause, notDeleted, eq(estimates.companyId, companyId));
     const estimatesList = await db
       .select()
       .from(estimates)
@@ -1906,9 +1917,41 @@ export class DatabaseStorage implements IStorage {
     return estimatesWithCalculatedTotals;
   }
 
-  async getEstimate(id: number): Promise<EstimateWithItems | undefined> {
-    const [estimate] = await db.select().from(estimates).where(eq(estimates.id, id));
-    if (!estimate) return undefined;
+  async getEstimate(id: number, opts?: { includeDeleted?: boolean }): Promise<EstimateWithItems | undefined> {
+    const [rawEstimate] = await db.select().from(estimates).where(eq(estimates.id, id));
+    if (!rawEstimate) return undefined;
+    // Task #634 — soft-deleted rows are hidden unless explicitly requested
+    // (super_admin "Show deleted" toggle).
+    if (rawEstimate.deletedAt && !opts?.includeDeleted) return undefined;
+
+    // Task #634 (bug #1) — legacy "prospect" estimates were persisted with
+    // a NULL `companyId` so the ownership guard at the call site returns
+    // false and the user sees a 404 from the PDF endpoint. Backfill the
+    // owning company from the linked customer (if any), otherwise from
+    // the creating user, then persist the fix so the next request is a
+    // straight equality check. This is a one-way stamp; we never clear
+    // a non-null companyId.
+    let estimate = rawEstimate;
+    if (estimate.companyId == null) {
+      let derived: number | null = null;
+      if (estimate.customerId != null) {
+        const [cust] = await db.select({ companyId: customers.companyId })
+          .from(customers).where(eq(customers.id, estimate.customerId));
+        if (cust?.companyId != null) derived = cust.companyId;
+      }
+      if (derived == null && estimate.createdByUserId != null) {
+        const [u] = await db.select({ companyId: users.companyId })
+          .from(users).where(eq(users.id, estimate.createdByUserId));
+        if (u?.companyId != null) derived = u.companyId;
+      }
+      if (derived != null) {
+        const [stamped] = await db.update(estimates)
+          .set({ companyId: derived })
+          .where(and(eq(estimates.id, id), isNull(estimates.companyId)))
+          .returning();
+        if (stamped) estimate = stamped;
+      }
+    }
 
     const items = await db.select().from(estimateItems).where(eq(estimateItems.estimateId, id)).orderBy(estimateItems.sortOrder);
 
@@ -2103,6 +2146,22 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
+  // Task #634 — manager-facing soft delete. Only marks draft rows; the
+  // route layer is responsible for the role / ownership checks. The
+  // WHERE clause pins `internalStatus = 'draft'` and `deletedAt IS NULL`
+  // so a concurrent send-to-customer can't lose the race AND a double
+  // click can't double-stamp the deletedAt.
+  async softDeleteEstimate(id: number, deletedByUserId: number): Promise<boolean> {
+    const result = await db.update(estimates)
+      .set({ deletedAt: new Date(), deletedBy: deletedByUserId })
+      .where(and(
+        eq(estimates.id, id),
+        eq(estimates.internalStatus, "draft"),
+        isNull(estimates.deletedAt),
+      ));
+    return (result.rowCount || 0) > 0;
+  }
+
   async getEstimateItems(estimateId: number): Promise<EstimateItem[]> {
     return await db.select().from(estimateItems).where(eq(estimateItems.estimateId, estimateId)).orderBy(estimateItems.sortOrder);
   }
@@ -2249,7 +2308,11 @@ export class DatabaseStorage implements IStorage {
     };
     recentWorkOrders: WorkOrder[];
   }> {
-    const allEstimates = await db.select().from(estimates);
+    // Task #634 — dashboards never surface soft-deleted estimates.
+    const allEstimates = await db
+      .select()
+      .from(estimates)
+      .where(isNull(estimates.deletedAt));
     const allParts = await db.select().from(parts);
     const allEstimateItems = await db.select().from(estimateItems);
     const allWorkOrders = await db.select().from(workOrders);
@@ -4344,7 +4407,10 @@ export class DatabaseStorage implements IStorage {
 
   // Customer-related data methods
   async getEstimatesByCustomer(customerId: number): Promise<Estimate[]> {
-    const rows = await db.select().from(estimates).where(eq(estimates.customerId, customerId)).orderBy(desc(estimates.createdAt));
+    // Task #634 — exclude soft-deleted rows from the customer profile list.
+    const rows = await db.select().from(estimates)
+      .where(and(eq(estimates.customerId, customerId), isNull(estimates.deletedAt)))
+      .orderBy(desc(estimates.createdAt));
     return rows.map((e) => ({ ...e, lifecycleStatus: computeLifecycleStatus(e) }) as Estimate);
   }
 

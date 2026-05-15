@@ -44,6 +44,9 @@ export default function Estimates() {
   const currentUser = getCurrentUser();
   const isIrrigationManager = currentUser?.role === "irrigation_manager";
   const isFieldTech = currentUser?.role === "field_tech";
+  // Task #634 — super_admin can opt into seeing soft-deleted estimates.
+  const isSuperAdmin = currentUser?.role === "super_admin";
+  const [showDeleted, setShowDeleted] = useState(false);
 
   useEffect(() => {
     safeSet(VIEW_PREF_KEY, view);
@@ -71,8 +74,16 @@ export default function Estimates() {
     window.history.replaceState({}, "", url.toString());
   }, []);
 
+  // Task #634 — when a super_admin toggles "Show deleted", swap the
+  // request path so the soft-deleted rows come back. `queryKey.join("/")`
+  // is what the default queryFn turns into a URL, so the key itself
+  // must encode the query string.
+  const estimatesPath =
+    isSuperAdmin && showDeleted
+      ? "/api/estimates?includeDeleted=1"
+      : "/api/estimates";
   const { data: estimates = [], isLoading, isError } = useArrayQuery<Estimate>({
-    queryKey: ["/api/estimates"],
+    queryKey: [estimatesPath],
   });
 
   const { data: customers = [] } = useArrayQuery<Customer>({
@@ -102,7 +113,22 @@ export default function Estimates() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {/* Slice 10c — Always-visible Board/List view toggle. */}
-      <div className="flex justify-end mb-3">
+      <div className="flex justify-end items-center gap-3 mb-3">
+        {isSuperAdmin && (
+          <label
+            className="flex items-center gap-2 text-sm text-gray-700 select-none"
+            data-testid="show-deleted-toggle"
+          >
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-300"
+              checked={showDeleted}
+              onChange={(e) => setShowDeleted(e.target.checked)}
+              data-testid="show-deleted-checkbox"
+            />
+            Show deleted
+          </label>
+        )}
         <BoardListToggle value={view} onChange={setView} />
       </div>
 

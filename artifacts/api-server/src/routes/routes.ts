@@ -7423,9 +7423,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Duplicate assembly routes removed - consolidated above in Assembly routes section
 
   // Estimate routes
-  app.get("/api/estimates", async (req, res) => {
+  app.get("/api/estimates", requireAuthentication, async (req: any, res) => {
     try {
-      const estimates = await storage.getEstimates();
+      // Task #634 — super_admin can opt-in to see soft-deleted rows via
+      // ?includeDeleted=1. All other roles always get the active list.
+      // `requireAuthentication` populates `authenticatedUserRole` from
+      // the header-auth context; without it the super_admin check would
+      // silently evaluate false and the toggle would be a no-op.
+      const role =
+        (req.authenticatedUserRole as string | undefined) ??
+        (typeof req.headers?.["x-user-role"] === "string"
+          ? (req.headers["x-user-role"] as string)
+          : undefined);
+      const includeDeleted =
+        role === 'super_admin' &&
+        String(req.query?.includeDeleted ?? '') === '1';
+      const estimates = await storage.getEstimates({ includeDeleted });
       // Task #532 — opt-in pagination; full list returned when ?limit and
       // ?offset are both omitted to preserve existing client behavior.
       res.json(paginate(req, res, estimates, { limit: 100, max: 500 }));
@@ -7483,15 +7496,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
 
-  app.delete("/api/estimates/:id", requireAuthentication, async (req, res) => {
+  // Task #634 — manager-facing soft delete for draft estimates. Restricted to
+  // roles that can already manage estimates (managers + admins). Only rows
+  // whose `internalStatus` is still `draft` can be deleted; once submitted
+  // for review or sent to the customer the delete is rejected with 409 so
+  // approval / send / approve workflows retain their audit trail. Hides
+  // cross-company access as 404 (consistent with other estimate routes).
+  // Writes an `estimate.deleted` row to `audit_log`.
+  app.delete("/api/estimates/:id", requireAuthentication, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
-      const success = await storage.deleteEstimate(id);
-      if (!success) {
+      if (!Number.isFinite(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
+      }
+      const role = req.authenticatedUserRole as string | undefined;
+      // Task #634 — "anyone who can create an estimate can delete their
+      // own draft". `POST /api/estimates` is gated only by
+      // `requireAuthentication` (no role allowlist), so we mirror that
+      // here and let `estimateOwnershipMatches` + the draft check below
+      // do the real fencing. Field techs are included so a tech who
+      // started a draft on a tablet can throw it away themselves.
+      const ESTIMATE_DELETE_ROLES = new Set<string>([
+        "super_admin",
+        "company_admin",
+        "manager",
+        "irrigation_manager",
+        "billing_manager",
+        "field_tech",
+      ]);
+      if (!role || !ESTIMATE_DELETE_ROLES.has(role)) {
+        res.status(403).json({
+          message:
+            "Access denied. Deleting estimates is restricted to managers and administrators.",
+        });
+        return;
+      }
+
+      const existing = await storage.getEstimate(id);
+      if (!existing) {
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
-      res.json({ message: "Estimate deleted successfully" });
+      if (!estimateOwnershipMatches(req, existing.companyId)) {
+        res.status(404).json({ message: "Estimate not found" });
+        return;
+      }
+      if (existing.internalStatus !== "draft") {
+        res.status(409).json({
+          message:
+            "Only draft estimates can be deleted. Submitted or sent estimates are preserved for audit.",
+        });
+        return;
+      }
+
+      const userId = (req.authenticatedUserId as number | undefined) ?? 0;
+      const success = await storage.softDeleteEstimate(id, userId);
+      if (!success) {
+        // Lost the race to a concurrent submit/send/delete.
+        res.status(409).json({ message: "Estimate is no longer a deletable draft" });
+        return;
+      }
+
+      try {
+        await recordAuditEvent(req, {
+          actorUserId: userId || null,
+          actorRole: role ?? null,
+          actorCompanyId: req.authenticatedUserCompanyId ?? null,
+          actionType: "data",
+          action: "estimate.deleted",
+          severity: "info",
+          targetType: "estimate",
+          targetId: String(id),
+          summary: `Estimate ${existing.estimateNumber ?? id} deleted`,
+          details: {
+            estimateId: id,
+            estimateNumber: existing.estimateNumber ?? null,
+            customerId: existing.customerId ?? null,
+            companyId: existing.companyId ?? null,
+            internalStatus: existing.internalStatus ?? null,
+          },
+        });
+      } catch (auditErr) {
+        // Audit-log failure must not break the delete; it's already
+        // best-effort in writeAuditEvent itself.
+        try { req?.log?.warn({ err: auditErr }, "estimate.deleted audit failed"); } catch {}
+      }
+
+      // Task #634 — return the updated row (with deletedAt/deletedBy
+      // populated) so the client can show the audit metadata in the
+      // super-admin "Show deleted" view without a separate refetch.
+      const updated = await storage.getEstimate(id, { includeDeleted: true });
+      res.json(updated ?? { id, deletedAt: new Date().toISOString(), deletedBy: userId });
     } catch (error) {
       console.error("Error deleting estimate:", error instanceof Error ? error.message : error);
       res.status(500).json({ message: "Failed to delete estimate" });

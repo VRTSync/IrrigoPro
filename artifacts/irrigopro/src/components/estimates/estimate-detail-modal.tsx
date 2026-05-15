@@ -3,9 +3,19 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
-import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download } from "lucide-react";
+import { CheckCircle, XCircle, FileText, Users, Calendar, DollarSign, Wrench, Edit2, Mail, MapPin, ExternalLink, Send, Eye, Download, Trash2 } from "lucide-react";
 import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
@@ -42,6 +52,17 @@ const PDF_READ_ROLES = new Set<string>([
   "irrigation_manager",
 ]);
 
+// Task #634 — must agree with the server's ESTIMATE_DELETE_ROLES set in
+// routes.ts. UI hides the Delete action entirely for roles that would 403.
+const DELETE_ROLES = new Set<string>([
+  "super_admin",
+  "company_admin",
+  "manager",
+  "irrigation_manager",
+  "billing_manager",
+  "field_tech",
+]);
+
 function readCurrentUserRole(): string | null {
   try {
     if (typeof window === "undefined") return null;
@@ -62,11 +83,13 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isViewingPdf, setIsViewingPdf] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   // Compute once per mount — the user's role rarely changes during a
   // session and we don't want this gate to flicker as React re-renders.
   const currentRole = readCurrentUserRole();
   const canSeeEstimatePdf = currentRole != null && PDF_READ_ROLES.has(currentRole);
+  const canDeleteEstimateRole = currentRole != null && DELETE_ROLES.has(currentRole);
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
@@ -253,6 +276,65 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       });
     },
   });
+
+  const deleteEstimateMutation = useMutation({
+    mutationFn: async () => {
+      if (!estimateId) throw new Error("Missing estimate id");
+      await apiRequest(`/api/estimates/${estimateId}`, "DELETE");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Estimate deleted",
+        description: `Estimate ${estimate?.estimateNumber ?? ""} was deleted.`.trim(),
+      });
+      setShowDeleteDialog(false);
+      // Task #634 — invalidate every cache surface that could be
+      // displaying this estimate (lists, dashboards, customer profile)
+      // including query-string variants like `?includeDeleted=1`.
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = q.queryKey?.[0];
+          return (
+            typeof k === "string" &&
+            (k.startsWith("/api/estimates") ||
+              k.startsWith("/api/dashboard") ||
+              k.startsWith("/api/customers"))
+          );
+        },
+      });
+      onOpenChange(false);
+    },
+    onError: (err) => {
+      toast({
+        title: "Couldn't delete estimate",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Task #634 — show the Delete control only on still-draft rows. The
+  // server enforces the same precondition; this just avoids surfacing
+  // an action that will 409 the moment the user clicks it.
+  const isEstimateDeleted = Boolean(
+    (estimate as { deletedAt?: Date | string | null } | undefined)?.deletedAt,
+  );
+  const deletedAtDisplay = (() => {
+    const raw = (estimate as { deletedAt?: Date | string | null } | undefined)
+      ?.deletedAt;
+    if (!raw) return null;
+    try {
+      return new Date(raw as string | Date).toLocaleString();
+    } catch {
+      return null;
+    }
+  })();
+  const deletedByDisplay =
+    (estimate as { deletedBy?: number | null } | undefined)?.deletedBy ?? null;
+  const canDeleteEstimate =
+    canDeleteEstimateRole &&
+    estimate?.internalStatus === "draft" &&
+    !isEstimateDeleted;
 
   const handleConvertToWorkOrder = async () => {
     if (!estimateId) return;
@@ -675,7 +757,18 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   >
                     Close
                   </Button>
-                  {canSeeEstimatePdf && (
+                  {isEstimateDeleted && (
+                    <div
+                      className="w-full text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded px-3 py-2"
+                      data-testid="detail-modal-deleted-banner"
+                    >
+                      This estimate was deleted
+                      {deletedByDisplay != null ? ` by user #${deletedByDisplay}` : ""}
+                      {deletedAtDisplay ? ` on ${deletedAtDisplay}` : ""}. It is
+                      preserved for audit only — actions are disabled.
+                    </div>
+                  )}
+                  {canSeeEstimatePdf && !isEstimateDeleted && (
                     <>
                       <Button
                         variant="outline"
@@ -699,7 +792,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       </Button>
                     </>
                   )}
-                  {estimate.lifecycleStatus === 'expired' && (
+                  {estimate.lifecycleStatus === 'expired' && !isEstimateDeleted && (
                     <Button
                       onClick={() => setShowResendDialog(true)}
                       variant="outline"
@@ -710,7 +803,19 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       Resend
                     </Button>
                   )}
-                  {estimate.status !== 'converted_to_work_order' && onEdit && (
+                  {canDeleteEstimate && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowDeleteDialog(true)}
+                      disabled={deleteEstimateMutation.isPending}
+                      className="border-red-200 text-red-700 hover:bg-red-50 w-full sm:w-auto"
+                      data-testid="detail-modal-delete"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      {deleteEstimateMutation.isPending ? "Deleting…" : "Delete"}
+                    </Button>
+                  )}
+                  {estimate.status !== 'converted_to_work_order' && onEdit && !isEstimateDeleted && (
                     <Button
                       onClick={() => {
                         onEdit(estimateId!);
@@ -730,7 +835,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
 
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3 sm:justify-end">
                   {/* Approval Actions for Pending Estimates */}
-                  {estimate.status === 'pending' && (
+                  {estimate.status === 'pending' && !isEstimateDeleted && (
                     <>
                       <Button
                         onClick={() => setShowSendDialog(true)}
@@ -764,7 +869,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   )}
 
                   {/* Convert to Work Order for Approved Estimates */}
-                  {estimate.status === 'approved' && (
+                  {estimate.status === 'approved' && !isEstimateDeleted && (
                     <Button
                       onClick={handleConvertToWorkOrder}
                       disabled={isConverting}
@@ -801,6 +906,37 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
         isSending={sendApprovalEmailMutation.isPending}
         onSend={(payload) => sendApprovalEmailMutation.mutate(payload)}
       />
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent data-testid="detail-modal-delete-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this draft estimate?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Estimate{" "}
+              <span className="font-medium">{estimate?.estimateNumber}</span>{" "}
+              for{" "}
+              <span className="font-medium">{estimate?.customerName}</span>{" "}
+              will be removed from lists and dashboards. The row is preserved
+              for audit and can be restored by a super admin if needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteEstimateMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={deleteEstimateMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                deleteEstimateMutation.mutate();
+              }}
+              data-testid="detail-modal-delete-confirm"
+            >
+              {deleteEstimateMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

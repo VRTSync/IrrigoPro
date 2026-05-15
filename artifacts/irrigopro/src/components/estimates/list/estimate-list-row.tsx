@@ -5,13 +5,49 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient, authedPdfUrl } from "@/lib/queryClient";
 import type { Estimate } from "@workspace/db/schema";
 import type { LifecycleStatus } from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
-import { authedPdfUrl } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+
+// Task #634 — must agree with the server's ESTIMATE_DELETE_ROLES set in
+// routes.ts. UI hides the Delete action entirely for roles that would
+// 403; the server is the authoritative gate.
+const DELETE_ROLES = new Set<string>([
+  "super_admin",
+  "company_admin",
+  "manager",
+  "irrigation_manager",
+  "billing_manager",
+  "field_tech",
+]);
+
+function readCurrentUserRole(): string | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem("user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { role?: string };
+    return typeof parsed?.role === "string" ? parsed.role : null;
+  } catch {
+    return null;
+  }
+}
 
 interface Props {
   estimate: Estimate;
@@ -39,6 +75,67 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
   const isExpired = lifecycle === "expired";
   const { toast } = useToast();
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  // Task #634 — super_admin "Show deleted" surfaces soft-deleted rows.
+  // Render them muted and disable the active-row actions so they stay
+  // audit-only.
+  const deletedAtRaw = (estimate as { deletedAt?: Date | string | null }).deletedAt ?? null;
+  const deletedByRaw = (estimate as { deletedBy?: number | null }).deletedBy ?? null;
+  const isDeleted = deletedAtRaw != null;
+  const deletedTooltip = isDeleted
+    ? `Deleted${deletedByRaw != null ? ` by user #${deletedByRaw}` : ""}${
+        deletedAtRaw
+          ? ` on ${new Date(deletedAtRaw as string | Date).toLocaleString()}`
+          : ""
+      }`
+    : undefined;
+
+  // Task #634 — Delete is only available for draft estimates and only to
+  // roles the server will accept. We treat `internalStatus === 'draft'`
+  // as the canonical "still a draft" signal (the field rules /transition
+  // endpoint already drives forward). Soft-deleted rows shouldn't reach
+  // this list at all, but we still guard on deletedAt for safety.
+  const currentRole = readCurrentUserRole();
+  const canDelete =
+    currentRole != null &&
+    DELETE_ROLES.has(currentRole) &&
+    estimate.internalStatus === "draft" &&
+    !isDeleted;
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest(`/api/estimates/${estimate.id}`, "DELETE");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Estimate deleted",
+        description: `Estimate ${estimate.estimateNumber} was deleted.`,
+      });
+      setShowDeleteDialog(false);
+      // Task #634 — the deleted estimate may sit in any of these query
+      // caches. `predicate` catches list keys with query-string suffixes
+      // (e.g. `/api/estimates?includeDeleted=1`) that exact-match misses.
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = q.queryKey?.[0];
+          return (
+            typeof k === "string" &&
+            (k.startsWith("/api/estimates") ||
+              k.startsWith("/api/dashboard") ||
+              k.startsWith("/api/customers"))
+          );
+        },
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Couldn't delete estimate",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleViewPdf = () => {
     window.open(
@@ -78,17 +175,27 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
   };
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen(estimate.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(estimate.id);
-        }
-      }}
-      className="grid grid-cols-[2fr_1fr_1.5fr_1fr_auto] gap-4 items-center px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+      role={isDeleted ? undefined : "button"}
+      tabIndex={isDeleted ? -1 : 0}
+      onClick={isDeleted ? undefined : () => onOpen(estimate.id)}
+      onKeyDown={
+        isDeleted
+          ? undefined
+          : (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen(estimate.id);
+              }
+            }
+      }
+      className={`grid grid-cols-[2fr_1fr_1.5fr_1fr_auto] gap-4 items-center px-4 py-3 border-b border-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${
+        isDeleted
+          ? "bg-gray-50 opacity-60 italic line-through decoration-gray-400"
+          : "hover:bg-gray-50 cursor-pointer"
+      }`}
+      title={deletedTooltip}
       data-testid={`list-row-${estimate.id}`}
+      data-deleted={isDeleted ? "true" : undefined}
     >
       <div className="min-w-0">
         <div className="text-sm font-medium text-gray-900 truncate">{estimate.customerName}</div>
@@ -111,32 +218,89 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onOpen(estimate.id)}>Open</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onEdit(estimate.id)}>Edit</DropdownMenuItem>
             <DropdownMenuItem
-              onClick={handleViewPdf}
+              disabled={isDeleted}
+              onClick={() => !isDeleted && onOpen(estimate.id)}
+            >
+              Open
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={isDeleted}
+              onClick={() => !isDeleted && onEdit(estimate.id)}
+            >
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={isDeleted}
+              onClick={() => !isDeleted && handleViewPdf()}
               data-testid={`list-row-view-pdf-${estimate.id}`}
             >
               View PDF
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={handleDownloadPdf}
+              disabled={isDeleted}
+              onClick={() => !isDeleted && handleDownloadPdf()}
               data-testid={`list-row-download-pdf-${estimate.id}`}
             >
               Download PDF
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={!isExpired || !onResendClick}
-              title={isExpired ? "Resend to customer" : "Only available for expired estimates"}
+              disabled={isDeleted || !isExpired || !onResendClick}
+              title={
+                isDeleted
+                  ? "Estimate is deleted"
+                  : isExpired
+                  ? "Resend to customer"
+                  : "Only available for expired estimates"
+              }
               onClick={() => {
-                if (isExpired && onResendClick) onResendClick(estimate);
+                if (!isDeleted && isExpired && onResendClick) onResendClick(estimate);
               }}
               data-testid={`list-row-resend-${estimate.id}`}
             >
               Resend
             </DropdownMenuItem>
+            {canDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-red-600 focus:text-red-700 focus:bg-red-50"
+                  onClick={() => setShowDeleteDialog(true)}
+                  data-testid={`list-row-delete-${estimate.id}`}
+                >
+                  Delete
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <AlertDialogContent data-testid={`list-row-delete-dialog-${estimate.id}`}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this draft estimate?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Estimate <span className="font-medium">{estimate.estimateNumber}</span> for{" "}
+                <span className="font-medium">{estimate.customerName}</span> will be removed from
+                lists and dashboards. The row is preserved for audit and can be restored by a
+                super admin if needed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                disabled={deleteMutation.isPending}
+                onClick={(e) => {
+                  e.preventDefault();
+                  deleteMutation.mutate();
+                }}
+                data-testid={`list-row-delete-confirm-${estimate.id}`}
+              >
+                {deleteMutation.isPending ? "Deleting…" : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

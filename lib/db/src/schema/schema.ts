@@ -436,6 +436,12 @@ export const estimates = pgTable("estimates", {
   // number from the customer's controller setup this estimate is for.
   controllerLetter: text("controller_letter"),
   zoneNumber: integer("zone_number"),
+  // Task #634 — manager-facing soft delete for draft estimates. The
+  // row stays in the database (auditable) but every read path filters
+  // `deletedAt IS NULL` by default. Only super_admin can opt-in to
+  // see deleted rows via `?includeDeleted=1`.
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: integer("deleted_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -446,6 +452,11 @@ export const estimates = pgTable("estimates", {
   customerIdx: index("estimates_customer_idx").on(table.customerId),
   statusIdx: index("estimates_status_idx").on(table.status),
   internalStatusIdx: index("estimates_internal_status_idx").on(table.internalStatus),
+  // Task #634 — partial index keeps the active-row list endpoints O(log n)
+  // even after deleted rows accumulate.
+  activeCompanyStatusIdx: index("estimates_active_company_status_idx")
+    .on(table.companyId, table.status)
+    .where(sql`${table.deletedAt} IS NULL`),
 }));
 
 export const estimateItems = pgTable("estimate_items", {
