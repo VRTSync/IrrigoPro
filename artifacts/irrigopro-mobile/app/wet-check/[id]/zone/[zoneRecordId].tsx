@@ -2014,20 +2014,24 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
   },
   addFindingText: { fontSize: 14, fontWeight: "600" },
-  statusGroup: { gap: 6 },
+  // Task #612 facelift — bigger, glove-friendly primary actions.
+  // Each row is now a 56pt-tall tappable target with a heavier border
+  // when selected, mirroring the web ZoneScreen primary buttons.
+  statusGroup: { gap: 8 },
   statusOption: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    minHeight: 56,
   },
-  statusOptionText: { fontSize: 14, fontWeight: "600", flex: 1 },
+  statusOptionText: { fontSize: 16, fontWeight: "700", flex: 1 },
   radioDot: {
-    width: 16,
-    height: 16,
+    width: 18,
+    height: 18,
     borderRadius: 999,
     borderWidth: 2,
   },

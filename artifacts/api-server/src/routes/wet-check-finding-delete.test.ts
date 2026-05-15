@@ -137,7 +137,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       h.setDel(async () => true);
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/123`, { method: "DELETE" });
       assert.equal(res.status, 200);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.deepEqual(body, { ok: true });
     } finally {
       await h.close();
@@ -150,7 +150,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       h.setDel(async (id) => { throw new WetCheckFindingNotFoundError(id); });
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/999`, { method: "DELETE" });
       assert.equal(res.status, 404);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.equal(body.reason, "not_found");
       assert.match(String(body.message), /finding/i);
     } finally {
@@ -166,7 +166,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       });
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/55`, { method: "DELETE" });
       assert.equal(res.status, 409);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.equal(body.reason, "already_converted");
       assert.equal(body.target, "billing_sheet");
       assert.equal(body.targetId, 4242);
@@ -184,7 +184,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       });
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/55`, { method: "DELETE" });
       assert.equal(res.status, 409);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.equal(body.target, "estimate");
       assert.equal(body.targetId, 17);
       assert.match(String(body.message), /estimate #17/i);
@@ -201,7 +201,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       });
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/77`, { method: "DELETE" });
       assert.equal(res.status, 409);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.equal(body.reason, "wet_check_not_editable");
       assert.equal(body.wetCheckStatus, "submitted");
       assert.match(String(body.message), /submitted/);
@@ -218,7 +218,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       });
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/12`, { method: "DELETE" });
       assert.equal(res.status, 409);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.match(String(body.message), /approved/);
     } finally {
       await h.close();
@@ -234,7 +234,7 @@ describe("DELETE /api/wet-checks/findings/:id — Task #518 typed-error mapping"
       });
       const res = await fetch(`${h.baseUrl}/api/wet-checks/findings/12`, { method: "DELETE" });
       assert.equal(res.status, 400);
-      const body = await res.json();
+      const body = (await res.json()) as { ok?: boolean; reason?: string; message?: string; target?: string; targetId?: number; wetCheckStatus?: string };
       assert.equal(body.message, "Couldn't delete finding — please retry");
       assert.equal(/Failed query/.test(JSON.stringify(body)), false);
       // The unexpected error should still be logged server-side.

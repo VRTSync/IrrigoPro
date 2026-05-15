@@ -140,6 +140,7 @@ import { db } from "./db";
 import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
+import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
 import { computeLifecycleStatus } from "./lifecycle";
 import { ObjectStorageService } from "./objectStorage";
 
@@ -6391,10 +6392,12 @@ export class DatabaseStorage implements IStorage {
       if (!p) throw new Error(`Part ${patch.partId} not found in this company`);
       next.partName = p.name;
       next.partPrice = p.price;
-      // Task #464 — assigning a part always wins over the labor-only flag
-      // so the two states can never both be set on a finding.
-      next.noPartNeeded = false;
     }
+    // Task #464 / #612 — enforce the two-state invariant via the
+    // extracted pure helper. The helper is covered by
+    // wet-check-finding-invariants.test.ts so future refactors of this
+    // storage method can't silently regress the invariant.
+    applyNoPartNeededInvariant(patch, next);
     if (patch.issueType) next.issueGroup = deriveIssueGroup(patch.issueType);
     const [updated] = await db.update(wetCheckFindings).set(next).where(eq(wetCheckFindings.id, id)).returning();
     return updated;

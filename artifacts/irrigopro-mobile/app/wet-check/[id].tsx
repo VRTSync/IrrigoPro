@@ -320,18 +320,24 @@ export default function WetCheckDetailScreen() {
   }, [wcd]);
 
   const counts = useMemo(() => {
-    if (!wcd) return { ok: 0, issues: 0, na: 0, notChecked: 0 };
+    if (!wcd) return { ok: 0, issues: 0, na: 0, notChecked: 0, markedComplete: 0 };
     let ok = 0;
     let issues = 0;
     let na = 0;
     let notChecked = 0;
+    let markedComplete = 0;
     for (const z of wcd.zoneRecords) {
       if (z.status === "checked_ok") ok++;
-      else if (z.status === "checked_with_issues") issues++;
-      else if (z.status === "not_applicable") na++;
+      else if (z.status === "checked_with_issues") {
+        issues++;
+        // Task #612 facelift — mirror the web summary header so the tech
+        // can see at a glance how many Needs Work zones have already
+        // been reviewed and confirmed (Mark Zone Complete pressed).
+        if (z.markedCompleteAt) markedComplete++;
+      } else if (z.status === "not_applicable") na++;
       else notChecked++;
     }
-    return { ok, issues, na, notChecked };
+    return { ok, issues, na, notChecked, markedComplete };
   }, [wcd]);
 
   const prefetchZone = useCallback(() => {
@@ -784,7 +790,7 @@ function ChipRow({
   counts,
   colors,
 }: {
-  counts: { ok: number; issues: number; na: number; notChecked: number };
+  counts: { ok: number; issues: number; na: number; notChecked: number; markedComplete?: number };
   colors: ReturnType<typeof useColors>;
 }) {
   return (
@@ -792,6 +798,9 @@ function ChipRow({
       <Chip label={`Ran OK · ${counts.ok}`} bg="#16a34a" fg="#ffffff" />
       <Chip label={`Needs work · ${counts.issues}`} bg="#dc2626" fg="#ffffff" />
       <Chip label={`N/A · ${counts.na}`} bg="#9ca3af" fg="#ffffff" />
+      {(counts.markedComplete ?? 0) > 0 ? (
+        <Chip label={`Marked complete · ${counts.markedComplete}`} bg="#dbeafe" fg="#1e3a8a" />
+      ) : null}
       {counts.notChecked > 0 ? (
         <Chip
           label={`Not checked · ${counts.notChecked}`}
@@ -824,6 +833,11 @@ function ControllerSection({
   colors: ReturnType<typeof useColors>;
   onZonePress: (zone: WetCheckZoneRecord) => void;
 }) {
+  // Task #612 — surface a per-tile finding count so a tech scanning
+  // the grid can see at a glance which zones have work attached
+  // without having to open each one.
+  const findingCountForZone = (z: WetCheckZoneRecord): number =>
+    Array.isArray(z.findings) ? z.findings.length : 0;
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
@@ -881,6 +895,17 @@ function ControllerSection({
                         <Feather name="camera" size={8} color="#1f2937" />
                         <Text style={styles.photoCountDotText}>
                           {photoCountByZoneId.get(z.id)}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {findingCountForZone(z) > 0 ? (
+                      <View
+                        style={styles.findingCountDot}
+                        accessibilityLabel={`${findingCountForZone(z)} work item${findingCountForZone(z) === 1 ? "" : "s"}`}
+                      >
+                        <Feather name="tool" size={8} color="#ffffff" />
+                        <Text style={styles.findingCountDotText}>
+                          {findingCountForZone(z)}
                         </Text>
                       </View>
                     ) : null}
@@ -1039,6 +1064,30 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "700",
     color: "#1f2937",
+  },
+  // Task #612 — work-item count dot, top-left of the tile so it
+  // doesn't collide with the marked-complete dot (top-right) or the
+  // photo dot (bottom-right).
+  findingCountDot: {
+    position: "absolute",
+    top: -4,
+    left: -4,
+    minWidth: 18,
+    height: 14,
+    borderRadius: 999,
+    paddingHorizontal: 3,
+    backgroundColor: "#b91c1c",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 1,
+    borderWidth: 1,
+    borderColor: "#ffffff",
+  },
+  findingCountDotText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#ffffff",
   },
   emptyCard: {
     borderWidth: StyleSheet.hairlineWidth,

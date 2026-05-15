@@ -651,39 +651,42 @@ export function ZoneScreen({
         <CardContent className="space-y-4 pt-4">
           {!readOnly && (
             <>
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+              {/* Task #612 facelift — taller, bolder primary actions
+                  so a tech with gloves can hit them on a small phone
+                  screen. Selected state gets a saturated tint + ring
+                  so the current call is obvious without reading the
+                  pill above. */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <Button
                   variant={zoneRecord?.status === "checked_ok" ? "default" : "outline"}
-                  className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "checked_ok" ? "bg-green-600" : ""}`}
+                  className={`min-h-[64px] px-2 text-sm sm:text-base font-semibold flex-col gap-1 shadow-sm ${zoneRecord?.status === "checked_ok" ? "bg-green-600 hover:bg-green-700 text-white ring-2 ring-green-700 ring-offset-1" : "hover:bg-green-50 active:bg-green-100"}`}
                   onClick={() => handleStatusClick("checked_ok")}
                   disabled={setStatus.isPending || reverting}
                   data-testid="btn-zone-yes"
                 >
-                  <CheckCircle2 className="w-4 h-4 mr-1 shrink-0" />
-                  <span className="sm:hidden">OK</span>
-                  <span className="hidden sm:inline">Ran OK</span>
+                  <CheckCircle2 className="w-6 h-6 shrink-0" />
+                  <span>Ran OK</span>
                 </Button>
                 <Button
                   variant={zoneRecord?.status === "checked_with_issues" ? "default" : "outline"}
-                  className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "checked_with_issues" ? "bg-red-600" : ""}`}
+                  className={`min-h-[64px] px-2 text-sm sm:text-base font-semibold flex-col gap-1 shadow-sm ${zoneRecord?.status === "checked_with_issues" ? "bg-red-600 hover:bg-red-700 text-white ring-2 ring-red-700 ring-offset-1" : "hover:bg-red-50 active:bg-red-100"}`}
                   onClick={() => handleStatusClick("checked_with_issues")}
                   disabled={setStatus.isPending || reverting}
                   data-testid="btn-zone-no"
                 >
-                  <Wrench className="w-4 h-4 mr-1 shrink-0" />
-                  <span className="sm:hidden">Issue</span>
-                  <span className="hidden sm:inline">Needs Work</span>
+                  <Wrench className="w-6 h-6 shrink-0" />
+                  <span>Needs Work</span>
                 </Button>
                 <Button
                   variant={zoneRecord?.status === "not_applicable" ? "default" : "outline"}
-                  className={`min-h-[48px] px-2 text-xs sm:text-sm ${zoneRecord?.status === "not_applicable" ? "bg-gray-500" : ""}`}
+                  className={`min-h-[64px] px-2 text-sm sm:text-base font-semibold flex-col gap-1 shadow-sm ${zoneRecord?.status === "not_applicable" ? "bg-gray-500 hover:bg-gray-600 text-white ring-2 ring-gray-600 ring-offset-1" : "hover:bg-gray-50 active:bg-gray-100"}`}
                   onClick={() => handleStatusClick("not_applicable")}
                   disabled={setStatus.isPending || reverting}
                   data-testid="btn-zone-na"
                 >
-                  <MinusCircle className="w-4 h-4 mr-1 shrink-0" />
+                  <MinusCircle className="w-6 h-6 shrink-0" />
                   <span className="sm:hidden">N/A</span>
-                  <span className="hidden sm:inline">Skip / Not Applicable</span>
+                  <span className="hidden sm:inline">Skip · N/A</span>
                 </Button>
               </div>
               {(!zoneRecord || zoneRecord.status === "not_checked") && (

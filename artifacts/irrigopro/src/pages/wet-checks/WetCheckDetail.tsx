@@ -574,6 +574,49 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         </CardContent>
       </Card>
 
+      {(() => {
+        // Task #612 facelift — summary header above the controllers grid
+        // so techs can see the state of the whole wet check at a glance
+        // instead of mentally summing tile colors. Counts mirror the
+        // mobile ChipRow.
+        let ok = 0, issues = 0, na = 0, notChecked = 0, markedComplete = 0;
+        for (const zr of wcZoneRecords) {
+          if (zr.status === "checked_ok") ok++;
+          else if (zr.status === "checked_with_issues") {
+            issues++;
+            if (zr.markedCompleteAt) markedComplete++;
+          } else if (zr.status === "not_applicable") na++;
+          else notChecked++;
+        }
+        return (
+          <div
+            className="flex flex-wrap items-center gap-1.5 sm:gap-2"
+            data-testid="wet-check-summary-counts"
+            aria-label={`Wet check summary: ${ok} ran OK, ${issues} need work, ${na} N/A, ${notChecked} not checked`}
+          >
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-600 text-white" data-testid="summary-ok">
+              ✓ Ran OK · {ok}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-600 text-white" data-testid="summary-issues">
+              ! Needs work · {issues}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-400 text-white" data-testid="summary-na">
+              N/A · {na}
+            </span>
+            {notChecked > 0 && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-900 border border-amber-300" data-testid="summary-not-checked">
+                Not checked · {notChecked}
+              </span>
+            )}
+            {markedComplete > 0 && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-900 border border-blue-300" data-testid="summary-marked-complete">
+                ✓ Marked complete · {markedComplete}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       <h2 className="text-lg font-semibold">Controllers</h2>
       <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {controllers.map(c => {
@@ -583,6 +626,13 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
           const na = recs.filter(r => r.status === "not_applicable").length;
           const photoCount = recs.reduce(
             (n, r) => n + countZonePhotos(wc, r),
+            0,
+          );
+          // Task #612 — surface the total work items on the controller
+          // tile so a tech scanning the grid sees which controllers
+          // have findings attached before drilling in.
+          const findingCount = recs.reduce(
+            (n, r) => n + asArray(r.findings).length,
             0,
           );
           return (
@@ -602,6 +652,16 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                   <span className="text-green-700">✓ {ok}</span>
                   <span className="text-red-700">! {issues}</span>
                   <span className="text-gray-500">N/A {na}</span>
+                  {findingCount > 0 && (
+                    <span
+                      className="inline-flex items-center gap-0.5 text-red-700 font-medium"
+                      data-testid={`controller-${c.controllerLetter}-finding-count`}
+                      aria-label={`${findingCount} work item${findingCount === 1 ? "" : "s"} on this controller`}
+                    >
+                      <Wrench className="w-3 h-3" aria-hidden />
+                      {findingCount}
+                    </span>
+                  )}
                   {photoCount > 0 && (
                     <span
                       className="inline-flex items-center gap-0.5 text-gray-700"
