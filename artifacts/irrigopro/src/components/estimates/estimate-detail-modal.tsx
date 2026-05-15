@@ -329,6 +329,23 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           <DialogTitle className="flex items-center space-x-2 text-lg sm:text-xl">
             <FileText className="w-5 h-5" />
             <span>Estimate Details</span>
+            {/* Task #637 — headline lifecycle badge in the modal
+                header, matching the list rows and board columns so
+                all three surfaces agree on the single status. */}
+            {estimate ? (
+              <span className="ml-2">
+                <EstimateListStatusBadge
+                  status={
+                    (estimate.lifecycleStatus as LifecycleStatus | undefined) ??
+                    computeLifecycleStatus({
+                      status: estimate.status,
+                      internalStatus: estimate.internalStatus,
+                      estimateDate: estimate.estimateDate ?? null,
+                    })
+                  }
+                />
+              </span>
+            ) : null}
           </DialogTitle>
         </DialogHeader>
 
