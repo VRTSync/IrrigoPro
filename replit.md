@@ -311,6 +311,25 @@ Caveats / known limits:
 - Force-upgrade relies on an existing `VITE_BUILD_HASH` build-time
   env var; environments that don't set it will silently no-op.
 
+## Estimate system
+
+The estimate flow has two independent status axes (`status` =
+customer response, `internalStatus` = internal review stage) plus a
+single computed `lifecycleStatus` bucket. The UI groups and badges
+should always switch on the computed lifecycle; behavior gates may
+still check `status` directly. **Always check
+[`docs/estimate-system.md`](docs/estimate-system.md) before editing
+anything under `routes.ts` estimate handlers or
+`components/estimates/**`** — it covers the lifecycle diagram, the
+endpoint table, the role × action matrix, and the looks-similar-
+but-isn't pitfalls (duplicate `POST` vs `PATCH` approve/reject,
+`/transition` vs `/submit-for-review`, the dual customer-token
+paths). The wizard's internals (3 state stores, 2×2 submission
+matrix, `irrigopro:estimate-wizard-draft:v1:` autosave contract) are
+in [`docs/estimate-wizard.md`](docs/estimate-wizard.md). The deep
+audit of known gaps is in
+[`docs/audits/estimate-handoffs-2026-05.md`](docs/audits/estimate-handoffs-2026-05.md).
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

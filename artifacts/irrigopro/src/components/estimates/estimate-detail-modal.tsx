@@ -277,10 +277,47 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     });
   };
 
+  // Task #637 — these two helpers split the raw `status` /
+  // `internalStatus` enums into the user-facing "Review stage" and
+  // "Customer response" axes. The headline badge is always the
+  // computed `lifecycleStatus`; these labels are the secondary
+  // detail row below it. See docs/estimate-system.md §1.
+  const reviewStageLabel = (internalStatus: string | null | undefined): string => {
+    switch (internalStatus) {
+      case 'draft':
+        return 'Draft';
+      case 'pending_approval':
+        return 'Awaiting review';
+      case 'approved_internal':
+        return 'Ready to send';
+      case 'sent_to_customer':
+        return 'Sent to customer';
+      default:
+        return internalStatus ? internalStatus : '—';
+    }
+  };
+
+  const customerResponseLabel = (status: string | null | undefined): string => {
+    switch (status) {
+      case 'pending':
+        return 'Awaiting reply';
+      case 'approved':
+        return 'Approved';
+      case 'rejected':
+        return 'Rejected';
+      case 'expired':
+        return 'Expired';
+      case 'converted_to_work_order':
+        return 'Approved (converted)';
+      default:
+        return status ? status : '—';
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Pending Review</Badge>;
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Awaiting reply</Badge>;
       case 'approved':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Approved</Badge>;
       case 'rejected':
@@ -386,6 +423,25 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       ) : (
                         getStatusBadge(estimate.status)
                       )}
+                    </div>
+                    {/* Task #637 — secondary detail row exposing the two
+                        underlying axes (internal review track + customer
+                        response). The badge above is the combined
+                        lifecycle headline; these labels help managers
+                        understand which side moved last. */}
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-gray-600">
+                      <div>
+                        <span className="font-medium text-gray-500">Review stage:</span>{' '}
+                        <span data-testid="status-review-stage">
+                          {reviewStageLabel(estimate.internalStatus)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-500">Customer response:</span>{' '}
+                        <span data-testid="status-customer-response">
+                          {customerResponseLabel(estimate.status)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div>

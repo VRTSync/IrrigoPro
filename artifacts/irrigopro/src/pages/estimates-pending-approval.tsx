@@ -117,7 +117,7 @@ export default function EstimatesPendingApproval() {
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <ClipboardList className="w-4 h-4 text-blue-600" />
-            <CardTitle className="text-base">Awaiting internal review</CardTitle>
+            <CardTitle className="text-base">Review stage: Awaiting review</CardTitle>
             {pending.length > 0 && (
               <Badge variant="secondary" className="ml-auto">
                 {pending.length}
@@ -181,7 +181,7 @@ export default function EstimatesPendingApproval() {
                           </Button>
                           {est.internalStatus === "approved_internal" ? (
                             <Badge className="bg-green-100 text-green-800 border-green-200">
-                              Internally approved
+                              Ready to send
                             </Badge>
                           ) : (
                             <Button
