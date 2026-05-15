@@ -558,6 +558,15 @@ export interface IStorage {
 
   // Invoices - monthly consolidated billing
   getInvoices(): Promise<Invoice[]>;
+  // Task #662 — company-scoped "This Month Billed" rollup. Joins
+  // invoices to customers so the result honors customers.companyId
+  // (the invoices table itself has no companyId column). Excludes
+  // draft and cancelled invoices. Pass `null` for the global view
+  // (super_admin). `now` is injectable so tests can pin the month.
+  getThisMonthBilledForCompany(
+    companyId: number | null,
+    now?: Date,
+  ): Promise<{ amount: number; invoiceCount: number; month: string }>;
   getInvoiceById(id: number): Promise<InvoiceWithItems | undefined>;
   createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice>;
   updateInvoice(id: number, invoice: Partial<InsertInvoice> & { invoiceNumber?: string }): Promise<Invoice | undefined>;
@@ -4825,6 +4834,50 @@ export class DatabaseStorage implements IStorage {
 
   async getInvoices(): Promise<Invoice[]> {
     return await db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  }
+
+  // Task #662 — company-scoped "This Month Billed" rollup. Sums
+  // invoices.total_amount for invoices created in the current
+  // calendar month, joining customers so we can filter on
+  // customers.company_id (invoices itself has no company_id column).
+  // Excludes draft and cancelled invoices. Pass `null` to get the
+  // global view (super_admin).
+  async getThisMonthBilledForCompany(
+    companyId: number | null,
+    now: Date = new Date(),
+  ): Promise<{ amount: number; invoiceCount: number; month: string }> {
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const monthLabel = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+    const conditions = [
+      gte(invoices.createdAt, monthStart),
+      sql`${invoices.createdAt} < ${nextMonthStart}`,
+      sql`${invoices.status} NOT IN ('draft','cancelled')`,
+    ];
+    if (companyId !== null) {
+      conditions.push(eq(customers.companyId, companyId));
+    }
+
+    const rows = await db
+      .select({
+        total: sql<string>`COALESCE(SUM(${invoices.totalAmount}), 0)`,
+        count: sql<string>`COUNT(${invoices.id})`,
+      })
+      .from(invoices)
+      .innerJoin(customers, eq(customers.id, invoices.customerId))
+      .where(and(...conditions));
+
+    const row = rows[0];
+    const amountRaw = row?.total ?? "0";
+    const countRaw = row?.count ?? "0";
+    const amount = Number.parseFloat(String(amountRaw));
+    const invoiceCount = Number.parseInt(String(countRaw), 10);
+    return {
+      amount: Number.isFinite(amount) ? amount : 0,
+      invoiceCount: Number.isFinite(invoiceCount) ? invoiceCount : 0,
+      month: monthLabel,
+    };
   }
 
   async createInvoice(invoice: InsertInvoice & { invoiceNumber?: string }): Promise<Invoice> {

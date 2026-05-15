@@ -127,6 +127,18 @@ export default function AdminDashboard() {
     },
     enabled: !!user?.companyId,
   });
+  // Task #662 — company-scoped "This Month Billed" rollup. The
+  // legacy approach of summing /api/invoices client-side leaked
+  // totals across tenants (that endpoint is intentionally unscoped).
+  const thisMonthBilledQ = useQuery<{ amount: number; invoiceCount: number; month: string }>({
+    queryKey: ["/api/dashboard/this-month-billed"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/this-month-billed", { credentials: "include" });
+      if (!res.ok) throw new Error("this-month-billed failed");
+      return res.json();
+    },
+    enabled: !!user?.companyId,
+  });
   const techsQ = useArrayQuery<FieldTech>({ queryKey: ["/api/users/field-techs"], enabled: !!user?.companyId });
 
   // Company profile (for logo + name in header)
@@ -230,18 +242,14 @@ export default function AdminDashboard() {
       totalUnbilled += toNumber(r.totalUnbilled);
       currentMonth += toNumber(r.currentMonthUnbilled);
     }
-    // "This Month Billed" = sum of invoice totals created this month
-    const invs = invoicesQ.data ?? [];
-    const now = new Date();
-    const m = now.getMonth();
-    const y = now.getFullYear();
-    let thisMonthBilled = 0;
-    for (const i of invs) {
-      const d = new Date(i.createdAt);
-      if (d.getMonth() === m && d.getFullYear() === y) thisMonthBilled += toNumber(i.totalAmount);
-    }
+    // Task #662 — "This Month Billed" comes from a company-scoped
+    // server rollup (see /api/dashboard/this-month-billed). The
+    // legacy approach of summing /api/invoices client-side leaked
+    // totals across tenants (that endpoint is intentionally unscoped
+    // and only safe for customer-bounded callers).
+    const thisMonthBilled = toNumber(thisMonthBilledQ.data?.amount ?? 0);
     return { approved, unapproved, totalUnbilled, currentMonth, thisMonthBilled };
-  }, [billingPreviewQ.data, invoicesQ.data]);
+  }, [billingPreviewQ.data, thisMonthBilledQ.data]);
 
   // Attention rows
   const attentionRows: AttentionRow[] = useMemo(() => {
@@ -513,7 +521,7 @@ export default function AdminDashboard() {
             unapprovedUnbilled={financial.unapproved}
             totalUnbilled={financial.totalUnbilled}
             thisMonthBilled={financial.thisMonthBilled}
-            isLoading={billingPreviewQ.isLoading}
+            isLoading={billingPreviewQ.isLoading || thisMonthBilledQ.isLoading}
           />
           <TopLists
             customers={topCustomers}

@@ -52,6 +52,13 @@ Production irrigation company management app: estimates → work orders → wet 
 
 - Express 5 rejects inline regex route params — never use `/:param(\d+)` or `/:param(*)` patterns
 - `routes.ts` is a massive legacy file; build takes ~600ms via esbuild
+- `GET /api/invoices` is intentionally **not company-scoped** — it is
+  only safe for customer-bounded callers (`?customerId=`) or for the
+  paginated all-tenants list (super_admin contexts). Never use it to
+  build a dashboard rollup. The canonical "This Month Billed" tile
+  rollup is `GET /api/dashboard/this-month-billed` (see Task #662),
+  which joins `invoices` ⨝ `customers` to scope by
+  `customers.companyId` and excludes `draft` / `cancelled`.
 
 ## Originals Storage Backfill
 

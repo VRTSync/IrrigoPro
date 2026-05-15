@@ -9404,6 +9404,59 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     }
   });
 
+  // Task #662 — company-scoped "This Month Billed" rollup for the
+  // Company Admin dashboard's Financial Exposure tile. The legacy
+  // GET /api/invoices is intentionally unscoped (it's only safe for
+  // customer-bounded callers); using it for a dashboard rollup
+  // leaked totals across tenants. This endpoint is the canonical
+  // source for the tile.
+  app.get("/api/dashboard/this-month-billed", requireAuthentication, async (req: any, res) => {
+    try {
+      const role = req.authenticatedUserRole as string | undefined;
+      const callerCompanyId = (req.authenticatedUserCompanyId as number | null | undefined) ?? null;
+
+      // Monetary rollup — field techs (and any unrecognized role) are
+      // denied. Pricing visibility is suppressed for field_tech across
+      // the rest of the app; this endpoint must match.
+      const ROLLUP_ROLES = new Set([
+        "super_admin",
+        "company_admin",
+        "billing_manager",
+        "irrigation_manager",
+      ]);
+      if (!role || !ROLLUP_ROLES.has(role)) {
+        res.status(403).json({ message: "Forbidden" });
+        return;
+      }
+
+      // super_admin: global by default, or `?companyId=N` to scope.
+      // Everyone else: forced to their own company id; query param is
+      // ignored (do not let a non-super-admin pick someone else's totals).
+      let scopeCompanyId: number | null;
+      if (role === "super_admin") {
+        const q = req.query.companyId;
+        if (q != null && q !== "") {
+          const parsed = parseInt(String(q), 10);
+          scopeCompanyId = Number.isFinite(parsed) ? parsed : null;
+        } else {
+          scopeCompanyId = null;
+        }
+      } else {
+        if (callerCompanyId == null) {
+          res.status(403).json({ message: "User is not associated with a company" });
+          return;
+        }
+        scopeCompanyId = callerCompanyId;
+      }
+
+      const rollup = await storage.getThisMonthBilledForCompany(scopeCompanyId);
+      res.json(rollup);
+    } catch (error) {
+      console.error("Error fetching this-month-billed rollup:", error);
+      res.status(500).json({ message: "Failed to fetch this-month-billed rollup" });
+    }
+  });
+
   // Invoice routes (placeholder endpoints)
   app.get("/api/invoices", async (req, res) => {
     try {
