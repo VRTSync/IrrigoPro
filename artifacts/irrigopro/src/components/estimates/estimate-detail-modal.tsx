@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, authedPdfUrl } from "@/lib/queryClient";
@@ -16,6 +15,11 @@ import {
   type SendEstimatePayload,
 } from "@/components/estimates/send-estimate-dialog";
 import { sendEstimateEmail } from "@/lib/email";
+import {
+  computeLifecycleStatus,
+  type LifecycleStatus,
+} from "@/lib/lifecycle";
+import { EstimateListStatusBadge } from "@/components/estimates/list/estimate-list-status-badge";
 
 interface EstimateDetailModalProps {
   open: boolean;
@@ -280,8 +284,10 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   // Task #637 — these two helpers split the raw `status` /
   // `internalStatus` enums into the user-facing "Review stage" and
   // "Customer response" axes. The headline badge is always the
-  // computed `lifecycleStatus`; these labels are the secondary
-  // detail row below it. See docs/estimate-system.md §1.
+  // computed `lifecycleStatus` (rendered via EstimateListStatusBadge);
+  // these labels are the secondary detail row below it. Raw enum
+  // values never reach the screen — unknown values fall through to
+  // "—". See docs/estimate-system.md §1.
   const reviewStageLabel = (internalStatus: string | null | undefined): string => {
     switch (internalStatus) {
       case 'draft':
@@ -291,9 +297,9 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       case 'approved_internal':
         return 'Ready to send';
       case 'sent_to_customer':
-        return 'Sent to customer';
+        return 'Sent';
       default:
-        return internalStatus ? internalStatus : '—';
+        return '—';
     }
   };
 
@@ -310,22 +316,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       case 'converted_to_work_order':
         return 'Approved (converted)';
       default:
-        return status ? status : '—';
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Awaiting reply</Badge>;
-      case 'approved':
-        return <Badge className="bg-green-100 text-green-800 border-green-200">Approved</Badge>;
-      case 'rejected':
-        return <Badge className="bg-red-100 text-red-800 border-red-200">Rejected</Badge>;
-      case 'converted_to_work_order':
-        return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Converted to Work Order</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+        return '—';
     }
   };
 
@@ -405,30 +396,32 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Status:</span>
-                    <div className="mt-1">
-                      {estimate.status === 'approved' ? (
-                        <div className="flex items-center space-x-2">
-                          <Badge className="bg-green-100 text-green-800 border-green-200 text-sm font-semibold px-3 py-1">
-                            ✓ Approved
-                          </Badge>
-                          <span className="text-green-600 text-sm font-medium">Customer Approved!</span>
-                        </div>
-                      ) : estimate.status === 'converted_to_work_order' ? (
-                        <div className="flex items-center space-x-2">
-                          <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-sm font-semibold px-3 py-1">
-                            ⚡ Converted
-                          </Badge>
-                          <span className="text-purple-600 text-sm font-medium">Work Order Active!</span>
-                        </div>
-                      ) : (
-                        getStatusBadge(estimate.status)
+                    {/* Task #637 — the headline badge is now the
+                        computed lifecycle bucket, matching the list
+                        rows and board columns so all three surfaces
+                        agree. The accent line under it (Customer
+                        Approved! / Work Order Active!) is kept for
+                        the two terminal-success cases so the screen
+                        still reads as celebratory. The two axes
+                        below expose what moved last. */}
+                    <div className="mt-1 flex items-center space-x-2">
+                      <EstimateListStatusBadge
+                        status={
+                          (estimate.lifecycleStatus as LifecycleStatus | undefined) ??
+                          computeLifecycleStatus({
+                            status: estimate.status,
+                            internalStatus: estimate.internalStatus,
+                            estimateDate: estimate.estimateDate ?? null,
+                          })
+                        }
+                      />
+                      {estimate.status === 'approved' && (
+                        <span className="text-green-600 text-sm font-medium">Customer Approved!</span>
+                      )}
+                      {estimate.status === 'converted_to_work_order' && (
+                        <span className="text-purple-600 text-sm font-medium">Work Order Active!</span>
                       )}
                     </div>
-                    {/* Task #637 — secondary detail row exposing the two
-                        underlying axes (internal review track + customer
-                        response). The badge above is the combined
-                        lifecycle headline; these labels help managers
-                        understand which side moved last. */}
                     <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-gray-600">
                       <div>
                         <span className="font-medium text-gray-500">Review stage:</span>{' '}

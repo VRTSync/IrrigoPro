@@ -117,28 +117,34 @@ axes can never appear to disagree.
 
 All routes live in `routes.ts` unless noted. Line numbers are May 2026.
 
-| Method   | Path                                                | File / Line                       | Auth                                | Notes                                                                          |
-| -------- | --------------------------------------------------- | --------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
-| `GET`    | `/api/estimates`                                    | `routes.ts:7426`                  | **none**                            | List. ⚠ unauthenticated, leaks `approvalToken` — see audit F-01.               |
-| `GET`    | `/api/estimates/pending-approval`                   | `routes.ts:7440`                  | auth + approval-access              | Powers the billing-manager queue.                                              |
-| `GET`    | `/api/estimates/:id`                                | `routes.ts:7464`                  | **none**                            | Detail. ⚠ unauthenticated — see audit F-01.                                    |
-| `POST`   | `/api/estimates`                                    | `estimate-routes.ts:101`          | auth                                | Create. Wizard's only insert path.                                             |
-| `PUT`    | `/api/estimates/:id`                                | `estimate-routes.ts:306`          | auth                                | Content update only. ⚠ no company/role scope — audit F-02.                     |
-| `POST`   | `/api/estimates/:id/submit-for-review`              | `estimate-routes.ts:319`          | auth                                | **Atomic** update + transition draft → pending_approval. Wizard "Save & submit" path. |
-| `DELETE` | `/api/estimates/:id`                                | `routes.ts:7486`                  | auth                                | ⚠ no role/company scope — audit F-03.                                          |
-| `PATCH`  | `/api/estimates/:id/internal-approve`               | `routes.ts:8971`                  | auth + approval-access              | pending_approval → approved_internal.                                          |
-| `POST`   | `/api/estimates/:id/send-approval-email`            | `routes.ts:9259`                  | auth + approval-access              | Sends customer link, transitions to sent_to_customer, mints `approvalToken`.   |
-| `POST`   | `/api/estimates/:id/transition`                     | `routes.ts:9311`                  | auth + action-specific role        | Legacy multi-action handler (`action=submit_for_review` · `send_to_customer` · `resend`). Role gate is per-action: `submit_for_review`/`resend` require irrigation_manager+, `send_to_customer` requires billing_manager+. |
-| `PATCH`  | `/api/estimates/:id/approve`                        | `routes.ts:9008`                  | auth + approval-access              | Manager approve. Guards `status === pending`, creates work order.              |
-| `PATCH`  | `/api/estimates/:id/reject`                         | `routes.ts:9067`                  | auth + approval-access              | Manager reject. Guards `status === pending`.                                   |
-| `POST`   | `/api/estimates/:id/approve`                        | `routes.ts:8890`                  | auth + approval-access              | ⚠ Legacy duplicate of PATCH /approve. Diverges (no work-order creation, no status guard) — audit F-04. |
-| `POST`   | `/api/estimates/:id/reject`                         | `routes.ts:8929`                  | auth + approval-access              | ⚠ Legacy duplicate of PATCH /reject — audit F-04.                              |
-| `GET`    | `/api/estimates/approve-via-token/:token`           | `routes.ts:9405`                  | **token only**                      | Customer approval click. ⚠ token never revoked, O(N) scan — audit F-06.        |
-| `GET`    | `/api/estimates/reject-via-token/:token`            | `routes.ts:9527`                  | **token only**                      | Customer reject click. ⚠ no expiry check — audit F-06.                         |
-| `POST`   | `/api/estimates/:id/convert-to-work-order`          | `routes.ts:9619`                  | auth                                | Creates a work order. ⚠ no role gate, races on duplicate — audit F-05.         |
-| `POST`   | `/api/estimates/:id/pdf`                            | `routes.ts:11897`                 | auth + pdf-access                   | Generate / refresh PDF.                                                        |
-| `GET`    | `/api/estimates/:id/pdf`                            | `routes.ts:11898`                 | auth + pdf-access                   | Fetch latest PDF.                                                              |
-| `POST`   | `/api/estimates/:id/email`                          | `routes.ts:7506`                  | auth + approval-access              | Send approval email with optional `to` / `cc` / `bcc` / `note` overrides. Funnels through `_sendEstimateApprovalEmailFlow`, so it shares token-generation + status-transition logic with `/send-approval-email` and `/transition?action=send_to_customer`. Called by `lib/email.ts:sendEstimateEmail`. (Task #616 turned the stub flagged in audit F-15 into the real path.) |
+The **Canonical?** column flags which route to call from new code.
+**✓** = use this one. **legacy** = still wired up for the existing
+client/UI but slated for retirement; do not call from new code. The
+audit-listed gaps still need to be closed before the legacy rows
+can actually be removed — see audit F-04 / F-15.
+
+| Method   | Path                                                | File / Line                       | Auth                                | Canonical? | Notes                                                                          |
+| -------- | --------------------------------------------------- | --------------------------------- | ----------------------------------- | :--------: | ------------------------------------------------------------------------------ |
+| `GET`    | `/api/estimates`                                    | `routes.ts:7426`                  | **none**                            | ✓          | List. ⚠ unauthenticated, leaks `approvalToken` — see audit F-01.               |
+| `GET`    | `/api/estimates/pending-approval`                   | `routes.ts:7440`                  | auth + approval-access              | ✓          | Powers the billing-manager queue.                                              |
+| `GET`    | `/api/estimates/:id`                                | `routes.ts:7464`                  | **none**                            | ✓          | Detail. ⚠ unauthenticated — see audit F-01.                                    |
+| `POST`   | `/api/estimates`                                    | `estimate-routes.ts:101`          | auth                                | ✓          | Create. Wizard's only insert path.                                             |
+| `PUT`    | `/api/estimates/:id`                                | `estimate-routes.ts:306`          | auth                                | ✓          | Content update only. ⚠ no company/role scope — audit F-02.                     |
+| `POST`   | `/api/estimates/:id/submit-for-review`              | `estimate-routes.ts:319`          | auth                                | ✓          | **Atomic** update + transition draft → pending_approval. Wizard "Save & submit" path. |
+| `DELETE` | `/api/estimates/:id`                                | `routes.ts:7486`                  | auth                                | ✓          | ⚠ no role/company scope — audit F-03.                                          |
+| `PATCH`  | `/api/estimates/:id/internal-approve`               | `routes.ts:8971`                  | auth + approval-access              | ✓          | pending_approval → approved_internal.                                          |
+| `POST`   | `/api/estimates/:id/send-approval-email`            | `routes.ts:9259`                  | auth + approval-access              | ✓          | Sends customer link, transitions to sent_to_customer, mints `approvalToken`.   |
+| `POST`   | `/api/estimates/:id/transition`                     | `routes.ts:9311`                  | auth + action-specific role         | legacy     | Multi-action handler (`action=submit_for_review` · `send_to_customer` · `resend`). Role gate is per-action: `submit_for_review`/`resend` require irrigation_manager+, `send_to_customer` requires billing_manager+. Prefer the dedicated single-purpose routes above for new code. |
+| `PATCH`  | `/api/estimates/:id/approve`                        | `routes.ts:9008`                  | auth + approval-access              | ✓          | Manager approve. Guards `status === pending`, creates work order.              |
+| `PATCH`  | `/api/estimates/:id/reject`                         | `routes.ts:9067`                  | auth + approval-access              | ✓          | Manager reject. Guards `status === pending`.                                   |
+| `POST`   | `/api/estimates/:id/approve`                        | `routes.ts:8890`                  | auth + approval-access              | legacy     | ⚠ Duplicate of PATCH /approve. Diverges (no work-order creation, no status guard) — audit F-04. |
+| `POST`   | `/api/estimates/:id/reject`                         | `routes.ts:8929`                  | auth + approval-access              | legacy     | ⚠ Duplicate of PATCH /reject — audit F-04.                                     |
+| `GET`    | `/api/estimates/approve-via-token/:token`           | `routes.ts:9405`                  | **token only**                      | ✓          | Customer approval click. ⚠ token never revoked, O(N) scan — audit F-06.        |
+| `GET`    | `/api/estimates/reject-via-token/:token`            | `routes.ts:9527`                  | **token only**                      | ✓          | Customer reject click. ⚠ no expiry check — audit F-06.                         |
+| `POST`   | `/api/estimates/:id/convert-to-work-order`          | `routes.ts:9619`                  | auth                                | ✓          | Creates a work order. ⚠ no role gate, races on duplicate — audit F-05.         |
+| `POST`   | `/api/estimates/:id/pdf`                            | `routes.ts:11897`                 | auth + pdf-access                   | ✓          | Generate / refresh PDF.                                                        |
+| `GET`    | `/api/estimates/:id/pdf`                            | `routes.ts:11898`                 | auth + pdf-access                   | ✓          | Fetch latest PDF.                                                              |
+| `POST`   | `/api/estimates/:id/email`                          | `routes.ts:7506`                  | auth + approval-access              | ✓          | Send approval email with optional `to` / `cc` / `bcc` / `note` overrides. Funnels through `_sendEstimateApprovalEmailFlow`, so it shares token-generation + status-transition logic with `/send-approval-email` and `/transition?action=send_to_customer`. Called by `lib/email.ts:sendEstimateEmail`. (Task #616 turned the stub flagged in audit F-15 into the real path.) |
 
 The `requireEstimateApprovalAccess` middleware allows
 `billing_manager | company_admin | super_admin`.
@@ -156,18 +162,24 @@ The `requireEstimateApprovalAccess` middleware allows
 What the **server** enforces. Frontend buttons are gated separately
 (see Gotchas below).
 
-| Action                                | super_admin | company_admin | billing_manager | irrigation_manager | field_tech |
-| ------------------------------------- | :---------: | :-----------: | :-------------: | :----------------: | :--------: |
-| Create estimate (`POST /api/estimates`) | ✓           | ✓             | ✓               | ✓                  | ✓          |
-| Read list / detail                    | ✓ *(public)*| ✓ *(public)*  | ✓ *(public)*    | ✓ *(public)*       | ✓ *(public)* |
-| Edit content (`PUT /:id`)             | ✓           | ✓             | ✓               | ✓                  | ✓ ⚠        |
-| Submit for review                     | ✓           | ✓             | ✓               | ✓                  | ✓          |
-| Internal approve                      | ✓           | ✓             | ✓               | —                  | —          |
-| Send approval email                   | ✓           | ✓             | ✓               | —                  | —          |
-| Manager approve / reject              | ✓           | ✓             | ✓               | —                  | —          |
-| Customer approve / reject (token)     | *anyone with token*                                                          |
-| Convert to work order                 | ✓           | ✓             | ✓               | ✓                  | ✓ ⚠        |
-| Delete                                | ✓           | ✓             | ✓               | ✓                  | ✓ ⚠        |
+The `manager` column is the same DB role as `irrigation_manager`
+(the product blurb in `replit.md` calls it "manager" — see the
+naming note above). Both spellings hit the same enum value at
+runtime; the column is repeated here so readers searching for
+either name find the row they expect.
+
+| Action                                  | super_admin | company_admin | billing_manager | manager / irrigation_manager | field_tech    |
+| --------------------------------------- | :---------: | :-----------: | :-------------: | :--------------------------: | :-----------: |
+| Create estimate (`POST /api/estimates`) | ✓           | ✓             | ✓               | ✓                            | ✓             |
+| Read list / detail                      | ✓ *(public)*| ✓ *(public)*  | ✓ *(public)*    | ✓ *(public)*                 | ✓ *(public)*  |
+| Edit content (`PUT /:id`)               | ✓           | ✓             | ✓               | ✓                            | ✓ ⚠           |
+| Submit for review                       | ✓           | ✓             | ✓               | ✓                            | ✓             |
+| Internal approve                        | ✓           | ✓             | ✓               | —                            | —             |
+| Send approval email                     | ✓           | ✓             | ✓               | —                            | —             |
+| Manager approve / reject                | ✓           | ✓             | ✓               | —                            | —             |
+| Customer approve / reject (token)       | *anyone with the token — no role gate*                                                       |
+| Convert to work order                   | ✓           | ✓             | ✓               | ✓                            | ✓ ⚠           |
+| Delete                                  | ✓           | ✓             | ✓               | ✓                            | ✓ ⚠           |
 
 ✓ ⚠ entries mark the gaps the audit flagged — the server allows it,
 but the frontend hides the button. Closing those gaps is the work of
