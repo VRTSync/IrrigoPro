@@ -6901,12 +6901,13 @@ export class DatabaseStorage implements IStorage {
     id: number,
     companyId: number,
     manager: { id: number; name: string },
+    executor: DbExecutor = db,
   ): Promise<WetCheck | undefined> {
     const wc = await this.assertWetCheckBelongsToCompany(id, companyId);
     if (wc.status !== "submitted" && wc.status !== "approved") {
       throw new Error(`Cannot approve wet check in status ${wc.status}`);
     }
-    const [updated] = await db.update(wetChecks)
+    const [updated] = await (executor as typeof db).update(wetChecks)
       .set({
         status: "approved",
         approvedAt: wc.approvedAt ?? new Date(),

@@ -93,6 +93,12 @@ export function registerEstimateRoutes(
   app: Express,
   storage: EstimateRoutesStorage,
   requireAuthentication: RequestHandler,
+  auditSubmitForReview?: (
+    req: any,
+    estimateId: number,
+    before: { status?: string | null; internalStatus?: string | null } | null,
+    after: EstimateWithItems,
+  ) => Promise<void> | void,
 ): void {
   // processEstimatePayload is shared with the Wet Check conversion engine
   // (server/storage.ts → convertWetCheck) so both code paths compute prices
@@ -317,7 +323,31 @@ export function registerEstimateRoutes(
   // 409 so the wizard surfaces a retryable error instead of silently
   // double-flipping.
   app.post("/api/estimates/:id/submit-for-review", requireAuthentication, async (req, res) => {
+    const estimateId = parseInt(String(req.params.id));
+    let before: { status?: string | null; internalStatus?: string | null } | null = null;
+    if (!Number.isNaN(estimateId)) {
+      try {
+        const existing = await storage.getEstimate(estimateId);
+        if (existing) {
+          before = {
+            status: (existing as any).status ?? null,
+            internalStatus: (existing as any).internalStatus ?? null,
+          };
+        }
+      } catch {
+        // best-effort snapshot; never block the request
+      }
+    }
     const updated = await handleEstimateUpdate(req, res, { submitForReview: true });
-    if (updated) res.json(updated);
+    if (updated) {
+      if (auditSubmitForReview) {
+        try {
+          await auditSubmitForReview(req, estimateId, before, updated);
+        } catch {
+          // never let an audit failure mask the success
+        }
+      }
+      res.json(updated);
+    }
   });
 }

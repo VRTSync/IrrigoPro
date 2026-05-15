@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -863,6 +864,14 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Task #641 — Activity feed */}
+            <div className="border-t border-gray-200" data-testid="estimate-activity-section">
+              <div className="px-4 sm:px-6 py-3 bg-gray-50 text-sm font-semibold">
+                Activity
+              </div>
+              <ActivityTab resource="estimates" id={estimate.id} />
             </div>
           </>
         ) : (

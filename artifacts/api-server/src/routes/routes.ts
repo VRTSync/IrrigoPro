@@ -1167,7 +1167,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     userAgent?: string | null;
     sessionId?: string | null;
   };
-  async function recordAuditEvent(req: Request | null, evt: AuditEventInput): Promise<void> {
+  // Task #641 — `tx` and `strict` were added so lifecycle transitions
+  // can co-transact the audit row with the state mutation. When
+  // `strict: true` is passed, any audit-insert failure propagates so
+  // the enclosing `db.transaction()` rolls back the state change too.
+  // The default (no tx / non-strict) preserves the original
+  // best-effort behavior for non-lifecycle audit emitters like the
+  // admin / auth pipelines that pre-date Task #641.
+  async function recordAuditEvent(
+    req: Request | null,
+    evt: AuditEventInput,
+    opts: { tx?: any; strict?: boolean } = {},
+  ): Promise<void> {
+    const executor: any = opts.tx ?? db;
     try {
       const ip = evt.ip ?? (req ? (req.ip || (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() || null) : null);
       const userAgent = evt.userAgent ?? (req ? ((req.headers["user-agent"] as string | undefined) ?? null) : null);
@@ -1180,7 +1192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (impersonatorId) {
         details = { ...(details ?? {}), impersonatorUserId: impersonatorId };
       }
-      await db.insert(auditLog).values({
+      await executor.insert(auditLog).values({
         occurredAt: evt.occurredAt ?? new Date(),
         actorUserId: evt.actorUserId ?? null,
         actorLabel: evt.actorLabel ?? (impersonatorId ? `impersonated by user ${impersonatorId}` : null),
@@ -1198,9 +1210,209 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sessionId: evt.sessionId ?? null,
       });
     } catch (err) {
+      if (opts.strict) throw err;
       try { req?.log?.warn({ err }, "audit log write failed"); } catch { /* ignore */ }
     }
   }
+
+  // Task #641 — lifecycle transition audit helper. Thin wrapper over
+  // `recordAuditEvent` that standardizes the actor extraction, the
+  // `details.before` / `details.after` payload, and the synthetic
+  // "customer" actor used for customer-token transitions on estimates.
+  // Best-effort: never throws and never fails the originating request.
+  type LifecycleAuditOpts = {
+    resource: "estimate" | "wet_check" | "work_order";
+    action: string;
+    targetId: number | string;
+    before?: unknown;
+    after?: unknown;
+    summary?: string | null;
+    note?: string | null;
+    companyId?: number | null;
+    // When set, the audit row is attributed to the synthetic "customer"
+    // actor (no user id / role) — used by /approve-via-token and
+    // /reject-via-token paths.
+    customer?: { email?: string | null; name?: string | null; token?: string | null } | null;
+    extra?: Record<string, unknown>;
+  };
+  async function recordLifecycleAudit(
+    req: any,
+    opts: LifecycleAuditOpts,
+    txOpts: { tx?: any; strict?: boolean } = {},
+  ): Promise<void> {
+    const targetType = opts.resource;
+    const isCustomer = !!opts.customer;
+    const actorUserId = isCustomer
+      ? null
+      : ((req?.authenticatedUserId as number | undefined) ?? null);
+    const actorRole = isCustomer
+      ? "customer"
+      : ((req?.authenticatedUserRole as string | undefined) ?? null);
+    const actorCompanyId = opts.companyId
+      ?? (isCustomer
+        ? null
+        : ((req?.authenticatedUserCompanyId as number | undefined) ?? null));
+    // Resolve a human-readable actor label so the Activity tab shows
+    // "Jane Smith" instead of "User #42". Looked up once per emission;
+    // failures are non-fatal and fall back to the user id.
+    let actorLabel: string | null = null;
+    if (isCustomer) {
+      actorLabel = opts.customer?.email
+        ? `customer:${opts.customer.email}`
+        : (opts.customer?.name ? `customer:${opts.customer.name}` : "customer");
+    } else if (actorUserId != null) {
+      try {
+        const u = await storage.getUser(actorUserId);
+        if (u?.name) actorLabel = u.name;
+        else if (u?.email) actorLabel = u.email;
+        else actorLabel = `user:${actorUserId}`;
+      } catch {
+        actorLabel = `user:${actorUserId}`;
+      }
+    }
+    const details: Record<string, unknown> = {
+      ...(opts.extra ?? {}),
+    };
+    if (opts.before !== undefined) details.before = opts.before;
+    if (opts.after !== undefined) details.after = opts.after;
+    if (opts.note != null && String(opts.note).trim() !== "")
+      details.note = String(opts.note);
+    if (isCustomer && opts.customer?.token)
+      details.customerToken = opts.customer.token;
+    await recordAuditEvent(req ?? null, {
+      actorUserId,
+      actorLabel,
+      actorRole,
+      actorCompanyId,
+      actionType: "data",
+      action: opts.action,
+      severity: "info",
+      targetType,
+      targetId: String(opts.targetId),
+      summary: opts.summary ?? null,
+      details,
+    }, txOpts);
+  }
+
+  // Task #641 — per-resource activity feed. Returns the audit_log rows
+  // we've written for a single estimate / wet check / work order so the
+  // detail modals can render an "Activity" tab. Company-scoped: the
+  // resource is loaded with the normal ownership guard, and then the
+  // rows are filtered by `actor_company_id = <resource company>` (plus
+  // rows with a null actor_company_id, which is how customer-token
+  // transitions are attributed). super_admin sees everything.
+  async function fetchActivityForTarget(
+    targetType: "estimate" | "wet_check" | "work_order",
+    targetId: number,
+    companyId: number | null,
+    isSuperAdmin: boolean,
+  ) {
+    const filters: SQL[] = [
+      sql`target_type = ${targetType}`,
+      sql`target_id = ${String(targetId)}`,
+    ];
+    if (!isSuperAdmin && companyId != null) {
+      filters.push(sql`(actor_company_id = ${companyId} OR actor_company_id IS NULL)`);
+    }
+    const where = filters.reduce<SQL>(
+      (acc, frag, i) => (i === 0 ? frag : sql`${acc} AND ${frag}`),
+      sql``,
+    );
+    const result = await db.execute<{
+      id: number;
+      occurredAt: string;
+      actorUserId: number | null;
+      actorLabel: string | null;
+      actorRole: string | null;
+      action: string;
+      summary: string | null;
+      details: unknown;
+    }>(sql`
+      SELECT id, occurred_at AS "occurredAt", actor_user_id AS "actorUserId",
+             actor_label AS "actorLabel", actor_role AS "actorRole",
+             action, summary, details
+      FROM audit_log
+      WHERE ${where}
+      ORDER BY occurred_at DESC
+      LIMIT 200
+    `);
+    return result.rows ?? [];
+  }
+
+  app.get("/api/estimates/:id/activity", requireAuthentication, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid estimate ID" });
+        return;
+      }
+      const existing = await storage.getEstimate(id);
+      if (!existing) { res.status(404).json({ message: "Estimate not found" }); return; }
+      if (!estimateOwnershipMatches(req, existing.companyId)) {
+        res.status(404).json({ message: "Estimate not found" });
+        return;
+      }
+      const isSuper = req.authenticatedUserRole === "super_admin";
+      const rows = await fetchActivityForTarget("estimate", id, existing.companyId ?? null, isSuper);
+      res.json({ events: rows });
+    } catch (error) {
+      console.error("[activity] estimate", error);
+      res.status(500).json({ message: "Failed to load activity" });
+    }
+  });
+
+  app.get("/api/wet-checks/:id/activity", requireAuthentication, async (req: any, res) => {
+    try {
+      const cid = requireCompanyId(req, res); if (!cid) return;
+      const id = parseInt(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid wet check ID" });
+        return;
+      }
+      const wc = await storage.getWetCheck(id, cid);
+      if (!wc) { res.status(404).json({ message: "Not found" }); return; }
+      const isSuper = req.authenticatedUserRole === "super_admin";
+      const rows = await fetchActivityForTarget("wet_check", id, cid, isSuper);
+      res.json({ events: rows });
+    } catch (error) {
+      console.error("[activity] wet_check", error);
+      res.status(500).json({ message: "Failed to load activity" });
+    }
+  });
+
+  app.get("/api/work-orders/:id/activity", requireAuthentication, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid work order ID" });
+        return;
+      }
+      const wo = await storage.getWorkOrder(id);
+      if (!wo) { res.status(404).json({ message: "Work order not found" }); return; }
+      // Resolve the work order's company via its customer record so we can
+      // apply the same per-company isolation as the estimate / wet check
+      // activity endpoints.
+      let woCompanyId: number | null = null;
+      if (wo.customerId) {
+        const customer = await storage.getCustomer(wo.customerId);
+        woCompanyId = customer?.companyId ?? null;
+      }
+      const role = req.authenticatedUserRole as string | undefined;
+      const isSuper = role === "super_admin";
+      if (!isSuper) {
+        const userCid = req.authenticatedUserCompanyId as number | undefined;
+        if (!userCid || !woCompanyId || Number(userCid) !== Number(woCompanyId)) {
+          res.status(404).json({ message: "Work order not found" });
+          return;
+        }
+      }
+      const rows = await fetchActivityForTarget("work_order", id, woCompanyId, isSuper);
+      res.json({ events: rows });
+    } catch (error) {
+      console.error("[activity] work_order", error);
+      res.status(500).json({ message: "Failed to load activity" });
+    }
+  });
 
   // Slice 4A feature flag exposure. The offline service worker is gated
   // by the build-time VITE_OFFLINE_SERVICE_WORKER env var on the client,
@@ -7499,7 +7711,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST/PUT /api/estimates live in ./estimate-routes.ts so the labor-rate
   // enforcement (Task #397/398) is exercised by automated tests without
   // pulling in registerRoutes()'s startup side effects.
-  registerEstimateRoutes(app, storage, requireAuthentication);
+  registerEstimateRoutes(app, storage, requireAuthentication, async (req, estimateId, before, after) => {
+    await recordLifecycleAudit(req, {
+      resource: "estimate",
+      action: "estimate.submitted_for_review",
+      targetId: estimateId,
+      before,
+      after: { status: (after as any).status ?? null, internalStatus: (after as any).internalStatus ?? null },
+      summary: `Estimate ${estimateId} submitted for review`,
+    });
+  });
 
 
 
@@ -9034,6 +9255,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(409).json({ message: "Estimate is no longer pending internal review" });
         return;
       }
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.internal_approved",
+        targetId: id,
+        companyId: estimate.companyId ?? null,
+        before: { internalStatus: estimate.internalStatus },
+        after: { internalStatus: updated.internalStatus },
+        summary: `Estimate ${estimate.estimateNumber ?? id} internally approved`,
+      });
       res.json({ message: "Estimate internally approved", estimate: updated });
     } catch (error) {
       console.error('Internal approve error:', error);
@@ -9074,6 +9304,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // approved estimate with a work order and a notified manager, or
       // nothing changed and they can safely retry.
       const result = await storage.approveEstimateAndCreateWorkOrder(id);
+
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.approved",
+        targetId: id,
+        companyId: estimate.companyId ?? null,
+        before: { status: estimate.status, internalStatus: estimate.internalStatus },
+        after: { status: result.estimate.status, internalStatus: result.estimate.internalStatus },
+        summary: `Estimate ${estimate.estimateNumber ?? id} approved` + (result.workOrder ? `; work order ${result.workOrder.workOrderNumber} created` : ""),
+        extra: result.workOrder ? { workOrderId: result.workOrder.id, workOrderNumber: result.workOrder.workOrderNumber } : undefined,
+      });
 
       res.json({
         message: "Estimate approved successfully",
@@ -9132,6 +9373,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(409).json({ message: "Estimate is no longer pending and cannot be rejected" });
         return;
       }
+
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.rejected",
+        targetId: id,
+        companyId: estimate.companyId ?? null,
+        before: { status: estimate.status },
+        after: { status: updatedEstimate.status },
+        summary: `Estimate ${estimate.estimateNumber ?? id} rejected`,
+      });
 
       res.json({
         message: "Estimate rejected successfully",
@@ -9375,6 +9626,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       await _sendEstimateApprovalEmailFlow(id, { resetEstimateDate: true, req });
       const fresh = await storage.getEstimate(id);
+      // Task #641 — audit the resend so the Activity tab shows it.
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.resent",
+        targetId: id,
+        companyId: estimate.companyId ?? null,
+        before: { status: estimate.status, internalStatus: estimate.internalStatus },
+        after: { status: fresh?.status, internalStatus: fresh?.internalStatus },
+        summary: `Estimate ${estimate.estimateNumber ?? id} resent after expiration`,
+      });
       res.json({ message: "Estimate resent to customer", estimate: fresh });
     } catch (error) {
       if (error instanceof EstimateSendConflictError) {
@@ -9437,6 +9698,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvalSource: 'email_link',
         approvalRespondedAt: new Date(),
         approvedAt: new Date()
+      });
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.customer_approved",
+        targetId: estimate.id,
+        companyId: estimate.companyId ?? null,
+        customer: { email: estimate.customerEmail, name: estimate.customerName, token },
+        before: { status: estimate.status },
+        after: { status: "approved" },
+        summary: `Customer approved estimate ${estimate.estimateNumber}`,
+        extra: { approvalSource: "email_link" },
       });
 
       // Auto-convert to work order (per business rule: estimates auto-create work orders when approved)
@@ -9547,6 +9819,17 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvalRespondedAt: new Date(),
         rejectedAt: new Date()
       });
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.customer_rejected",
+        targetId: estimate.id,
+        companyId: estimate.companyId ?? null,
+        customer: { email: estimate.customerEmail, name: estimate.customerName, token },
+        before: { status: estimate.status },
+        after: { status: "rejected" },
+        summary: `Customer rejected estimate ${estimate.estimateNumber}`,
+        extra: { approvalSource: "email_link" },
+      });
 
       // Notify company admins and managers that customer rejected the estimate
       try {
@@ -9609,9 +9892,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   app.post("/api/estimates/:id/convert-to-work-order", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      
+      const estBefore = await storage.getEstimate(id).catch(() => null);
+
       // Use the new storage function that handles all validation and conversion
       const workOrder = await storage.createWorkOrderFromEstimate(id);
+
+      await recordLifecycleAudit(req, {
+        resource: "estimate",
+        action: "estimate.converted_to_work_order",
+        targetId: id,
+        before: { status: estBefore?.status, internalStatus: estBefore?.internalStatus },
+        after: { workOrderId: workOrder.id, workOrderNumber: workOrder.workOrderNumber },
+        summary: `Estimate ${id} converted to work order ${workOrder.workOrderNumber}`,
+        extra: { workOrderId: workOrder.id, workOrderNumber: workOrder.workOrderNumber },
+      });
       
       // Optionally assign to a technician if provided in request
       if (req.body.assignedTechnicianId) {
@@ -9953,6 +10247,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         });
       }
 
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.completed",
+        targetId: workOrderId,
+        before: { status: existingWorkOrder?.status },
+        after: { status: workOrder.status },
+        summary: `Work order ${workOrder.workOrderNumber} completed`,
+      });
+
       res.json({ message: "Work order completed successfully", workOrder });
     } catch (error) {
       console.error("Error completing work order:", error);
@@ -10019,7 +10322,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           relatedEntityId: id
         });
       }
-      
+
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.completed",
+        targetId: id,
+        before: { status: existingWorkOrder.status },
+        after: { status: workOrder.status },
+        summary: `Work order ${workOrder.workOrderNumber} completed and pending review`,
+      });
+
       res.json(workOrder);
     } catch (error) {
       console.error("Error completing work order:", error);
@@ -10072,6 +10384,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         approvedLaborSnapshot: laborSnapshot,
       } as any);
 
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.approved",
+        targetId: id,
+        before: { status: workOrder.status },
+        after: { status: 'approved_passed_to_billing' },
+        summary: `Work order ${workOrder.workOrderNumber} approved by ${approverName}`,
+      });
+
       res.json({ message: "Work order approved and passed to billing", workOrder: updated });
     } catch (error) {
       console.error("Error approving work order:", error);
@@ -10106,6 +10427,16 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         status: 'in_progress',
         ...(notes ? { notes: `${workOrder.notes ? workOrder.notes + '\n' : ''}[Returned for correction: ${notes}]` } : {}),
       } as any);
+
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.returned_for_correction",
+        targetId: id,
+        before: { status: workOrder.status },
+        after: { status: 'in_progress' },
+        note: notes ?? null,
+        summary: `Work order ${workOrder.workOrderNumber} returned for correction`,
+      });
 
       res.json({ message: "Work order returned for correction", workOrder: updated });
     } catch (error) {
@@ -12483,6 +12814,25 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       // 'submitted'/'approved' work-order statuses. Neither value is valid
       // under workOrderStatusValues, so the branch was unreachable.
 
+      // Task #641 — audit any status change applied via PATCH so the
+      // Activity tab shows the full lifecycle, not just the dedicated
+      // transition endpoints. Only emits when status actually changed.
+      if (
+        workOrderData.status !== undefined &&
+        existingForLockCheck &&
+        workOrder &&
+        existingForLockCheck.status !== workOrder.status
+      ) {
+        await recordLifecycleAudit(req, {
+          resource: "work_order",
+          action: "work_order.status_changed",
+          targetId: id,
+          before: { status: existingForLockCheck.status },
+          after: { status: workOrder.status },
+          summary: `Work order ${workOrder.workOrderNumber} status ${existingForLockCheck.status} → ${workOrder.status}`,
+        });
+      }
+
       res.json(workOrder);
     } catch (error) {
       console.error(error);
@@ -12514,9 +12864,20 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
           skipped.push(id);
           continue;
         }
+        const woBefore = await storage.getWorkOrder(id);
         await storage.deleteWorkOrderItems(id);
         const success = await storage.deleteWorkOrder(id);
-        if (success) deleted++;
+        if (success) {
+          deleted++;
+          await recordLifecycleAudit(req, {
+            resource: "work_order",
+            action: "work_order.deleted",
+            targetId: id,
+            before: { status: woBefore?.status, workOrderNumber: woBefore?.workOrderNumber },
+            after: { deleted: true },
+            summary: `Work order ${woBefore?.workOrderNumber ?? id} deleted (bulk)`,
+          });
+        }
       }
       if (skipped.length > 0 && deleted === 0) {
         res.status(409).json({ message: "These work orders are linked to invoices and cannot be deleted. Remove them from their invoices first." });
@@ -12546,12 +12907,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
         res.status(409).json({ message: "This work order is linked to an invoice and cannot be deleted. Remove it from the invoice first." });
         return;
       }
+      const woBefore = await storage.getWorkOrder(id);
       await storage.deleteWorkOrderItems(id);
       const success = await storage.deleteWorkOrder(id);
       if (!success) {
         res.status(404).json({ message: "Work order not found" });
         return;
       }
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.deleted",
+        targetId: id,
+        before: { status: woBefore?.status, workOrderNumber: woBefore?.workOrderNumber },
+        after: { deleted: true },
+        summary: `Work order ${woBefore?.workOrderNumber ?? id} deleted`,
+      });
       res.json({ message: "Work order deleted successfully" });
     } catch (error) {
       console.error(error);
@@ -12677,14 +13047,27 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       const { technicianId, technicianName } = req.body;
       
+      const woBeforeAssign = await storage.getWorkOrder(workOrderId);
       const success = await storage.assignWorkOrder(workOrderId, technicianId, technicianName);
       if (!success) {
         res.status(404).json({ message: "Work order not found or assignment failed" });
         return;
       }
-      
+
       // Get work order details for notification
       const workOrder = await storage.getWorkOrder(workOrderId);
+
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.assigned",
+        targetId: workOrderId,
+        before: {
+          assignedTechnicianId: woBeforeAssign?.assignedTechnicianId ?? null,
+          assignedTechnicianName: woBeforeAssign?.assignedTechnicianName ?? null,
+        },
+        after: { assignedTechnicianId: technicianId ?? null, assignedTechnicianName: technicianName ?? null },
+        summary: `Work order ${workOrder?.workOrderNumber ?? workOrderId} assigned to ${technicianName ?? technicianId}`,
+      });
       if (workOrder && technicianId) {
         // Notify field technician about work order assignment
         await storage.createNotification({
@@ -13389,6 +13772,15 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       }
       // Regression guard: surface any catalog $0 leak that slipped through.
       await regressionGuardZeroCatalogPrices('work_order_conversion', newBillingSheet.id, resolvedItems as RawBillingItem[]);
+      await recordLifecycleAudit(req, {
+        resource: "work_order",
+        action: "work_order.billing_sheet_created",
+        targetId: workOrderId,
+        before: { status: workOrder.status },
+        after: { billingSheetId: newBillingSheet.id, billingSheetStatus: resolvedStatus },
+        summary: `Billing sheet ${newBillingSheet.id} created from work order ${workOrder.workOrderNumber}`,
+        extra: { billingSheetId: newBillingSheet.id, billingSheetStatus: resolvedStatus },
+      });
       res.json({ message: "Billing sheet saved successfully" });
     } catch (error) {
       console.error(error);
@@ -15323,7 +15715,19 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const results: Outcome[] = [];
     for (const id of validIds) {
       try {
+        const wcBefore = await storage.getWetCheck(id, cid).catch(() => null);
         const ok = await storage.deleteWetCheck(id, cid);
+        if (ok) {
+          await recordLifecycleAudit(req, {
+            resource: "wet_check",
+            action: "wet_check.deleted",
+            targetId: id,
+            companyId: cid,
+            before: { status: wcBefore?.status, customerName: wcBefore?.customerName },
+            after: { deleted: true },
+            summary: `Wet check ${id} deleted (bulk)`,
+          });
+        }
         results.push({ id, status: ok ? 'deleted' : 'not_found' });
       } catch (e: any) {
         if (e instanceof WetCheckHasInvoicedRecordsError) {
@@ -15375,8 +15779,18 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     const id = parseInt(req.params.id);
     if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
     try {
+      const wcBefore = await storage.getWetCheck(id, cid).catch(() => null);
       const ok = await storage.deleteWetCheck(id, cid);
       if (!ok) { res.status(404).json({ message: "Not found" }); return; }
+      await recordLifecycleAudit(req, {
+        resource: "wet_check",
+        action: "wet_check.deleted",
+        targetId: id,
+        companyId: cid,
+        before: { status: wcBefore?.status, customerName: wcBefore?.customerName },
+        after: { deleted: true },
+        summary: `Wet check ${id} deleted`,
+      });
       res.json({ ok });
     } catch (e: any) {
       if (e instanceof WetCheckHasInvoicedRecordsError) {
@@ -15509,8 +15923,29 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
       if (!parsed.success) { res.status(400).json({ message: "Invalid body", errors: parsed.error.flatten() }); return; }
     }
     try {
-      const result = await storage.submitWetCheck(parseInt(req.params.id), cid);
+      const wcId = parseInt(req.params.id);
+      const wcBefore = await storage.getWetCheck(wcId, cid).catch(() => null);
+      const result = await storage.submitWetCheck(wcId, cid);
       if (!result) { res.status(404).json({ message: "Not found" }); return; }
+      await recordLifecycleAudit(req, {
+        resource: "wet_check",
+        action: "wet_check.submitted",
+        targetId: wcId,
+        companyId: cid,
+        before: { status: wcBefore?.status },
+        after: {
+          status: result.wetCheck.status,
+          billingSheetId: result.billingSheetId,
+          autoBilledCount: result.autoBilledCount,
+          pendingCount: result.pendingCount,
+        },
+        summary: `Wet check ${wcId} submitted`,
+        extra: {
+          billingSheetId: result.billingSheetId,
+          autoBilledCount: result.autoBilledCount,
+          pendingCount: result.pendingCount,
+        },
+      });
       // Spread wetCheck so legacy clients that read fields directly off the
       // response (status, submittedAt, etc.) keep working; the new
       // billingSheetId / autoBilledCount / pendingCount surface alongside.
@@ -16015,7 +16450,36 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const me = await storage.getUser(userId);
       if (!me) { res.status(401).json({ message: "User not found" }); return; }
-      const updated = await storage.approveWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name });
+      const wcId = parseInt(req.params.id);
+      const wcBefore = await storage.getWetCheck(wcId, cid).catch(() => null);
+      // Task #641 — co-transact the state mutation with the audit row.
+      // `approveWetCheck` writes via the global `db`, so we open the
+      // outer transaction here and only commit when the audit insert
+      // succeeds too. If the audit insert fails (e.g. constraint
+      // violation, transient DB error), `strict: true` propagates the
+      // error and Postgres rolls back the wet-check status flip — so
+      // we never end up with a transitioned row that has no audit
+      // trail.
+      let updated: Awaited<ReturnType<typeof storage.approveWetCheck>> | null = null;
+      await db.transaction(async (tx) => {
+        // Pass `tx` into the storage method so the UPDATE and the
+        // audit INSERT both run on the same SQL connection inside
+        // the same transaction. `strict: true` propagates any
+        // audit-write failure out of the tx, causing Postgres to
+        // roll back the wet-check status flip too — so we never
+        // end up with a transitioned row that has no audit trail.
+        updated = await storage.approveWetCheck(wcId, cid, { id: me.id, name: me.name }, tx);
+        if (!updated) return;
+        await recordLifecycleAudit(req, {
+          resource: "wet_check",
+          action: "wet_check.approved",
+          targetId: wcId,
+          companyId: cid,
+          before: { status: wcBefore?.status },
+          after: { status: updated.status },
+          summary: `Wet check ${wcId} approved by ${me.name}`,
+        }, { tx, strict: true });
+      });
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
       res.json(updated);
     } catch (e: any) {
@@ -16043,8 +16507,21 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const me = await storage.getUser(userId);
       if (!me) { res.status(401).json({ message: "User not found" }); return; }
-      const updated = await storage.routeWetCheckFinding(parseInt(req.params.id), cid, parsed.data.resolution, { id: me.id, name: me.name });
+      const findingId = parseInt(req.params.id);
+      const updated = await storage.routeWetCheckFinding(findingId, cid, parsed.data.resolution, { id: me.id, name: me.name });
       if (!updated) { res.status(404).json({ message: "Not found" }); return; }
+      const wcIdForAudit = (updated as any).wetCheckId ?? null;
+      if (wcIdForAudit) {
+        await recordLifecycleAudit(req, {
+          resource: "wet_check",
+          action: "wet_check.finding_routed",
+          targetId: wcIdForAudit,
+          companyId: cid,
+          after: { findingId, resolution: parsed.data.resolution },
+          summary: `Wet check ${wcIdForAudit} finding ${findingId} routed → ${parsed.data.resolution}`,
+          extra: { findingId, resolution: parsed.data.resolution },
+        });
+      }
       res.json(updated);
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {
@@ -16077,7 +16554,26 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
     try {
       const me = await storage.getUser(userId);
       if (!me) { res.status(401).json({ message: "User not found" }); return; }
-      const result = await storage.convertWetCheck(parseInt(req.params.id), cid, { id: me.id, name: me.name }, scheduledDates);
+      const wcId = parseInt(req.params.id);
+      const wcBefore = await storage.getWetCheck(wcId, cid).catch(() => null);
+      const result = await storage.convertWetCheck(wcId, cid, { id: me.id, name: me.name }, scheduledDates);
+      await recordLifecycleAudit(req, {
+        resource: "wet_check",
+        action: "wet_check.converted",
+        targetId: wcId,
+        companyId: cid,
+        before: { status: wcBefore?.status },
+        after: {
+          status: (result as any)?.wetCheck?.status ?? null,
+          estimateIds: (result as any)?.estimateIds ?? null,
+          workOrderIds: (result as any)?.workOrderIds ?? null,
+        },
+        summary: `Wet check ${wcId} converted by ${me.name}`,
+        extra: {
+          estimateIds: (result as any)?.estimateIds ?? null,
+          workOrderIds: (result as any)?.workOrderIds ?? null,
+        },
+      });
       res.json(result);
     } catch (e: any) {
       const { status, message } = classifyAndLog(req, e, {

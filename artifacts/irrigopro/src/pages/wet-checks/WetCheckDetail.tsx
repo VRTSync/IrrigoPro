@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera } from "lucide-react";
@@ -734,6 +735,14 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
           {(previewMut.isPending || submitMut.isPending) ? <Loader2 className="animate-spin" /> : submitCtaLabel}
         </Button>
       )}
+
+      {/* Task #641 — Activity feed */}
+      <div className="border rounded" data-testid="wet-check-activity-section">
+        <div className="px-3 py-2 bg-gray-50 text-sm font-semibold border-b">
+          Activity
+        </div>
+        <ActivityTab resource="wet-checks" id={wc?.id ?? null} />
+      </div>
 
       {/* Submit-confirm modal — surfaces the server's preview of what
           will be auto-billed and what will land in the manager queue

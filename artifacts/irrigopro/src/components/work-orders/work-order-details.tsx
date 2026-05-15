@@ -1,4 +1,5 @@
 import { safeGet } from "@/utils/safeStorage";
+import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -395,9 +396,14 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
         <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-1">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="activity" data-testid="tab-activity">Activity</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="activity" className="mt-6">
+            <ActivityTab resource="work-orders" id={workOrder?.id} />
+          </TabsContent>
 
           <TabsContent value="overview" className="space-y-6 mt-6">
             {/* Header Status Bar */}
