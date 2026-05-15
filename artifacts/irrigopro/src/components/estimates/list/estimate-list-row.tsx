@@ -21,20 +21,18 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, authedPdfUrl } from "@/lib/queryClient";
 import type { Estimate } from "@workspace/db/schema";
-import { isDraft, type LifecycleStatus } from "@/lib/lifecycle";
+import {
+  canDeleteEstimateAs,
+  isPendingReview,
+  type LifecycleStatus,
+} from "@/lib/lifecycle";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
 import { useToast } from "@/hooks/use-toast";
 
-// Task #634 — must agree with the server's ESTIMATE_DELETE_ROLES set in
-// routes.ts. UI hides the Delete action entirely for roles that would
-// 403; the server is the authoritative gate.
-const DELETE_ROLES = new Set<string>([
-  "super_admin",
-  "company_admin",
-  "irrigation_manager",
-  "billing_manager",
-  "field_tech",
-]);
+// Task #634 / #658 — the role × lifecycle delete matrix lives in
+// `@/lib/lifecycle` (`canDeleteEstimateAs`) so this file and the
+// estimate detail modal stay in lockstep. The server is still the
+// authoritative gate.
 
 function readCurrentUserRole(): string | null {
   try {
@@ -98,10 +96,8 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
   // safety.
   const currentRole = readCurrentUserRole();
   const canDelete =
-    currentRole != null &&
-    DELETE_ROLES.has(currentRole) &&
-    isDraft(estimate) &&
-    !isDeleted;
+    canDeleteEstimateAs(currentRole, estimate) && !isDeleted;
+  const isPendingDelete = canDelete && isPendingReview(estimate);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -277,12 +273,28 @@ export function EstimateListRow({ estimate, lifecycle, onOpen, onEdit, onResendC
         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
           <AlertDialogContent data-testid={`list-row-delete-dialog-${estimate.id}`}>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete this draft estimate?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {isPendingDelete
+                  ? "Delete this pending estimate?"
+                  : "Delete this draft estimate?"}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                Estimate <span className="font-medium">{estimate.estimateNumber}</span> for{" "}
-                <span className="font-medium">{estimate.customerName}</span> will be removed from
-                lists and dashboards. The row is preserved for audit and can be restored by a
-                super admin if needed.
+                {isPendingDelete ? (
+                  <>
+                    Estimate{" "}
+                    <span className="font-medium">{estimate.estimateNumber}</span>{" "}
+                    for <span className="font-medium">{estimate.customerName}</span>{" "}
+                    has been submitted for approval. Deleting it will hide it
+                    from every list; admins can still see it for audit.
+                  </>
+                ) : (
+                  <>
+                    Estimate <span className="font-medium">{estimate.estimateNumber}</span> for{" "}
+                    <span className="font-medium">{estimate.customerName}</span> will be removed
+                    from lists and dashboards. The row is preserved for audit and can be restored
+                    by a super admin if needed.
+                  </>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

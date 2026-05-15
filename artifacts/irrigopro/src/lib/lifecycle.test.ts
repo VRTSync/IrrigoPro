@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import {
   ESTIMATE_EXPIRATION_DAYS,
   LIFECYCLE_STATUSES,
+  canDeleteEstimateAs,
+  canDeleteLifecycle,
   computeLifecycleStatus,
   customerResponseLabel,
   customerResponseLabelOf,
@@ -297,6 +299,62 @@ describe("axis label helpers", () => {
     ).toBe("Approved");
     expect(reviewStageLabelOf(null)).toBe("—");
     expect(customerResponseLabelOf(undefined)).toBe("—");
+  });
+});
+
+// Task #658 — Role × lifecycle delete matrix. Must agree with the server's
+// ESTIMATE_DELETE_ROLES + ESTIMATE_PENDING_DELETE_ROLES sets so the UI
+// never surfaces a Delete control the server would refuse.
+describe("canDeleteLifecycle (Task #658)", () => {
+  it("returns true for draft and pending_review only", () => {
+    expect(canDeleteLifecycle({ status: "draft", internalStatus: "draft", estimateDate: FRESH }, NOW)).toBe(true);
+    expect(canDeleteLifecycle({ status: "pending", internalStatus: "pending_approval", estimateDate: FRESH }, NOW)).toBe(true);
+    expect(canDeleteLifecycle({ status: "pending", internalStatus: "approved_internal", estimateDate: FRESH }, NOW)).toBe(true);
+  });
+
+  it("returns false for sent / approved / rejected / expired", () => {
+    expect(canDeleteLifecycle({ status: "pending", internalStatus: "sent_to_customer", estimateDate: FRESH }, NOW)).toBe(false);
+    expect(canDeleteLifecycle({ status: "approved", internalStatus: "sent_to_customer", estimateDate: FRESH }, NOW)).toBe(false);
+    expect(canDeleteLifecycle({ status: "rejected", internalStatus: "sent_to_customer", estimateDate: FRESH }, NOW)).toBe(false);
+    expect(canDeleteLifecycle({ status: "pending", internalStatus: "sent_to_customer", estimateDate: STALE }, NOW)).toBe(false);
+  });
+});
+
+describe("canDeleteEstimateAs (Task #658)", () => {
+  const draft = { status: "draft", internalStatus: "draft", estimateDate: FRESH };
+  const pending = { status: "pending", internalStatus: "pending_approval", estimateDate: FRESH };
+  const approvedInternal = { status: "pending", internalStatus: "approved_internal", estimateDate: FRESH };
+  const sent = { status: "pending", internalStatus: "sent_to_customer", estimateDate: FRESH };
+  const approved = { status: "approved", internalStatus: "sent_to_customer", estimateDate: FRESH };
+  const rejected = { status: "rejected", internalStatus: "sent_to_customer", estimateDate: FRESH };
+
+  it("manager / admin / billing can delete draft AND pending_review", () => {
+    for (const role of ["super_admin", "company_admin", "irrigation_manager", "billing_manager"]) {
+      expect(canDeleteEstimateAs(role, draft, NOW)).toBe(true);
+      expect(canDeleteEstimateAs(role, pending, NOW)).toBe(true);
+      expect(canDeleteEstimateAs(role, approvedInternal, NOW)).toBe(true);
+    }
+  });
+
+  it("field_tech can delete drafts but NOT pending_review", () => {
+    expect(canDeleteEstimateAs("field_tech", draft, NOW)).toBe(true);
+    expect(canDeleteEstimateAs("field_tech", pending, NOW)).toBe(false);
+    expect(canDeleteEstimateAs("field_tech", approvedInternal, NOW)).toBe(false);
+  });
+
+  it("nobody can delete sent / approved / rejected", () => {
+    for (const role of ["super_admin", "company_admin", "irrigation_manager", "billing_manager", "field_tech"]) {
+      expect(canDeleteEstimateAs(role, sent, NOW)).toBe(false);
+      expect(canDeleteEstimateAs(role, approved, NOW)).toBe(false);
+      expect(canDeleteEstimateAs(role, rejected, NOW)).toBe(false);
+    }
+  });
+
+  it("unknown / missing role is always refused", () => {
+    expect(canDeleteEstimateAs(null, draft, NOW)).toBe(false);
+    expect(canDeleteEstimateAs(undefined, draft, NOW)).toBe(false);
+    expect(canDeleteEstimateAs("guest", draft, NOW)).toBe(false);
+    expect(canDeleteEstimateAs("manager", pending, NOW)).toBe(false); // retired alias (Task #643)
   });
 });
 

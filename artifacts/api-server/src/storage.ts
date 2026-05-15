@@ -2201,17 +2201,23 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount || 0) > 0;
   }
 
-  // Task #634 — manager-facing soft delete. Only marks draft rows; the
-  // route layer is responsible for the role / ownership checks. The
-  // WHERE clause pins `internalStatus = 'draft'` and `deletedAt IS NULL`
-  // so a concurrent send-to-customer can't lose the race AND a double
-  // click can't double-stamp the deletedAt.
+  // Task #634 / #658 — manager-facing soft delete. Allows the three
+  // pre-sent internal statuses (`draft`, `pending_approval`,
+  // `approved_internal`); anything past that has customer-facing
+  // artifacts and must stay auditable. The route layer is responsible
+  // for the role / ownership checks. The WHERE clause also pins
+  // `deletedAt IS NULL` so a concurrent send-to-customer can't lose
+  // the race AND a double click can't double-stamp the deletedAt.
   async softDeleteEstimate(id: number, deletedByUserId: number): Promise<boolean> {
     const result = await db.update(estimates)
       .set({ deletedAt: new Date(), deletedBy: deletedByUserId })
       .where(and(
         eq(estimates.id, id),
-        eq(estimates.internalStatus, "draft"),
+        inArray(estimates.internalStatus, [
+          "draft",
+          "pending_approval",
+          "approved_internal",
+        ]),
         isNull(estimates.deletedAt),
       ));
     return (result.rowCount || 0) > 0;

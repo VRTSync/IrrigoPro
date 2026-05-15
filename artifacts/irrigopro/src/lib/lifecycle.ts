@@ -152,6 +152,50 @@ export const isAwaitingCustomerReply = (
   e: EstimateLike | null | undefined,
 ): boolean => e?.status === "pending";
 
+// Task #658 — role × lifecycle delete matrix. Must agree with the
+// server's `ESTIMATE_DELETE_ROLES` + `ESTIMATE_PENDING_DELETE_ROLES`
+// sets in `estimate-routes.ts` / `estimate-role-guards.ts`. The UI
+// hides the Delete control whenever this returns false so we never
+// surface an action that would 403 / 409 on click; the server
+// remains the authoritative gate.
+//
+//   - draft           → any role that can create an estimate (incl.
+//                       field_tech for their own drafts) may delete.
+//   - pending_review  → managers/admins/billing only; field_tech is
+//                       refused server-side.
+//   - sent / approved /
+//     rejected / expired → nobody (still preserved for audit).
+const DELETE_ROLES_ANY = new Set<string>([
+  "super_admin",
+  "company_admin",
+  "irrigation_manager",
+  "billing_manager",
+  "field_tech",
+]);
+const DELETE_ROLES_PENDING = new Set<string>([
+  "super_admin",
+  "company_admin",
+  "irrigation_manager",
+  "billing_manager",
+]);
+
+export function canDeleteLifecycle(arg: LifecycleArg, now?: Date): boolean {
+  const lc = toLifecycle(arg, now);
+  return lc === "draft" || lc === "pending_review";
+}
+
+export function canDeleteEstimateAs(
+  role: string | null | undefined,
+  arg: LifecycleArg,
+  now?: Date,
+): boolean {
+  if (!role || !DELETE_ROLES_ANY.has(role)) return false;
+  const lc = toLifecycle(arg, now);
+  if (lc === "draft") return true;
+  if (lc === "pending_review") return DELETE_ROLES_PENDING.has(role);
+  return false;
+}
+
 // --- Two-axis label helpers ----------------------------------------
 // `computeLifecycleStatus` collapses the two server-side axes
 // (internalStatus = "review stage", status = "customer response") into

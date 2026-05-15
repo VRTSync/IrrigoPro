@@ -48,8 +48,14 @@ import {
   resolvePutLaborRate,
   type EstimatePayloadInput,
 } from "../estimate-payload";
-import { recordAuditEvent, type LifecycleAuditOpts } from "./audit-log";
+import {
+  recordAuditEvent as defaultRecordAuditEvent,
+  type AuditEventInput,
+  type LifecycleAuditOpts,
+} from "./audit-log";
 import { paginate } from "./pagination";
+import { ESTIMATE_PENDING_DELETE_ROLES } from "./estimate-role-guards";
+import { deriveLifecycleForWrite } from "../lifecycle";
 
 // Storage surface used by every estimate route. Methods used only by
 // routes that aren't exercised in the existing test suite are marked
@@ -258,6 +264,13 @@ export type EstimateRouteDeps = {
   // the customer-token approve/reject paths). Defaults to a no-op
   // for tests.
   recordLifecycleAudit?: (req: any, opts: LifecycleAuditOpts) => Promise<void>;
+  // Task #658 — non-lifecycle audit emitter (estimate.deleted, etc.).
+  // Defaults to the real `recordAuditEvent` from `./audit-log`. Tests
+  // inject a spy to assert on `details.lifecycle` without a DB round-trip.
+  recordAuditEvent?: (
+    req: Request | null,
+    evt: AuditEventInput,
+  ) => Promise<void>;
 };
 
 export function registerEstimateRoutes(
@@ -270,6 +283,7 @@ export function registerEstimateRoutes(
     deps.applyPricingVisibility ?? (<T,>(_req: Request, data: T) => data);
   const recordLifecycleAudit =
     deps.recordLifecycleAudit ?? (async () => {});
+  const recordAuditEvent = deps.recordAuditEvent ?? defaultRecordAuditEvent;
   // processEstimatePayload is shared with the Wet Check conversion engine
   // (server/storage.ts → convertWetCheck) so both code paths compute prices
   // and totals identically. See server/estimate-payload.ts for details.
@@ -620,7 +634,7 @@ export function registerEstimateRoutes(
   // approval / send / approve workflows retain their audit trail. Hides
   // cross-company access as 404 (consistent with other estimate routes).
   // Writes an `estimate.deleted` row to `audit_log`.
-  app.delete("/api/estimates/:id", requireAuthentication, async (req: any, res) => {
+  app.delete("/api/estimates/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
       if (!Number.isFinite(id) || id <= 0) {
@@ -660,10 +674,36 @@ export function registerEstimateRoutes(
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
-      if (existing.internalStatus !== "draft") {
+
+      // Task #658 — soft-delete is allowed for both `draft` and the two
+      // `pending_review` internal statuses (`pending_approval` /
+      // `approved_internal`). Anything past that (sent / approved /
+      // rejected / expired) has customer-facing artifacts and must
+      // stay auditable, so we still 409 those.
+      const existingLifecycle = deriveLifecycleForWrite({
+        status: existing.status ?? null,
+        internalStatus: existing.internalStatus ?? null,
+      });
+      if (existingLifecycle !== "draft" && existingLifecycle !== "pending_review") {
+        // Preserve the legacy 409 contract for terminal states
+        // (sent / approved / rejected / expired): the row stays
+        // intact because customer-facing artifacts depend on it.
         res.status(409).json({
           message:
             "Only draft estimates can be deleted. Submitted or sent estimates are preserved for audit.",
+        });
+        return;
+      }
+      // Field techs may still delete their own drafts (this mirrors
+      // Task #634), but only the office roles can clear a row that's
+      // already been submitted for review.
+      if (
+        existingLifecycle === "pending_review" &&
+        !ESTIMATE_PENDING_DELETE_ROLES.has(role)
+      ) {
+        res.status(403).json({
+          message:
+            "Access denied. Deleting a submitted estimate is restricted to managers and administrators.",
         });
         return;
       }
@@ -693,6 +733,11 @@ export function registerEstimateRoutes(
             customerId: existing.customerId ?? null,
             companyId: existing.companyId ?? null,
             internalStatus: existing.internalStatus ?? null,
+            // Task #658 — include the lifecycle bucket too so the App
+            // Health audit tab can show "deleted from pending" vs
+            // "deleted from draft" without re-deriving from the two
+            // legacy axes.
+            lifecycle: existingLifecycle,
           },
         });
       } catch (auditErr) {

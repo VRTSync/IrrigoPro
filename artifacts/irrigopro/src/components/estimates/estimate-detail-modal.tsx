@@ -27,12 +27,14 @@ import {
 } from "@/components/estimates/send-estimate-dialog";
 import { sendEstimateEmail } from "@/lib/email";
 import {
+  canDeleteEstimateAs,
   customerResponseLabelOf,
   isApproved,
   isAwaitingCustomerReply,
   isConvertedToWorkOrder,
   isDraft,
   isExpired,
+  isPendingReview,
   lifecycleOf,
   reviewStageLabelOf,
   type LifecycleStatus,
@@ -59,15 +61,10 @@ const PDF_READ_ROLES = new Set<string>([
   "irrigation_manager",
 ]);
 
-// Task #634 — must agree with the server's ESTIMATE_DELETE_ROLES set in
-// routes.ts. UI hides the Delete action entirely for roles that would 403.
-const DELETE_ROLES = new Set<string>([
-  "super_admin",
-  "company_admin",
-  "irrigation_manager",
-  "billing_manager",
-  "field_tech",
-]);
+// Task #634 / #658 — the role × lifecycle delete matrix lives in
+// `@/lib/lifecycle` (`canDeleteEstimateAs`) so this modal and the
+// estimate list row stay in lockstep. The server is still the
+// authoritative gate.
 
 function readCurrentUserRole(): string | null {
   try {
@@ -95,7 +92,6 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   // session and we don't want this gate to flicker as React re-renders.
   const currentRole = readCurrentUserRole();
   const canSeeEstimatePdf = currentRole != null && PDF_READ_ROLES.has(currentRole);
-  const canDeleteEstimateRole = currentRole != null && DELETE_ROLES.has(currentRole);
 
   const { data: estimate, isLoading } = useQuery<any>({
     queryKey: ["/api/estimates", estimateId],
@@ -337,10 +333,12 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   })();
   const deletedByDisplay =
     (estimate as { deletedBy?: number | null } | undefined)?.deletedBy ?? null;
+  // Task #658 — Delete is now allowed on `draft` AND `pending_review`,
+  // with the role × lifecycle matrix mirroring the server.
   const canDeleteEstimate =
-    canDeleteEstimateRole &&
-    isDraft(estimate ?? null) &&
-    !isEstimateDeleted;
+    canDeleteEstimateAs(currentRole, estimate ?? null) && !isEstimateDeleted;
+  const isPendingDelete =
+    canDeleteEstimate && isPendingReview(estimate ?? null);
 
   const handleConvertToWorkOrder = async () => {
     if (!estimateId) return;
@@ -899,14 +897,32 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent data-testid="detail-modal-delete-dialog">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this draft estimate?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isPendingDelete
+                ? "Delete this pending estimate?"
+                : "Delete this draft estimate?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Estimate{" "}
-              <span className="font-medium">{estimate?.estimateNumber}</span>{" "}
-              for{" "}
-              <span className="font-medium">{estimate?.customerName}</span>{" "}
-              will be removed from lists and dashboards. The row is preserved
-              for audit and can be restored by a super admin if needed.
+              {isPendingDelete ? (
+                <>
+                  Estimate{" "}
+                  <span className="font-medium">{estimate?.estimateNumber}</span>{" "}
+                  for{" "}
+                  <span className="font-medium">{estimate?.customerName}</span>{" "}
+                  has been submitted for approval. Deleting it will hide it
+                  from every list; admins can still see it for audit.
+                </>
+              ) : (
+                <>
+                  Estimate{" "}
+                  <span className="font-medium">{estimate?.estimateNumber}</span>{" "}
+                  for{" "}
+                  <span className="font-medium">{estimate?.customerName}</span>{" "}
+                  will be removed from lists and dashboards. The row is
+                  preserved for audit and can be restored by a super admin if
+                  needed.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

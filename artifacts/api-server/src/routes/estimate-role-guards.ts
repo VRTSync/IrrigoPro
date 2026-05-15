@@ -42,6 +42,20 @@ export const ESTIMATE_SUBMIT_FOR_REVIEW_ROLES = new Set<string>([
   "irrigation_manager",
 ]);
 
+// Task #658 — roles allowed to delete a `pending_review` estimate
+// (internalStatus in {pending_approval, approved_internal}). Drafts
+// remain deletable by every authenticated role (including field_tech
+// for their own drafts); this set narrows down who can soft-delete a
+// row that has already been submitted for review. Mirrors the office
+// roles in `ESTIMATE_SUBMIT_FOR_REVIEW_ROLES` plus `billing_manager`
+// so the same people who own the pending queue can clean it up.
+export const ESTIMATE_PENDING_DELETE_ROLES = new Set<string>([
+  "super_admin",
+  "company_admin",
+  "irrigation_manager",
+  "billing_manager",
+]);
+
 // Roles that may flip an internally-approved estimate to the customer
 // via POST /api/estimates/:id/transition (send_to_customer). Same as
 // the approval roles but spelled out explicitly so a future widening

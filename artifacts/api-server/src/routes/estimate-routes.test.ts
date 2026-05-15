@@ -18,16 +18,27 @@ import {
   registerEstimateRoutes,
   type EstimateRoutesStorage,
 } from "./estimate-routes";
+import type { AuditEventInput } from "./audit-log";
 import {
   processEstimatePayload,
   type EstimatePayloadInput,
 } from "../estimate-payload";
 import type {
   Customer,
+  Estimate,
   EstimateWithItems,
   InsertEstimate,
   InsertEstimateItem,
 } from "@workspace/db";
+
+// Task #658 — typed shape of a seeded row in the DELETE/list stubs.
+// Captures only the fields the DELETE handler reads; carries the same
+// soft-delete tombstone columns that real storage stamps so we can
+// assert on the GET ?includeDeleted=1 view without `as any` casts.
+type SeededEstimate = EstimateWithItems & {
+  deletedAt: Date | null;
+  deletedBy: number | null;
+};
 
 // ─── Storage stub ─────────────────────────────────────────────────────────────
 // Captures the InsertEstimate values that the route handed to storage so the
@@ -496,4 +507,299 @@ describe("POST /api/estimates/:id/submit-for-review — atomic draft → pending
     assert.equal(res.status, 404);
     assert.equal(stub.lastUpdate, undefined);
   });
+});
+
+// ─── Task #658 — DELETE /api/estimates/:id role × lifecycle matrix ────────────
+describe("DELETE /api/estimates/:id — role × lifecycle matrix (Task #658)", () => {
+  type DeleteStub = EstimateRoutesStorage & {
+    estimates: Map<number, SeededEstimate>;
+    softDeleted: number[];
+    auditCalls: AuditEventInput[];
+  };
+
+  function makeDeleteStub(): DeleteStub {
+    const stub: DeleteStub = {
+      estimates: new Map(),
+      softDeleted: [],
+      auditCalls: [],
+      async getCustomer() {
+        return undefined;
+      },
+      async getEstimate(id) {
+        const row = stub.estimates.get(id);
+        // Soft-deleted rows are filtered by the storage layer in
+        // production unless `includeDeleted: true` is passed. Mirror
+        // that here so the route's post-delete read returns undefined.
+        if (!row || row.deletedAt) return undefined;
+        return row;
+      },
+      async getEstimates(opts) {
+        const includeDeleted = opts?.includeDeleted ?? false;
+        const rows: Estimate[] = [];
+        for (const row of stub.estimates.values()) {
+          if (!includeDeleted && row.deletedAt) continue;
+          rows.push(row as unknown as Estimate);
+        }
+        return rows;
+      },
+      async createEstimateFromPayload() {
+        throw new Error("not used");
+      },
+      async updateEstimateWithItems() {
+        throw new Error("not used");
+      },
+      async softDeleteEstimate(id, userId) {
+        const row = stub.estimates.get(id);
+        if (!row || row.deletedAt) return false;
+        // Mirror the production WHERE clause: only the pre-sent
+        // internal statuses can be soft-deleted from storage.
+        const internal = row.internalStatus;
+        if (
+          internal !== "draft" &&
+          internal !== "pending_approval" &&
+          internal !== "approved_internal"
+        ) {
+          return false;
+        }
+        stub.softDeleted.push(id);
+        row.deletedAt = new Date();
+        row.deletedBy = userId;
+        return true;
+      },
+    };
+    return stub;
+  }
+
+  function seedEstimate(
+    stub: DeleteStub,
+    id: number,
+    fields: { status: string; internalStatus: string },
+  ): void {
+    const seeded = {
+      id,
+      companyId: 1,
+      customerId: 1,
+      estimateNumber: `EST-${id}`,
+      status: fields.status,
+      internalStatus: fields.internalStatus,
+      estimateDate: new Date(),
+      items: [],
+      deletedAt: null,
+      deletedBy: null,
+    } as unknown as SeededEstimate;
+    stub.estimates.set(id, seeded);
+  }
+
+  async function deleteAs(
+    baseUrl: string,
+    id: number,
+    role: string | null,
+    userId = 1,
+  ): Promise<Response> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-user-id": String(userId),
+      "x-user-company-id": "1",
+    };
+    if (role) headers["x-user-role"] = role;
+    return fetch(`${baseUrl}/api/estimates/${id}`, { method: "DELETE", headers });
+  }
+
+  let stub: DeleteStub;
+  let baseUrl: string;
+  let close: () => Promise<void>;
+
+  // Typed augmentation for the auth-context fields the routes read off
+  // `req`. Avoids `req: any` in the header-auth shim while still
+  // matching the production header-auth contract.
+  type AuthedRequest = import("express").Request & {
+    authenticatedUserId?: number;
+    authenticatedUserRole?: string;
+    authenticatedUserCompanyId?: number | null;
+  };
+
+  async function startWithHeaderAuth(s: DeleteStub): Promise<{
+    baseUrl: string;
+    close: () => Promise<void>;
+  }> {
+    const app: Express = express();
+    app.use(express.json());
+    const headerAuth: RequestHandler = (req, _res, next) => {
+      const r = req as AuthedRequest;
+      r.authenticatedUserId = Number(req.header("x-user-id")) || 0;
+      r.authenticatedUserRole = req.header("x-user-role") || undefined;
+      r.authenticatedUserCompanyId =
+        Number(req.header("x-user-company-id")) || null;
+      next();
+    };
+    registerEstimateRoutes(app, s, headerAuth, {
+      // Capture every estimate.deleted audit emission so the
+      // "lifecycle in details" test can assert the payload directly
+      // instead of round-tripping through DB-backed recordAuditEvent.
+      recordAuditEvent: async (_req, evt) => {
+        s.auditCalls.push(evt);
+      },
+    });
+    const server: Server = createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const port = (server.address() as AddressInfo).port;
+    return {
+      baseUrl: `http://127.0.0.1:${port}`,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  beforeEach(async () => {
+    stub = makeDeleteStub();
+    ({ baseUrl, close } = await startWithHeaderAuth(stub));
+  });
+  afterEach(async () => {
+    await close();
+  });
+
+  it("manager roles can delete a pending-review estimate", async () => {
+    for (const role of [
+      "super_admin",
+      "company_admin",
+      "irrigation_manager",
+      "billing_manager",
+    ]) {
+      const id = 100 + Math.floor(Math.random() * 100000);
+      seedEstimate(stub, id, {
+        status: "pending",
+        internalStatus: "pending_approval",
+      });
+      const res = await deleteAs(baseUrl, id, role);
+      assert.equal(res.status, 200, `expected 200 deleting pending as ${role}`);
+      assert.ok(stub.softDeleted.includes(id), `softDelete called for ${role}`);
+    }
+  });
+
+  it("field_tech is refused (403) on a pending-review estimate", async () => {
+    seedEstimate(stub, 1, {
+      status: "pending",
+      internalStatus: "pending_approval",
+    });
+    const res = await deleteAs(baseUrl, 1, "field_tech");
+    assert.equal(res.status, 403);
+    assert.equal(stub.softDeleted.length, 0);
+  });
+
+  it("field_tech can still delete their own draft estimate", async () => {
+    seedEstimate(stub, 2, { status: "draft", internalStatus: "draft" });
+    const res = await deleteAs(baseUrl, 2, "field_tech");
+    assert.equal(res.status, 200);
+    assert.ok(stub.softDeleted.includes(2));
+  });
+
+  it("returns 409 for sent / approved / rejected (non-deletable) lifecycles", async () => {
+    const cases: Array<{ status: string; internalStatus: string; label: string }> = [
+      { status: "pending", internalStatus: "sent_to_customer", label: "sent" },
+      { status: "approved", internalStatus: "sent_to_customer", label: "approved" },
+      { status: "rejected", internalStatus: "sent_to_customer", label: "rejected" },
+    ];
+    let nextId = 200;
+    for (const c of cases) {
+      const id = nextId++;
+      seedEstimate(stub, id, { status: c.status, internalStatus: c.internalStatus });
+      const res = await deleteAs(baseUrl, id, "company_admin");
+      assert.equal(res.status, 409, `expected 409 for ${c.label}`);
+    }
+    assert.equal(stub.softDeleted.length, 0);
+  });
+
+  it("delete on pending-review records audit details including lifecycle", async () => {
+    seedEstimate(stub, 3, {
+      status: "pending",
+      internalStatus: "approved_internal",
+    });
+    const res = await deleteAs(baseUrl, 3, "irrigation_manager");
+    assert.equal(res.status, 200);
+    assert.ok(stub.softDeleted.includes(3));
+    // The route MUST emit exactly one estimate.deleted audit event
+    // and the `details.lifecycle` field MUST carry the derived
+    // lifecycle bucket so App Health → Audit can render
+    // "deleted from pending" without re-deriving from the legacy
+    // (status, internalStatus) axes.
+    const deleted = stub.auditCalls.filter((e) => e.action === "estimate.deleted");
+    assert.equal(deleted.length, 1, "exactly one estimate.deleted audit row");
+    const evt = deleted[0]!;
+    assert.equal(evt.targetType, "estimate");
+    assert.equal(evt.targetId, "3");
+    assert.equal(evt.actorRole, "irrigation_manager");
+    const details = (evt.details ?? {}) as Record<string, unknown>;
+    assert.equal(details.lifecycle, "pending_review");
+    assert.equal(details.internalStatus, "approved_internal");
+    assert.equal(details.estimateId, 3);
+  });
+
+  it("delete on a draft records audit details with lifecycle='draft'", async () => {
+    seedEstimate(stub, 4, { status: "draft", internalStatus: "draft" });
+    const res = await deleteAs(baseUrl, 4, "field_tech");
+    assert.equal(res.status, 200);
+    const deleted = stub.auditCalls.filter((e) => e.action === "estimate.deleted");
+    assert.equal(deleted.length, 1);
+    const details = (deleted[0]!.details ?? {}) as Record<string, unknown>;
+    assert.equal(details.lifecycle, "draft");
+  });
+
+  it("soft-deleted rows are hidden from GET /api/estimates and visible with ?includeDeleted=1 for super_admin", async () => {
+    seedEstimate(stub, 50, {
+      status: "pending",
+      internalStatus: "pending_approval",
+    });
+    seedEstimate(stub, 51, { status: "draft", internalStatus: "draft" });
+    // Delete the pending row via the real route — exercises the
+    // end-to-end soft-delete path including the storage tombstone.
+    const del = await deleteAs(baseUrl, 50, "company_admin");
+    assert.equal(del.status, 200);
+
+    // Default GET hides the deleted row for every role.
+    const headers: Record<string, string> = {
+      "x-user-id": "1",
+      "x-user-company-id": "1",
+      "x-user-role": "super_admin",
+    };
+    const listRes = await fetch(`${baseUrl}/api/estimates`, { headers });
+    assert.equal(listRes.status, 200);
+    const list = (await listRes.json()) as Array<{ id: number }>;
+    const ids = list.map((r) => r.id).sort();
+    assert.deepEqual(ids, [51]);
+
+    // super_admin with ?includeDeleted=1 sees the soft-deleted row again.
+    const includeRes = await fetch(
+      `${baseUrl}/api/estimates?includeDeleted=1`,
+      { headers },
+    );
+    assert.equal(includeRes.status, 200);
+    const includeList = (await includeRes.json()) as Array<{
+      id: number;
+      deletedAt: string | null;
+    }>;
+    const includeIds = includeList.map((r) => r.id).sort();
+    assert.deepEqual(includeIds, [50, 51]);
+    const deletedRow = includeList.find((r) => r.id === 50)!;
+    assert.ok(deletedRow.deletedAt, "tombstone column carries deletedAt");
+  });
+
+  it("non-super_admin role cannot bypass soft-delete filtering via ?includeDeleted=1", async () => {
+    seedEstimate(stub, 60, {
+      status: "pending",
+      internalStatus: "pending_approval",
+    });
+    await deleteAs(baseUrl, 60, "company_admin");
+    const headers: Record<string, string> = {
+      "x-user-id": "1",
+      "x-user-company-id": "1",
+      "x-user-role": "company_admin",
+    };
+    const res = await fetch(
+      `${baseUrl}/api/estimates?includeDeleted=1`,
+      { headers },
+    );
+    assert.equal(res.status, 200);
+    const list = (await res.json()) as Array<{ id: number }>;
+    assert.equal(list.length, 0, "company_admin must not see soft-deleted rows");
+  });
+
 });

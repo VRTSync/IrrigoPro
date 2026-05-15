@@ -401,6 +401,164 @@ describe("Estimate role × screen matrix (Task #632)", () => {
     );
   });
 
+  // ─── DELETE on pending_review — Task #658 allowlist ─────────────────────
+  // Manager / admin / billing may delete a `pending_review` estimate;
+  // field_tech is refused 403. Spins per-case Express servers with a
+  // dedicated stub that seeds a pending estimate AND implements
+  // softDeleteEstimate so the real handler in registerEstimateRoutes()
+  // is exercised end-to-end (instead of the stub `app.delete(... ok)`
+  // mounted on `baseUrl` for the no-role-gate test above).
+  it("DELETE /api/estimates/:id (pending_review) is gated to manager/admin/billing; field_tech → 403", async () => {
+    const allowed = new Set<string>([
+      "super_admin",
+      "company_admin",
+      "irrigation_manager",
+      "billing_manager",
+    ]);
+
+    function makeSeededStub(internalStatus: string): EstimateRoutesStorage {
+      const seeded = {
+        id: 1,
+        companyId: 1,
+        customerId: 1,
+        estimateNumber: "EST-1",
+        status: "pending",
+        internalStatus,
+        estimateDate: new Date(),
+        items: [],
+      } as unknown as EstimateWithItems;
+      return {
+        async getCustomer() {
+          return undefined;
+        },
+        async getEstimate() {
+          return seeded;
+        },
+        async createEstimateFromPayload() {
+          throw new Error("not used");
+        },
+        async updateEstimateWithItems() {
+          throw new Error("not used");
+        },
+        async softDeleteEstimate() {
+          return true;
+        },
+      };
+    }
+
+    for (const internalStatus of ["pending_approval", "approved_internal"]) {
+      const app: Express = express();
+      app.use(express.json());
+      registerEstimateRoutes(app, makeSeededStub(internalStatus), stubAuth);
+      const server: Server = createServer(app);
+      await new Promise<void>((r) => server.listen(0, r));
+      const port = (server.address() as AddressInfo).port;
+      const url = `http://127.0.0.1:${port}`;
+      try {
+        for (const role of ROLES) {
+          const expected = allowed.has(role) ? 200 : 403;
+          const got = await callAs(url, "DELETE", "/api/estimates/1", role);
+          assert.equal(
+            got,
+            expected,
+            `DELETE pending(${internalStatus}) as ${role} → expected ${expected}, got ${got}`,
+          );
+        }
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    }
+  });
+
+  // ─── DELETE on sent / approved / rejected — never allowed ───────────────
+  // Pins the 409 wall: once an estimate is past pending_review, no role
+  // can soft-delete it. This is the regression guard for "office can
+  // delete pending" not accidentally widening to sent/approved.
+  it("DELETE /api/estimates/:id returns 409 for sent / approved / rejected for every role", async () => {
+    function makeSeededStub(
+      status: string,
+      internalStatus: string,
+      estimateDate: Date = new Date(),
+    ): EstimateRoutesStorage {
+      return {
+        async getCustomer() {
+          return undefined;
+        },
+        async getEstimate() {
+          return {
+            id: 1,
+            companyId: 1,
+            customerId: 1,
+            estimateNumber: "EST-1",
+            status,
+            internalStatus,
+            estimateDate,
+            items: [],
+          } as unknown as EstimateWithItems;
+        },
+        async createEstimateFromPayload() {
+          throw new Error("not used");
+        },
+        async updateEstimateWithItems() {
+          throw new Error("not used");
+        },
+        async softDeleteEstimate() {
+          return true;
+        },
+      };
+    }
+
+    // `expired` is the read-time view over (lifecycle='sent',
+    // estimateDate > 30d). At the storage layer the row is still
+    // `(status='pending', internalStatus='sent_to_customer')` —
+    // the same shape as a fresh `sent` — so the 409 wall covers
+    // it via the lifecycle derivation. We pin that explicitly
+    // here by seeding a 60-day-old `sent` row.
+    const cases: Array<{
+      status: string;
+      internalStatus: string;
+      estimateDate?: Date;
+    }> = [
+      { status: "pending", internalStatus: "sent_to_customer" },
+      { status: "approved", internalStatus: "sent_to_customer" },
+      { status: "rejected", internalStatus: "sent_to_customer" },
+      {
+        status: "pending",
+        internalStatus: "sent_to_customer",
+        estimateDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
+      },
+    ];
+    for (const c of cases) {
+      const app: Express = express();
+      app.use(express.json());
+      registerEstimateRoutes(
+        app,
+        makeSeededStub(c.status, c.internalStatus, c.estimateDate),
+        stubAuth,
+      );
+      const server: Server = createServer(app);
+      await new Promise<void>((r) => server.listen(0, r));
+      const port = (server.address() as AddressInfo).port;
+      const url = `http://127.0.0.1:${port}`;
+      try {
+        for (const role of ROLES) {
+          // The retired `manager` alias (Task #643) is no longer in
+          // ESTIMATE_DELETE_ROLES, so it short-circuits at the role
+          // gate with 403 before the lifecycle 409 path runs.
+          const expected = role === "manager" ? 403 : 409;
+          const got = await callAs(url, "DELETE", "/api/estimates/1", role);
+          assert.equal(
+            got,
+            expected,
+            `DELETE ${c.status}/${c.internalStatus} as ${role} → expected ${expected}, got ${got}`,
+          );
+        }
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    }
+  });
+
   // ─── Transition handler-level role dispatch ─────────────────────────────
   it("POST /api/estimates/:id/transition gates submit_for_review/resend to {super_admin, company_admin, irrigation_manager} and send_to_customer to {super_admin, company_admin, billing_manager}", async () => {
     const actions: TransitionAction[] = ["submit_for_review", "resend", "send_to_customer"];
