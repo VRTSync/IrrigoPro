@@ -311,6 +311,47 @@ Caveats / known limits:
 - Force-upgrade relies on an existing `VITE_BUILD_HASH` build-time
   env var; environments that don't set it will silently no-op.
 
+## Estimate lifecycle column (Task #642)
+
+Single canonical `estimates.lifecycle` column persisted alongside the
+legacy `(status, internalStatus)` pair. Stored values:
+`draft | pending_review | sent | approved | rejected`. `expired` is
+**not** stored — it's a read-time view over
+`(lifecycle='sent', estimateDate > 30 days)` so a resend
+(`estimateDate` reset) automatically rolls the row back to `sent`
+without a write.
+
+- **Schema**: `lib/db/src/schema/schema.ts` — `lifecycle` text column,
+  not null, default `pending_review`. Apply with
+  `pnpm --filter @workspace/db run push`.
+- **Backfill**: `artifacts/api-server/src/scripts/backfill-estimate-lifecycle.ts`
+  — idempotent; derives target from `deriveLifecycleForWrite(row)` and
+  only writes rows that disagree. Dev run (May 15, 2026): 365 scanned,
+  65 updated (300 pending_review + 33 sent + 30 draft + 2 approved).
+  Run: `node --import tsx/esm artifacts/api-server/src/scripts/backfill-estimate-lifecycle.ts [--dry-run] [--batch=N]`
+- **Helper**: `artifacts/api-server/src/lifecycle.ts` —
+  `deriveLifecycleForWrite({status, internalStatus})` is the
+  authoritative write-time mapping. `computeLifecycleStatus` now
+  prefers the stored column when present and only re-derives expiry
+  for `sent`.
+- **Dual-write contract**: Every write path that mutates `status` /
+  `internalStatus` must also stamp `lifecycle`. Sites:
+  - `storage._writeEstimateWithItems` (insert), `storage.updateEstimate`
+    (read-then-merge), `storage.updateEstimateWithItems`,
+    `storage.rejectEstimateIfPending`,
+    `storage.internallyApproveEstimateIfPending`,
+    `storage.markEstimateSentToCustomer`,
+    `storage.createWorkOrderFromEstimate`,
+    `storage.approveEstimateAndCreateWorkOrder`.
+  - Inline routes: `POST /api/estimates/:id/approve` and
+    `POST /api/estimates/:id/reject` in `routes/routes.ts`.
+  - `status='expired'` writes (token-expiry path) are special-cased in
+    `updateEstimate` to leave `lifecycle` alone (stays `sent`).
+- **Out of scope (future task)**: Dropping the legacy `status` and
+  `internalStatus` columns is deferred until after production
+  verification that all writes are dual-stamping and all reads agree
+  with the column. Track as a separate follow-up.
+
 ## Estimate system
 
 The estimate flow has two independent status axes (`status` =

@@ -141,7 +141,7 @@ import { sql, eq, like, ilike, desc, and, gte, lte, or, isNull, inArray, gt } fr
 import bcrypt from "bcrypt";
 import { processEstimatePayload, type EstimatePayloadInput } from "./estimate-payload";
 import { applyNoPartNeededInvariant } from "./storage/wet-check-finding-invariants";
-import { computeLifecycleStatus } from "./lifecycle";
+import { computeLifecycleStatus, deriveLifecycleForWrite } from "./lifecycle";
 import { ObjectStorageService } from "./objectStorage";
 
 // Executor accepted by storage helpers that may run inside a caller's
@@ -1999,9 +1999,17 @@ export class DatabaseStorage implements IStorage {
     const estimateNumber = explicitEstimateNumber
       ?? (estimate as { estimateNumber?: string }).estimateNumber
       ?? `EST-${Date.now()}`;
+    // Task #642 — dual-write the canonical lifecycle column alongside
+    // the legacy (status, internalStatus) pair. Derived from whatever
+    // the caller passed; defaults to `pending_review` if neither axis
+    // is specified.
+    const lifecycle = deriveLifecycleForWrite({
+      status: (estimate as { status?: string | null }).status,
+      internalStatus: (estimate as { internalStatus?: string | null }).internalStatus,
+    });
     const [newEstimate] = await executor
       .insert(estimates)
-      .values([{ ...estimate, estimateNumber }])
+      .values([{ ...estimate, estimateNumber, lifecycle }])
       .returning();
     const createdItems: EstimateItem[] = [];
     for (let i = 0; i < items.length; i++) {
@@ -2044,7 +2052,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateEstimate(id: number, estimate: Partial<InsertEstimate>): Promise<Estimate | undefined> {
-    const [updatedEstimate] = await db.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
+    // Task #642 — when the caller patches `status` or `internalStatus`,
+    // mirror the change into the canonical `lifecycle` column so the
+    // two stay in sync. We read the existing row to merge unspecified
+    // axes (e.g. a status-only patch keeps the existing internalStatus
+    // for derivation). The `status='expired'` write is special-cased:
+    // we leave `lifecycle` alone so it stays at its pre-expiry value
+    // (`sent`), which makes the read-time expiry view and the resend
+    // flow work without a second write.
+    const patch: Partial<InsertEstimate> = { ...estimate };
+    const touchesAxis =
+      Object.prototype.hasOwnProperty.call(patch, "status") ||
+      Object.prototype.hasOwnProperty.call(patch, "internalStatus");
+    if (touchesAxis && !Object.prototype.hasOwnProperty.call(patch, "lifecycle")) {
+      const [existing] = await db.select().from(estimates).where(eq(estimates.id, id));
+      if (existing) {
+        const finalStatus = (patch.status ?? existing.status) as string | null | undefined;
+        const finalInternal = (patch.internalStatus ?? existing.internalStatus) as string | null | undefined;
+        if (finalStatus !== "expired") {
+          (patch as { lifecycle?: string }).lifecycle = deriveLifecycleForWrite({
+            status: finalStatus,
+            internalStatus: finalInternal,
+          });
+        }
+      }
+    }
+    const [updatedEstimate] = await db.update(estimates).set(patch).where(eq(estimates.id, id)).returning();
     if (!updatedEstimate) return undefined;
     return { ...updatedEstimate, lifecycleStatus: computeLifecycleStatus(updatedEstimate) } as Estimate;
   }
@@ -2055,7 +2088,8 @@ export class DatabaseStorage implements IStorage {
   // zero rows and returns undefined, which the route turns into a 400.
   async rejectEstimateIfPending(id: number): Promise<Estimate | undefined> {
     const [updated] = await db.update(estimates)
-      .set({ status: "rejected", rejectedAt: new Date() })
+      // Task #642 — dual-write lifecycle alongside the legacy status.
+      .set({ status: "rejected", rejectedAt: new Date(), lifecycle: "rejected" })
       .where(and(eq(estimates.id, id), eq(estimates.status, "pending")))
       .returning();
     if (!updated) return undefined;
@@ -2065,8 +2099,14 @@ export class DatabaseStorage implements IStorage {
   // Task #611 — conditional internal-approve. Same idea as
   // rejectEstimateIfPending but on the internal-review track.
   async internallyApproveEstimateIfPending(id: number): Promise<Estimate | undefined> {
+    // Task #642 — internalStatus `approved_internal` still derives to
+    // the `pending_review` lifecycle bucket (the customer-facing
+    // `status` is still `pending`), so we explicitly stamp it. This
+    // is a no-op for the column value but documents the dual-write
+    // contract and keeps the column truthful even if a row's
+    // lifecycle drifted (e.g. on a pre-backfill record).
     const [updated] = await db.update(estimates)
-      .set({ internalStatus: "approved_internal" })
+      .set({ internalStatus: "approved_internal", lifecycle: "pending_review" })
       .where(and(eq(estimates.id, id), eq(estimates.internalStatus, "pending_approval")))
       .returning();
     if (!updated) return undefined;
@@ -2095,6 +2135,11 @@ export class DatabaseStorage implements IStorage {
       tokenExpiresAt: args.tokenExpiresAt,
       approvalSentAt: args.approvalSentAt,
       internalStatus: "sent_to_customer",
+      // Task #642 — dual-write the lifecycle column. The resend flow
+      // also flips lifecycle back from `expired` (read-time view of
+      // `sent` + stale estimateDate) to `sent` since the new
+      // estimateDate clears the expiry condition.
+      lifecycle: "sent",
     };
     if (args.newEstimateDate) {
       (setClause as { estimateDate?: Date }).estimateDate = args.newEstimateDate;
@@ -2122,7 +2167,17 @@ export class DatabaseStorage implements IStorage {
 
   async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: InsertEstimateItem[]): Promise<EstimateWithItems> {
     return await db.transaction(async (tx) => {
-      const [updatedEstimate] = await tx.update(estimates).set(estimate).where(eq(estimates.id, id)).returning();
+      // Task #642 — dual-write the canonical lifecycle column. We
+      // already have the full intended (status, internalStatus) here
+      // (the route layer rebuilds the row), so no extra read needed.
+      const merged: InsertEstimate = {
+        ...estimate,
+        lifecycle: deriveLifecycleForWrite({
+          status: (estimate as { status?: string | null }).status,
+          internalStatus: (estimate as { internalStatus?: string | null }).internalStatus,
+        }),
+      } as InsertEstimate;
+      const [updatedEstimate] = await tx.update(estimates).set(merged).where(eq(estimates.id, id)).returning();
       if (!updatedEstimate) {
         throw new Error(`Estimate ${id} not found`);
       }
@@ -2940,7 +2995,9 @@ export class DatabaseStorage implements IStorage {
     await db.update(estimates)
       .set({ 
         status: 'approved', // Keep as approved, don't change status
-        workOrderId: newWorkOrder.id 
+        workOrderId: newWorkOrder.id,
+        // Task #642 — dual-write the canonical lifecycle column.
+        lifecycle: 'approved',
       })
       .where(eq(estimates.id, estimateId));
 
@@ -3000,6 +3057,8 @@ export class DatabaseStorage implements IStorage {
           status: "approved",
           approvalSource: "manual",
           approvedAt: new Date(),
+          // Task #642 — dual-write the canonical lifecycle column.
+          lifecycle: "approved",
         })
         .where(and(eq(estimates.id, estimateId), eq(estimates.status, "pending")))
         .returning();

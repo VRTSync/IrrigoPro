@@ -405,6 +405,16 @@ export const estimates = pgTable("estimates", {
   // Allowed values: draft, pending_approval, approved_internal, sent_to_customer.
   // Reserved for future slices: needs_revision.
   internalStatus: text("internal_status").notNull().default("pending_approval"),
+  // Task #642 — Single canonical lifecycle bucket persisted alongside the
+  // legacy two-axis (status, internalStatus) pair. Allowed values:
+  // draft | pending_review | sent | approved | rejected.
+  // Note: `expired` is intentionally NOT a stored value — it's derived at
+  // read time from (lifecycle='sent', estimateDate > 30 days) so a stored
+  // row can roll back into 'sent' if `estimateDate` is reset (e.g. resend).
+  // The legacy `status` / `internalStatus` columns continue to be written
+  // by every write path until they're dropped in a follow-up task after
+  // production verification.
+  lifecycle: text("lifecycle").notNull().default("pending_review"),
   partsSubtotal: decimal("parts_subtotal", { precision: 10, scale: 2 }).notNull(),
   laborSubtotal: decimal("labor_subtotal", { precision: 10, scale: 2 }).notNull(),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),

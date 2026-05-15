@@ -9222,6 +9222,12 @@ console.log("Required redirect URI:", window.location.protocol + "//" + window.l
   // entire registerRoutes(). The /transition entry is registered
   // alongside the new /resend route below to keep both close to the
   // canonical sendable-state endpoints.
+  // Task #642 — the legacy approve/reject UPDATEs that previously
+  // dual-wrote the `lifecycle` column lived here; they've been
+  // retired in favor of the canonical PATCH /:id/approve|reject
+  // (storage.approveEstimateAndCreateWorkOrder /
+  // storage.rejectEstimateIfPending) which already dual-write
+  // `lifecycle`. No additional changes needed here.
 
   // Internal approval — flips the internal review track from
   // `pending_approval` to `approved_internal`. Does NOT touch the

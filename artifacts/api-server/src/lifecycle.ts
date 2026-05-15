@@ -28,21 +28,58 @@ type EstimateLifecycleInput = {
   status?: string | null;
   internalStatus?: string | null;
   estimateDate?: Date | string | null;
+  // Task #642 — canonical lifecycle column. Preferred over (status,
+  // internalStatus) when set. `null`/missing means a pre-migration row.
+  lifecycle?: string | null;
 };
+
+// Task #642 — write-time derivation of the lifecycle column from the
+// two legacy axes. Returns only the five *stored* lifecycle values;
+// `expired` is intentionally excluded because it's a read-time view
+// over (lifecycle='sent', estimateDate > 30 days). Every write path
+// that mutates `status` or `internalStatus` must also pass the result
+// of this helper through as `lifecycle` so the column stays in sync
+// with the legacy axes during the dual-write window.
+export type StoredLifecycleStatus = Exclude<LifecycleStatus, "expired">;
+
+export function deriveLifecycleForWrite(opts: {
+  status?: string | null;
+  internalStatus?: string | null;
+}): StoredLifecycleStatus {
+  const status = opts.status ?? "";
+  const internalStatus = opts.internalStatus ?? "";
+
+  if (status === "approved") return "approved";
+  if (status === "rejected") return "rejected";
+  if (internalStatus === "draft") return "draft";
+  if (internalStatus === "sent_to_customer" && status === "pending") return "sent";
+  return "pending_review";
+}
+
+const STORED_LIFECYCLES = new Set<string>([
+  "draft",
+  "pending_review",
+  "sent",
+  "approved",
+  "rejected",
+]);
 
 export function computeLifecycleStatus(
   estimate: EstimateLifecycleInput,
   now: Date = new Date(),
 ): LifecycleStatus {
-  const status = estimate.status ?? "";
-  const internalStatus = estimate.internalStatus ?? "";
+  // Task #642 — Prefer the stored lifecycle column when present.
+  // Legacy (status, internalStatus) is consulted only when the column
+  // is missing/invalid (e.g. backfill not yet run, or an in-memory
+  // fixture in a test). `sent` always re-checks the expiry window so
+  // a row can flip into `expired` without a write.
+  const stored = (estimate.lifecycle ?? "") as string;
+  const useStored = STORED_LIFECYCLES.has(stored);
+  const base: StoredLifecycleStatus = useStored
+    ? (stored as StoredLifecycleStatus)
+    : deriveLifecycleForWrite(estimate);
 
-  if (status === "approved") return "approved";
-  if (status === "rejected") return "rejected";
-
-  if (internalStatus === "draft") return "draft";
-
-  if (internalStatus === "sent_to_customer" && status === "pending") {
+  if (base === "sent") {
     const ed = estimate.estimateDate;
     if (ed) {
       const sent = ed instanceof Date ? ed : new Date(ed);
@@ -55,7 +92,7 @@ export function computeLifecycleStatus(
     return "sent";
   }
 
-  return "pending_review";
+  return base;
 }
 
 // Slice 10c — shared tint + label map so the board column headers and the
